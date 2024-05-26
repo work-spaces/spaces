@@ -22,8 +22,3 @@ sha256 = "1.5.0"
 tar = "0.4.40"
 cfg-if = "1.0.0"
 
-
-#! spaces_workspace
-[patch.'https://github.com/tyler-gilbert/printer-rs']
-printer = { path = "../printer-rs" }
-#! drop(spaces_workspace)
