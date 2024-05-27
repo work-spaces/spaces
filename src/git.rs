@@ -156,7 +156,7 @@ impl Worktree {
 
     pub fn checkout(
         &self,
-        printer: &mut Printer,
+        _printer: &mut Printer,
         dependency: &manifest::Dependency,
     ) -> anyhow::Result<Vec<printer::ExecuteLater>> {
         let mut options = printer::ExecuteOptions::default();
@@ -191,7 +191,7 @@ impl Worktree {
         Ok(execute_later)
     }
 
-    pub fn checkout_detached_head(&self, printer: &mut Printer) -> anyhow::Result<Vec<printer::ExecuteLater>> {
+    pub fn checkout_detached_head(&self, _printer: &mut Printer) -> anyhow::Result<Vec<printer::ExecuteLater>> {
         let mut options = printer::ExecuteOptions::default();
 
         options.working_directory = Some(self.full_path.clone());
