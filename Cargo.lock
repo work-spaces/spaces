@@ -910,16 +910,14 @@ checksum = "7170ef9988bc169ba16dd36a7fa041e5c4cbeb6a35b76d4c03daded371eae7c0"
 [[package]]
 name = "printer"
 version = "0.1.0"
-source = "git+https://github.com/tyler-gilbert/printer-rs?rev=db45175e7369d7835780bc7a335dbbdd1eca78b8#db45175e7369d7835780bc7a335dbbdd1eca78b8"
+source = "git+https://github.com/tyler-gilbert/printer-rs?rev=64b9d8189bc347e8ea66d46cbe2638d386d1dbd2#64b9d8189bc347e8ea66d46cbe2638d386d1dbd2"
 dependencies = [
  "anyhow",
  "console",
- "flume",
  "indicatif",
  "owo-colors",
  "serde",
  "serde_json",
- "tokio",
 ]
 
 [[package]]

@@ -12,7 +12,7 @@ serde_json = "1.0.68"
 toml = "0.8.13"
 url = "2.5.0"
 home = "0.5.9"
-printer = { git = "https://github.com/tyler-gilbert/printer-rs", rev = "db45175e7369d7835780bc7a335dbbdd1eca78b8" }
+printer = { git = "https://github.com/tyler-gilbert/printer-rs", rev = "64b9d8189bc347e8ea66d46cbe2638d386d1dbd2" }
 
 reqwest = { version = "0.12", features = ["json"] }
 tokio = { version = "1", features = ["full"] }
