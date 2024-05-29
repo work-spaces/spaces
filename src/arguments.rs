@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use crate::config::Printer;
 
 
-#[derive(ValueEnum, Clone, Debug)]
+#[derive(ValueEnum, Clone, Copy, Debug)]
 pub enum Level {
     Trace,
     Debug,
@@ -12,9 +12,10 @@ pub enum Level {
     Error
 }
 
-impl Into<printer::Level> for Level {
-    fn into(self) -> printer::Level {
-        match self {
+
+impl From<Level> for printer::Level {
+    fn from(level: Level) -> Self {
+        match level {
             Level::Trace => printer::Level::Trace,
             Level::Debug => printer::Level::Debug,
             Level::Message => printer::Level::Message,
@@ -23,8 +24,8 @@ impl Into<printer::Level> for Level {
             Level::Error => printer::Level::Error,
         }
     }
-
 }
+
 
 #[derive(Debug, Parser)]
 #[command(version, about, long_about = None)]
@@ -40,7 +41,7 @@ pub struct Arguments {
 fn update_printer(printer: &mut Printer, is_dry_run: bool, level: Option<Level>) {
     printer.is_dry_run = is_dry_run;
     if let Some(level) = level {
-        printer.level = level.clone().into();
+        printer.level = level.into();
     }   
 }
 

@@ -1,6 +1,4 @@
-use std::{
-    collections::{HashMap, VecDeque},
-};
+use std::collections::{HashMap, VecDeque};
 
 use crate::{
     archive,
@@ -21,7 +19,7 @@ pub fn create(printer: &mut Printer, space_name: &String) -> anyhow::Result<()> 
     let workspace_config = WorkspaceConfig::new("./")?;
     let heading = printer::Heading::new(printer, "Creating Workspace")?;
     let directory = format!("{}/{space_name}", get_current_directory()?);
-    if heading.printer.is_dry_run == false {
+    if !heading.printer.is_dry_run {
         std::fs::create_dir(std::path::Path::new(space_name))?;
     }
 
@@ -116,109 +114,108 @@ impl<'a> State<'a> {
 
     fn sync_dependencies(&mut self) -> anyhow::Result<()> {
         let heading = printer::Heading::new(self.printer, "Dependencies")?;
-        loop {
-            if let Some((bare_repository, dependency)) = self.all_deps.pop_back() {
-                let mut execute_batch = printer::ExecuteBatch::new();
+        while let Some((bare_repository, dependency)) = self.all_deps.pop_back() {
+            let mut execute_batch = printer::ExecuteBatch::new();
 
-                let section = printer::Section::new(heading.printer, &bare_repository.spaces_key)?;
-                let (worktree, execute_later) =
-                    bare_repository.add_worktree(section.printer, self.full_path)?;
-                execute_batch.add(bare_repository.spaces_key.as_str(), execute_later);
+            let section = printer::Section::new(heading.printer, &bare_repository.spaces_key)?;
+            let (worktree, execute_later) =
+                bare_repository.add_worktree(section.printer, self.full_path)?;
+            execute_batch.add(bare_repository.spaces_key.as_str(), execute_later);
 
-                if self.deps_map.contains_key(&bare_repository.spaces_key) {
-                    section.printer.info("checkout", &"develop")?;
-                } else {
-                    self.deps_map
-                        .insert(bare_repository.spaces_key.clone(), dependency.clone());
-                    execute_batch.add(
-                        &bare_repository.spaces_key,
-                        worktree.checkout(section.printer, &dependency)?,
-                    );
-                    execute_batch.add(
-                        &bare_repository.spaces_key,
-                        worktree.checkout_detached_head(section.printer)?,
-                    );
-                }
+            if self.deps_map.contains_key(&bare_repository.spaces_key) {
+                section.printer.info("checkout", &"develop")?;
+            } else {
+                self.deps_map
+                    .insert(bare_repository.spaces_key.clone(), dependency.clone());
+                execute_batch.add(
+                    &bare_repository.spaces_key,
+                    worktree.checkout(section.printer, &dependency)?,
+                );
+                execute_batch.add(
+                    &bare_repository.spaces_key,
+                    worktree.checkout_detached_head(section.printer)?,
+                );
+            }
 
-                let spaces_deps = worktree.get_deps()?;
-                if let Some(spaces_deps) = spaces_deps {
-                    section.printer.info("deps", &spaces_deps)?;
-                    for (spaces_key, dep) in spaces_deps.deps.iter() {
-                        section.printer.info(spaces_key, dep)?;
-                        let (bare_repository, execute_later) =
-                            git::BareRepository::new(section.printer, spaces_key, &dep.git)?;
+            let spaces_deps = worktree.get_deps()?;
+            if let Some(spaces_deps) = spaces_deps {
+                section.printer.info("deps", &spaces_deps)?;
+                for (spaces_key, dep) in spaces_deps.deps.iter() {
+                    section.printer.info(spaces_key, dep)?;
+                    let (bare_repository, execute_later) =
+                        git::BareRepository::new(section.printer, spaces_key, &dep.git)?;
 
-                        execute_batch.add(bare_repository.spaces_key.as_str(), execute_later);
-                        if !self
-                            .workspace
-                            .repositories
-                            .contains_key(&bare_repository.spaces_key)
-                        {
-                            self.workspace
-                                .dependencies
-                                .insert(bare_repository.spaces_key.clone(), dep.clone());
-                        }
-
-                        if !self.deps_map.contains_key(&bare_repository.spaces_key) {
-                            self.all_deps.push_front((bare_repository, dep.clone()));
-                        }
+                    execute_batch.add(bare_repository.spaces_key.as_str(), execute_later);
+                    if !self
+                        .workspace
+                        .repositories
+                        .contains_key(&bare_repository.spaces_key)
+                    {
+                        self.workspace
+                            .dependencies
+                            .insert(bare_repository.spaces_key.clone(), dep.clone());
                     }
-                    if let Some(archive_map) = spaces_deps.archives {
-                        let mut archives = Vec::new();
-                        {
+
+                    if !self.deps_map.contains_key(&bare_repository.spaces_key) {
+                        self.all_deps.push_front((bare_repository, dep.clone()));
+                    }
+                }
+                if let Some(archive_map) = spaces_deps.archives {
+                    let mut archives = Vec::new();
+                    let mut http_archives = Vec::new();
+                    {
+                        for (key, archive) in archive_map.iter() {
+                            let http_archive =
+                                archive::HttpArchive::new(section.printer, key, archive)?;
+                            http_archives.push((key, http_archive));
+                        }
+
+                        for (key, http_archive) in http_archives {
                             let mut multi_progress = printer::MultiProgress::new(section.printer);
-                            for (key, archive) in archive_map.iter() {
-                                let http_archive = archive::HttpArchive::new(
-                                    multi_progress.printer,
-                                    key,
-                                    archive,
+
+                            if http_archive.is_download_required() {
+                                let bar = multi_progress.add_progress(key, Some(100));
+                                let join_handle = http_archive.download(
+                                    &multi_progress.printer.context().async_runtime,
+                                    bar,
                                 )?;
-
-                                if http_archive.is_download_required() {
-                                    let bar = multi_progress.add_progress(key, Some(100));
-                                    let join_handle = http_archive.download(
-                                        &multi_progress.printer.context().async_runtime,
-                                        bar,
-                                    )?;
-                                    archives.push((http_archive, Some(join_handle)));
-                                } else {
-                                    archives.push((http_archive, None));
-                                }
+                                archives.push((http_archive, Some(join_handle)));
+                            } else {
+                                archives.push((http_archive, None));
                             }
+                        }
 
-                            loop {
-                                let mut is_running = false;
-                                for (_archive, join_handle) in archives.iter() {
-                                    if let Some(join_handle) = join_handle {
-                                        if !join_handle.is_finished() {
-                                            is_running = true;
-                                        }
+                        loop {
+                            let mut is_running = false;
+                            for (_archive, join_handle) in archives.iter() {
+                                if let Some(join_handle) = join_handle {
+                                    if !join_handle.is_finished() {
+                                        is_running = true;
                                     }
                                 }
-                                if !is_running {
-                                    break;
-                                }
+                            }
+                            if !is_running {
+                                break;
                             }
                         }
-
-                        for (archive, _join_handle) in archives.iter() {
-                            archive.extract(section.printer)?;
-
-                            section.printer.info(
-                                "symlink",
-                                &format!("{}/{}", self.full_path, archive.spaces_key),
-                            )?;
-
-                            archive.create_soft_link(self.full_path)?;
-                        }
                     }
-                } else {
-                    section.printer.info("deps", &"No dependencies found")?;
+
+                    for (archive, _join_handle) in archives.iter_mut() {
+                        let section = printer::Section::new(section.printer, &archive.spaces_key)?;
+                        archive.extract(section.printer)?;
+
+                        section.printer.info(
+                            "link",
+                            &format!("{}/{}", self.full_path, archive.spaces_key),
+                        )?;
+
+                        archive.create_links(self.full_path)?;
+                    }
                 }
-                execute_batch.execute(section.printer)?;
             } else {
-                break;
+                section.printer.info("deps", &"No dependencies found")?;
             }
+            execute_batch.execute(section.printer)?;
         }
 
         Ok(())
@@ -265,7 +262,10 @@ impl<'a> State<'a> {
                 const START_WORKSPACE: &str = "\n\n#! spaces_workspace\n";
                 const END_WORKSPACE: &str = "#! drop(spaces_workspace)\n";
 
-                if let (Some(start), Some(end)) = (cargo_toml_contents.find(START_WORKSPACE), cargo_toml_contents.find(END_WORKSPACE)) {
+                if let (Some(start), Some(end)) = (
+                    cargo_toml_contents.find(START_WORKSPACE),
+                    cargo_toml_contents.find(END_WORKSPACE),
+                ) {
                     cargo_toml_contents.replace_range(start..(end + END_WORKSPACE.len()), "");
                 }
 
@@ -277,7 +277,7 @@ impl<'a> State<'a> {
                         value
                     ))?;
 
-                    if let Some(git) = dependency.get("git").map(|e| e.as_str()).flatten() {
+                    if let Some(git) = dependency.get("git").and_then(|e| e.as_str()) {
                         let patch = format!("[patch.'{}']\n", git);
                         let path = format!("{value} = {{ path = \"../{value}\" }}\n");
                         cargo_toml_contents.push_str(patch.as_str());

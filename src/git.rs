@@ -14,7 +14,11 @@ pub struct BareRepository {
 }
 
 impl BareRepository {
-    pub fn new(printer: &mut Printer, spaces_key: &str, url: &str) -> anyhow::Result<(Self, Vec<printer::ExecuteLater>)> {
+    pub fn new(
+        printer: &mut Printer,
+        spaces_key: &str,
+        url: &str,
+    ) -> anyhow::Result<(Self, Vec<printer::ExecuteLater>)> {
         let mut options = printer::ExecuteOptions::default();
 
         let (relative_bare_store_path, name_dot_git) = Self::url_to_relative_path_and_name(url)
@@ -51,16 +55,22 @@ impl BareRepository {
 
         let execute_later = vec![printer::ExecuteLater::new("git", options)];
 
-        Ok((Self {
-            url: url.to_owned(),
-            full_path,
-            spaces_key: spaces_key.to_owned(),
-            name_dot_git,
-        }, execute_later))
-        
+        Ok((
+            Self {
+                url: url.to_owned(),
+                full_path,
+                spaces_key: spaces_key.to_owned(),
+                name_dot_git,
+            },
+            execute_later,
+        ))
     }
 
-    pub fn add_worktree(&self, printer: &mut Printer, path: &str) -> anyhow::Result<(Worktree, Vec<printer::ExecuteLater>)> {
+    pub fn add_worktree(
+        &self,
+        printer: &mut Printer,
+        path: &str,
+    ) -> anyhow::Result<(Worktree, Vec<printer::ExecuteLater>)> {
         let result = Worktree::new(printer, self, path)
             .with_context(|| format!("Adding working to {} at {path}", self.url))?;
         Ok(result)
@@ -82,17 +92,17 @@ impl BareRepository {
         let mut repo_name = String::new();
         let count = path_segments.clone().count();
         if count > 1 {
-            path.push_str("/");
+            path.push('/');
             for (index, segment) in path_segments.enumerate() {
                 if index == count - 1 {
                     repo_name = segment.to_string();
                     break;
                 }
                 path.push_str(segment);
-                path.push_str("/");
+                path.push('/');
             }
         } else {
-            path.push_str("/");
+            path.push('/');
         }
 
         let bare_store = format!("{scheme}/{host}{path}");
@@ -108,7 +118,11 @@ pub struct Worktree {
 }
 
 impl Worktree {
-    fn new(printer: &mut Printer, repository: &BareRepository, path: &str) -> anyhow::Result<(Self, Vec<printer::ExecuteLater>)> {
+    fn new(
+        printer: &mut Printer,
+        repository: &BareRepository,
+        path: &str,
+    ) -> anyhow::Result<(Self, Vec<printer::ExecuteLater>)> {
         let mut options = printer::ExecuteOptions::default();
 
         if !std::path::Path::new(&path).is_absolute() {
@@ -119,7 +133,7 @@ impl Worktree {
         }
 
         if !printer.is_dry_run {
-            std::fs::create_dir_all(&path)?;
+            std::fs::create_dir_all(path)?;
         }
 
         let mut execute_later = Vec::new();
@@ -144,10 +158,13 @@ impl Worktree {
             printer.info("worktree", &full_path)?;
         }
 
-        Ok((Self {
-            full_path,
-            repository: repository.clone(),
-        }, execute_later))
+        Ok((
+            Self {
+                full_path,
+                repository: repository.clone(),
+            },
+            execute_later,
+        ))
     }
 
     pub fn get_deps(&self) -> anyhow::Result<Option<manifest::Deps>> {
@@ -191,15 +208,19 @@ impl Worktree {
         Ok(execute_later)
     }
 
-    pub fn checkout_detached_head(&self, _printer: &mut Printer) -> anyhow::Result<Vec<printer::ExecuteLater>> {
-        let mut options = printer::ExecuteOptions::default();
-
-        options.working_directory = Some(self.full_path.clone());
-        options.arguments = vec![
-            "checkout".to_string(),
-            "--detach".to_string(),
-            "HEAD".to_string(),
-        ];
+    pub fn checkout_detached_head(
+        &self,
+        _printer: &mut Printer,
+    ) -> anyhow::Result<Vec<printer::ExecuteLater>> {
+        let options = printer::ExecuteOptions {
+            working_directory: Some(self.full_path.clone()),
+            arguments: vec![
+                "checkout".to_string(),
+                "--detach".to_string(),
+                "HEAD".to_string(),
+            ],
+            ..Default::default()
+        };
         Ok(vec![printer::ExecuteLater::new("git", options)])
     }
 
@@ -215,13 +236,12 @@ impl Worktree {
             original_checkout_dependency.checkout = None;
             execute_later.extend(self.checkout(printer, &original_checkout_dependency)?);
 
-
             if *checkout == manifest::CheckoutOption::Develop {
-                let mut options = printer::ExecuteOptions::default();
-
-                options.working_directory = Some(self.full_path.clone());
-                options.arguments = vec!["pull".to_string()];
-                //printer.execute_process("git", &options)?;
+                let mut options = printer::ExecuteOptions {
+                    working_directory: Some(self.full_path.clone()),
+                    arguments: vec!["pull".to_string()],
+                    ..Default::default()
+                };
                 execute_later.push(printer::ExecuteLater::new("git", options.clone()));
 
                 options.arguments = vec!["switch".to_string(), "-c".to_string(), dev.clone()];

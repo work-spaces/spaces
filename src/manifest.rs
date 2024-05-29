@@ -93,19 +93,16 @@ impl Dependency {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Platform {
-    pub url: String,
-    pub sha256: String,
+pub enum ArchiveLink {
+    Soft,
+    Hard,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Archive {
-    pub linux_x86_64: Option<Platform>,
-    pub linux_aarch64: Option<Platform>,
-    pub macos_x86_64: Option<Platform>,
-    pub macos_aarch64: Option<Platform>,
-    pub windows_x86_64: Option<Platform>,
-    pub windows_aarch64: Option<Platform>,
+    pub url: String,
+    pub sha256: String,
+    pub link: ArchiveLink,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -155,7 +152,7 @@ impl BuckConfig {
                 result.push_str(&format!("    {} = {}\n", key, value));
             }
         }
-        result.push_str("\n");
+        result.push('\n');
         result
     }
 
@@ -237,6 +234,6 @@ impl Workspace {
     }
 
     pub fn get_cargo_patches(&self) -> Option<&HashMap<String, Vec<String>>> {
-        self.cargo.as_ref().map(|e| e.patches.as_ref()).flatten()
+        self.cargo.as_ref().and_then(|e| e.patches.as_ref())
     }
 }

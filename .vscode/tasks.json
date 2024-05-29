@@ -8,7 +8,16 @@
 				"$rustc"
 			],
 			"group": "build",
-			"label": "cargo: build"
+			"label": "spaces:build"
+		},
+		{
+			"type": "cargo",
+			"command": "clippy",
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "build",
+			"label": "spaces:clippy"
 		},
 		{
 			"type": "cargo",
@@ -21,7 +30,7 @@
 				"$rustc"
 			],
 			"group": "build",
-			"label": "cargo: install"
+			"label": "spaces:install"
 		}
 	]
 }

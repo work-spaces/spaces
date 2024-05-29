@@ -2,32 +2,20 @@ use std::io::Read;
 
 use crate::{config::Printer, manifest};
 use anyhow::Context;
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use tokio::io::AsyncWriteExt;
 
-fn get_platform(archive: &manifest::Archive) -> Option<&manifest::Platform> {
-    cfg_if::cfg_if! {
-        if #[cfg(all(target_os = "windows", target_arch = "x86_64"))] {
-            return archive.windows_x86_64.as_ref();
-        } else if #[cfg(all(target_os = "windows", target_arch = "aarch64"))] {
-            return archive.windows_aarch64.as_ref();
-        } else if #[cfg(all(target_os = "linux", target_arch = "x86_64"))] {
-            return archive.linux_x86_64.as_ref();
-        } else if #[cfg(all(target_os = "linux", target_arch = "aarch64"))] {
-            return archive.linux_aarch64.as_ref();
-        } else if #[cfg(all(target_os = "macos", target_arch = "aarch64"))] {
-            return archive.macos_aarch64.as_ref();
-        } else if #[cfg(all(target_os = "macos", target_arch = "x86_64"))] {
-            return archive.macos_x86_64.as_ref();
-        } else {
-            return None;
-        }
-    }
+#[derive(Debug, Serialize, Deserialize)]
+struct Files {
+    files: HashSet<String>,
 }
 
 pub struct HttpArchive {
     pub spaces_key: String,
-    pub archive: manifest::Platform,
-    pub full_path_to_archive: String,
+    archive: manifest::Archive,
+    full_path_to_archive: String,
+    files: HashSet<String>,
 }
 
 impl HttpArchive {
@@ -36,27 +24,28 @@ impl HttpArchive {
         spaces_key: &str,
         archive: &manifest::Archive,
     ) -> anyhow::Result<Self> {
-        let archive = get_platform(archive)
-            .ok_or(anyhow::anyhow!("No platform found"))?
-            .clone();
-
         let full_path_to_archive = printer
             .context()
             .get_bare_store_path(Self::url_to_relative_path(archive.url.as_str())?.as_str());
 
         let full_path_to_archive = format!("{}/{}", full_path_to_archive, archive.sha256);
 
-        printer.info("path", &full_path_to_archive)?;
+        printer.info(spaces_key, &full_path_to_archive)?;
 
         Ok(Self {
-            archive,
+            archive: archive.clone(),
             full_path_to_archive,
             spaces_key: spaces_key.to_string(),
+            files: HashSet::new(),
         })
     }
 
     fn get_path_to_extracted_files(&self) -> String {
         format!("{}_files", self.full_path_to_archive)
+    }
+
+    fn get_path_to_extracted_files_json(&self) -> String {
+        format!("{}.json", self.get_path_to_extracted_files())
     }
 
     pub fn is_download_required(&self) -> bool {
@@ -67,16 +56,56 @@ impl HttpArchive {
         !std::path::Path::new(self.get_path_to_extracted_files().as_str()).exists()
     }
 
-    pub fn create_soft_link(&self, space_directory: &str) -> anyhow::Result<()> {
+    fn get_link_paths(&self, space_directory: &str) -> (String, String) {
+        let target_path = format!("{space_directory}/{}", self.spaces_key);
+        let source = self.get_path_to_extracted_files();
+        (source, target_path)
+    }
+
+    pub fn create_links(&mut self, space_directory: &str) -> anyhow::Result<()> {
+        match self.archive.link {
+            manifest::ArchiveLink::Soft => self.create_soft_link(space_directory),
+            manifest::ArchiveLink::Hard => self.create_hard_links(space_directory),
+        }
+    }
+
+    fn create_soft_link(&self, space_directory: &str) -> anyhow::Result<()> {
         use std::os::unix::fs::symlink;
 
-        let target_path = format!("{space_directory}/{}", self.spaces_key);
+        let (source, target_path) = self.get_link_paths(space_directory);
         let target = std::path::Path::new(target_path.as_str());
-
-        let source = self.get_path_to_extracted_files();
         let original = std::path::Path::new(source.as_str());
 
-        symlink(original, target)?;
+        symlink(original, target)
+            .with_context(|| format!("symlinking {} to {}", target_path, source))?;
+
+        Ok(())
+    }
+
+    fn create_hard_links(&mut self, space_directory: &str) -> anyhow::Result<()> {
+        let (source, target_path) = self.get_link_paths(space_directory);
+
+        if self.files.is_empty() {
+            self.load_files_json()?;
+        }
+
+        for file in self.files.iter() {
+            let target_path = format!("{}/{}", target_path, file);
+            let source = format!("{}/{}", source, file);
+
+            let target = std::path::Path::new(target_path.as_str());
+            let original = std::path::Path::new(source.as_str());
+
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent).with_context(|| {
+                    format!("when creating parent for hardlink {target_path} -> {source}")
+                })?;
+            }
+
+            std::fs::hard_link(original, target)
+                .with_context(|| format!("hardlinking {} -> {}", target_path, source))?;
+        }
+
         Ok(())
     }
 
@@ -100,12 +129,13 @@ impl HttpArchive {
             let mut response = client.get(&url).send().await?;
             let total_size = response.content_length().unwrap_or(0);
             progress.set_total(total_size);
+            progress.set_message(url.as_str());
 
             let mut output_file = tokio::fs::File::create(full_path_to_archive.as_str()).await?;
 
             while let Some(chunk) = response.chunk().await? {
                 progress.increment(chunk.len() as u64);
-                output_file.write(&chunk).await?;
+                output_file.write_all(&chunk).await?;
             }
 
             Ok(())
@@ -114,8 +144,83 @@ impl HttpArchive {
         Ok(join_handle)
     }
 
-    pub fn extract(&self, printer: &mut Printer) -> anyhow::Result<()> {
+    fn extract_zip_archive(&mut self, printer: &mut Printer) -> anyhow::Result<()> {
+        use std::fs::File;
+        use std::path::Path;
+        use zip::read::ZipArchive;
+
+        let destination_string = self.get_path_to_extracted_files();
+        let destination = Path::new(destination_string.as_str());
+        let archive_path = &self.full_path_to_archive;
+
+        let error_context = format!("in zip archive {}", self.archive.url);
+
+        let reader = File::open(archive_path)?;
+        let mut archive = ZipArchive::new(reader).with_context(|| error_context.clone())?;
+
+        let mut progress =
+            printer::Progress::new(printer, "extracting", Some(archive.len() as u64))?;
+
+        for i in 0..archive.len() {
+            let mut file = archive.by_index(i).with_context(|| error_context.clone())?;
+            if let Some(file_name) = file.enclosed_name() {
+                if let Some(file_name) = file_name.to_str() {
+                    if file_name.starts_with("__MACOSX") {
+                        continue;
+                    }
+                    if file_name.starts_with(".DS_Store") {
+                        continue;
+                    }
+
+                    if file.is_file() {
+                        self.files.insert(file_name.to_string());
+                        progress.set_message(file_name);
+                    }
+                }
+
+                let outpath = destination.join(file_name);
+                if let Some(parent) = outpath.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+
+                if file.is_file() {
+                    let mut outfile = File::create(&outpath)
+                        .with_context(|| format!("{} creating {outpath:?}", error_context))?;
+                    std::io::copy(&mut file, &mut outfile)
+                        .with_context(|| format!("{} copying {outpath:?}", error_context))?;
+                }
+
+                progress.increment(1);
+            }
+        }
+        progress.set_message("Done!");
+
+        Ok(())
+    }
+
+    fn save_files_json(&self) -> anyhow::Result<()> {
+        let files = Files {
+            files: self.files.clone(),
+        };
+
+        let file_path = self.get_path_to_extracted_files_json();
+        let contents = serde_json::to_string_pretty(&files)?;
+        std::fs::write(file_path, contents)?;
+        Ok(())
+    }
+
+    fn load_files_json(&mut self) -> anyhow::Result<()> {
+        let file_path = self.get_path_to_extracted_files_json();
+        let contents = std::fs::read_to_string(file_path)?;
+        let files: Files = serde_json::from_str(contents.as_str())?;
+        self.files = files.files;
+
+        Ok(())
+    }
+
+    pub fn extract(&mut self, printer: &mut Printer) -> anyhow::Result<()> {
         if !self.is_extract_required() {
+            self.load_files_json().with_context(|| format!("Missing {}", self.get_path_to_extracted_files_json()))?;
             return Ok(());
         }
 
@@ -123,7 +228,7 @@ impl HttpArchive {
         let contents = {
             let full_path_to_archive = self.full_path_to_archive.clone();
 
-            let contents = std::fs::read(&full_path_to_archive)?;
+            let contents = std::fs::read(full_path_to_archive)?;
 
             let mut progress = printer::Progress::new(printer, "digesting", None)?;
             let digest_handle = std::thread::spawn(move || {
@@ -145,7 +250,7 @@ impl HttpArchive {
 
             if digest != self.archive.sha256 {
                 std::fs::remove_file(self.full_path_to_archive.as_str()).with_context(|| {
-                    format!("Internal Error: failed to delete file with bad sha256")
+                    "Internal Error: failed to delete file with bad sha256".to_string()
                 })?;
 
                 return Err(anyhow::anyhow!("Digest mismatch"));
@@ -153,83 +258,87 @@ impl HttpArchive {
             contents
         };
 
-        let tar_contents_handle;
-        {
-            let mut progress = printer::Progress::new(printer, "extracting", None)?;
-
-            tar_contents_handle = std::thread::spawn(move || {
-                let decoder = flate2::read::GzDecoder::new(contents.as_slice());
-                std::io::BufReader::new(decoder)
-                    .bytes()
-                    .collect::<Result<Vec<u8>, std::io::Error>>()
-                    .unwrap()
-            });
-
-            loop {
-                if tar_contents_handle.is_finished() {
-                    break;
-                }
-                progress.increment(1);
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-        }
-
-        let tar_contents = tar_contents_handle
-            .join()
-            .map_err(|_| anyhow::anyhow!("Extract thread failed"))?;
-
-        let mut tar_archive = tar::Archive::new(tar_contents.as_slice());
-        let entries = tar_archive.entries()?;
-
-        let mut progress = printer::Progress::new(printer, "writing", None)?;
-
-        let output_folder = self.get_path_to_extracted_files();
-        if !std::path::Path::new(output_folder.as_str()).exists() {
-            std::fs::create_dir_all(output_folder.as_str())?;
-        }
-
-        for file in entries {
-            if let Ok(mut file) = file {
-                let file_path = file.path()?;
-                let file_path_str = file_path.to_str().ok_or(anyhow::anyhow!(
-                    "Internal Error: can't get path for tar file"
-                ))?;
-                progress.set_message(file_path_str);
-
-                let path = format!("{output_folder}/{file_path_str}",);
-
-                match file.header().entry_type() {
-                    tar::EntryType::Directory => {
-                        let _ = std::fs::create_dir_all(path.as_str());
+        if self.archive.url.ends_with(".zip") {
+            self.extract_zip_archive(printer)?;
+        } else {
+            let tar_contents_handle;
+            {
+                let mut progress = printer::Progress::new(printer, "extracting", None)?;
+                tar_contents_handle = std::thread::spawn(move || {
+                    let decoder = flate2::read::GzDecoder::new(contents.as_slice());
+                    std::io::BufReader::new(decoder)
+                        .bytes()
+                        .collect::<Result<Vec<u8>, std::io::Error>>()
+                        .unwrap()
+                });
+                loop {
+                    if tar_contents_handle.is_finished() {
+                        break;
                     }
-                    tar::EntryType::Regular => {
-                        let file_name = std::path::Path::new(&path)
-                            .file_name()
-                            .ok_or(anyhow::anyhow!("Internal Error: No file name found"))?
-                            .to_str()
-                            .ok_or(anyhow::anyhow!("Internal Error: File is not a str"))?;
+                    progress.increment(1);
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+            }
 
-                        if !file_name.starts_with("._") {
-                            use std::os::unix::fs::PermissionsExt;
-                            let mut file_contents = Vec::new();
-                            let _ = file.read_to_end(&mut file_contents);
-                            let _ = std::fs::write(path.as_str(), file_contents.as_slice());
-                            let mode = file.header().mode().unwrap_or(0o644);
-                            let permissions = std::fs::Permissions::from_mode(mode);
-                            let _ = std::fs::set_permissions(path.as_str(), permissions);
+            let tar_contents = tar_contents_handle
+                .join()
+                .map_err(|_| anyhow::anyhow!("Extract thread failed"))?;
+
+            let mut tar_archive = tar::Archive::new(tar_contents.as_slice());
+            let entries = tar_archive.entries()?;
+
+            let mut progress = printer::Progress::new(printer, "writing", None)?;
+
+            let output_folder = self.get_path_to_extracted_files();
+            if !std::path::Path::new(output_folder.as_str()).exists() {
+                std::fs::create_dir_all(output_folder.as_str())?;
+            }
+
+            for file in entries {
+                if let Ok(mut file) = file {
+                    let file_path = file.path()?;
+                    let file_path_str = file_path.to_str().ok_or(anyhow::anyhow!(
+                        "Internal Error: can't get path for tar file"
+                    ))?;
+                    progress.set_message(file_path_str);
+
+                    let path = format!("{output_folder}/{file_path_str}",);
+
+                    match file.header().entry_type() {
+                        tar::EntryType::Directory => {
+                            let _ = std::fs::create_dir_all(path.as_str());
+                        }
+                        tar::EntryType::Regular => {
+                            let file_name = std::path::Path::new(&path)
+                                .file_name()
+                                .ok_or(anyhow::anyhow!("Internal Error: No file name found"))?
+                                .to_str()
+                                .ok_or(anyhow::anyhow!("Internal Error: File is not a str"))?;
+
+                            if !file_name.starts_with("._") {
+                                use std::os::unix::fs::PermissionsExt;
+                                let mut file_contents = Vec::new();
+                                let _ = file.read_to_end(&mut file_contents);
+                                let _ = std::fs::write(path.as_str(), file_contents.as_slice());
+                                let mode = file.header().mode().unwrap_or(0o644);
+                                let permissions = std::fs::Permissions::from_mode(mode);
+                                let _ = std::fs::set_permissions(path.as_str(), permissions);
+                            }
+                        }
+                        _ => {
+                            println!("Skipping {:?}", file.header().entry_type());
                         }
                     }
-                    _ => {
-                        println!("Skipping {:?}", file.header().entry_type());
+                    if file.header().entry_type() == tar::EntryType::Directory {
+                        let _ = std::fs::create_dir_all(path.as_str());
                     }
                 }
-                if file.header().entry_type() == tar::EntryType::Directory {
-                    let _ = std::fs::create_dir_all(path.as_str());
-                }
-            }
 
-            progress.increment(1);
+                progress.increment(1);
+            }
         }
+
+        self.save_files_json()?;
 
         Ok(())
     }
@@ -256,18 +365,25 @@ mod tests {
     fn test_http_archive() {
         let mut printer = Printer::new_stdout(config::Config::new().unwrap());
 
-        let archive = manifest::Archive {
+        let _archive = manifest::Archive {
             url: "https://github.com/StratifyLabs/SDK/releases/download/v8.3.1/arm-none-eabi-8-2019-q3-update-macos-x86_64.tar.gz".to_string(),
             sha256: "930dcd8b837916c82608bdf198d9f34f71deefd432024fe98271449b742a3623".to_string(),
+            link: manifest::ArchiveLink::Hard,
         };
 
-        let http_archive = HttpArchive::new(&mut printer, "toolchain", &archive).unwrap();
+        let archive = manifest::Archive {
+            url: "https://github.com/StratifyLabs/SDK/releases/download/v8.3.1/stratifyos-arm-none-eabi-libstd-8.3.1.zip".to_string(),
+            sha256: "2b9cbca5867c70bf1f890f1dc25adfbe7ff08ef6ea385784b0e5877a298b7ff1".to_string(),
+            link: manifest::ArchiveLink::Hard,
+        };
+
+        let mut http_archive = HttpArchive::new(&mut printer, "toolchain", &archive).unwrap();
 
         if http_archive.is_download_required() {
             let mut multi_progress = printer::MultiProgress::new(&mut printer);
 
-            let download_progress = multi_progress.add_progress("Downloading", Some(100));
-            let mut wait_progress = multi_progress.add_progress("Waiting", None);
+            let download_progress = multi_progress.add_progress("downloading", Some(100));
+            let mut wait_progress = multi_progress.add_progress("waiting", None);
             let runtime = &printer.context().async_runtime;
 
             let handle = http_archive.download(runtime, download_progress).unwrap();
@@ -280,6 +396,10 @@ mod tests {
 
         http_archive.extract(&mut printer).unwrap();
 
-        http_archive.create_soft_link("tmp/toolchain").unwrap();
+        if http_archive.archive.link_type == manifest::ArchiveLinkType::Soft {
+            http_archive.create_soft_link("tmp/toolchain").unwrap();
+        } else {
+            http_archive.create_hard_links("tmp").unwrap();
+        }
     }
 }
