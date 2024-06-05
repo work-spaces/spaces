@@ -2,7 +2,7 @@ use std::collections::{HashMap, VecDeque};
 
 use crate::{
     archive,
-    config::Printer,
+    context::Context,
     git::{self, BareRepository},
     manifest::{Dependency, Workspace, WorkspaceConfig},
 };
@@ -15,11 +15,18 @@ fn get_current_directory() -> anyhow::Result<String> {
     Ok(current_directory_str.to_string())
 }
 
-pub fn create(printer: &mut Printer, space_name: &String) -> anyhow::Result<()> {
+pub fn create(context: Context, space_name: &String) -> anyhow::Result<()> {
     let workspace_config = WorkspaceConfig::new("./")?;
-    let heading = printer::Heading::new(printer, "Creating Workspace")?;
     let directory = format!("{}/{space_name}", get_current_directory()?);
-    if !heading.printer.is_dry_run {
+    let context = std::sync::Arc::new(context);
+
+    let mut printer = context
+        .printer
+        .write()
+        .expect("Internal Error: Printer is not set");
+    let heading: printer::Heading = printer::Heading::new(&mut printer, "Creating Workspace")?;
+
+    if !context.is_dry_run {
         std::fs::create_dir(std::path::Path::new(space_name))?;
     }
 
@@ -30,225 +37,325 @@ pub fn create(printer: &mut Printer, space_name: &String) -> anyhow::Result<()> 
 
     {
         let section = printer::Heading::new(heading.printer, "Workspace")?;
-        let mut execute_batch = printer::ExecuteBatch::new();
+        let mut multi_progress = printer::MultiProgress::new(section.printer);
+
+        let mut handles: Vec<std::thread::JoinHandle<anyhow::Result<(), _>>> = Vec::new();
+
         for (spaces_key, dependency) in workspace.repositories.iter() {
-            let (bare_repository, execute_later) =
-                git::BareRepository::new(section.printer, spaces_key, &dependency.git)?;
-            execute_batch.add(spaces_key, execute_later);
+            let progress_bar = multi_progress.add_progress(spaces_key, None, None);
 
-            section.printer.info(spaces_key, &bare_repository)?;
+            let context = context.clone();
+            let spaces_key = spaces_key.to_owned();
+            let dependency = dependency.clone();
+            let directory = directory.clone();
 
-            let (worktree, execute_later) =
-                bare_repository.add_worktree(section.printer, &directory)?;
-            execute_batch.add(spaces_key, execute_later);
-            execute_batch.add(
-                spaces_key,
-                worktree.switch_new_branch(section.printer, dependency)?,
-            );
+            let handle = std::thread::spawn(move || {
+                let mut progress_bar = progress_bar;
+                let bare_repository = git::BareRepository::new(
+                    context.clone(),
+                    &mut progress_bar,
+                    &spaces_key,
+                    &dependency.git,
+                )?;
+
+                let worktree =
+                    bare_repository.add_worktree(context.clone(), &mut progress_bar, &directory)?;
+
+                worktree.switch_new_branch(context, &mut progress_bar, &dependency)?;
+
+                Ok::<(), anyhow::Error>(())
+            });
+            handles.push(handle);
         }
-        execute_batch.execute(section.printer)?;
+
+        for handle in handles {
+            handle.join().unwrap()?;
+        }
     }
 
-    let mut state = State::new(heading.printer, &directory)?;
+    drop(heading);
+    drop(printer);
+    let mut state = State::new(context, directory.clone())?;
+    state.sync_full_path()?;
 
     if let Some(buck) = &workspace_config.buck {
         buck.export(&directory)?;
     }
 
-    state.sync_full_path()?;
 
+    Ok::<(), anyhow::Error>(())
+}
+
+pub fn sync(context: Context) -> anyhow::Result<()> {
+    let full_path = get_current_directory()?;
+    let mut state = State::new(std::sync::Arc::new(context), full_path)?;
+    state.sync_full_path()?;
     Ok(())
 }
 
-pub fn sync(printer: &mut Printer) -> anyhow::Result<()> {
-    let full_path = get_current_directory()?;
-    let mut state = State::new(printer, &full_path)?;
-    state.sync_full_path()
+enum SyncDep {
+    Repository(BareRepository, Dependency),
+    Archive(String, archive::HttpArchive),
 }
 
-struct State<'a> {
-    printer: &'a mut Printer,
-    full_path: &'a str,
+struct State {
+    context: std::sync::Arc<Context>,
+    full_path: String,
     workspace: Workspace,
-    all_deps: VecDeque<(BareRepository, Dependency)>,
+    all_deps: VecDeque<SyncDep>,
     deps_map: HashMap<String, Dependency>,
 }
 
-impl<'a> State<'a> {
-    fn new(printer: &'a mut Printer, full_path: &'a str) -> anyhow::Result<Self> {
+impl State {
+    fn new(context: std::sync::Arc<Context>, full_path: String) -> anyhow::Result<Self> {
         Ok(Self {
-            printer,
-            full_path,
-            workspace: Workspace::new(full_path)?,
+            context,
+            full_path: full_path.clone(),
+            workspace: Workspace::new(&full_path)?,
             deps_map: HashMap::new(),
             all_deps: VecDeque::new(),
         })
     }
 
     fn sync_full_path(&mut self) -> anyhow::Result<()> {
-        self.sync_repositories()?;
-        self.sync_dependencies()?;
-        self.export_buck_config()?;
-        self.update_cargo()?;
+        let context = self.context.clone();
+
+        let mut printer = context
+            .printer
+            .write()
+            .expect("Internal Error: Printer is not set");
+
+        let mut multi_progress = printer::MultiProgress::new(&mut printer);
+
+        self.sync_repositories(&mut multi_progress)?;
+        self.sync_dependencies(&mut multi_progress)?;
+        self.export_buck_config(&mut multi_progress)?;
+        self.update_cargo(&mut multi_progress)?;
+
         Ok(())
     }
 
-    fn sync_repositories(&mut self) -> anyhow::Result<()> {
-        let section = printer::Heading::new(self.printer, "Workspace")?;
-        let mut execute_batch = printer::ExecuteBatch::new();
+    fn sync_repositories(
+        &mut self,
+        multi_progress: &mut printer::MultiProgress,
+    ) -> anyhow::Result<()> {
+        let mut handles = Vec::new();
+
         for (spaces_key, dependency) in self.workspace.repositories.iter() {
             self.deps_map.insert(spaces_key.clone(), dependency.clone());
-            let (bare_repository, execute_later) =
-                git::BareRepository::new(section.printer, spaces_key, &dependency.git)?;
 
-            section.printer.info(spaces_key, &bare_repository)?;
-            execute_batch.add(spaces_key, execute_later);
+            let mut progress_bar = multi_progress.add_progress(spaces_key, None, None);
+            let context = self.context.clone();
+            let spaces_key = spaces_key.to_owned();
+            let dependency = dependency.clone();
 
-            self.all_deps
-                .push_back((bare_repository, dependency.clone()));
+            let handle = std::thread::spawn(move || {
+                let bare_repository = git::BareRepository::new(
+                    context,
+                    &mut progress_bar,
+                    &spaces_key,
+                    &dependency.git,
+                )?;
+
+                Ok::<_, anyhow::Error>((bare_repository, dependency.clone()))
+            });
+
+            handles.push(handle);
         }
 
-        execute_batch.execute(section.printer)?;
+        for handle in handles {
+            let result = handle
+                .join()
+                .expect("Internal Error: Failed to join thread");
+            match result {
+                Ok((bare_repository, dependency)) => {
+                    self.all_deps
+                        .push_back(SyncDep::Repository(bare_repository, dependency));
+                }
+                Err(e) => {
+                    return Err(e);
+                }
+            }
+        }
+
         Ok(())
     }
 
-    fn sync_dependencies(&mut self) -> anyhow::Result<()> {
-        let heading = printer::Heading::new(self.printer, "Dependencies")?;
-        while let Some((bare_repository, dependency)) = self.all_deps.pop_back() {
-            let mut execute_batch = printer::ExecuteBatch::new();
+    fn sync_dependencies(
+        &mut self,
+        multi_progress: &mut printer::MultiProgress,
+    ) -> anyhow::Result<()> {
+        let mut handles: Vec<Option<std::thread::JoinHandle<Result<_, anyhow::Error>>>> =
+            Vec::new();
+        loop {
+            if let Some(next_dep) = self.all_deps.pop_back() {
+                let handle = match next_dep {
+                    SyncDep::Archive(spaces_key, http_archive) => {
+                        self.sync_archive(multi_progress, spaces_key, http_archive)?
+                    }
+                    SyncDep::Repository(bare_repository, dependency) => {
+                        if !self
+                            .workspace
+                            .repositories
+                            .contains_key(&bare_repository.spaces_key)
+                        {
+                            self.workspace
+                                .dependencies
+                                .insert(bare_repository.spaces_key.clone(), dependency.clone());
+                        }
 
-            let section = printer::Section::new(heading.printer, &bare_repository.spaces_key)?;
-            let (worktree, execute_later) =
-                bare_repository.add_worktree(section.printer, self.full_path)?;
-            execute_batch.add(bare_repository.spaces_key.as_str(), execute_later);
+                        self.sync_dependency(multi_progress, bare_repository, dependency)?
+                    }
+                };
 
-            if self.deps_map.contains_key(&bare_repository.spaces_key) {
-                section.printer.info("checkout", &"develop")?;
+                handles.push(Some(handle));
             } else {
-                self.deps_map
-                    .insert(bare_repository.spaces_key.clone(), dependency.clone());
-                execute_batch.add(
-                    &bare_repository.spaces_key,
-                    worktree.checkout(section.printer, &dependency)?,
-                );
-                execute_batch.add(
-                    &bare_repository.spaces_key,
-                    worktree.checkout_detached_head(section.printer)?,
-                );
+                //println!("All finished?");
+                let mut all_finished = true;
+                for handle_option in handles.iter_mut() {
+                    if let Some(_) = handle_option {
+                        let handle = handle_option.take().unwrap();
+                        if !handle.is_finished() {
+                            all_finished = false;
+                            *handle_option = Some(handle);
+                        } else {
+                            let sync_deps = handle
+                                .join()
+                                .expect("Internal Error: failed to join handle")?;
+
+                            for sync_dep in sync_deps {
+                                self.all_deps.push_back(sync_dep);
+                            }
+
+                            *handle_option = None;
+                        }
+                    }
+                }
+
+                if all_finished {
+                    break;
+                } else {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                }
+            };
+        }
+
+        Ok(())
+    }
+
+    fn sync_archive(
+        &self,
+        multi_progress: &mut printer::MultiProgress,
+        spaces_key: String,
+        mut http_archive: archive::HttpArchive,
+    ) -> anyhow::Result<std::thread::JoinHandle<Result<Vec<SyncDep>, anyhow::Error>>> {
+        let download_progress_bar = multi_progress.add_progress(&spaces_key, Some(100), None);
+        let mut progress_bar = multi_progress.add_progress(&spaces_key, Some(100), None);
+        let context = self.context.clone();
+        let full_path = self.full_path.clone();
+
+        let handle = std::thread::spawn(move || {
+            if http_archive.is_download_required() {
+                let join_handle =
+                    http_archive.download(&context.async_runtime, download_progress_bar)?;
+                let _ = context.async_runtime.block_on(join_handle)?;
+            }
+
+            http_archive.extract(&mut progress_bar)?;
+            http_archive.create_links(&full_path)?;
+
+            Ok::<_, anyhow::Error>(Vec::new())
+        });
+
+        Ok(handle)
+    }
+
+    fn sync_dependency(
+        &mut self,
+        multi_progress: &mut printer::MultiProgress,
+        bare_repository: BareRepository,
+        dependency: Dependency,
+    ) -> anyhow::Result<std::thread::JoinHandle<Result<Vec<SyncDep>, anyhow::Error>>> {
+        let mut progress_bar = multi_progress.add_progress(&bare_repository.spaces_key, None, None);
+
+        progress_bar.set_finish(None);
+
+        let context = self.context.clone();
+        let full_path = self.full_path.to_string();
+
+        let needs_checked_out = if self.deps_map.contains_key(&bare_repository.spaces_key) {
+            //checked out for development
+            false
+        } else {
+            self.deps_map
+                .insert(bare_repository.spaces_key.clone(), dependency.clone());
+            true
+        };
+
+        let handle = std::thread::spawn(move || {
+            let mut new_deps = Vec::new();
+
+            let worktree =
+                bare_repository.add_worktree(context.clone(), &mut progress_bar, &full_path)?;
+
+            if needs_checked_out {
+                worktree.checkout(context.clone(), &mut progress_bar, &dependency)?;
+                worktree.checkout_detached_head(context.clone(), &mut progress_bar)?;
             }
 
             let spaces_deps = worktree.get_deps()?;
             if let Some(spaces_deps) = spaces_deps {
-                section.printer.info("deps", &spaces_deps)?;
                 for (spaces_key, dep) in spaces_deps.deps.iter() {
-                    section.printer.info(spaces_key, dep)?;
-                    let (bare_repository, execute_later) =
-                        git::BareRepository::new(section.printer, spaces_key, &dep.git)?;
+                    let bare_repository = git::BareRepository::new(
+                        context.clone(),
+                        &mut progress_bar,
+                        spaces_key,
+                        &dep.git,
+                    )?;
 
-                    execute_batch.add(bare_repository.spaces_key.as_str(), execute_later);
-                    if !self
-                        .workspace
-                        .repositories
-                        .contains_key(&bare_repository.spaces_key)
-                    {
-                        self.workspace
-                            .dependencies
-                            .insert(bare_repository.spaces_key.clone(), dep.clone());
-                    }
-
-                    if !self.deps_map.contains_key(&bare_repository.spaces_key) {
-                        self.all_deps.push_front((bare_repository, dep.clone()));
-                    }
+                    new_deps.push(SyncDep::Repository(bare_repository.clone(), dep.clone()));
                 }
+
                 if let Some(archive_map) = spaces_deps.archives {
-                    let mut archives = Vec::new();
-                    let mut http_archives = Vec::new();
-                    {
-                        for (key, archive) in archive_map.iter() {
-                            let http_archive =
-                                archive::HttpArchive::new(section.printer, key, archive)?;
-                            http_archives.push((key, http_archive));
-                        }
+                    for (key, archive) in archive_map.iter() {
+                        let http_archive =
+                            archive::HttpArchive::new(context.clone(), key, archive)?;
 
-                        for (key, http_archive) in http_archives {
-                            let mut multi_progress = printer::MultiProgress::new(section.printer);
-
-                            if http_archive.is_download_required() {
-                                let bar = multi_progress.add_progress(key, Some(100));
-                                let join_handle = http_archive.download(
-                                    &multi_progress.printer.context().async_runtime,
-                                    bar,
-                                )?;
-                                archives.push((http_archive, Some(join_handle)));
-                            } else {
-                                archives.push((http_archive, None));
-                            }
-                        }
-
-                        loop {
-                            let mut is_running = false;
-                            for (_archive, join_handle) in archives.iter() {
-                                if let Some(join_handle) = join_handle {
-                                    if !join_handle.is_finished() {
-                                        is_running = true;
-                                    }
-                                }
-                            }
-                            if !is_running {
-                                break;
-                            }
-                        }
-                    }
-
-                    for (archive, _join_handle) in archives.iter_mut() {
-                        let section = printer::Section::new(section.printer, &archive.spaces_key)?;
-                        archive.extract(section.printer)?;
-
-                        section.printer.info(
-                            "link",
-                            &format!("{}/{}", self.full_path, archive.spaces_key),
-                        )?;
-
-                        archive.create_links(self.full_path)?;
+                        new_deps.push(SyncDep::Archive(key.clone(), http_archive));
                     }
                 }
-            } else {
-                section.printer.info("deps", &"No dependencies found")?;
             }
-            execute_batch.execute(section.printer)?;
-        }
 
-        Ok(())
+            Ok::<_, anyhow::Error>(new_deps)
+        });
+
+        Ok(handle)
     }
 
-    fn export_buck_config(&mut self) -> anyhow::Result<()> {
-        let workspace = &mut self.workspace;
-        let deps_map = &mut self.deps_map;
-
-        if let Some(buck) = workspace.buck.as_mut() {
+    fn export_buck_config(
+        &mut self,
+        _multi_progress: &mut printer::MultiProgress,
+    ) -> anyhow::Result<()> {
+        if let Some(buck) = self.workspace.buck.as_mut() {
             if buck.cells.is_none() {
                 buck.cells = Some(HashMap::new());
             }
 
             if let Some(buck_cells) = buck.cells.as_mut() {
-                for (key, _dep) in deps_map.iter() {
+                for (key, _dep) in self.deps_map.iter() {
                     buck_cells.insert(key.clone(), format!("./{key}"));
                 }
             }
-            buck.export(self.full_path)?;
+            buck.export(&self.full_path)?;
         }
 
-        workspace.save(self.full_path)?;
+        self.workspace.save(&self.full_path)?;
 
         Ok(())
     }
 
-    fn update_cargo(&mut self) -> anyhow::Result<()> {
+    fn update_cargo(&self, _multi_progress: &mut printer::MultiProgress) -> anyhow::Result<()> {
         if let Some(cargo) = self.workspace.get_cargo_patches() {
-            let heading = printer::Heading::new(self.printer, "Cargo")?;
-
-            heading.printer.info("cargo", cargo)?;
-
             for (spaces_key, list) in cargo.iter() {
                 //read the cargo toml file to see how the dependency is specified crates-io or git
                 let cargo_toml_path = format!("{}/{spaces_key}/Cargo.toml", self.full_path);

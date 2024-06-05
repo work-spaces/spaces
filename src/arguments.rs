@@ -1,5 +1,4 @@
 use clap::{Parser, Subcommand, ValueEnum};
-use crate::config::Printer;
 
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
@@ -38,28 +37,19 @@ pub struct Arguments {
     level: Option<Level>,
 }
 
-fn update_printer(printer: &mut Printer, is_dry_run: bool, level: Option<Level>) {
-    printer.is_dry_run = is_dry_run;
-    if let Some(level) = level {
-        printer.level = level.into();
-    }   
-}
-
 pub fn execute() -> anyhow::Result<()> {
-    use crate::config::Config;
+    use crate::{context::Context, workspace};
     let args = Arguments::parse();
-    let config = Config::new()?;
+    let mut context = Context::new()?;
 
-    let mut printer = printer::Printer::new_stdout(config);
-    use crate::workspace;
     match args {
         Arguments { commands: Commands::Create { name }, is_dry_run, level } => {
-            update_printer(&mut printer, is_dry_run, level);
-            workspace::create(&mut printer, &name)?;
+            context.update_printer(is_dry_run, level.map(|e| e.into()));
+            workspace::create(context, &name)?;
         }
         Arguments { commands: Commands::Sync {}, is_dry_run, level } => {
-            update_printer(&mut printer, is_dry_run, level);
-            workspace::sync(&mut printer)?;
+            context.update_printer(is_dry_run, level.map(|e| e.into()));
+            workspace::sync(context)?;
         }
     }
 

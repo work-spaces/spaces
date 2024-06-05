@@ -4,7 +4,7 @@ mod arguments;
 mod git;
 mod manifest;
 mod workspace;
-mod config;
+mod context;
 mod archive;
 
 

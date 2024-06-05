@@ -92,7 +92,7 @@ impl Dependency {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ArchiveLink {
     Soft,
     Hard,

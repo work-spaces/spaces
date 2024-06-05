@@ -1,6 +1,6 @@
 use std::io::Read;
 
-use crate::{config::Printer, manifest};
+use crate::{context, manifest};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -20,17 +20,14 @@ pub struct HttpArchive {
 
 impl HttpArchive {
     pub fn new(
-        printer: &mut Printer,
+        context: std::sync::Arc<context::Context>,
         spaces_key: &str,
         archive: &manifest::Archive,
     ) -> anyhow::Result<Self> {
-        let full_path_to_archive = printer
-            .context()
+        let full_path_to_archive = context
             .get_bare_store_path(Self::url_to_relative_path(archive.url.as_str())?.as_str());
 
         let full_path_to_archive = format!("{}/{}", full_path_to_archive, archive.sha256);
-
-        printer.info(spaces_key, &full_path_to_archive)?;
 
         Ok(Self {
             archive: archive.clone(),
@@ -63,6 +60,10 @@ impl HttpArchive {
     }
 
     pub fn create_links(&mut self, space_directory: &str) -> anyhow::Result<()> {
+        if std::path::Path::new(self.get_path_to_extracted_files().as_str()).join(&self.spaces_key).exists() {
+            return Ok(());
+        }
+
         match self.archive.link {
             manifest::ArchiveLink::Soft => self.create_soft_link(space_directory),
             manifest::ArchiveLink::Hard => self.create_hard_links(space_directory),
@@ -104,6 +105,7 @@ impl HttpArchive {
 
             std::fs::hard_link(original, target)
                 .with_context(|| format!("hardlinking {} -> {}", target_path, source))?;
+
         }
 
         Ok(())
@@ -113,13 +115,14 @@ impl HttpArchive {
         &self,
         runtime: &tokio::runtime::Runtime,
         mut progress: printer::MultiProgressBar,
-    ) -> anyhow::Result<tokio::task::JoinHandle<anyhow::Result<()>>> {
+    ) -> anyhow::Result<tokio::task::JoinHandle<anyhow::Result<printer::MultiProgressBar>>> {
         let url = self.archive.url.clone();
         let full_path_to_archive = self.full_path_to_archive.clone();
         let full_path = std::path::Path::new(&full_path_to_archive);
         if let Some(parent) = full_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
+
 
         let join_handle = runtime.spawn(async move {
             let client = reqwest::ClientBuilder::new()
@@ -138,13 +141,13 @@ impl HttpArchive {
                 output_file.write_all(&chunk).await?;
             }
 
-            Ok(())
+            Ok(progress)
         });
 
         Ok(join_handle)
     }
 
-    fn extract_zip_archive(&mut self, printer: &mut Printer) -> anyhow::Result<()> {
+    fn extract_zip_archive(&mut self, progress: &mut printer::MultiProgressBar) -> anyhow::Result<()> {
         use std::fs::File;
         use std::path::Path;
         use zip::read::ZipArchive;
@@ -158,8 +161,7 @@ impl HttpArchive {
         let reader = File::open(archive_path)?;
         let mut archive = ZipArchive::new(reader).with_context(|| error_context.clone())?;
 
-        let mut progress =
-            printer::Progress::new(printer, "extracting", Some(archive.len() as u64))?;
+        progress.set_prefix("Extracting");
 
         for i in 0..archive.len() {
             let mut file = archive.by_index(i).with_context(|| error_context.clone())?;
@@ -186,6 +188,11 @@ impl HttpArchive {
                 if file.is_file() {
                     let mut outfile = File::create(&outpath)
                         .with_context(|| format!("{} creating {outpath:?}", error_context))?;
+
+                    use std::os::unix::fs::PermissionsExt;
+                    outfile.set_permissions(PermissionsExt::from_mode(file.unix_mode().unwrap_or(0o644)))
+                        .with_context(|| format!("{} setting permissions {outpath:?}", error_context))?;
+
                     std::io::copy(&mut file, &mut outfile)
                         .with_context(|| format!("{} copying {outpath:?}", error_context))?;
                 }
@@ -218,7 +225,7 @@ impl HttpArchive {
         Ok(())
     }
 
-    pub fn extract(&mut self, printer: &mut Printer) -> anyhow::Result<()> {
+    pub fn extract(&mut self, progress: &mut printer::MultiProgressBar) -> anyhow::Result<()> {
         if !self.is_extract_required() {
             self.load_files_json().with_context(|| format!("Missing {}", self.get_path_to_extracted_files_json()))?;
             return Ok(());
@@ -230,7 +237,6 @@ impl HttpArchive {
 
             let contents = std::fs::read(full_path_to_archive)?;
 
-            let mut progress = printer::Progress::new(printer, "digesting", None)?;
             let digest_handle = std::thread::spawn(move || {
                 let digest = sha256::digest(&contents);
                 (digest, contents)
@@ -259,11 +265,10 @@ impl HttpArchive {
         };
 
         if self.archive.url.ends_with(".zip") {
-            self.extract_zip_archive(printer)?;
+            self.extract_zip_archive(progress)?;
         } else {
             let tar_contents_handle;
             {
-                let mut progress = printer::Progress::new(printer, "extracting", None)?;
                 tar_contents_handle = std::thread::spawn(move || {
                     let decoder = flate2::read::GzDecoder::new(contents.as_slice());
                     std::io::BufReader::new(decoder)
@@ -271,6 +276,7 @@ impl HttpArchive {
                         .collect::<Result<Vec<u8>, std::io::Error>>()
                         .unwrap()
                 });
+                progress.set_prefix("Extracting");
                 loop {
                     if tar_contents_handle.is_finished() {
                         break;
@@ -286,8 +292,6 @@ impl HttpArchive {
 
             let mut tar_archive = tar::Archive::new(tar_contents.as_slice());
             let entries = tar_archive.entries()?;
-
-            let mut progress = printer::Progress::new(printer, "writing", None)?;
 
             let output_folder = self.get_path_to_extracted_files();
             if !std::path::Path::new(output_folder.as_str()).exists() {
@@ -359,11 +363,14 @@ impl HttpArchive {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config;
+    use crate::context;
 
     #[test]
     fn test_http_archive() {
-        let mut printer = Printer::new_stdout(config::Config::new().unwrap());
+        let mut context = std::sync::Arc::new(context::Context::default());
+
+        let mut printer = context.printer.take().expect("Internal Error: No printer");
+    
 
         let _archive = manifest::Archive {
             url: "https://github.com/StratifyLabs/SDK/releases/download/v8.3.1/arm-none-eabi-8-2019-q3-update-macos-x86_64.tar.gz".to_string(),
@@ -377,14 +384,17 @@ mod tests {
             link: manifest::ArchiveLink::Hard,
         };
 
-        let mut http_archive = HttpArchive::new(&mut printer, "toolchain", &archive).unwrap();
+        let mut multi_progress = printer::MultiProgress::new(&mut printer);
+        let mut progress_bar = multi_progress.add_progress("test", Some(100));
+
+
+        let mut http_archive = HttpArchive::new(context.clone(),  "toolchain", &archive).unwrap();
 
         if http_archive.is_download_required() {
-            let mut multi_progress = printer::MultiProgress::new(&mut printer);
 
-            let download_progress = multi_progress.add_progress("downloading", Some(100));
+            let mut download_progress = multi_progress.add_progress("downloading", Some(100));
             let mut wait_progress = multi_progress.add_progress("waiting", None);
-            let runtime = &printer.context().async_runtime;
+            let runtime = &context.async_runtime;
 
             let handle = http_archive.download(runtime, download_progress).unwrap();
 
@@ -394,9 +404,9 @@ mod tests {
             }
         }
 
-        http_archive.extract(&mut printer).unwrap();
+        http_archive.extract(&mut progress_bar).unwrap();
 
-        if http_archive.archive.link_type == manifest::ArchiveLinkType::Soft {
+        if http_archive.archive.link == manifest::ArchiveLink::Soft {
             http_archive.create_soft_link("tmp/toolchain").unwrap();
         } else {
             http_archive.create_hard_links("tmp").unwrap();

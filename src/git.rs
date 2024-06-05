@@ -1,5 +1,5 @@
 use crate::{
-    config::Printer,
+    context,
     manifest::{self, Dependency},
 };
 use anyhow::Context;
@@ -15,20 +15,19 @@ pub struct BareRepository {
 
 impl BareRepository {
     pub fn new(
-        printer: &mut Printer,
+        context: std::sync::Arc<context::Context>,
+        progress_bar: &mut printer::MultiProgressBar,
         spaces_key: &str,
         url: &str,
-    ) -> anyhow::Result<(Self, Vec<printer::ExecuteLater>)> {
+    ) -> anyhow::Result<Self> {
         let mut options = printer::ExecuteOptions::default();
 
         let (relative_bare_store_path, name_dot_git) = Self::url_to_relative_path_and_name(url)
             .with_context(|| format!("Failed to parse {spaces_key} url: {url}"))?;
 
-        let bare_store_path = printer
-            .context()
-            .get_bare_store_path(relative_bare_store_path.as_str());
+        let bare_store_path = context.get_bare_store_path(relative_bare_store_path.as_str());
 
-        if !printer.is_dry_run {
+        if !context.is_dry_run {
             std::fs::create_dir_all(&bare_store_path)?;
         }
 
@@ -39,8 +38,7 @@ impl BareRepository {
             options.arguments = vec!["fetch".to_string()];
         } else {
             options.working_directory = Some(bare_store_path.clone());
-            printer.info("barestore", &bare_store_path)?;
-            if !printer.is_dry_run {
+            if !context.is_dry_run {
                 std::fs::create_dir_all(&bare_store_path)?;
             }
             options.arguments = vec![
@@ -51,27 +49,30 @@ impl BareRepository {
             ];
         }
 
-        //printer.execute_process("git", &options)?;
+        progress_bar
+            .execute_process("git", &options)
+            .with_context(|| {
+                format!(
+                    "failed to run {}",
+                    options.get_full_command_in_working_directory("git")
+                )
+            })?;
 
-        let execute_later = vec![printer::ExecuteLater::new("git", options)];
-
-        Ok((
-            Self {
-                url: url.to_owned(),
-                full_path,
-                spaces_key: spaces_key.to_owned(),
-                name_dot_git,
-            },
-            execute_later,
-        ))
+        Ok(Self {
+            url: url.to_owned(),
+            full_path,
+            spaces_key: spaces_key.to_owned(),
+            name_dot_git,
+        })
     }
 
     pub fn add_worktree(
         &self,
-        printer: &mut Printer,
+        context: std::sync::Arc<context::Context>,
+        progress_bar: &mut printer::MultiProgressBar,
         path: &str,
-    ) -> anyhow::Result<(Worktree, Vec<printer::ExecuteLater>)> {
-        let result = Worktree::new(printer, self, path)
+    ) -> anyhow::Result<Worktree> {
+        let result = Worktree::new(context, progress_bar, self, path)
             .with_context(|| format!("Adding working to {} at {path}", self.url))?;
         Ok(result)
     }
@@ -119,10 +120,11 @@ pub struct Worktree {
 
 impl Worktree {
     fn new(
-        printer: &mut Printer,
+        context: std::sync::Arc<context::Context>,
+        progress_bar: &mut printer::MultiProgressBar,
         repository: &BareRepository,
         path: &str,
-    ) -> anyhow::Result<(Self, Vec<printer::ExecuteLater>)> {
+    ) -> anyhow::Result<Self> {
         let mut options = printer::ExecuteOptions::default();
 
         if !std::path::Path::new(&path).is_absolute() {
@@ -132,39 +134,44 @@ impl Worktree {
             ));
         }
 
-        if !printer.is_dry_run {
+        if !context.is_dry_run {
             std::fs::create_dir_all(path)?;
         }
 
-        let mut execute_later = Vec::new();
-
         options.working_directory = Some(repository.full_path.clone());
         options.arguments = vec!["worktree".to_string(), "prune".to_string()];
-        //printer.execute_process("git", &options)?;
-
-        execute_later.push(printer::ExecuteLater::new("git", options.clone()));
+        progress_bar
+            .execute_process("git", &options)
+            .with_context(|| {
+                format!(
+                    "failed to run {}",
+                    options.get_full_command_in_working_directory("git")
+                )
+            })?;
 
         let full_path = format!("{}/{}", path, repository.spaces_key);
-        if !printer.is_dry_run && !std::path::Path::new(&full_path).exists() {
+        if !context.is_dry_run && !std::path::Path::new(&full_path).exists() {
             options.arguments = vec![
                 "worktree".to_string(),
                 "add".to_string(),
                 "--detach".to_string(),
                 full_path.to_string(),
             ];
-            //printer.execute_process("git", &options)?;
-            execute_later.push(printer::ExecuteLater::new("git", options.clone()));
-        } else {
-            printer.info("worktree", &full_path)?;
+
+            progress_bar
+                .execute_process("git", &options)
+                .with_context(|| {
+                    format!(
+                        "failed to run {}",
+                        options.get_full_command_in_working_directory("git")
+                    )
+                })?;
         }
 
-        Ok((
-            Self {
-                full_path,
-                repository: repository.clone(),
-            },
-            execute_later,
-        ))
+        Ok(Self {
+            full_path,
+            repository: repository.clone(),
+        })
     }
 
     pub fn get_deps(&self) -> anyhow::Result<Option<manifest::Deps>> {
@@ -173,13 +180,14 @@ impl Worktree {
 
     pub fn checkout(
         &self,
-        _printer: &mut Printer,
+        _context: std::sync::Arc<context::Context>,
+        progress_bar: &mut printer::MultiProgressBar,
         dependency: &manifest::Dependency,
-    ) -> anyhow::Result<Vec<printer::ExecuteLater>> {
-        let mut options = printer::ExecuteOptions::default();
-        let mut execute_later = Vec::new();
-
-        options.working_directory = Some(self.full_path.clone());
+    ) -> anyhow::Result<()> {
+        let mut options = printer::ExecuteOptions {
+            working_directory: Some(self.full_path.clone()),
+            ..Default::default()
+        };
 
         let checkout = dependency.get_checkout()?;
         match checkout {
@@ -203,15 +211,22 @@ impl Worktree {
             }
         }
 
-        //printer.execute_process("git", &options)?;
-        execute_later.push(printer::ExecuteLater::new("git", options));
-        Ok(execute_later)
+        progress_bar
+            .execute_process("git", &options)
+            .with_context(|| {
+                format!(
+                    "failed to run {}",
+                    options.get_full_command_in_working_directory("git")
+                )
+            })?;
+        Ok(())
     }
 
     pub fn checkout_detached_head(
         &self,
-        _printer: &mut Printer,
-    ) -> anyhow::Result<Vec<printer::ExecuteLater>> {
+        _context: std::sync::Arc<context::Context>,
+        progress_bar: &mut printer::MultiProgressBar,
+    ) -> anyhow::Result<()> {
         let options = printer::ExecuteOptions {
             working_directory: Some(self.full_path.clone()),
             arguments: vec![
@@ -221,20 +236,30 @@ impl Worktree {
             ],
             ..Default::default()
         };
-        Ok(vec![printer::ExecuteLater::new("git", options)])
+        progress_bar
+            .execute_process("git", &options)
+            .with_context(|| {
+                format!(
+                    "failed to run {}",
+                    options.get_full_command_in_working_directory("git")
+                )
+            })?;
+
+        Ok(())
     }
 
     pub fn switch_new_branch(
         &self,
-        printer: &mut Printer,
+        context: std::sync::Arc<context::Context>,
+        progress_bar: &mut printer::MultiProgressBar,
         dependency: &Dependency,
-    ) -> anyhow::Result<Vec<printer::ExecuteLater>> {
-        let mut execute_later = Vec::new();
+    ) -> anyhow::Result<()> {
         if let (Some(checkout), Some(dev)) = (dependency.checkout.as_ref(), dependency.dev.as_ref())
         {
             let mut original_checkout_dependency = dependency.clone();
             original_checkout_dependency.checkout = None;
-            execute_later.extend(self.checkout(printer, &original_checkout_dependency)?);
+
+            self.checkout(context, progress_bar, &original_checkout_dependency)?;
 
             if *checkout == manifest::CheckoutOption::Develop {
                 let mut options = printer::ExecuteOptions {
@@ -242,12 +267,25 @@ impl Worktree {
                     arguments: vec!["pull".to_string()],
                     ..Default::default()
                 };
-                execute_later.push(printer::ExecuteLater::new("git", options.clone()));
+                progress_bar
+                    .execute_process("git", &options)
+                    .with_context(|| {
+                        format!(
+                            "failed to run {}",
+                            options.get_full_command_in_working_directory("git")
+                        )
+                    })?;
 
                 options.arguments = vec!["switch".to_string(), "-c".to_string(), dev.clone()];
 
-                //printer.execute_process("git", &options)?;
-                execute_later.push(printer::ExecuteLater::new("git", options));
+                progress_bar
+                    .execute_process("git", &options)
+                    .with_context(|| {
+                        format!(
+                            "failed to run {}",
+                            options.get_full_command_in_working_directory("git")
+                        )
+                    })?;
             } else {
                 return Err(anyhow::anyhow!(
                     "No `dev` found for dependency {}",
@@ -268,6 +306,6 @@ impl Worktree {
             ));
         }
 
-        Ok(execute_later)
+        Ok(())
     }
 }
