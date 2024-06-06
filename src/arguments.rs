@@ -71,7 +71,9 @@ enum Commands {
         #[arg(long)]
         config: String,
     },
+    /// Synchronize the current workspace. This is useful if you modify the workspace after creating it.
     Sync {},
+    /// Lists the workspaces in the spaces store on the local machine.
     List {}
 }
 

@@ -3,3 +3,6 @@ git-fetch-with-cli = true
 
 [patch.'https://github.com/tyler-gilbert/printer-rs']
 printer = { path = "../printer-rs" }
+
+[build]
+rustc-wrapper = "sccache"

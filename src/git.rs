@@ -84,11 +84,11 @@ impl BareRepository {
 
         let host = repo_url
             .host_str()
-            .ok_or(anyhow_error("No host found in url {}", url))?;
+            .ok_or(anyhow_error!("No host found in url {}", url))?;
         let scheme = repo_url.scheme();
         let path_segments = repo_url
             .path_segments()
-            .ok_or(anyhow_error("No path found in url {}", url))?;
+            .ok_or(anyhow_error!("No path found in url {}", url))?;
 
         let mut path = String::new();
         let mut repo_name = String::new();
@@ -129,7 +129,7 @@ impl Worktree {
         let mut options = printer::ExecuteOptions::default();
 
         if !std::path::Path::new(&path).is_absolute() {
-            return Err(anyhow_error(
+            return Err(anyhow_error!(
                 "Path to worktree must be an absolute path: {}",
                 path
             ));
@@ -199,13 +199,13 @@ impl Worktree {
                 options.arguments = vec!["checkout".to_string(), value.clone()];
             }
             manifest::Checkout::Develop(value) => {
-                return Err(anyhow_error(
+                return Err(anyhow_error!(
                     "Internal Error: cannot call checkout() with `Checkout::Develop` {}",
                     value
                 ));
             }
             manifest::Checkout::Artifact(artifact) => {
-                return Err(anyhow_error(
+                return Err(anyhow_error!(
                     "Artifact checkout is not yet supported {}",
                     artifact
                 ));
@@ -288,20 +288,20 @@ impl Worktree {
                         )
                     })?;
             } else {
-                return Err(anyhow_error(
+                return Err(anyhow_error!(
                     "No `dev` found for dependency {}",
                     dependency.git
                 ));
             }
         } else {
             if dependency.checkout.is_none() {
-                return Err(anyhow_error(
+                return Err(anyhow_error!(
                     "No `checkout` found for dependency {}",
                     dependency.git
                 ));
             }
 
-            return Err(anyhow_error(
+            return Err(anyhow_error!(
                 "No `dev` found for dependency {}",
                 dependency.git
             ));
