@@ -173,11 +173,16 @@ impl BuckConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct WorkspaceConfigSettings {
+    pub branch: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct WorkspaceConfig {
     pub repositories: HashMap<String, Dependency>,
     pub buck: Option<BuckConfig>,
     pub cargo: Option<CargoConfig>,
-    pub branch: Option<String>,
+    pub settings: Option<WorkspaceConfigSettings>,
 }
 
 impl WorkspaceConfig {
@@ -192,16 +197,22 @@ impl WorkspaceConfig {
     pub fn to_workspace(&self, space_name: &str) -> anyhow::Result<Workspace> {
         let mut repositories = self.repositories.clone();
         for (_key, dependency) in repositories.iter_mut() {
-            if let Some(branch) = self.branch.as_ref() {
+            let branch_name = if let Some(branch) = self
+                .settings
+                .as_ref()
+                .and_then(|e| e.branch.as_ref())
+                .as_ref()
+            {
+                let branch = *branch;
                 let mut dev_branch = branch.clone();
-                if branch.find("{USER}").is_some() {
+                if branch.contains("{USER}") {
                     let user = std::env::var("USER").with_context(|| {
                         format!("Failed to replace {{USER}} with $USER for {branch} naming")
                     })?;
                     dev_branch = dev_branch.replace("{USER}", &user);
                 }
 
-                if branch.find("{SPACE}").is_some() {
+                if branch.contains("{SPACE}") {
                     dev_branch = dev_branch.replace("{SPACE}", space_name);
                 } else {
                     return Err(anyhow::anyhow!(
@@ -209,9 +220,11 @@ impl WorkspaceConfig {
                     ));
                 }
 
-                dependency.dev = Some(dev_branch);
-            }
-            dependency.dev = Some(space_name.to_string());
+                dev_branch
+            } else {
+                space_name.to_string()
+            };
+            dependency.dev = Some(branch_name);
             dependency.checkout = Some(CheckoutOption::Develop);
         }
         Ok(Workspace {

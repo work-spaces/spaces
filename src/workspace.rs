@@ -3,7 +3,8 @@ use std::collections::{HashMap, VecDeque};
 use anyhow::Context;
 
 use crate::{
-    archive, context, context::{format_error_context, anyhow_error}, 
+    archive, context,
+    context::{anyhow_error, format_error_context},
     git::{self, BareRepository},
     ledger,
     manifest::{Dependency, Workspace, WorkspaceConfig},
@@ -45,9 +46,15 @@ pub fn create(
     let directory = format!("{current_directory}/{space_name}");
     let context = std::sync::Arc::new(context);
 
-    let workspace = workspace_config
-        .to_workspace(space_name)
-        .with_context(|| format_error_context!("When creating workspace {space_name} from workspace config"))?;
+    if !context.is_dry_run {
+        std::fs::create_dir(std::path::Path::new(space_name)).with_context(|| {
+            format_error_context!("When creating workspace {space_name} in current directory")
+        })?;
+    }
+
+    let workspace = workspace_config.to_workspace(space_name).with_context(|| {
+        format_error_context!("When creating workspace {space_name} from workspace config")
+    })?;
     workspace
         .save(&directory)
         .with_context(|| format_error_context!("When trying to save workspace for {space_name}"))?;
@@ -57,12 +64,6 @@ pub fn create(
             .printer
             .write()
             .expect("Internal Error: Printer is not set");
-
-        if !context.is_dry_run {
-            std::fs::create_dir(std::path::Path::new(space_name)).with_context(|| {
-                format_error_context!("When creating workspace {space_name} in current directory")
-            })?;
-        }
 
         let mut multi_progress = printer::MultiProgress::new(&mut printer);
 
@@ -125,6 +126,7 @@ pub fn sync(context: context::Context) -> anyhow::Result<()> {
 }
 
 enum SyncDep {
+    BareRepository(String, Dependency),
     Repository(BareRepository, Dependency),
     Archive(String, archive::HttpArchive),
 }
@@ -228,6 +230,9 @@ impl State {
                     SyncDep::Archive(spaces_key, http_archive) => {
                         self.sync_archive(multi_progress, spaces_key, http_archive)?
                     }
+                    SyncDep::BareRepository(spaces_key, dependency) => {
+                        self.sync_bare_repository(multi_progress, spaces_key, dependency)?
+                    }
                     SyncDep::Repository(bare_repository, dependency) => {
                         if !self
                             .workspace
@@ -245,7 +250,6 @@ impl State {
 
                 handles.push(Some(handle));
             } else {
-                //println!("All finished?");
                 let mut all_finished = true;
                 for handle_option in handles.iter_mut() {
                     if handle_option.is_some() {
@@ -267,7 +271,7 @@ impl State {
                     }
                 }
 
-                if all_finished {
+                if all_finished && self.all_deps.is_empty() {
                     break;
                 } else {
                     std::thread::sleep(std::time::Duration::from_millis(500));
@@ -276,6 +280,30 @@ impl State {
         }
 
         Ok(())
+    }
+
+    fn sync_bare_repository(
+        &self,
+        multi_progress: &mut printer::MultiProgress,
+        spaces_key: String,
+        dependency: Dependency,
+    ) -> anyhow::Result<std::thread::JoinHandle<Result<Vec<SyncDep>, anyhow::Error>>> {
+        let mut progress_bar = multi_progress.add_progress(&spaces_key, None, None);
+        let context = self.context.clone();
+
+        let handle = std::thread::spawn(move || {
+            let mut new_deps = Vec::new();
+            let bare_repository = git::BareRepository::new(
+                context.clone(),
+                &mut progress_bar,
+                &spaces_key,
+                &dependency.git,
+            )?;
+            new_deps.push(SyncDep::Repository(bare_repository, dependency));
+            Ok::<_, anyhow::Error>(new_deps)
+        });
+
+        Ok(handle)
     }
 
     fn sync_archive(
@@ -313,8 +341,6 @@ impl State {
     ) -> anyhow::Result<std::thread::JoinHandle<Result<Vec<SyncDep>, anyhow::Error>>> {
         let mut progress_bar = multi_progress.add_progress(&bare_repository.spaces_key, None, None);
 
-        progress_bar.set_finish(None);
-
         let context = self.context.clone();
         let full_path = self.full_path.to_string();
 
@@ -341,14 +367,8 @@ impl State {
             let spaces_deps = worktree.get_deps()?;
             if let Some(spaces_deps) = spaces_deps {
                 for (spaces_key, dep) in spaces_deps.deps.iter() {
-                    let bare_repository = git::BareRepository::new(
-                        context.clone(),
-                        &mut progress_bar,
-                        spaces_key,
-                        &dep.git,
-                    )?;
-
-                    new_deps.push(SyncDep::Repository(bare_repository.clone(), dep.clone()));
+                    progress_bar.set_prefix(spaces_key);
+                    new_deps.push(SyncDep::BareRepository(spaces_key.clone(), dep.clone()));
                 }
 
                 if let Some(archive_map) = spaces_deps.archives {
