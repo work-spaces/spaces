@@ -32,24 +32,29 @@ pub struct Arguments {
     #[command(subcommand)]
     commands: Commands,
     #[arg(long)]
-    is_dry_run: bool,
-    #[arg(long)]
     level: Option<Level>,
 }
 
 pub fn execute() -> anyhow::Result<()> {
-    use crate::{context::Context, workspace};
+    use crate::{context::Context, workspace, ledger};
     let args = Arguments::parse();
     let mut context = Context::new()?;
 
     match args {
-        Arguments { commands: Commands::Create { name }, is_dry_run, level } => {
-            context.update_printer(is_dry_run, level.map(|e| e.into()));
-            workspace::create(context, &name)?;
+        Arguments { commands: Commands::Create { name, config }, level } => {
+            context.update_printer(level.map(|e| e.into()));
+            workspace::create(context, &name, &config)?;
         }
-        Arguments { commands: Commands::Sync {}, is_dry_run, level } => {
-            context.update_printer(is_dry_run, level.map(|e| e.into()));
+        Arguments { commands: Commands::Sync {}, level } => {
+            context.update_printer(level.map(|e| e.into()));
             workspace::sync(context)?;
+        }
+
+        Arguments { commands: Commands::List {}, level } => {
+            context.update_printer(level.map(|e| e.into()));
+            let arc_context = std::sync::Arc::new(context);
+            let ledger = ledger::Ledger::new(arc_context.clone())?;
+            ledger.show_status(arc_context)?;
         }
     }
 
@@ -63,8 +68,11 @@ enum Commands {
         /// The name of the workspace
         #[arg(long)]
         name: String,
+        #[arg(long)]
+        config: String,
     },
-    Sync {}
+    Sync {},
+    List {}
 }
 
 

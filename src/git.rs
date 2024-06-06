@@ -1,5 +1,6 @@
 use crate::{
     context,
+    context::{format_error_context, anyhow_error}, 
     manifest::{self, Dependency},
 };
 use anyhow::Context;
@@ -23,7 +24,7 @@ impl BareRepository {
         let mut options = printer::ExecuteOptions::default();
 
         let (relative_bare_store_path, name_dot_git) = Self::url_to_relative_path_and_name(url)
-            .with_context(|| format!("Failed to parse {spaces_key} url: {url}"))?;
+            .with_context(|| format_error_context!("Failed to parse {spaces_key} url: {url}"))?;
 
         let bare_store_path = context.get_bare_store_path(relative_bare_store_path.as_str());
 
@@ -52,7 +53,7 @@ impl BareRepository {
         progress_bar
             .execute_process("git", &options)
             .with_context(|| {
-                format!(
+                format_error_context!(
                     "failed to run {}",
                     options.get_full_command_in_working_directory("git")
                 )
@@ -73,21 +74,21 @@ impl BareRepository {
         path: &str,
     ) -> anyhow::Result<Worktree> {
         let result = Worktree::new(context, progress_bar, self, path)
-            .with_context(|| format!("Adding working to {} at {path}", self.url))?;
+            .with_context(|| format_error_context!("Adding working to {} at {path}", self.url))?;
         Ok(result)
     }
 
     fn url_to_relative_path_and_name(url: &str) -> anyhow::Result<(String, String)> {
         let repo_url = url::Url::parse(url)
-            .with_context(|| format!("Failed to parse bare store url {url}"))?;
+            .with_context(|| format_error_context!("Failed to parse bare store url {url}"))?;
 
         let host = repo_url
             .host_str()
-            .ok_or(anyhow::anyhow!("No host found in url {}", url))?;
+            .ok_or(anyhow_error("No host found in url {}", url))?;
         let scheme = repo_url.scheme();
         let path_segments = repo_url
             .path_segments()
-            .ok_or(anyhow::anyhow!("No path found in url {}", url))?;
+            .ok_or(anyhow_error("No path found in url {}", url))?;
 
         let mut path = String::new();
         let mut repo_name = String::new();
@@ -128,7 +129,7 @@ impl Worktree {
         let mut options = printer::ExecuteOptions::default();
 
         if !std::path::Path::new(&path).is_absolute() {
-            return Err(anyhow::anyhow!(
+            return Err(anyhow_error(
                 "Path to worktree must be an absolute path: {}",
                 path
             ));
@@ -143,7 +144,7 @@ impl Worktree {
         progress_bar
             .execute_process("git", &options)
             .with_context(|| {
-                format!(
+                format_error_context!(
                     "failed to run {}",
                     options.get_full_command_in_working_directory("git")
                 )
@@ -161,7 +162,7 @@ impl Worktree {
             progress_bar
                 .execute_process("git", &options)
                 .with_context(|| {
-                    format!(
+                    format_error_context!(
                         "failed to run {}",
                         options.get_full_command_in_working_directory("git")
                     )
@@ -198,13 +199,13 @@ impl Worktree {
                 options.arguments = vec!["checkout".to_string(), value.clone()];
             }
             manifest::Checkout::Develop(value) => {
-                return Err(anyhow::anyhow!(
+                return Err(anyhow_error(
                     "Internal Error: cannot call checkout() with `Checkout::Develop` {}",
                     value
                 ));
             }
             manifest::Checkout::Artifact(artifact) => {
-                return Err(anyhow::anyhow!(
+                return Err(anyhow_error(
                     "Artifact checkout is not yet supported {}",
                     artifact
                 ));
@@ -214,7 +215,7 @@ impl Worktree {
         progress_bar
             .execute_process("git", &options)
             .with_context(|| {
-                format!(
+                format_error_context!(
                     "failed to run {}",
                     options.get_full_command_in_working_directory("git")
                 )
@@ -239,7 +240,7 @@ impl Worktree {
         progress_bar
             .execute_process("git", &options)
             .with_context(|| {
-                format!(
+                format_error_context!(
                     "failed to run {}",
                     options.get_full_command_in_working_directory("git")
                 )
@@ -270,7 +271,7 @@ impl Worktree {
                 progress_bar
                     .execute_process("git", &options)
                     .with_context(|| {
-                        format!(
+                        format_error_context!(
                             "failed to run {}",
                             options.get_full_command_in_working_directory("git")
                         )
@@ -281,26 +282,26 @@ impl Worktree {
                 progress_bar
                     .execute_process("git", &options)
                     .with_context(|| {
-                        format!(
+                        format_error_context!(
                             "failed to run {}",
                             options.get_full_command_in_working_directory("git")
                         )
                     })?;
             } else {
-                return Err(anyhow::anyhow!(
+                return Err(anyhow_error(
                     "No `dev` found for dependency {}",
                     dependency.git
                 ));
             }
         } else {
             if dependency.checkout.is_none() {
-                return Err(anyhow::anyhow!(
+                return Err(anyhow_error(
                     "No `checkout` found for dependency {}",
                     dependency.git
                 ));
             }
 
-            return Err(anyhow::anyhow!(
+            return Err(anyhow_error(
                 "No `dev` found for dependency {}",
                 dependency.git
             ));

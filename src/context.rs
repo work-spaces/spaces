@@ -1,5 +1,24 @@
 use serde::Serialize;
 
+#[macro_export]
+macro_rules! format_error_context {
+    ($($arg:tt)*) => {{
+        let res = format!($($arg)*);
+        format!("[{}:{}] {}", file!(), line!(), res)
+    }};
+}
+
+#[macro_export]
+macro_rules! anyhow_error {
+    ($($arg:tt)*) => {{
+        let res = format!($($arg)*);
+        anyhow::anyhow!("[{}:{}] {}", file!(), line!(), res)
+    }};
+}
+
+pub use format_error_context;
+pub use anyhow_error;
+
 #[derive(Serialize)]
 pub struct Context {
     pub bare_store_base: String,
@@ -52,8 +71,7 @@ impl Context {
         result
     }
 
-    pub fn update_printer(&mut self, is_dry_run: bool, level: Option<printer::Level>) {
-        self.is_dry_run = is_dry_run;
+    pub fn update_printer(&mut self, level: Option<printer::Level>) {
         if let (Some(level), Ok(mut printer)) = (level, self.printer.write()) {
             printer.level = level;
         }

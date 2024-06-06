@@ -1,6 +1,10 @@
 use std::io::Read;
 
-use crate::{context, manifest};
+use crate::{
+    context,
+    context::{format_error_context, anyhow_error},
+    manifest,
+};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -24,8 +28,8 @@ impl HttpArchive {
         spaces_key: &str,
         archive: &manifest::Archive,
     ) -> anyhow::Result<Self> {
-        let full_path_to_archive = context
-            .get_bare_store_path(Self::url_to_relative_path(archive.url.as_str())?.as_str());
+        let full_path_to_archive =
+            context.get_bare_store_path(Self::url_to_relative_path(archive.url.as_str())?.as_str());
 
         let full_path_to_archive = format!("{}/{}", full_path_to_archive, archive.sha256);
 
@@ -60,14 +64,25 @@ impl HttpArchive {
     }
 
     pub fn create_links(&mut self, space_directory: &str) -> anyhow::Result<()> {
-        if std::path::Path::new(self.get_path_to_extracted_files().as_str()).join(&self.spaces_key).exists() {
+        let (_, target_path) = self.get_link_paths(space_directory);
+        if std::path::Path::new(target_path.as_str()).exists() {
             return Ok(());
         }
 
         match self.archive.link {
-            manifest::ArchiveLink::Soft => self.create_soft_link(space_directory),
-            manifest::ArchiveLink::Hard => self.create_hard_links(space_directory),
+            manifest::ArchiveLink::Soft => {
+                self.create_soft_link(space_directory).with_context(|| {
+                    format_error_context!("Failed to create soft links for {}", self.archive.url)
+                })?;
+            }
+            manifest::ArchiveLink::Hard => {
+                self.create_hard_links(space_directory).with_context(|| {
+                    format_error_context!("Failed to create hard links for {}", self.archive.url)
+                })?;
+            }
         }
+
+        Ok(())
     }
 
     fn create_soft_link(&self, space_directory: &str) -> anyhow::Result<()> {
@@ -78,7 +93,7 @@ impl HttpArchive {
         let original = std::path::Path::new(source.as_str());
 
         symlink(original, target)
-            .with_context(|| format!("symlinking {} to {}", target_path, source))?;
+            .with_context(|| format_error_context!("symlinking {} to {}", target_path, source))?;
 
         Ok(())
     }
@@ -104,8 +119,7 @@ impl HttpArchive {
             }
 
             std::fs::hard_link(original, target)
-                .with_context(|| format!("hardlinking {} -> {}", target_path, source))?;
-
+                .with_context(|| format_error_context!("hardlinking {} -> {}", target_path, source))?;
         }
 
         Ok(())
@@ -122,7 +136,6 @@ impl HttpArchive {
         if let Some(parent) = full_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-
 
         let join_handle = runtime.spawn(async move {
             let client = reqwest::ClientBuilder::new()
@@ -147,7 +160,10 @@ impl HttpArchive {
         Ok(join_handle)
     }
 
-    fn extract_zip_archive(&mut self, progress: &mut printer::MultiProgressBar) -> anyhow::Result<()> {
+    fn extract_zip_archive(
+        &mut self,
+        progress: &mut printer::MultiProgressBar,
+    ) -> anyhow::Result<()> {
         use std::fs::File;
         use std::path::Path;
         use zip::read::ZipArchive;
@@ -159,12 +175,12 @@ impl HttpArchive {
         let error_context = format!("in zip archive {}", self.archive.url);
 
         let reader = File::open(archive_path)?;
-        let mut archive = ZipArchive::new(reader).with_context(|| error_context.clone())?;
+        let mut archive = ZipArchive::new(reader).with_context(|| format_error_context!("{}", error_context.clone()))?;
 
         progress.set_prefix("Extracting");
 
         for i in 0..archive.len() {
-            let mut file = archive.by_index(i).with_context(|| error_context.clone())?;
+            let mut file = archive.by_index(i).with_context(|| format_error_context!("{}", error_context.clone()))?;
             if let Some(file_name) = file.enclosed_name() {
                 if let Some(file_name) = file_name.to_str() {
                     if file_name.starts_with("__MACOSX") {
@@ -190,8 +206,13 @@ impl HttpArchive {
                         .with_context(|| format!("{} creating {outpath:?}", error_context))?;
 
                     use std::os::unix::fs::PermissionsExt;
-                    outfile.set_permissions(PermissionsExt::from_mode(file.unix_mode().unwrap_or(0o644)))
-                        .with_context(|| format!("{} setting permissions {outpath:?}", error_context))?;
+                    outfile
+                        .set_permissions(PermissionsExt::from_mode(
+                            file.unix_mode().unwrap_or(0o644),
+                        ))
+                        .with_context(|| {
+                            format!("{} setting permissions {outpath:?}", error_context)
+                        })?;
 
                     std::io::copy(&mut file, &mut outfile)
                         .with_context(|| format!("{} copying {outpath:?}", error_context))?;
@@ -227,7 +248,8 @@ impl HttpArchive {
 
     pub fn extract(&mut self, progress: &mut printer::MultiProgressBar) -> anyhow::Result<()> {
         if !self.is_extract_required() {
-            self.load_files_json().with_context(|| format!("Missing {}", self.get_path_to_extracted_files_json()))?;
+            self.load_files_json()
+                .with_context(|| format!("Missing {}", self.get_path_to_extracted_files_json()))?;
             return Ok(());
         }
 
@@ -252,14 +274,14 @@ impl HttpArchive {
 
             let (digest, contents) = digest_handle
                 .join()
-                .map_err(|_| anyhow::anyhow!("Digest thread failed"))?;
+                .map_err(|_| anyhow_error!("Digest thread failed"))?;
 
             if digest != self.archive.sha256 {
                 std::fs::remove_file(self.full_path_to_archive.as_str()).with_context(|| {
                     "Internal Error: failed to delete file with bad sha256".to_string()
                 })?;
 
-                return Err(anyhow::anyhow!("Digest mismatch"));
+                return Err(anyhow_error!("Digest mismatch"));
             }
             contents
         };
@@ -288,7 +310,7 @@ impl HttpArchive {
 
             let tar_contents = tar_contents_handle
                 .join()
-                .map_err(|_| anyhow::anyhow!("Extract thread failed"))?;
+                .map_err(|_| anyhow_error!("Extract thread failed"))?;
 
             let mut tar_archive = tar::Archive::new(tar_contents.as_slice());
             let entries = tar_archive.entries()?;
@@ -301,9 +323,9 @@ impl HttpArchive {
             for file in entries {
                 if let Ok(mut file) = file {
                     let file_path = file.path()?;
-                    let file_path_str = file_path.to_str().ok_or(anyhow::anyhow!(
-                        "Internal Error: can't get path for tar file"
-                    ))?;
+                    let file_path_str = file_path
+                        .to_str()
+                        .ok_or(anyhow_error!("Internal Error: can't get path for tar file"))?;
                     progress.set_message(file_path_str);
 
                     let path = format!("{output_folder}/{file_path_str}",);
@@ -315,9 +337,9 @@ impl HttpArchive {
                         tar::EntryType::Regular => {
                             let file_name = std::path::Path::new(&path)
                                 .file_name()
-                                .ok_or(anyhow::anyhow!("Internal Error: No file name found"))?
+                                .ok_or(anyhow_error!("Internal Error: No file name found"))?
                                 .to_str()
-                                .ok_or(anyhow::anyhow!("Internal Error: File is not a str"))?;
+                                .ok_or(anyhow_error!("Internal Error: File is not a str"))?;
 
                             if !file_name.starts_with("._") {
                                 use std::os::unix::fs::PermissionsExt;
@@ -353,7 +375,7 @@ impl HttpArchive {
 
         let host = archive_url
             .host_str()
-            .ok_or(anyhow::anyhow!("No host found in url {}", url))?;
+            .ok_or(anyhow_error!("No host found in url {}", url))?;
         let scheme = archive_url.scheme();
         let path = archive_url.path();
         Ok(format!("{scheme}/{host}{path}"))
@@ -369,8 +391,7 @@ mod tests {
     fn test_http_archive() {
         let mut context = std::sync::Arc::new(context::Context::default());
 
-        let mut printer = context.printer.take().expect("Internal Error: No printer");
-    
+        let mut printer = context.printer.write().expect("Internal Error: No printer");
 
         let _archive = manifest::Archive {
             url: "https://github.com/StratifyLabs/SDK/releases/download/v8.3.1/arm-none-eabi-8-2019-q3-update-macos-x86_64.tar.gz".to_string(),
@@ -385,15 +406,13 @@ mod tests {
         };
 
         let mut multi_progress = printer::MultiProgress::new(&mut printer);
-        let mut progress_bar = multi_progress.add_progress("test", Some(100));
+        let mut progress_bar = multi_progress.add_progress("test", Some(100), None);
 
-
-        let mut http_archive = HttpArchive::new(context.clone(),  "toolchain", &archive).unwrap();
+        let mut http_archive = HttpArchive::new(context.clone(), "toolchain", &archive).unwrap();
 
         if http_archive.is_download_required() {
-
-            let mut download_progress = multi_progress.add_progress("downloading", Some(100));
-            let mut wait_progress = multi_progress.add_progress("waiting", None);
+            let mut download_progress = multi_progress.add_progress("downloading", Some(100), None);
+            let mut wait_progress = multi_progress.add_progress("waiting", None, None);
             let runtime = &context.async_runtime;
 
             let handle = http_archive.download(runtime, download_progress).unwrap();

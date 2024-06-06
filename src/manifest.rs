@@ -132,6 +132,9 @@ impl Deps {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CargoConfig {
     pub patches: Option<HashMap<String, Vec<String>>>,
+    pub net: Option<HashMap<String, String>>,
+    pub http: Option<HashMap<String, String>>,
+    pub build: Option<HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -174,23 +177,53 @@ pub struct WorkspaceConfig {
     pub repositories: HashMap<String, Dependency>,
     pub buck: Option<BuckConfig>,
     pub cargo: Option<CargoConfig>,
+    pub branch: Option<String>,
 }
 
 impl WorkspaceConfig {
-    const FILE_NAME: &'static str = "spaces_workspace_config.toml";
-
     pub fn new(path: &str) -> anyhow::Result<Self> {
-        let file_path = format!("{path}/{}", Self::FILE_NAME);
-        let contents = std::fs::read_to_string(&file_path)
-            .with_context(|| format!("Failed to read workspace config file {file_path}"))?;
+        let contents = std::fs::read_to_string(path)
+            .with_context(|| format!("Failed to read spaces workspace config file {path}"))?;
         let result: WorkspaceConfig = toml::from_str(&contents)
-            .with_context(|| format!("Failed to workspace config file {file_path}"))?;
-
+            .with_context(|| format!("Failed to parse spaces workspace config file {path}"))?;
         Ok(result)
+    }
+
+    pub fn to_workspace(&self, space_name: &str) -> anyhow::Result<Workspace> {
+        let mut repositories = self.repositories.clone();
+        for (_key, dependency) in repositories.iter_mut() {
+            if let Some(branch) = self.branch.as_ref() {
+                let mut dev_branch = branch.clone();
+                if branch.find("{USER}").is_some() {
+                    let user = std::env::var("USER").with_context(|| {
+                        format!("Failed to replace {{USER}} with $USER for {branch} naming")
+                    })?;
+                    dev_branch = dev_branch.replace("{USER}", &user);
+                }
+
+                if branch.find("{SPACE}").is_some() {
+                    dev_branch = dev_branch.replace("{SPACE}", space_name);
+                } else {
+                    return Err(anyhow::anyhow!(
+                        "Branch name {branch} must contain {{SPACE}}"
+                    ));
+                }
+
+                dependency.dev = Some(dev_branch);
+            }
+            dependency.dev = Some(space_name.to_string());
+            dependency.checkout = Some(CheckoutOption::Develop);
+        }
+        Ok(Workspace {
+            repositories,
+            buck: self.buck.clone(),
+            cargo: self.cargo.clone(),
+            dependencies: HashMap::new(),
+        })
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Workspace {
     pub repositories: HashMap<String, Dependency>,
     pub dependencies: HashMap<String, Dependency>,
@@ -200,19 +233,6 @@ pub struct Workspace {
 
 impl Workspace {
     const FILE_NAME: &'static str = "spaces_workspace.toml";
-    pub fn new_from_workspace_config(workspace_config: &WorkspaceConfig, space_name: &str) -> Self {
-        let mut repositories = workspace_config.repositories.clone();
-        for (_key, dependency) in repositories.iter_mut() {
-            dependency.dev = Some(space_name.to_string());
-            dependency.checkout = Some(CheckoutOption::Develop);
-        }
-        Workspace {
-            repositories,
-            buck: workspace_config.buck.clone(),
-            cargo: workspace_config.cargo.clone(),
-            dependencies: HashMap::new(),
-        }
-    }
 
     pub fn new(path: &str) -> anyhow::Result<Self> {
         let file_path = format!("{path}/{}", Self::FILE_NAME);
@@ -235,5 +255,39 @@ impl Workspace {
 
     pub fn get_cargo_patches(&self) -> Option<&HashMap<String, Vec<String>>> {
         self.cargo.as_ref().and_then(|e| e.patches.as_ref())
+    }
+
+    pub fn get_cargo_build(&self) -> Option<&HashMap<String, String>> {
+        self.cargo.as_ref().and_then(|e| e.build.as_ref())
+    }
+
+    pub fn get_cargo_net(&self) -> Option<&HashMap<String, String>> {
+        self.cargo.as_ref().and_then(|e| e.net.as_ref())
+    }
+
+    pub fn get_cargo_http(&self) -> Option<&HashMap<String, String>> {
+        self.cargo.as_ref().and_then(|e| e.http.as_ref())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct Ledger {
+    pub workspaces: HashMap<String, Workspace>,
+}
+
+impl Ledger {
+    pub fn new(path: &str) -> anyhow::Result<Self> {
+        let contents = std::fs::read_to_string(path)
+            .with_context(|| format!("Failed to read ledger file {path}"))?;
+        let result: Ledger = toml::from_str(&contents)
+            .with_context(|| format!("Failed to parse ledger file {path}"))?;
+        Ok(result)
+    }
+
+    pub fn save(&self, path: &str) -> anyhow::Result<()> {
+        let contents = toml::to_string(&self).with_context(|| "Failed to serialize ledger")?;
+        std::fs::write(path, contents)
+            .with_context(|| format!("Failed to save ledger file {path}"))?;
+        Ok(())
     }
 }

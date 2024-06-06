@@ -1,43 +1,70 @@
 use std::collections::{HashMap, VecDeque};
 
+use anyhow::Context;
+
 use crate::{
-    archive,
-    context::Context,
+    archive, context, context::{format_error_context, anyhow_error}, 
     git::{self, BareRepository},
+    ledger,
     manifest::{Dependency, Workspace, WorkspaceConfig},
 };
 
 fn get_current_directory() -> anyhow::Result<String> {
     let current_directory = std::env::current_dir()?;
-    let current_directory_str = current_directory
-        .to_str()
-        .ok_or(anyhow::anyhow!("Path is not a valid string"))?;
+    let current_directory_str = current_directory.to_str().ok_or(anyhow::anyhow!(
+        "Internal Error: Path is not a valid string"
+    ))?;
     Ok(current_directory_str.to_string())
 }
 
-pub fn create(context: Context, space_name: &String) -> anyhow::Result<()> {
-    let workspace_config = WorkspaceConfig::new("./")?;
-    let directory = format!("{}/{space_name}", get_current_directory()?);
-    let context = std::sync::Arc::new(context);
-
-    let mut printer = context
-        .printer
-        .write()
-        .expect("Internal Error: Printer is not set");
-    let heading: printer::Heading = printer::Heading::new(&mut printer, "Creating Workspace")?;
-
-    if !context.is_dry_run {
-        std::fs::create_dir(std::path::Path::new(space_name))?;
-    }
-
-    heading.printer.info("name", space_name)?;
-
-    let workspace = Workspace::new_from_workspace_config(&workspace_config, space_name);
-    workspace.save(&directory)?;
+pub fn create(
+    context: context::Context,
+    space_name: &String,
+    config: &String,
+) -> anyhow::Result<()> {
+    // don't create if we are in a .git repository
+    let current_directory = get_current_directory()
+        .with_context(|| format_error_context!("while creating workspace using {config}"))?;
 
     {
-        let section = printer::Heading::new(heading.printer, "Workspace")?;
-        let mut multi_progress = printer::MultiProgress::new(section.printer);
+        let path = std::path::Path::new(&current_directory);
+        let mut path = path.join(".git");
+        while let Some(parent) = path.parent() {
+            let git_path = parent.join(".git");
+            if git_path.exists() {
+                return Err(anyhow_error!(
+                    "Cannot create a spaces workspace in a git repository: {git_path:?}"
+                ));
+            }
+            path.pop();
+        }
+    }
+
+    let workspace_config = WorkspaceConfig::new(config)
+        .with_context(|| format_error_context!("Failed to load spaces configuration {config}"))?;
+    let directory = format!("{current_directory}/{space_name}");
+    let context = std::sync::Arc::new(context);
+
+    let workspace = workspace_config
+        .to_workspace(space_name)
+        .with_context(|| format_error_context!("When creating workspace {space_name} from workspace config"))?;
+    workspace
+        .save(&directory)
+        .with_context(|| format_error_context!("When trying to save workspace for {space_name}"))?;
+
+    {
+        let mut printer = context
+            .printer
+            .write()
+            .expect("Internal Error: Printer is not set");
+
+        if !context.is_dry_run {
+            std::fs::create_dir(std::path::Path::new(space_name)).with_context(|| {
+                format_error_context!("When creating workspace {space_name} in current directory")
+            })?;
+        }
+
+        let mut multi_progress = printer::MultiProgress::new(&mut printer);
 
         let mut handles: Vec<std::thread::JoinHandle<anyhow::Result<(), _>>> = Vec::new();
 
@@ -73,20 +100,24 @@ pub fn create(context: Context, space_name: &String) -> anyhow::Result<()> {
         }
     }
 
-    drop(heading);
-    drop(printer);
-    let mut state = State::new(context, directory.clone())?;
+    let mut state = State::new(context.clone(), directory.clone())?;
     state.sync_full_path()?;
 
     if let Some(buck) = &workspace_config.buck {
         buck.export(&directory)?;
     }
 
+    let mut printer = context
+        .printer
+        .write()
+        .expect("Internal Error: Printer is not set");
+
+    printer.info(space_name, &workspace)?;
 
     Ok::<(), anyhow::Error>(())
 }
 
-pub fn sync(context: Context) -> anyhow::Result<()> {
+pub fn sync(context: context::Context) -> anyhow::Result<()> {
     let full_path = get_current_directory()?;
     let mut state = State::new(std::sync::Arc::new(context), full_path)?;
     state.sync_full_path()?;
@@ -99,7 +130,7 @@ enum SyncDep {
 }
 
 struct State {
-    context: std::sync::Arc<Context>,
+    context: std::sync::Arc<context::Context>,
     full_path: String,
     workspace: Workspace,
     all_deps: VecDeque<SyncDep>,
@@ -107,7 +138,7 @@ struct State {
 }
 
 impl State {
-    fn new(context: std::sync::Arc<Context>, full_path: String) -> anyhow::Result<Self> {
+    fn new(context: std::sync::Arc<context::Context>, full_path: String) -> anyhow::Result<Self> {
         Ok(Self {
             context,
             full_path: full_path.clone(),
@@ -131,6 +162,10 @@ impl State {
         self.sync_dependencies(&mut multi_progress)?;
         self.export_buck_config(&mut multi_progress)?;
         self.update_cargo(&mut multi_progress)?;
+
+        self.workspace.save(&self.full_path)?;
+        let mut ledger = ledger::Ledger::new(context.clone())?;
+        ledger.update(&self.full_path, &self.workspace)?;
 
         Ok(())
     }
@@ -213,7 +248,7 @@ impl State {
                 //println!("All finished?");
                 let mut all_finished = true;
                 for handle_option in handles.iter_mut() {
-                    if let Some(_) = handle_option {
+                    if handle_option.is_some() {
                         let handle = handle_option.take().unwrap();
                         if !handle.is_finished() {
                             all_finished = false;
@@ -348,35 +383,24 @@ impl State {
             }
             buck.export(&self.full_path)?;
         }
-
-        self.workspace.save(&self.full_path)?;
-
         Ok(())
     }
 
     fn update_cargo(&self, _multi_progress: &mut printer::MultiProgress) -> anyhow::Result<()> {
+        let mut config_contents = String::new();
+
         if let Some(cargo) = self.workspace.get_cargo_patches() {
             for (spaces_key, list) in cargo.iter() {
                 //read the cargo toml file to see how the dependency is specified crates-io or git
                 let cargo_toml_path = format!("{}/{spaces_key}/Cargo.toml", self.full_path);
-                let mut cargo_toml_contents = std::fs::read_to_string(&cargo_toml_path)?;
-                let cargo_toml: toml::Value = toml::from_str(&cargo_toml_contents)?;
+                let cargo_toml: toml::Value = {
+                    let cargo_toml_contents = std::fs::read_to_string(&cargo_toml_path)?;
+                    toml::from_str(&cargo_toml_contents)?
+                };
 
                 let dependencies = cargo_toml.get("dependencies").ok_or(anyhow::anyhow!(
                     "Cargo.toml does not have a dependencies section"
                 ))?;
-
-                const START_WORKSPACE: &str = "\n\n#! spaces_workspace\n";
-                const END_WORKSPACE: &str = "#! drop(spaces_workspace)\n";
-
-                if let (Some(start), Some(end)) = (
-                    cargo_toml_contents.find(START_WORKSPACE),
-                    cargo_toml_contents.find(END_WORKSPACE),
-                ) {
-                    cargo_toml_contents.replace_range(start..(end + END_WORKSPACE.len()), "");
-                }
-
-                cargo_toml_contents.push_str(START_WORKSPACE);
 
                 for value in list {
                     let dependency = dependencies.get(value.as_str()).ok_or(anyhow::anyhow!(
@@ -386,16 +410,47 @@ impl State {
 
                     if let Some(git) = dependency.get("git").and_then(|e| e.as_str()) {
                         let patch = format!("[patch.'{}']\n", git);
-                        let path = format!("{value} = {{ path = \"../{value}\" }}\n");
-                        cargo_toml_contents.push_str(patch.as_str());
-                        cargo_toml_contents.push_str(path.as_str());
+                        let path = format!("{value} = {{ path = \"./{value}\" }}\n");
+                        config_contents.push_str(patch.as_str());
+                        config_contents.push_str(path.as_str());
                     }
                 }
-                cargo_toml_contents.push_str(END_WORKSPACE);
-
-                std::fs::write(&cargo_toml_path, cargo_toml_contents)?;
             }
         }
+
+        fn write_cargo_section(
+            config_contents: &mut String,
+            section_name: &str,
+            section: &HashMap<String, String>,
+        ) {
+            config_contents.push_str(&format!("[{}]\n", section_name));
+            for (key, value) in section.iter() {
+                config_contents.push_str(&format!("{} = \"{}\"\n", key, value));
+            }
+        }
+
+        if let Some(build) = self.workspace.get_cargo_build() {
+            write_cargo_section(&mut config_contents, "build", build);
+        }
+
+        if let Some(net) = self.workspace.get_cargo_net() {
+            write_cargo_section(&mut config_contents, "net", net);
+        }
+
+        if let Some(http) = self.workspace.get_cargo_http() {
+            write_cargo_section(&mut config_contents, "http", http);
+        }
+
+        if config_contents.is_empty() {
+            return Ok(());
+        }
+
+        let config_path = format!("{}/.cargo", self.full_path);
+        std::fs::create_dir_all(std::path::Path::new(&config_path))
+            .with_context(|| format_error_context!("Trying to create {config_path}"))?;
+        std::fs::write(format!("{config_path}/config.toml"), config_contents).with_context(
+            || format_error_context!("While trying to write contents to {config_path}/config.toml"),
+        )?;
 
         Ok(())
     }

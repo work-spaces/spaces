@@ -1108,7 +1108,6 @@ checksum = "5b40af805b3121feab8a3c29f04d8ad262fa8e0561883e7653e024ae4479e6de"
 [[package]]
 name = "printer"
 version = "0.1.0"
-source = "git+https://github.com/tyler-gilbert/printer-rs?rev=7b3352c4c7ae21b3920be0c5904f926f2b2b724e#7b3352c4c7ae21b3920be0c5904f926f2b2b724e"
 dependencies = [
  "anyhow",
  "console",
