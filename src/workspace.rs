@@ -312,20 +312,15 @@ impl State {
         spaces_key: String,
         mut http_archive: archive::HttpArchive,
     ) -> anyhow::Result<std::thread::JoinHandle<Result<Vec<SyncDep>, anyhow::Error>>> {
-        let download_progress_bar = multi_progress.add_progress(&spaces_key, Some(100), None);
-        let mut progress_bar = multi_progress.add_progress(&spaces_key, Some(100), None);
+        let progress_bar = multi_progress.add_progress(&spaces_key, Some(100), None);
         let context = self.context.clone();
         let full_path = self.full_path.clone();
 
         let handle = std::thread::spawn(move || {
-            if http_archive.is_download_required() {
-                let join_handle =
-                    http_archive.download(&context.async_runtime, download_progress_bar)?;
-                let _ = context.async_runtime.block_on(join_handle)?;
-            }
 
-            http_archive.extract(&mut progress_bar)?;
-            http_archive.create_links(&full_path)?;
+            http_archive.sync(context, full_path.as_str(), progress_bar)?;
+
+   
 
             Ok::<_, anyhow::Error>(Vec::new())
         });

@@ -105,6 +105,65 @@ pub struct Archive {
     pub link: ArchiveLink,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlatformArchive {
+    pub archive: Archive,
+    pub executables: Vec<String>
+}
+
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Executables {
+    pub macos_x86_64: Option<PlatformArchive>,
+    pub macos_aarch64: Option<PlatformArchive>,
+    pub windows_aarch64: Option<PlatformArchive>,
+    pub windows_x86_64: Option<PlatformArchive>,
+    pub linux_x86_64: Option<PlatformArchive>,
+    pub linux_aarch64: Option<PlatformArchive>,
+}
+
+impl Executables {
+    const FILE_NAME: &'static str = "spaces_executables.toml";
+
+    pub fn new(path: &str) -> anyhow::Result<Option<Self>> {
+        let file_path = format!("{path}/{}", Self::FILE_NAME); //change to spaces_dependencies.toml
+        let contents = std::fs::read_to_string(&file_path)
+            .with_context(|| format!("Failed to read deps file {file_path}"));
+
+        if let Ok(contents) = contents {
+            let result: Self = toml::from_str(&contents)
+                .with_context(|| format!("Failed to parse deps file {file_path}"))?;
+            Ok(Some(result))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn get_platform_archive(&self) -> Option<PlatformArchive> {
+        if cfg!(target_os = "macos") {
+            if cfg!(target_arch = "x86_64") {
+                return self.macos_x86_64.clone();
+            } else if cfg!(target_arch = "aarch64") {
+                return self.macos_aarch64.clone();
+            }
+        } else if cfg!(target_os = "windows") {
+            if cfg!(target_arch = "x86_64") {
+                return self.windows_x86_64.clone();
+            } else if cfg!(target_arch = "aarch64") {
+                return self.windows_aarch64.clone();
+            }
+        } else if cfg!(target_os = "linux") {
+            if cfg!(target_arch = "x86_64") {
+                return self.linux_x86_64.clone();
+            } else if cfg!(target_arch = "aarch64") {
+                return self.linux_aarch64.clone();
+            }
+        }
+        None
+    }
+
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Deps {
     pub deps: HashMap<String, Dependency>,
@@ -120,7 +179,7 @@ impl Deps {
             .with_context(|| format!("Failed to read deps file {file_path}"));
 
         if let Ok(contents) = contents {
-            let result: Deps = toml::from_str(&contents)
+            let result: Self = toml::from_str(&contents)
                 .with_context(|| format!("Failed to parse deps file {file_path}"))?;
             Ok(Some(result))
         } else {

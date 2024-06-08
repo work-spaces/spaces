@@ -61,6 +61,22 @@ pub fn execute() -> anyhow::Result<()> {
     Ok(())
 }
 
+
+/*
+
+TODO
+
+Add a sync option to checkout all deps on the branch rather than the rev. This can help testing tip of branch before
+updating the dep rev. Should only apply to deps that are part of development repositories. They are the only
+ones that can be updated.
+
+Add a command to get tip of tree commit hashes for the deps of the development repositories. This can be used to
+update the spaces_deps.toml file.
+
+Add a way to format spaces_deps.toml. This opens the door for auto updating spaces_deps.toml.
+
+*/
+
 #[derive(Debug, Subcommand)]
 enum Commands {
     /// Creates a new workspace
