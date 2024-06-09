@@ -1,9 +1,8 @@
 use std::io::Read;
 
 use crate::{
-    context,
-    context::{anyhow_error, format_error_context},
-    manifest,
+    context::{self, anyhow_error, format_error_context},
+    manifest::{self, Executables},
 };
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -170,7 +169,8 @@ impl HttpArchive {
             progress_bar
         };
 
-        self.extract(&mut next_progress_bar)?;
+        self.extract(&mut next_progress_bar)
+            .with_context(|| format_error_context!("failed to extract archive for {full_path}"))?;
 
         if let Some(platform_archive) = self
             .exectuables
@@ -191,7 +191,14 @@ impl HttpArchive {
                 next_progress_bar
             };
 
-            plaform_http_archive.extract(&mut platform_progress_bar)?;
+            plaform_http_archive
+                .extract(&mut platform_progress_bar)
+                .with_context(|| {
+                    format_error_context!(
+                        "failed to extract executables archive {}",
+                        platform_archive.archive.url
+                    )
+                })?;
         }
 
         self.create_links(full_path)?;
@@ -260,14 +267,16 @@ impl HttpArchive {
 
         let tar_contents = tar_contents_handle
             .join()
-            .map_err(|_| anyhow_error!("Extract thread failed"))?;
+            .map_err(|_| anyhow_error!("Internal Error: Extract thread failed"))?;
 
         let mut tar_archive = tar::Archive::new(tar_contents.as_slice());
         let entries = tar_archive.entries()?;
 
         let output_folder = self.get_path_to_extracted_files();
         if !std::path::Path::new(output_folder.as_str()).exists() {
-            std::fs::create_dir_all(output_folder.as_str())?;
+            std::fs::create_dir_all(output_folder.as_str()).with_context(|| {
+                format_error_context!("Failed to create output folder {output_folder}")
+            })?;
         }
 
         for file in entries {
@@ -421,7 +430,7 @@ impl HttpArchive {
         let contents = {
             let full_path_to_archive = self.full_path_to_archive.clone();
 
-            let contents = std::fs::read(full_path_to_archive)?;
+            let contents = std::fs::read(full_path_to_archive.as_str())?;
 
             let digest_handle = std::thread::spawn(move || {
                 let digest = sha256::digest(&contents);
@@ -438,14 +447,16 @@ impl HttpArchive {
 
             let (digest, contents) = digest_handle
                 .join()
-                .map_err(|_| anyhow_error!("Digest thread failed"))?;
+                .map_err(|_| anyhow_error!("Internal error: Digest thread failed"))?;
 
             if digest != self.archive.sha256 {
                 std::fs::remove_file(self.full_path_to_archive.as_str()).with_context(|| {
                     "Internal Error: failed to delete file with bad sha256".to_string()
                 })?;
 
-                return Err(anyhow_error!("Digest mismatch"));
+                return Err(anyhow_error!(
+                    "Digest mismatch for {full_path_to_archive} != {digest}"
+                ));
             }
             contents
         };
@@ -478,6 +489,306 @@ impl HttpArchive {
         let path = archive_url.path();
         Ok(format!("{scheme}/{host}{path}"))
     }
+}
+
+pub struct ExecutablePaths {
+    pub macos_x86_64: Option<String>,
+    pub macos_aarch64: Option<String>,
+    pub windows_x86_64: Option<String>,
+    pub windows_aarch64: Option<String>,
+    pub linux_x86_64: Option<String>,
+    pub linux_aarch64: Option<String>,
+}
+
+fn create_executables_archive(
+    progress: &mut printer::MultiProgressBar,
+    name: &str,
+    path_to_files: &str,
+    platform_archive: &manifest::PlatformArchive,
+    platform: manifest::Platform,
+) -> anyhow::Result<(manifest::Platform, String)> {
+    //verify all the files exist
+    for file in platform_archive.executables.iter() {
+        let full_path = format!("{path_to_files}/{file}");
+        if !std::path::Path::new(full_path.as_str()).exists() {
+            return Err(anyhow_error!("File {full_path} not found for macos_x86_64"));
+        }
+    }
+
+    let archive_name = format!("{name}-{platform}.zip");
+    let mut archive = zip::ZipWriter::new(std::fs::File::create(archive_name.as_str())?);
+
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .unix_permissions(0o755);
+
+    for file in platform_archive.executables.iter() {
+        let full_path = format!("{path_to_files}/{file}");
+        let relative_path_string = file;
+
+        let file_contents = std::fs::read(full_path.as_str())
+            .with_context(|| format_error_context!("Failed to read {full_path:?}"))?;
+
+        archive
+            .start_file(relative_path_string.to_owned(), options)
+            .with_context(|| {
+                format_error_context!("Failed to start archive file {relative_path_string}")
+            })?;
+
+        use std::io::Write;
+        archive
+            .write_all(file_contents.as_slice())
+            .with_context(|| {
+                format_error_context!(
+                    "Failed to write contents of archive file {relative_path_string}"
+                )
+            })?;
+
+        progress.increment(1);
+    }
+
+    archive.finish()?;
+
+    Ok((platform, archive_name))
+}
+
+pub fn create(
+    context: context::Context,
+    name: String,
+    path: String,
+    platform: Option<manifest::Platform>,
+    executable_paths: ExecutablePaths,
+) -> anyhow::Result<()> {
+    let walk_dir: Vec<_> = walkdir::WalkDir::new(path.as_str())
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+        .collect();
+
+    let mut printer = context
+        .printer
+        .write()
+        .expect("Internal Error: Printer is not set");
+
+    let mut executables = Executables::new(path.as_str())?;
+    let arhive_name = format!("{name}.zip");
+
+    if let Some(executables) = executables.as_mut() {
+        let mut handles = Vec::new();
+
+        let mut multi_progress = printer::MultiProgress::new(&mut printer);
+
+        let combinations = &[
+            (
+                executable_paths.macos_x86_64,
+                manifest::Platform::MacosX86_64,
+            ),
+            (
+                executable_paths.macos_aarch64,
+                manifest::Platform::MacosAarch64,
+            ),
+            (
+                executable_paths.windows_x86_64,
+                manifest::Platform::WindowsX86_64,
+            ),
+            (
+                executable_paths.windows_aarch64,
+                manifest::Platform::WindowsAarch64,
+            ),
+            (
+                executable_paths.linux_x86_64,
+                manifest::Platform::LinuxX86_64,
+            ),
+            (
+                executable_paths.linux_aarch64,
+                manifest::Platform::LinuxX86_64,
+            ),
+        ];
+
+        for (platform_path, platform) in combinations.iter() {
+            if let (Some(path), Some(platform_archive)) = (
+                platform_path,
+                executables.get_platform_archive_from_platform(*platform),
+            ) {
+                let mut progress = multi_progress.add_progress(
+                    platform.to_string().as_str(),
+                    Some(platform_archive.executables.len() as u64),
+                    None,
+                );
+
+                let platform = *platform;
+                let path = path.clone();
+                let name = name.clone();
+
+                let handle = std::thread::spawn(move || {
+                    let result = create_executables_archive(
+                        &mut progress,
+                        name.as_str(),
+                        path.as_str(),
+                        &platform_archive,
+                        platform,
+                    );
+                    result
+                });
+
+                handles.push(handle);
+            }
+        }
+
+        for handle in handles {
+            if let Ok(Ok((platform, archive))) = handle.join() {
+                if let Some(platform_archive) =
+                    executables.get_platform_archive_from_platform_mut(platform)
+                {
+                    let contents = std::fs::read(archive.as_str())?;
+                    let digest = sha256::digest(contents);
+
+                    platform_archive.archive.sha256 = digest;
+                }
+            } else {
+                // failed to create archive
+            }
+        }
+
+        executables
+            .save(path.as_str())
+            .with_context(|| format_error_context!("Failed to save executables for {path}"))?;
+    }
+
+    {
+        let mut multi_progress = printer::MultiProgress::new(&mut printer);
+        let mut archive = zip::ZipWriter::new(std::fs::File::create(arhive_name.as_str())?);
+
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        let walk_dir_list = walk_dir.iter().collect::<Vec<_>>();
+
+        let mut progress =
+            multi_progress.add_progress(name.as_str(), Some(walk_dir_list.len() as u64), None);
+
+        for entry in walk_dir_list {
+            if entry.file_type().is_file() {
+                let relative_path =
+                    entry.path().strip_prefix(path.as_str()).with_context(|| {
+                        format_error_context!(
+                            "Internal error: {path:?} not stripped from {entry:?}"
+                        )
+                    })?;
+                let relative_path_string = relative_path.to_str().with_context(|| {
+                    format_error_context!("Internal error: {relative_path:?} not valid utf-8 str")
+                })?;
+
+                progress.set_message(relative_path_string);
+                let full_path = entry.path();
+
+                let file_contents = if let Some(executables) = executables.as_ref() {
+                    let platform_archive = if let Some(platform) = platform {
+                        executables
+                            .get_platform_archive_from_platform(platform)
+                            .ok_or(anyhow::anyhow!("Provided Platform {platform:?} not found"))?
+                    } else {
+                        executables.get_platform_archive().ok_or(anyhow::anyhow!("Native platform not found. use --platform=<platform> to specify some executables"))?
+                    };
+
+                    let is_executable = platform_archive
+                        .executables
+                        .iter()
+                        .any(|executable| executable.as_str() == relative_path_string);
+
+                    if is_executable {
+                        "spaces executable placeholder"
+                            .to_string()
+                            .as_bytes()
+                            .to_vec()
+                    } else {
+                        std::fs::read(full_path).with_context(|| {
+                            format_error_context!("Failed to read {full_path:?}")
+                        })?
+                    }
+                } else {
+                    std::fs::read(full_path)
+                        .with_context(|| format_error_context!("Failed to read {full_path:?}"))?
+                };
+
+                archive
+                    .start_file(relative_path_string.to_owned(), options)
+                    .with_context(|| {
+                        format_error_context!("Failed to start archive file {relative_path_string}")
+                    })?;
+
+                use std::io::Write;
+                archive
+                    .write_all(file_contents.as_slice())
+                    .with_context(|| {
+                        format_error_context!(
+                            "Failed to write contents of archive file {relative_path_string}"
+                        )
+                    })?;
+            }
+            progress.increment(1);
+        }
+        archive.finish()?;
+    }
+
+    let contents = std::fs::read(arhive_name.as_str())?;
+    let digest = sha256::digest(contents);
+    printer.info(name.as_str(), &digest)?;
+
+    Ok(())
+}
+
+pub fn inspect(context: context::Context, path: String) -> anyhow::Result<()> {
+    use std::fs::File;
+    use zip::read::ZipArchive;
+
+    let mut printer = context
+        .printer
+        .write()
+        .expect("Internal Error: Printer is not set");
+
+    let mut files: Vec<String> = Vec::new();
+
+    {
+        let mut multi_progress = printer::MultiProgress::new(&mut printer);
+
+        let mut progress = multi_progress.add_progress(path.as_str(), Some(100), None);
+
+        let archive_path = path.as_str();
+
+        let reader = File::open(archive_path)?;
+        let mut archive = ZipArchive::new(reader)
+            .with_context(|| format_error_context!("failed to read zip file {archive_path}"))?;
+
+        progress.set_prefix("Extracting");
+
+        for i in 0..archive.len() {
+            let file = archive
+                .by_index(i)
+                .with_context(|| format_error_context!("failed to get index for archive"))?;
+
+            if let Some(file_name) = file.enclosed_name() {
+                if let Some(file_name) = file_name.to_str() {
+                    if file_name.starts_with("__MACOSX") {
+                        continue;
+                    }
+                    if file_name.starts_with(".DS_Store") {
+                        continue;
+                    }
+
+                    if file.is_file() {
+                        files.push(format!("{}, {} bytes", file_name, file.size()));
+                        progress.set_message(file_name);
+                    }
+                }
+                progress.increment(1);
+            }
+        }
+        progress.set_message("Done!");
+    }
+
+    printer.info("files", &files)?;
+
+    Ok(())
 }
 
 #[cfg(test)]

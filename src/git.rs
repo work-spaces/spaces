@@ -1,6 +1,6 @@
 use crate::{
     context,
-    context::{format_error_context, anyhow_error}, 
+    context::{anyhow_error, format_error_context},
     manifest::{self, Dependency},
 };
 use anyhow::Context;
@@ -15,6 +15,52 @@ pub struct BareRepository {
 }
 
 impl BareRepository {
+    fn configure_repository(
+        progress_bar: &mut printer::MultiProgressBar,
+        full_path: &str,
+    ) -> anyhow::Result<()> {
+        let options_git_config = printer::ExecuteOptions {
+            working_directory: Some(full_path.to_string()),
+            arguments: vec![
+                "config".to_string(),
+                "remote.origin.fetch".to_string(),
+                "\"+refs/heads/*:refs/remotes/origin/*\"".to_string(),
+            ],
+            ..Default::default()
+        };
+
+        let options_git_config_auto_push = printer::ExecuteOptions {
+            working_directory: Some(full_path.to_string()),
+            arguments: vec![
+                "config".to_string(),
+                "--add".to_string(),
+                "--bool".to_string(),
+                "push.autoSetupRemote".to_string(),
+                "true".to_string(),
+            ],
+            ..Default::default()
+        };
+
+        progress_bar
+            .execute_process("git", &options_git_config)
+            .with_context(|| {
+                format_error_context!(
+                    "failed to run {}",
+                    options_git_config.get_full_command_in_working_directory("git")
+                )
+            })?;
+
+        progress_bar
+            .execute_process("git", &options_git_config_auto_push)
+            .with_context(|| {
+                format_error_context!(
+                    "failed to run {}",
+                    options_git_config_auto_push.get_full_command_in_working_directory("git")
+                )
+            })?;
+        Ok(())
+    }
+
     pub fn new(
         context: std::sync::Arc<context::Context>,
         progress_bar: &mut printer::MultiProgressBar,
@@ -35,8 +81,24 @@ impl BareRepository {
         let full_path = format!("{}{}", bare_store_path, name_dot_git);
 
         if std::path::Path::new(&full_path).exists() {
+            // config to fetch all heads/refs
+            // This will grab newly created branches
+
+            Self::configure_repository(progress_bar, full_path.as_str()).with_context(|| {
+                format_error_context!("failed to configure {full_path} before fetch")
+            })?;
+
             options.working_directory = Some(full_path.clone());
             options.arguments = vec!["fetch".to_string()];
+
+            progress_bar
+                .execute_process("git", &options)
+                .with_context(|| {
+                    format_error_context!(
+                        "failed to run {}",
+                        options.get_full_command_in_working_directory("git")
+                    )
+                })?;
         } else {
             options.working_directory = Some(bare_store_path.clone());
             if !context.is_dry_run {
@@ -48,16 +110,11 @@ impl BareRepository {
                 "--filter=blob:none".to_string(),
                 url.to_string(),
             ];
-        }
 
-        progress_bar
-            .execute_process("git", &options)
-            .with_context(|| {
-                format_error_context!(
-                    "failed to run {}",
-                    options.get_full_command_in_working_directory("git")
-                )
+            Self::configure_repository(progress_bar, full_path.as_str()).with_context(|| {
+                format_error_context!("failed to configure {full_path} after bare clone")
             })?;
+        }
 
         Ok(Self {
             url: url.to_owned(),

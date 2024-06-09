@@ -1,5 +1,5 @@
+use crate::manifest;
 use clap::{Parser, Subcommand, ValueEnum};
-
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
 pub enum Level {
@@ -8,9 +8,8 @@ pub enum Level {
     Message,
     Info,
     Warning,
-    Error
+    Error,
 }
-
 
 impl From<Level> for printer::Level {
     fn from(level: Level) -> Self {
@@ -25,7 +24,6 @@ impl From<Level> for printer::Level {
     }
 }
 
-
 #[derive(Debug, Parser)]
 #[command(version, about, long_about = None)]
 pub struct Arguments {
@@ -36,31 +34,72 @@ pub struct Arguments {
 }
 
 pub fn execute() -> anyhow::Result<()> {
-    use crate::{context::Context, workspace, ledger};
+    use crate::{archive, context::Context, ledger, workspace};
     let args = Arguments::parse();
     let mut context = Context::new()?;
 
     match args {
-        Arguments { commands: Commands::Create { name, config }, level } => {
+        Arguments {
+            commands: Commands::Create { name, config },
+            level,
+        } => {
             context.update_printer(level.map(|e| e.into()));
             workspace::create(context, &name, &config)?;
         }
-        Arguments { commands: Commands::Sync {}, level } => {
+        Arguments {
+            commands: Commands::Sync {},
+            level,
+        } => {
             context.update_printer(level.map(|e| e.into()));
             workspace::sync(context)?;
         }
 
-        Arguments { commands: Commands::List {}, level } => {
+        Arguments {
+            commands: Commands::List {},
+            level,
+        } => {
             context.update_printer(level.map(|e| e.into()));
             let arc_context = std::sync::Arc::new(context);
             let ledger = ledger::Ledger::new(arc_context.clone())?;
             ledger.show_status(arc_context)?;
         }
+        Arguments {
+            commands:
+                Commands::CreateArchive {
+                    name,
+                    path,
+                    platform,
+                    macos_aarch64,
+                    macos_x86_64,
+                    windows_aarch64,
+                    windows_x86_64,
+                    linux_aarch64,
+                    linux_x86_64,
+                },
+            level,
+        } => {
+            context.update_printer(level.map(|e| e.into()));
+            let executable_paths = archive::ExecutablePaths {
+                macos_x86_64,
+                macos_aarch64,
+                windows_x86_64,
+                windows_aarch64,
+                linux_x86_64,
+                linux_aarch64,
+            };
+            archive::create(context, name, path, platform.map(manifest::Platform::from), executable_paths)?;
+        }
+        Arguments {
+            commands: Commands::InspectArchive { path },
+            level,
+        } => {
+            context.update_printer(level.map(|e| e.into()));
+            archive::inspect(context, path)?;
+        }
     }
 
     Ok(())
 }
-
 
 /*
 
@@ -77,6 +116,29 @@ Add a way to format spaces_deps.toml. This opens the door for auto updating spac
 
 */
 
+#[derive(ValueEnum, Clone, Copy, Debug)]
+pub enum Platform {
+    MacosX86_64,
+    MacosAarch64,
+    WindowsX86_64,
+    WindowsAarch64,
+    LinuxX86_64,
+    LinuxAarch64,
+}
+
+impl From<Platform> for manifest::Platform {
+    fn from(platform: Platform) -> manifest::Platform {
+        match platform {
+            Platform::MacosX86_64 => manifest::Platform::MacosX86_64,
+            Platform::MacosAarch64 => manifest::Platform::MacosAarch64,
+            Platform::WindowsX86_64 => manifest::Platform::WindowsX86_64,
+            Platform::WindowsAarch64 => manifest::Platform::WindowsAarch64,
+            Platform::LinuxX86_64 => manifest::Platform::LinuxX86_64,
+            Platform::LinuxAarch64 => manifest::Platform::LinuxAarch64,
+        }
+    }
+}
+
 #[derive(Debug, Subcommand)]
 enum Commands {
     /// Creates a new workspace
@@ -90,14 +152,31 @@ enum Commands {
     /// Synchronize the current workspace. This is useful if you modify the workspace after creating it.
     Sync {},
     /// Lists the workspaces in the spaces store on the local machine.
-    List {}
+    List {},
+    CreateArchive {
+        /// The name of the workspace
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        path: String,
+        #[arg(long)]
+        platform: Option<Platform>,
+        #[arg(long)]
+        macos_x86_64: Option<String>,
+        #[arg(long)]
+        macos_aarch64: Option<String>,
+        #[arg(long)]
+        windows_x86_64: Option<String>,
+        #[arg(long)]
+        windows_aarch64: Option<String>,
+        #[arg(long)]
+        linux_x86_64: Option<String>,
+        #[arg(long)]
+        linux_aarch64: Option<String>,
+    },
+    InspectArchive {
+        /// The name of the workspace
+        #[arg(long)]
+        path: String,
+    },
 }
-
-
-
-
-
-
-
-
-

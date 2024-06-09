@@ -2,6 +2,8 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::format_error_context;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum CheckoutOption {
     Revision,
@@ -108,9 +110,31 @@ pub struct Archive {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlatformArchive {
     pub archive: Archive,
-    pub executables: Vec<String>
+    pub executables: Vec<String>,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum Platform {
+    MacosX86_64,
+    MacosAarch64,
+    WindowsX86_64,
+    WindowsAarch64,
+    LinuxX86_64,
+    LinuxAarch64,
+}
+
+impl std::fmt::Display for Platform {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Platform::MacosX86_64 => write!(f, "macos-x86_64"),
+            Platform::MacosAarch64 => write!(f, "macos-aarch64"),
+            Platform::WindowsX86_64 => write!(f, "windows-x86_64"),
+            Platform::WindowsAarch64 => write!(f, "windows-aarch64"),
+            Platform::LinuxX86_64 => write!(f, "linux-x86_64"),
+            Platform::LinuxAarch64 => write!(f, "linux-aarch64"),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Executables {
@@ -139,6 +163,16 @@ impl Executables {
         }
     }
 
+    pub fn save(&self, path: &str) -> anyhow::Result<()> {
+        let file_path = format!("{path}/{}", Self::FILE_NAME);
+        let contents = toml::to_string(&self).with_context(|| {
+            format_error_context!("failed to build toml string for {file_path}")
+        })?;
+        std::fs::write(&file_path, contents)
+            .with_context(|| format_error_context!("failed write file to {file_path}"))?;
+        Ok(())
+    }
+
     pub fn get_platform_archive(&self) -> Option<PlatformArchive> {
         if cfg!(target_os = "macos") {
             if cfg!(target_arch = "x86_64") {
@@ -162,12 +196,38 @@ impl Executables {
         None
     }
 
+    pub fn get_platform_archive_from_platform(
+        &self,
+        platform: Platform,
+    ) -> Option<PlatformArchive> {
+        match platform {
+            Platform::MacosX86_64 => self.macos_x86_64.clone(),
+            Platform::MacosAarch64 => self.macos_aarch64.clone(),
+            Platform::WindowsX86_64 => self.windows_x86_64.clone(),
+            Platform::WindowsAarch64 => self.windows_aarch64.clone(),
+            Platform::LinuxX86_64 => self.linux_x86_64.clone(),
+            Platform::LinuxAarch64 => self.linux_aarch64.clone(),
+        }
+    }
+
+    pub fn get_platform_archive_from_platform_mut(
+        &mut self,
+        platform: Platform,
+    ) -> Option<&mut PlatformArchive> {
+        match platform {
+            Platform::MacosX86_64 => self.macos_x86_64.as_mut(),
+            Platform::MacosAarch64 => self.macos_aarch64.as_mut(),
+            Platform::WindowsX86_64 => self.windows_x86_64.as_mut(),
+            Platform::WindowsAarch64 => self.windows_aarch64.as_mut(),
+            Platform::LinuxX86_64 => self.linux_x86_64.as_mut(),
+            Platform::LinuxAarch64 => self.linux_aarch64.as_mut(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum AssetType {
     HardLink,
-    SoftLink,
     Template,
 }
 
@@ -297,19 +357,33 @@ impl WorkspaceConfig {
             {
                 let branch = *branch;
                 let mut dev_branch = branch.clone();
+
+                const USER: &str = "{USER}";
                 if branch.contains("{USER}") {
                     let user = std::env::var("USER").with_context(|| {
-                        format!("Failed to replace {{USER}} with $USER for {branch} naming")
+                        format!("Failed to replace {USER} with $USER for {branch} naming")
                     })?;
-                    dev_branch = dev_branch.replace("{USER}", &user);
+                    dev_branch = dev_branch.replace(USER, &user);
                 }
 
-                if branch.contains("{SPACE}") {
-                    dev_branch = dev_branch.replace("{SPACE}", space_name);
+                const SPACE: &str = "{SPACE}";
+                if branch.contains(SPACE) {
+                    dev_branch = dev_branch.replace(SPACE, space_name);
                 } else {
-                    return Err(anyhow::anyhow!(
-                        "Branch name {branch} must contain {{SPACE}}"
-                    ));
+                    return Err(anyhow::anyhow!("Branch name {branch} must contain {SPACE}"));
+                }
+
+                const UNIQUE: &str = "{UNIQUE}";
+                if branch.contains(UNIQUE) {
+                    //create a unique digest from the current time
+                    let unique = format!(
+                        "{dev_branch}{}",
+                        std::time::Instant::now().elapsed().as_nanos()
+                    );
+                    let unique_sha256 = sha256::digest(unique.as_bytes());
+                    let unique_start = unique_sha256.as_str()[0..8].to_string();
+
+                    dev_branch = dev_branch.replace(UNIQUE, unique_start.as_str());
                 }
 
                 dev_branch

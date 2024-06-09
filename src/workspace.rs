@@ -416,19 +416,13 @@ impl State {
 
                         match asset.type_ {
                             manifest::AssetType::HardLink => {
-                                std::fs::remove_file(dest_path.as_str()).with_context(|| {
-                                    format_error_context!("While removing {dest_path}")
-                                })?;
+                                if std::path::Path::new(dest_path.as_str()).exists() {
+                                    std::fs::remove_file(dest_path.as_str()).with_context(|| {
+                                        format_error_context!("While removing {dest_path}")
+                                    })?;
+                                }
                                 std::fs::hard_link(path.as_str(), dest_path.as_str()).with_context(|| format_error_context!(
                                     "While creating hard link from {path} to {dest_path}"
-                                ))?;
-                            }
-                            manifest::AssetType::SoftLink => {
-                                std::fs::remove_file(dest_path.as_str()).with_context(|| {
-                                    format_error_context!("While removing {dest_path}")
-                                })?;
-                                std::os::unix::fs::symlink(path.as_str(), dest_path.as_str()).with_context(|| format_error_context!(
-                                    "While creating soft link from {path} to {dest_path}"
                                 ))?;
                             }
                             manifest::AssetType::Template => {
