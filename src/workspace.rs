@@ -3,7 +3,8 @@ use std::collections::{HashMap, VecDeque};
 use anyhow::Context;
 
 use crate::{
-    archive, context::{self, anyhow_error, format_error_context},
+    archive,
+    context::{self, anyhow_error, format_error_context},
     git::{self, BareRepository},
     ledger,
     manifest::{self, Dependency, Workspace, WorkspaceConfig},
@@ -22,9 +23,20 @@ pub fn create(
     space_name: &String,
     config: &String,
 ) -> anyhow::Result<()> {
+    let workspace_config = WorkspaceConfig::new(config)
+        .with_context(|| format_error_context!("Failed to load spaces configuration {config}"))?;
+
+    create_from_config(context, space_name, workspace_config)
+}
+
+pub fn create_from_config(
+    context: context::Context,
+    space_name: &String,
+    config: WorkspaceConfig,
+) -> anyhow::Result<()> {
     // don't create if we are in a .git repository
     let current_directory = get_current_directory()
-        .with_context(|| format_error_context!("while creating workspace using {config}"))?;
+        .with_context(|| format_error_context!("while creating workspace using {config:?}"))?;
 
     {
         let path = std::path::Path::new(&current_directory);
@@ -40,8 +52,6 @@ pub fn create(
         }
     }
 
-    let workspace_config = WorkspaceConfig::new(config)
-        .with_context(|| format_error_context!("Failed to load spaces configuration {config}"))?;
     let directory = format!("{current_directory}/{space_name}");
     let context = std::sync::Arc::new(context);
 
@@ -51,7 +61,7 @@ pub fn create(
         })?;
     }
 
-    let workspace = workspace_config.to_workspace(space_name).with_context(|| {
+    let workspace = config.to_workspace(space_name).with_context(|| {
         format_error_context!("When creating workspace {space_name} from workspace config")
     })?;
     workspace
@@ -417,24 +427,29 @@ impl State {
                         match asset.type_ {
                             manifest::AssetType::HardLink => {
                                 if std::path::Path::new(dest_path.as_str()).exists() {
-                                    std::fs::remove_file(dest_path.as_str()).with_context(|| {
-                                        format_error_context!("While removing {dest_path}")
-                                    })?;
+                                    std::fs::remove_file(dest_path.as_str()).with_context(
+                                        || format_error_context!("While removing {dest_path}"),
+                                    )?;
                                 }
-                                std::fs::hard_link(path.as_str(), dest_path.as_str()).with_context(|| format_error_context!(
-                                    "While creating hard link from {path} to {dest_path}"
-                                ))?;
+                                std::fs::hard_link(path.as_str(), dest_path.as_str())
+                                    .with_context(|| {
+                                        format_error_context!(
+                                            "While creating hard link from {path} to {dest_path}"
+                                        )
+                                    })?;
                             }
                             manifest::AssetType::Template => {
-                                let contents = std::fs::read_to_string(&path)
-                                    .with_context(|| format_error_context!("While reading {path}"))?;
+                                let contents =
+                                    std::fs::read_to_string(&path).with_context(|| {
+                                        format_error_context!("While reading {path}")
+                                    })?;
 
                                 // do the substitutions
 
                                 // create a copy
-                                std::fs::write(dest_path.as_str(), contents).with_context(|| {
-                                    format_error_context!("While writing to {dest_path}")
-                                })?;
+                                std::fs::write(dest_path.as_str(), contents).with_context(
+                                    || format_error_context!("While writing to {dest_path}"),
+                                )?;
                             }
                         }
                     }

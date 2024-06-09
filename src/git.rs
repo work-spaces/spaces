@@ -169,6 +169,17 @@ impl BareRepository {
 
         Ok((bare_store, repo_name))
     }
+
+    pub fn get_workspace_name_from_url(url: &str) -> anyhow::Result<String> {
+        let (_, repo_name) = Self::url_to_relative_path_and_name(url)?;
+
+        repo_name.strip_suffix(".git").ok_or(anyhow_error!(
+            "Failed to extract a workspace name from  {url}",
+        )).map(|e| e.to_string())
+
+    }
+
+
 }
 
 pub struct Worktree {

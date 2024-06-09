@@ -19,7 +19,7 @@ pub enum Checkout {
     Develop(String),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Dependency {
     /// The git https or ssh URL
     pub git: String,
@@ -34,6 +34,7 @@ pub struct Dependency {
     /// The branch associated with the dependency.
     pub dev: Option<String>,
 }
+
 
 impl Dependency {
     pub fn get_checkout(&self) -> anyhow::Result<Checkout> {
@@ -328,7 +329,7 @@ pub struct WorkspaceConfigSettings {
     pub branch: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct WorkspaceConfig {
     pub repositories: HashMap<String, Dependency>,
     pub buck: Option<BuckConfig>,
@@ -336,6 +337,7 @@ pub struct WorkspaceConfig {
     pub settings: Option<WorkspaceConfigSettings>,
     pub vscode: Option<VsCodeConfig>,
 }
+
 
 impl WorkspaceConfig {
     pub fn new(path: &str) -> anyhow::Result<Self> {
@@ -349,48 +351,46 @@ impl WorkspaceConfig {
     pub fn to_workspace(&self, space_name: &str) -> anyhow::Result<Workspace> {
         let mut repositories = self.repositories.clone();
         for (_key, dependency) in repositories.iter_mut() {
-            let branch_name = if let Some(branch) = self
+            let mut dev_branch = if let Some(branch) = self
                 .settings
                 .as_ref()
                 .and_then(|e| e.branch.as_ref())
                 .as_ref()
             {
-                let branch = *branch;
-                let mut dev_branch = branch.clone();
-
-                const USER: &str = "{USER}";
-                if branch.contains("{USER}") {
-                    let user = std::env::var("USER").with_context(|| {
-                        format!("Failed to replace {USER} with $USER for {branch} naming")
-                    })?;
-                    dev_branch = dev_branch.replace(USER, &user);
-                }
-
-                const SPACE: &str = "{SPACE}";
-                if branch.contains(SPACE) {
-                    dev_branch = dev_branch.replace(SPACE, space_name);
-                } else {
-                    return Err(anyhow::anyhow!("Branch name {branch} must contain {SPACE}"));
-                }
-
-                const UNIQUE: &str = "{UNIQUE}";
-                if branch.contains(UNIQUE) {
-                    //create a unique digest from the current time
-                    let unique = format!(
-                        "{dev_branch}{}",
-                        std::time::Instant::now().elapsed().as_nanos()
-                    );
-                    let unique_sha256 = sha256::digest(unique.as_bytes());
-                    let unique_start = unique_sha256.as_str()[0..8].to_string();
-
-                    dev_branch = dev_branch.replace(UNIQUE, unique_start.as_str());
-                }
-
-                dev_branch
+                (*branch).to_owned()
             } else {
-                space_name.to_string()
+                "user/{USER}/{SPACE}-{UNIQUE}".to_string()
             };
-            dependency.dev = Some(branch_name);
+
+            const USER: &str = "{USER}";
+            if dev_branch.contains("{USER}") {
+                let user = std::env::var("USER").with_context(|| {
+                    format!("Failed to replace {USER} with $USER for {dev_branch} naming")
+                })?;
+                dev_branch = dev_branch.replace(USER, &user);
+            }
+
+            const SPACE: &str = "{SPACE}";
+            if dev_branch.contains(SPACE) {
+                dev_branch = dev_branch.replace(SPACE, space_name);
+            } else {
+                return Err(anyhow::anyhow!("Branch name {dev_branch} must contain {SPACE}"));
+            }
+
+            const UNIQUE: &str = "{UNIQUE}";
+            if dev_branch.contains(UNIQUE) {
+                //create a unique digest from the current time
+                let unique = format!(
+                    "{dev_branch}{}",
+                    std::time::Instant::now().elapsed().as_nanos()
+                );
+                let unique_sha256 = sha256::digest(unique.as_bytes());
+                let unique_start = unique_sha256.as_str()[0..8].to_string();
+
+                dev_branch = dev_branch.replace(UNIQUE, unique_start.as_str());
+            }
+
+            dependency.dev = Some(dev_branch);
             dependency.checkout = Some(CheckoutOption::Develop);
         }
         Ok(Workspace {

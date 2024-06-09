@@ -1,4 +1,4 @@
-use crate::manifest;
+use crate::{git, manifest::{self, WorkspaceConfig}};
 use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
@@ -46,6 +46,31 @@ pub fn execute() -> anyhow::Result<()> {
             context.update_printer(level.map(|e| e.into()));
             workspace::create(context, &name, &config)?;
         }
+
+        Arguments{
+            commands: Commands::CreateWorktree { name, git, branch, dev_branch },
+            level,
+        } => {
+            context.update_printer(level.map(|e| e.into()));
+
+            let hash_key = git::BareRepository::get_workspace_name_from_url(&git)?;
+
+            let config = WorkspaceConfig {
+                repositories: maplit::hashmap! {
+                    hash_key.clone() => manifest::Dependency {
+                        git,
+                        branch: Some(branch),
+                        dev: dev_branch,
+                        ..Default::default()
+                    }
+                },
+                ..Default::default()
+            };
+
+            workspace::create_from_config(context, &name, config)?;
+
+        }
+
         Arguments {
             commands: Commands::Sync {},
             level,
@@ -146,36 +171,60 @@ enum Commands {
         /// The name of the workspace
         #[arg(long)]
         name: String,
+        /// The path to the configuration file
         #[arg(long)]
         config: String,
+    },
+    /// Creates a workspace using a single git repository plus its deps.
+    CreateWorktree {
+        /// The name of the workspace
+        #[arg(long)]
+        name: String,
+        /// The URL to the git repository
+        #[arg(long)]
+        git: String,
+        /// The base branch
+        #[arg(long)]
+        branch: String,
+        /// The development branch `user/{USER}/{SPACE}-{UNIQUE}` is the default value
+        #[arg(long)]
+        dev_branch: Option<String>,
     },
     /// Synchronize the current workspace. This is useful if you modify the workspace after creating it.
     Sync {},
     /// Lists the workspaces in the spaces store on the local machine.
     List {},
     CreateArchive {
-        /// The name of the workspace
+        /// The name of the archive to create (without .zip)
         #[arg(long)]
         name: String,
+        /// The path to the files to compress
         #[arg(long)]
         path: String,
+        /// The platform is using spaces_executables.toml
         #[arg(long)]
         platform: Option<Platform>,
+        /// Path to macos_x86_64 executables
         #[arg(long)]
         macos_x86_64: Option<String>,
+        /// Path to macos_aarch64 executables
         #[arg(long)]
         macos_aarch64: Option<String>,
+        /// Path to windows_x86_64 executables
         #[arg(long)]
         windows_x86_64: Option<String>,
+        /// Path to windows_aarch64 executables
         #[arg(long)]
         windows_aarch64: Option<String>,
+        /// Path to linux_x86_64 executables
         #[arg(long)]
         linux_x86_64: Option<String>,
+        /// Path to linux_aarch64 executables
         #[arg(long)]
         linux_aarch64: Option<String>,
     },
     InspectArchive {
-        /// The name of the workspace
+        /// The path of the .zip archive to inspect
         #[arg(long)]
         path: String,
     },
