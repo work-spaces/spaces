@@ -88,16 +88,7 @@ impl HttpArchive {
         Ok(())
     }
 
-    fn create_soft_link(&self, space_directory: &str) -> anyhow::Result<()> {
-        use std::os::unix::fs::symlink;
-
-        let (source, target_path) = self.get_link_paths(space_directory);
-        let target = std::path::Path::new(target_path.as_str());
-        let original = std::path::Path::new(source.as_str());
-
-        symlink(original, target)
-            .with_context(|| format_error_context!("symlinking {} to {}", target_path, source))?;
-
+    fn create_soft_link(&self, _space_directory: &str) -> anyhow::Result<()> {
         Ok(())
     }
 
@@ -303,16 +294,20 @@ impl HttpArchive {
                         if !file_name.starts_with("._") {
                             self.files.insert(file_path_str.to_string());
 
-                            use std::os::unix::fs::PermissionsExt;
                             let mut file_contents = Vec::new();
                             let _ = file.read_to_end(&mut file_contents);
                             if let Some(parent) = std::path::Path::new(&path).parent() {
                                 std::fs::create_dir_all(parent)?;
                             }
                             let _ = std::fs::write(path.as_str(), file_contents.as_slice());
-                            let mode = file.header().mode().unwrap_or(0o644);
-                            let permissions = std::fs::Permissions::from_mode(mode);
-                            let _ = std::fs::set_permissions(path.as_str(), permissions);
+
+                            #[cfg(unix)]
+                            {
+                                use std::os::unix::fs::PermissionsExt;
+                                let mode = file.header().mode().unwrap_or(0o644);
+                                let permissions = std::fs::Permissions::from_mode(mode);
+                                let _ = std::fs::set_permissions(path.as_str(), permissions);
+                            }
                         }
                     }
                     _ => {
@@ -376,14 +371,18 @@ impl HttpArchive {
                     let mut outfile = File::create(&outpath)
                         .with_context(|| format!("{} creating {outpath:?}", error_context))?;
 
-                    use std::os::unix::fs::PermissionsExt;
-                    outfile
-                        .set_permissions(PermissionsExt::from_mode(
-                            file.unix_mode().unwrap_or(0o644),
-                        ))
-                        .with_context(|| {
-                            format!("{} setting permissions {outpath:?}", error_context)
-                        })?;
+
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        outfile
+                            .set_permissions(PermissionsExt::from_mode(
+                                file.unix_mode().unwrap_or(0o644),
+                            ))
+                            .with_context(|| {
+                                format!("{} setting permissions {outpath:?}", error_context)
+                            })?;
+                    }
 
                     std::io::copy(&mut file, &mut outfile)
                         .with_context(|| format!("{} copying {outpath:?}", error_context))?;
