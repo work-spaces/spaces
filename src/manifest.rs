@@ -165,9 +165,24 @@ impl Executables {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub enum AssetType {
+    HardLink,
+    SoftLink,
+    Template,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WorkspaceAsset {
+    pub path: String,
+    #[serde(rename = "type")]
+    pub type_: AssetType,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Deps {
     pub deps: HashMap<String, Dependency>,
     pub archives: Option<HashMap<String, Archive>>,
+    pub assets: Option<HashMap<String, WorkspaceAsset>>,
 }
 
 impl Deps {
@@ -232,6 +247,23 @@ impl BuckConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct VsCodeTask {
+    #[serde(rename = "type")]
+    pub type_: String,
+    pub command: String,
+    #[serde(rename = "problemMatcher")]
+    pub problem_matcher: Vec<String>,
+    pub arguments: Vec<String>,
+    pub label: String,
+    pub group: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VsCodeConfig {
+    tasks: Vec<VsCodeTask>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct WorkspaceConfigSettings {
     pub branch: Option<String>,
 }
@@ -242,6 +274,7 @@ pub struct WorkspaceConfig {
     pub buck: Option<BuckConfig>,
     pub cargo: Option<CargoConfig>,
     pub settings: Option<WorkspaceConfigSettings>,
+    pub vscode: Option<VsCodeConfig>,
 }
 
 impl WorkspaceConfig {

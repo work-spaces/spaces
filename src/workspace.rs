@@ -3,11 +3,10 @@ use std::collections::{HashMap, VecDeque};
 use anyhow::Context;
 
 use crate::{
-    archive, context,
-    context::{anyhow_error, format_error_context},
+    archive, context::{self, anyhow_error, format_error_context},
     git::{self, BareRepository},
     ledger,
-    manifest::{Dependency, Workspace, WorkspaceConfig},
+    manifest::{self, Dependency, Workspace, WorkspaceConfig},
 };
 
 fn get_current_directory() -> anyhow::Result<String> {
@@ -101,12 +100,11 @@ pub fn create(
         }
     }
 
-    let mut state = State::new(context.clone(), directory.clone())?;
-    state.sync_full_path()?;
-
-    if let Some(buck) = &workspace_config.buck {
-        buck.export(&directory)?;
-    }
+    let mut state = State::new(context.clone(), space_name.clone(), directory.clone())
+        .with_context(|| format_error_context!("While creating workspace state"))?;
+    state.sync_full_path().with_context(|| {
+        format_error_context!("While syncing full path during workspace creation")
+    })?;
 
     let mut printer = context
         .printer
@@ -120,7 +118,21 @@ pub fn create(
 
 pub fn sync(context: context::Context) -> anyhow::Result<()> {
     let full_path = get_current_directory()?;
-    let mut state = State::new(std::sync::Arc::new(context), full_path)?;
+    let space_name = std::path::Path::new(&full_path)
+        .file_name()
+        .ok_or(anyhow_error!(
+            "{full_path} directory is not a space workspace"
+        ))?
+        .to_str()
+        .ok_or(anyhow_error!(
+            "{full_path} directory is not a space workspace"
+        ))?;
+
+    let mut state = State::new(
+        std::sync::Arc::new(context),
+        space_name.to_string(),
+        full_path,
+    )?;
     state.sync_full_path()?;
     Ok(())
 }
@@ -134,17 +146,25 @@ enum SyncDep {
 struct State {
     context: std::sync::Arc<context::Context>,
     full_path: String,
+    _spaces_name: String,
     workspace: Workspace,
     all_deps: VecDeque<SyncDep>,
     deps_map: HashMap<String, Dependency>,
 }
 
 impl State {
-    fn new(context: std::sync::Arc<context::Context>, full_path: String) -> anyhow::Result<Self> {
+    fn new(
+        context: std::sync::Arc<context::Context>,
+        spaces_name: String,
+        full_path: String,
+    ) -> anyhow::Result<Self> {
         Ok(Self {
             context,
+            _spaces_name: spaces_name,
             full_path: full_path.clone(),
-            workspace: Workspace::new(&full_path)?,
+            workspace: Workspace::new(&full_path).with_context(|| {
+                format_error_context!("{full_path} when creating workspace state")
+            })?,
             deps_map: HashMap::new(),
             all_deps: VecDeque::new(),
         })
@@ -153,6 +173,10 @@ impl State {
     fn sync_full_path(&mut self) -> anyhow::Result<()> {
         let context = self.context.clone();
 
+        let log_path = format!("{}/spaces_logs", self.full_path);
+        std::fs::create_dir_all(log_path.as_str())
+            .with_context(|| format_error_context!("Trying to create {log_path}"))?;
+
         let mut printer = context
             .printer
             .write()
@@ -160,14 +184,27 @@ impl State {
 
         let mut multi_progress = printer::MultiProgress::new(&mut printer);
 
-        self.sync_repositories(&mut multi_progress)?;
-        self.sync_dependencies(&mut multi_progress)?;
-        self.export_buck_config(&mut multi_progress)?;
-        self.update_cargo(&mut multi_progress)?;
+        self.sync_repositories(&mut multi_progress)
+            .with_context(|| format_error_context!("While syncing repositories"))?;
+        self.sync_dependencies(&mut multi_progress)
+            .with_context(|| format_error_context!("While syncing dependencies"))?;
 
-        self.workspace.save(&self.full_path)?;
+        self.export_buck_config(&mut multi_progress)
+            .with_context(|| format_error_context!("While exporting buck config"))?;
+
+        self.update_cargo(&mut multi_progress)
+            .with_context(|| format_error_context!("While updating cargo"))?;
+
+        self.workspace.save(&self.full_path).with_context(|| {
+            format_error_context!("While saving workspace in {}", self.full_path)
+        })?;
+
         let mut ledger = ledger::Ledger::new(context.clone())?;
-        ledger.update(&self.full_path, &self.workspace)?;
+        ledger
+            .update(&self.full_path, &self.workspace)
+            .with_context(|| {
+                format_error_context!("While updating ledger with {}", self.full_path)
+            })?;
 
         Ok(())
     }
@@ -317,10 +354,7 @@ impl State {
         let full_path = self.full_path.clone();
 
         let handle = std::thread::spawn(move || {
-
             http_archive.sync(context, full_path.as_str(), progress_bar)?;
-
-   
 
             Ok::<_, anyhow::Error>(Vec::new())
         });
@@ -372,6 +406,43 @@ impl State {
                             archive::HttpArchive::new(context.clone(), key, archive)?;
 
                         new_deps.push(SyncDep::Archive(key.clone(), http_archive));
+                    }
+                }
+
+                if let Some(asset_map) = spaces_deps.assets {
+                    for (key, asset) in asset_map.iter() {
+                        let path = format!("{}/{key}", worktree.full_path);
+                        let dest_path = format!("{full_path}/{}", asset.path);
+
+                        match asset.type_ {
+                            manifest::AssetType::HardLink => {
+                                std::fs::remove_file(dest_path.as_str()).with_context(|| {
+                                    format_error_context!("While removing {dest_path}")
+                                })?;
+                                std::fs::hard_link(path.as_str(), dest_path.as_str()).with_context(|| format_error_context!(
+                                    "While creating hard link from {path} to {dest_path}"
+                                ))?;
+                            }
+                            manifest::AssetType::SoftLink => {
+                                std::fs::remove_file(dest_path.as_str()).with_context(|| {
+                                    format_error_context!("While removing {dest_path}")
+                                })?;
+                                std::os::unix::fs::symlink(path.as_str(), dest_path.as_str()).with_context(|| format_error_context!(
+                                    "While creating soft link from {path} to {dest_path}"
+                                ))?;
+                            }
+                            manifest::AssetType::Template => {
+                                let contents = std::fs::read_to_string(&path)
+                                    .with_context(|| format_error_context!("While reading {path}"))?;
+
+                                // do the substitutions
+
+                                // create a copy
+                                std::fs::write(dest_path.as_str(), contents).with_context(|| {
+                                    format_error_context!("While writing to {dest_path}")
+                                })?;
+                            }
+                        }
                     }
                 }
             }
