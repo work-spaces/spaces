@@ -173,13 +173,13 @@ impl BareRepository {
     pub fn get_workspace_name_from_url(url: &str) -> anyhow::Result<String> {
         let (_, repo_name) = Self::url_to_relative_path_and_name(url)?;
 
-        repo_name.strip_suffix(".git").ok_or(anyhow_error!(
-            "Failed to extract a workspace name from  {url}",
-        )).map(|e| e.to_string())
-
+        repo_name
+            .strip_suffix(".git")
+            .ok_or(anyhow_error!(
+                "Failed to extract a workspace name from  {url}",
+            ))
+            .map(|e| e.to_string())
     }
-
-
 }
 
 pub struct Worktree {
@@ -252,14 +252,17 @@ impl Worktree {
         _context: std::sync::Arc<context::Context>,
         progress_bar: &mut printer::MultiProgressBar,
         dependency: &manifest::Dependency,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<manifest::Checkout> {
         let mut options = printer::ExecuteOptions {
             working_directory: Some(self.full_path.clone()),
             ..Default::default()
         };
 
-        let checkout = dependency.get_checkout()?;
-        match checkout {
+        let checkout = dependency.get_checkout().with_context(|| {
+            format_error_context!("failed to get checkout type for {dependency:?}")
+        })?;
+
+        match &checkout {
             manifest::Checkout::ReadOnly(value) => {
                 options.arguments = vec!["checkout".to_string(), value.clone()];
             }
@@ -288,7 +291,7 @@ impl Worktree {
                     options.get_full_command_in_working_directory("git")
                 )
             })?;
-        Ok(())
+        Ok(checkout)
     }
 
     pub fn checkout_detached_head(
@@ -328,23 +331,35 @@ impl Worktree {
             let mut original_checkout_dependency = dependency.clone();
             original_checkout_dependency.checkout = None;
 
-            self.checkout(context, progress_bar, &original_checkout_dependency)?;
+            let checkout_type = self
+                .checkout(context, progress_bar, &original_checkout_dependency)
+                .with_context(|| {
+                    format_error_context!("when checking for {original_checkout_dependency:?}")
+                })?;
 
             if *checkout == manifest::CheckoutOption::Develop {
-                let mut options = printer::ExecuteOptions {
+                let options = printer::ExecuteOptions {
                     working_directory: Some(self.full_path.clone()),
-                    arguments: vec!["pull".to_string()],
                     ..Default::default()
                 };
-                progress_bar
-                    .execute_process("git", &options)
-                    .with_context(|| {
-                        format_error_context!(
-                            "failed to run {}",
-                            options.get_full_command_in_working_directory("git")
-                        )
-                    })?;
 
+                if let manifest::Checkout::ReadOnlyBranch(branch) = checkout_type {
+                    let mut options = options.clone();
+
+                    options.arguments =
+                        vec!["pull".to_string(), "origin".to_string(), branch.clone()];
+
+                    progress_bar
+                        .execute_process("git", &options)
+                        .with_context(|| {
+                            format_error_context!(
+                                "failed to run {}",
+                                options.get_full_command_in_working_directory("git")
+                            )
+                        })?;
+                }
+
+                let mut options = options.clone();
                 options.arguments = vec!["switch".to_string(), "-c".to_string(), dev.clone()];
 
                 progress_bar

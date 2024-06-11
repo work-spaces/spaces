@@ -93,7 +93,6 @@ pub fn execute() -> anyhow::Result<()> {
                 Commands::CreateArchive {
                     name,
                     path,
-                    platform,
                     macos_aarch64,
                     macos_x86_64,
                     windows_aarch64,
@@ -104,7 +103,7 @@ pub fn execute() -> anyhow::Result<()> {
             level,
         } => {
             context.update_printer(level.map(|e| e.into()));
-            let executable_paths = archive::ExecutablePaths {
+            let executable_paths = archive::PlatformPaths {
                 macos_x86_64,
                 macos_aarch64,
                 windows_x86_64,
@@ -112,7 +111,7 @@ pub fn execute() -> anyhow::Result<()> {
                 linux_x86_64,
                 linux_aarch64,
             };
-            archive::create(context, name, path, platform.map(manifest::Platform::from), executable_paths)?;
+            archive::create(context, name, path, executable_paths)?;
         }
         Arguments {
             commands: Commands::InspectArchive { path },
@@ -201,9 +200,6 @@ enum Commands {
         /// The path to the files to compress
         #[arg(long)]
         path: String,
-        /// The platform is using spaces_executables.toml
-        #[arg(long)]
-        platform: Option<Platform>,
         /// Path to macos_x86_64 executables
         #[arg(long)]
         macos_x86_64: Option<String>,

@@ -4,6 +4,12 @@ use std::collections::HashMap;
 
 use crate::format_error_context;
 
+
+pub const SPACES_OVERLAY: &str = "{SPACES_OVERLAY}";
+pub const SPACE: &str = "{SPACE}";
+pub const USER: &str = "{USER}";
+pub const UNIQUE: &str = "{UNIQUE}";
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum CheckoutOption {
     Revision,
@@ -34,7 +40,6 @@ pub struct Dependency {
     /// The branch associated with the dependency.
     pub dev: Option<String>,
 }
-
 
 impl Dependency {
     pub fn get_checkout(&self) -> anyhow::Result<Checkout> {
@@ -95,9 +100,30 @@ impl Dependency {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateArchive {
+    pub path: String,
+    pub files: Option<Vec<String>>,
+}
+
+impl CreateArchive {
+    const FILE_NAME: &'static str = "spaces_executables.toml";
+
+    pub fn new(path: &str) -> anyhow::Result<Self> {
+        let file_path = format!("{path}/{}", Self::FILE_NAME); //change to spaces_dependencies.toml
+        let contents = std::fs::read_to_string(&file_path)
+            .with_context(|| format!("Failed to read create archive file {file_path}"))?;
+
+        let result: Self = toml::from_str(&contents)
+            .with_context(|| format!("Failed to parse create archive file {file_path}"))?;
+
+        Ok(result)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ArchiveLink {
-    Soft,
+    None,
     Hard,
 }
 
@@ -106,12 +132,9 @@ pub struct Archive {
     pub url: String,
     pub sha256: String,
     pub link: ArchiveLink,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlatformArchive {
-    pub archive: Archive,
-    pub executables: Vec<String>,
+    pub files: Option<Vec<String>>,
+    pub strip_prefix: Option<String>,
+    pub add_prefix: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -138,43 +161,17 @@ impl std::fmt::Display for Platform {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Executables {
-    pub macos_x86_64: Option<PlatformArchive>,
-    pub macos_aarch64: Option<PlatformArchive>,
-    pub windows_aarch64: Option<PlatformArchive>,
-    pub windows_x86_64: Option<PlatformArchive>,
-    pub linux_x86_64: Option<PlatformArchive>,
-    pub linux_aarch64: Option<PlatformArchive>,
+pub struct PlatformArchive {
+    pub macos_x86_64: Option<Archive>,
+    pub macos_aarch64: Option<Archive>,
+    pub windows_aarch64: Option<Archive>,
+    pub windows_x86_64: Option<Archive>,
+    pub linux_x86_64: Option<Archive>,
+    pub linux_aarch64: Option<Archive>,
 }
 
-impl Executables {
-    const FILE_NAME: &'static str = "spaces_executables.toml";
-
-    pub fn new(path: &str) -> anyhow::Result<Option<Self>> {
-        let file_path = format!("{path}/{}", Self::FILE_NAME); //change to spaces_dependencies.toml
-        let contents = std::fs::read_to_string(&file_path)
-            .with_context(|| format!("Failed to read deps file {file_path}"));
-
-        if let Ok(contents) = contents {
-            let result: Self = toml::from_str(&contents)
-                .with_context(|| format!("Failed to parse deps file {file_path}"))?;
-            Ok(Some(result))
-        } else {
-            Ok(None)
-        }
-    }
-
-    pub fn save(&self, path: &str) -> anyhow::Result<()> {
-        let file_path = format!("{path}/{}", Self::FILE_NAME);
-        let contents = toml::to_string(&self).with_context(|| {
-            format_error_context!("failed to build toml string for {file_path}")
-        })?;
-        std::fs::write(&file_path, contents)
-            .with_context(|| format_error_context!("failed write file to {file_path}"))?;
-        Ok(())
-    }
-
-    pub fn get_platform_archive(&self) -> Option<PlatformArchive> {
+impl PlatformArchive {
+    pub fn get_archive(&self) -> Option<Archive> {
         if cfg!(target_os = "macos") {
             if cfg!(target_arch = "x86_64") {
                 return self.macos_x86_64.clone();
@@ -197,10 +194,7 @@ impl Executables {
         None
     }
 
-    pub fn get_platform_archive_from_platform(
-        &self,
-        platform: Platform,
-    ) -> Option<PlatformArchive> {
+    pub fn get_archive_from_platform(&self, platform: Platform) -> Option<Archive> {
         match platform {
             Platform::MacosX86_64 => self.macos_x86_64.clone(),
             Platform::MacosAarch64 => self.macos_aarch64.clone(),
@@ -211,10 +205,7 @@ impl Executables {
         }
     }
 
-    pub fn get_platform_archive_from_platform_mut(
-        &mut self,
-        platform: Platform,
-    ) -> Option<&mut PlatformArchive> {
+    pub fn get_archive_from_platform_mut(&mut self, platform: Platform) -> Option<&mut Archive> {
         match platform {
             Platform::MacosX86_64 => self.macos_x86_64.as_mut(),
             Platform::MacosAarch64 => self.macos_aarch64.as_mut(),
@@ -243,6 +234,7 @@ pub struct WorkspaceAsset {
 pub struct Deps {
     pub deps: HashMap<String, Dependency>,
     pub archives: Option<HashMap<String, Archive>>,
+    pub platform_archives: Option<HashMap<String, PlatformArchive>>,
     pub assets: Option<HashMap<String, WorkspaceAsset>>,
 }
 
@@ -261,6 +253,16 @@ impl Deps {
         } else {
             Ok(None)
         }
+    }
+
+    pub fn save(&self, path: &str) -> anyhow::Result<()> {
+        let file_path = format!("{path}/{}", Self::FILE_NAME); //change to spaces_dependencies.toml
+        let contents = toml::to_string(&self).with_context(|| {
+            format_error_context!("failed to build toml string for {file_path}")
+        })?;
+        std::fs::write(&file_path, contents)
+            .with_context(|| format_error_context!("failed write file to {file_path}"))?;
+        Ok(())
     }
 }
 
@@ -338,7 +340,6 @@ pub struct WorkspaceConfig {
     pub vscode: Option<VsCodeConfig>,
 }
 
-
 impl WorkspaceConfig {
     pub fn new(path: &str) -> anyhow::Result<Self> {
         let contents = std::fs::read_to_string(path)
@@ -359,25 +360,24 @@ impl WorkspaceConfig {
             {
                 (*branch).to_owned()
             } else {
-                "user/{USER}/{SPACE}-{UNIQUE}".to_string()
+                format!("user/{USER}/{SPACE}-{UNIQUE}")
             };
 
-            const USER: &str = "{USER}";
-            if dev_branch.contains("{USER}") {
+            if dev_branch.contains(USER) {
                 let user = std::env::var("USER").with_context(|| {
                     format!("Failed to replace {USER} with $USER for {dev_branch} naming")
                 })?;
                 dev_branch = dev_branch.replace(USER, &user);
             }
 
-            const SPACE: &str = "{SPACE}";
             if dev_branch.contains(SPACE) {
                 dev_branch = dev_branch.replace(SPACE, space_name);
             } else {
-                return Err(anyhow::anyhow!("Branch name {dev_branch} must contain {SPACE}"));
+                return Err(anyhow::anyhow!(
+                    "Branch name {dev_branch} must contain {SPACE}"
+                ));
             }
 
-            const UNIQUE: &str = "{UNIQUE}";
             if dev_branch.contains(UNIQUE) {
                 //create a unique digest from the current time
                 let unique = format!(

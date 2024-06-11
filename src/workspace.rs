@@ -151,6 +151,7 @@ enum SyncDep {
     BareRepository(String, Dependency),
     Repository(BareRepository, Dependency),
     Archive(String, archive::HttpArchive),
+    PlatformArchive(String, archive::HttpArchive),
 }
 
 struct State {
@@ -277,6 +278,9 @@ impl State {
                     SyncDep::Archive(spaces_key, http_archive) => {
                         self.sync_archive(multi_progress, spaces_key, http_archive)?
                     }
+                    SyncDep::PlatformArchive(spaces_key, http_archive) => {
+                        self.sync_platform_archive(multi_progress, spaces_key, http_archive)?
+                    }
                     SyncDep::BareRepository(spaces_key, dependency) => {
                         self.sync_bare_repository(multi_progress, spaces_key, dependency)?
                     }
@@ -364,12 +368,82 @@ impl State {
         let full_path = self.full_path.clone();
 
         let handle = std::thread::spawn(move || {
-            http_archive.sync(context, full_path.as_str(), progress_bar)?;
+            let mut new_deps = Vec::new();
+            http_archive.sync(context.clone(), full_path.as_str(), progress_bar)?;
 
+            if let Some(deps) =
+                manifest::Deps::new(format!("{full_path}/{}", http_archive.spaces_key).as_str())?
+            {
+                new_deps.extend(Self::get_new_deps(
+                    context.clone(),
+                    &http_archive.spaces_key,
+                    &deps,
+                )?);
+            }
+
+            Ok::<_, anyhow::Error>(new_deps)
+        });
+
+        Ok(handle)
+    }
+
+    fn sync_platform_archive(
+        &self,
+        multi_progress: &mut printer::MultiProgress,
+        spaces_key: String,
+        mut http_archive: archive::HttpArchive,
+    ) -> anyhow::Result<std::thread::JoinHandle<Result<Vec<SyncDep>, anyhow::Error>>> {
+        let progress_bar = multi_progress.add_progress(&spaces_key, Some(100), None);
+        let context = self.context.clone();
+        let full_path = self.full_path.clone();
+
+        let handle = std::thread::spawn(move || {
+            http_archive.sync(context.clone(), full_path.as_str(), progress_bar)?;
             Ok::<_, anyhow::Error>(Vec::new())
         });
 
         Ok(handle)
+    }
+
+    fn get_new_deps(
+        context: std::sync::Arc<context::Context>,
+        parent_spaces_key: &String,
+        spaces_deps: &manifest::Deps,
+    ) -> anyhow::Result<Vec<SyncDep>> {
+        let mut new_deps = Vec::new();
+        for (spaces_key, dep) in spaces_deps.deps.iter() {
+            new_deps.push(SyncDep::BareRepository(spaces_key.clone(), dep.clone()));
+        }
+
+        if let Some(map) = &spaces_deps.archives {
+            for (key, archive) in map.iter() {
+                let http_archive = archive::HttpArchive::new(context.clone(), key, archive)?;
+
+                new_deps.push(SyncDep::Archive(key.clone(), http_archive));
+            }
+        }
+
+        if let Some(map) = &spaces_deps.platform_archives {
+            for (key, platform_archive) in map.iter() {
+                if let Some(archive) = platform_archive.get_archive() {
+                    let effective_key = if key.starts_with(manifest::SPACES_OVERLAY) {
+                        key.replace(manifest::SPACES_OVERLAY, &parent_spaces_key)
+                    } else {
+                        key.to_owned()
+                    };
+
+                    let http_archive =
+                        archive::HttpArchive::new(context.clone(), &effective_key, &archive)?;
+
+                    new_deps.push(SyncDep::PlatformArchive(
+                        effective_key.clone(),
+                        http_archive,
+                    ));
+                }
+            }
+        }
+
+        Ok(new_deps)
     }
 
     fn sync_dependency(
@@ -395,6 +469,8 @@ impl State {
         let handle = std::thread::spawn(move || {
             let mut new_deps = Vec::new();
 
+            let parent_spaces_key = bare_repository.spaces_key.clone();
+
             let worktree =
                 bare_repository.add_worktree(context.clone(), &mut progress_bar, &full_path)?;
 
@@ -405,19 +481,11 @@ impl State {
 
             let spaces_deps = worktree.get_deps()?;
             if let Some(spaces_deps) = spaces_deps {
-                for (spaces_key, dep) in spaces_deps.deps.iter() {
-                    progress_bar.set_prefix(spaces_key);
-                    new_deps.push(SyncDep::BareRepository(spaces_key.clone(), dep.clone()));
-                }
-
-                if let Some(archive_map) = spaces_deps.archives {
-                    for (key, archive) in archive_map.iter() {
-                        let http_archive =
-                            archive::HttpArchive::new(context.clone(), key, archive)?;
-
-                        new_deps.push(SyncDep::Archive(key.clone(), http_archive));
-                    }
-                }
+                new_deps.extend(Self::get_new_deps(
+                    context.clone(),
+                    &parent_spaces_key,
+                    &spaces_deps,
+                )?);
 
                 if let Some(asset_map) = spaces_deps.assets {
                     for (key, asset) in asset_map.iter() {

@@ -2,7 +2,7 @@ use std::io::Read;
 
 use crate::{
     context::{self, anyhow_error, format_error_context},
-    manifest::{self, Executables},
+    manifest,
 };
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -19,8 +19,7 @@ pub struct HttpArchive {
     archive: manifest::Archive,
     full_path_to_archive: String,
     files: HashSet<String>,
-    exectuables: Option<manifest::Executables>,
-    context: std::sync::Arc<context::Context>,
+    _context: std::sync::Arc<context::Context>,
 }
 
 impl HttpArchive {
@@ -39,8 +38,7 @@ impl HttpArchive {
             full_path_to_archive,
             spaces_key: spaces_key.to_string(),
             files: HashSet::new(),
-            exectuables: None,
-            context,
+            _context: context,
         })
     }
 
@@ -67,28 +65,15 @@ impl HttpArchive {
     }
 
     fn create_links(&mut self, space_directory: &str) -> anyhow::Result<()> {
-        let (_, target_path) = self.get_link_paths(space_directory);
-        if std::path::Path::new(target_path.as_str()).exists() {
-            return Ok(());
-        }
-
         match self.archive.link {
-            manifest::ArchiveLink::Soft => {
-                self.create_soft_link(space_directory).with_context(|| {
-                    format_error_context!("Failed to create soft links for {}", self.archive.url)
-                })?;
-            }
             manifest::ArchiveLink::Hard => {
                 self.create_hard_links(space_directory).with_context(|| {
                     format_error_context!("Failed to create hard links for {}", self.archive.url)
                 })?;
             }
+            manifest::ArchiveLink::None => (),
         }
 
-        Ok(())
-    }
-
-    fn create_soft_link(&self, _space_directory: &str) -> anyhow::Result<()> {
         Ok(())
     }
 
@@ -118,32 +103,14 @@ impl HttpArchive {
         }
 
         for file in self.files.iter() {
-            let target_path = format!("{}/{}", target_path, file);
-            let source = format!("{}/{}", source, file);
+            if let Some(file) = self.transform_extracted_destination(file) {
+                let target_path = format!("{}/{}", target_path, file);
+                let source = format!("{}/{}", source, file);
 
-            Self::create_hard_link(target_path, source)
-                .with_context(|| format_error_context!("while hardlinking archive file"))?;
-        }
-
-        if let Some(executables) = self.exectuables.as_ref() {
-            if let Some(platform_archive) = executables.get_platform_archive() {
-                let http_executables_archive = HttpArchive::new(
-                    self.context.clone(),
-                    space_directory,
-                    &platform_archive.archive,
-                )?;
-
-                let source = http_executables_archive.get_path_to_extracted_files();
-
-                for executable_path in platform_archive.executables.iter() {
-                    let target_path = format!("{}/{}", target_path, executable_path);
-                    let source = format!("{}/{}", source, executable_path);
-                    Self::create_hard_link(target_path, source)
-                        .with_context(|| format_error_context!("while hardlinking executable"))?;
-                }
+                Self::create_hard_link(target_path, source)
+                    .with_context(|| format_error_context!("while hardlinking archive file"))?;
             }
         }
-
         Ok(())
     }
 
@@ -162,35 +129,6 @@ impl HttpArchive {
 
         self.extract(&mut next_progress_bar)
             .with_context(|| format_error_context!("failed to extract archive for {full_path}"))?;
-
-        if let Some(platform_archive) = self
-            .exectuables
-            .as_ref()
-            .and_then(|e| e.get_platform_archive())
-        {
-            let mut plaform_http_archive = HttpArchive::new(
-                context.clone(),
-                format!("{}_executables", self.spaces_key).as_str(),
-                &platform_archive.archive,
-            )?;
-
-            let mut platform_progress_bar = if plaform_http_archive.is_download_required() {
-                let join_handle =
-                    plaform_http_archive.download(&context.async_runtime, next_progress_bar)?;
-                context.async_runtime.block_on(join_handle)??
-            } else {
-                next_progress_bar
-            };
-
-            plaform_http_archive
-                .extract(&mut platform_progress_bar)
-                .with_context(|| {
-                    format_error_context!(
-                        "failed to extract executables archive {}",
-                        platform_archive.archive.url
-                    )
-                })?;
-        }
 
         self.create_links(full_path)?;
 
@@ -232,6 +170,28 @@ impl HttpArchive {
         Ok(join_handle)
     }
 
+    fn transform_extracted_destination(&self, relative_path: &String) -> Option<String> {
+        let mut path = relative_path.clone();
+        if let Some(add_prefix) = self.archive.add_prefix.as_ref() {
+            path = format!("{add_prefix}/{path}");
+        }
+
+        if let Some(strip_prefix) = self.archive.strip_prefix.as_ref() {
+            path = path.strip_prefix(strip_prefix).unwrap_or(&path).to_string();
+        }
+
+        if let Some(files) = self.archive.files.as_ref() {
+            //this needs to check for a glob_match
+            for pattern in files {
+                if glob_match::glob_match(pattern, &path) {
+                    return Some(path);
+                }
+            }
+            return None;
+        }
+        Some(path)
+    }
+
     fn extract_tar_archive(
         &mut self,
         progress: &mut printer::MultiProgressBar,
@@ -260,8 +220,23 @@ impl HttpArchive {
             .join()
             .map_err(|_| anyhow_error!("Internal Error: Extract thread failed"))?;
 
-        let mut tar_archive = tar::Archive::new(tar_contents.as_slice());
-        let entries = tar_archive.entries()?;
+        let mut tar_archive_collect = tar::Archive::new(tar_contents.as_slice());
+        let entries_collect = tar_archive_collect.entries()?;
+
+        let mut all_files_in_archive = Vec::new();
+        for file in entries_collect {
+            if let Ok(file) = file {
+                let file_path = file.path()?;
+                all_files_in_archive.push(
+                    file_path
+                        .to_str()
+                        .ok_or(anyhow_error!("Internal Error: File is not a str"))?
+                        .to_string(),
+                );
+            }
+        }
+
+        progress.set_total(all_files_in_archive.len() as u64);
 
         let output_folder = self.get_path_to_extracted_files();
         if !std::path::Path::new(output_folder.as_str()).exists() {
@@ -270,19 +245,20 @@ impl HttpArchive {
             })?;
         }
 
+        let mut tar_archive = tar::Archive::new(tar_contents.as_slice());
+        let entries = tar_archive.entries()?;
+
         for file in entries {
             if let Ok(mut file) = file {
                 let file_path = file.path()?;
-                let file_path_str = file_path
-                    .to_str()
-                    .ok_or(anyhow_error!("Internal Error: can't get path for tar file"))?;
-                progress.set_message(file_path_str);
 
-                let path = format!("{output_folder}/{file_path_str}",);
+                progress.set_message(file_path.to_str().unwrap_or("archive entry"));
+                let path = std::path::Path::new(&output_folder).join(file_path);
+                let path_string = path.display().to_string();
 
                 match file.header().entry_type() {
                     tar::EntryType::Directory => {
-                        let _ = std::fs::create_dir_all(path.as_str());
+                        let _ = std::fs::create_dir_all(&path);
                     }
                     tar::EntryType::Regular => {
                         let file_name = std::path::Path::new(&path)
@@ -292,21 +268,21 @@ impl HttpArchive {
                             .ok_or(anyhow_error!("Internal Error: File is not a str"))?;
 
                         if !file_name.starts_with("._") {
-                            self.files.insert(file_path_str.to_string());
+                            self.files.insert(path_string);
 
                             let mut file_contents = Vec::new();
                             let _ = file.read_to_end(&mut file_contents);
                             if let Some(parent) = std::path::Path::new(&path).parent() {
                                 std::fs::create_dir_all(parent)?;
                             }
-                            let _ = std::fs::write(path.as_str(), file_contents.as_slice());
+                            let _ = std::fs::write(&path, file_contents.as_slice());
 
                             #[cfg(unix)]
                             {
                                 use std::os::unix::fs::PermissionsExt;
                                 let mode = file.header().mode().unwrap_or(0o644);
                                 let permissions = std::fs::Permissions::from_mode(mode);
-                                let _ = std::fs::set_permissions(path.as_str(), permissions);
+                                let _ = std::fs::set_permissions(&path, permissions);
                             }
                         }
                     }
@@ -314,8 +290,9 @@ impl HttpArchive {
                         //println!("Skipping {:?}", file.header().entry_type());
                     }
                 }
+
                 if file.header().entry_type() == tar::EntryType::Directory {
-                    let _ = std::fs::create_dir_all(path.as_str());
+                    let _ = std::fs::create_dir_all(&path);
                 }
             }
             progress.increment(1);
@@ -362,15 +339,14 @@ impl HttpArchive {
                     }
                 }
 
-                let outpath = destination.join(file_name);
-                if let Some(parent) = outpath.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-
                 if file.is_file() {
+                    let outpath = destination.join(file_name);
+                    if let Some(parent) = outpath.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+
                     let mut outfile = File::create(&outpath)
                         .with_context(|| format!("{} creating {outpath:?}", error_context))?;
-
 
                     #[cfg(unix)]
                     {
@@ -418,8 +394,6 @@ impl HttpArchive {
 
     fn extract(&mut self, progress: &mut printer::MultiProgressBar) -> anyhow::Result<()> {
         if !self.is_extract_required() {
-            self.exectuables =
-                manifest::Executables::new(self.get_path_to_extracted_files().as_str())?;
             self.load_files_json()
                 .with_context(|| format!("Missing {}", self.get_path_to_extracted_files_json()))?;
             return Ok(());
@@ -472,8 +446,6 @@ impl HttpArchive {
         }
 
         self.save_files_json()?;
-        self.exectuables = manifest::Executables::new(self.get_path_to_extracted_files().as_str())?;
-
         Ok(())
     }
 
@@ -490,7 +462,7 @@ impl HttpArchive {
     }
 }
 
-pub struct ExecutablePaths {
+pub struct PlatformPaths {
     pub macos_x86_64: Option<String>,
     pub macos_aarch64: Option<String>,
     pub windows_x86_64: Option<String>,
@@ -499,66 +471,167 @@ pub struct ExecutablePaths {
     pub linux_aarch64: Option<String>,
 }
 
-fn create_executables_archive(
+fn create_platform_archive(
     progress: &mut printer::MultiProgressBar,
     name: &str,
     path_to_files: &str,
-    platform_archive: &manifest::PlatformArchive,
+    platform_archive: &manifest::Archive,
     platform: manifest::Platform,
 ) -> anyhow::Result<(manifest::Platform, String)> {
     //verify all the files exist
-    for file in platform_archive.executables.iter() {
-        let full_path = format!("{path_to_files}/{file}");
-        if !std::path::Path::new(full_path.as_str()).exists() {
-            return Err(anyhow_error!("File {full_path} not found for macos_x86_64"));
+    if let Some(files) = platform_archive.files.as_ref() {
+        for file in files.iter() {
+            let full_path = format!("{path_to_files}/{file}");
+            if !std::path::Path::new(full_path.as_str()).exists() {
+                return Err(anyhow_error!("File {full_path} not found for {platform:?}"));
+            }
+        }
+
+        let archive_name = format!("{name}-{platform}.zip");
+        let mut archive = zip::ZipWriter::new(std::fs::File::create(archive_name.as_str())?);
+
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated)
+            .unix_permissions(0o755);
+
+        for file in files.iter() {
+            let full_path = format!("{path_to_files}/{file}");
+            let relative_path_string = file;
+
+            let file_contents = std::fs::read(full_path.as_str())
+                .with_context(|| format_error_context!("Failed to read {full_path:?}"))?;
+
+            archive
+                .start_file(relative_path_string.to_owned(), options)
+                .with_context(|| {
+                    format_error_context!("Failed to start archive file {relative_path_string}")
+                })?;
+
+            use std::io::Write;
+            archive
+                .write_all(file_contents.as_slice())
+                .with_context(|| {
+                    format_error_context!(
+                        "Failed to write contents of archive file {relative_path_string}"
+                    )
+                })?;
+
+            progress.increment(1);
+        }
+        archive.finish()?;
+        Ok((platform, archive_name))
+    } else {
+        Err(anyhow_error!("No files found for {platform:?}"))
+    }
+}
+
+fn create_platform_archives(
+    name: &str,
+    multi_progress: &mut printer::MultiProgress,
+    config: &manifest::CreateArchive,
+    platform_paths: PlatformPaths,
+) -> anyhow::Result<()> {
+    let mut deps = manifest::Deps::new(config.path.as_str())?
+        .ok_or(anyhow_error!("no need to create platform archives"))
+        .with_context(|| format_error_context!("while looking at deps in {name}"))?;
+
+    let overlay_archive = deps
+        .platform_archives
+        .as_mut()
+        .and_then(|e| e.get_mut(manifest::SPACES_OVERLAY))
+        .ok_or(anyhow_error!(
+            "deps {name} does not have a {}",
+            manifest::SPACES_OVERLAY
+        ))?;
+
+    let mut handles = Vec::new();
+    let combinations = &[
+        (platform_paths.macos_x86_64, manifest::Platform::MacosX86_64),
+        (
+            platform_paths.macos_aarch64,
+            manifest::Platform::MacosAarch64,
+        ),
+        (
+            platform_paths.windows_x86_64,
+            manifest::Platform::WindowsX86_64,
+        ),
+        (
+            platform_paths.windows_aarch64,
+            manifest::Platform::WindowsAarch64,
+        ),
+        (platform_paths.linux_x86_64, manifest::Platform::LinuxX86_64),
+        (
+            platform_paths.linux_aarch64,
+            manifest::Platform::LinuxX86_64,
+        ),
+    ];
+
+    for (platform_path, platform) in combinations.iter() {
+        if let (Some(path), Some(platform_archive)) = (
+            platform_path,
+            overlay_archive.get_archive_from_platform(*platform),
+        ) {
+            let mut progress = multi_progress.add_progress(
+                platform.to_string().as_str(),
+                Some(
+                    platform_archive
+                        .files
+                        .as_ref()
+                        .map(|e| e.len())
+                        .unwrap_or(100) as u64,
+                ),
+                None,
+            );
+
+            let platform = *platform;
+            let path = path.to_owned();
+            let name = name.to_owned();
+
+            let handle = std::thread::spawn(move || {
+                let result = create_platform_archive(
+                    &mut progress,
+                    name.as_str(),
+                    path.as_str(),
+                    &platform_archive,
+                    platform,
+                );
+                result
+            });
+
+            handles.push(handle);
         }
     }
 
-    let archive_name = format!("{name}-{platform}.zip");
-    let mut archive = zip::ZipWriter::new(std::fs::File::create(archive_name.as_str())?);
+    for handle in handles {
+        if let Ok(Ok((platform, archive))) = handle.join() {
+            let contents = std::fs::read(archive.as_str())?;
+            let digest = sha256::digest(contents);
 
-    let options = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated)
-        .unix_permissions(0o755);
-
-    for file in platform_archive.executables.iter() {
-        let full_path = format!("{path_to_files}/{file}");
-        let relative_path_string = file;
-
-        let file_contents = std::fs::read(full_path.as_str())
-            .with_context(|| format_error_context!("Failed to read {full_path:?}"))?;
-
-        archive
-            .start_file(relative_path_string.to_owned(), options)
-            .with_context(|| {
-                format_error_context!("Failed to start archive file {relative_path_string}")
-            })?;
-
-        use std::io::Write;
-        archive
-            .write_all(file_contents.as_slice())
-            .with_context(|| {
-                format_error_context!(
-                    "Failed to write contents of archive file {relative_path_string}"
-                )
-            })?;
-
-        progress.increment(1);
+            if let Some(archive) = overlay_archive.get_archive_from_platform_mut(platform) {
+                archive.sha256 = digest;
+            }
+        } else {
+            // failed to create archive
+        }
     }
 
-    archive.finish()?;
+    deps.save(config.path.as_str()).with_context(|| {
+        format_error_context!("Failed to save overlay deps for {}", config.path)
+    })?;
 
-    Ok((platform, archive_name))
+    Ok(())
 }
 
 pub fn create(
     context: context::Context,
     name: String,
-    path: String,
-    platform: Option<manifest::Platform>,
-    executable_paths: ExecutablePaths,
+    config_path: String,
+    platform_paths: PlatformPaths,
 ) -> anyhow::Result<()> {
-    let walk_dir: Vec<_> = walkdir::WalkDir::new(path.as_str())
+    let config = manifest::CreateArchive::new(&config_path)
+        .with_context(|| format_error_context!("While loading config path {config_path}"))?;
+
+    let walk_dir: Vec<_> = walkdir::WalkDir::new(config.path.as_str())
         .into_iter()
         .filter_map(|entry| entry.ok())
         .collect();
@@ -568,89 +641,11 @@ pub fn create(
         .write()
         .expect("Internal Error: Printer is not set");
 
-    let mut executables = Executables::new(path.as_str())?;
     let arhive_name = format!("{name}.zip");
 
-    if let Some(executables) = executables.as_mut() {
-        let mut handles = Vec::new();
-
+    {
         let mut multi_progress = printer::MultiProgress::new(&mut printer);
-
-        let combinations = &[
-            (
-                executable_paths.macos_x86_64,
-                manifest::Platform::MacosX86_64,
-            ),
-            (
-                executable_paths.macos_aarch64,
-                manifest::Platform::MacosAarch64,
-            ),
-            (
-                executable_paths.windows_x86_64,
-                manifest::Platform::WindowsX86_64,
-            ),
-            (
-                executable_paths.windows_aarch64,
-                manifest::Platform::WindowsAarch64,
-            ),
-            (
-                executable_paths.linux_x86_64,
-                manifest::Platform::LinuxX86_64,
-            ),
-            (
-                executable_paths.linux_aarch64,
-                manifest::Platform::LinuxX86_64,
-            ),
-        ];
-
-        for (platform_path, platform) in combinations.iter() {
-            if let (Some(path), Some(platform_archive)) = (
-                platform_path,
-                executables.get_platform_archive_from_platform(*platform),
-            ) {
-                let mut progress = multi_progress.add_progress(
-                    platform.to_string().as_str(),
-                    Some(platform_archive.executables.len() as u64),
-                    None,
-                );
-
-                let platform = *platform;
-                let path = path.clone();
-                let name = name.clone();
-
-                let handle = std::thread::spawn(move || {
-                    let result = create_executables_archive(
-                        &mut progress,
-                        name.as_str(),
-                        path.as_str(),
-                        &platform_archive,
-                        platform,
-                    );
-                    result
-                });
-
-                handles.push(handle);
-            }
-        }
-
-        for handle in handles {
-            if let Ok(Ok((platform, archive))) = handle.join() {
-                if let Some(platform_archive) =
-                    executables.get_platform_archive_from_platform_mut(platform)
-                {
-                    let contents = std::fs::read(archive.as_str())?;
-                    let digest = sha256::digest(contents);
-
-                    platform_archive.archive.sha256 = digest;
-                }
-            } else {
-                // failed to create archive
-            }
-        }
-
-        executables
-            .save(path.as_str())
-            .with_context(|| format_error_context!("Failed to save executables for {path}"))?;
+        create_platform_archives(name.as_str(), &mut multi_progress, &config, platform_paths)?;
     }
 
     {
@@ -667,10 +662,13 @@ pub fn create(
 
         for entry in walk_dir_list {
             if entry.file_type().is_file() {
-                let relative_path =
-                    entry.path().strip_prefix(path.as_str()).with_context(|| {
+                let relative_path = entry
+                    .path()
+                    .strip_prefix(config.path.as_str())
+                    .with_context(|| {
                         format_error_context!(
-                            "Internal error: {path:?} not stripped from {entry:?}"
+                            "Internal error: {:?} not stripped from {entry:?}",
+                            config.path
                         )
                     })?;
                 let relative_path_string = relative_path.to_str().with_context(|| {
@@ -680,22 +678,13 @@ pub fn create(
                 progress.set_message(relative_path_string);
                 let full_path = entry.path();
 
-                let file_contents = if let Some(executables) = executables.as_ref() {
-                    let platform_archive = if let Some(platform) = platform {
-                        executables
-                            .get_platform_archive_from_platform(platform)
-                            .ok_or(anyhow::anyhow!("Provided Platform {platform:?} not found"))?
-                    } else {
-                        executables.get_platform_archive().ok_or(anyhow::anyhow!("Native platform not found. use --platform=<platform> to specify some executables"))?
-                    };
-
-                    let is_executable = platform_archive
-                        .executables
+                let file_contents = if let Some(files) = config.files.as_ref() {
+                    let is_executable = files
                         .iter()
-                        .any(|executable| executable.as_str() == relative_path_string);
+                        .any(|entry| entry.as_str() == relative_path_string);
 
                     if is_executable {
-                        "spaces executable placeholder"
+                        "spaces platform placeholder"
                             .to_string()
                             .as_bytes()
                             .to_vec()
@@ -805,12 +794,18 @@ mod tests {
             url: "https://github.com/StratifyLabs/SDK/releases/download/v8.3.1/arm-none-eabi-8-2019-q3-update-macos-x86_64.tar.gz".to_string(),
             sha256: "930dcd8b837916c82608bdf198d9f34f71deefd432024fe98271449b742a3623".to_string(),
             link: manifest::ArchiveLink::Hard,
+            files: None,
+            add_prefix: None,
+            strip_prefix: None
         };
 
         let archive = manifest::Archive {
             url: "https://github.com/StratifyLabs/SDK/releases/download/v8.3.1/stratifyos-arm-none-eabi-libstd-8.3.1.zip".to_string(),
             sha256: "2b9cbca5867c70bf1f890f1dc25adfbe7ff08ef6ea385784b0e5877a298b7ff1".to_string(),
             link: manifest::ArchiveLink::Hard,
+            files: None,
+            add_prefix: None,
+            strip_prefix: None
         };
 
         let mut multi_progress = printer::MultiProgress::new(&mut printer);
@@ -819,7 +814,7 @@ mod tests {
         let mut http_archive = HttpArchive::new(context.clone(), "toolchain", &archive).unwrap();
 
         if http_archive.is_download_required() {
-            let mut download_progress = multi_progress.add_progress("downloading", Some(100), None);
+            let download_progress = multi_progress.add_progress("downloading", Some(100), None);
             let mut wait_progress = multi_progress.add_progress("waiting", None, None);
             let runtime = &context.async_runtime;
 
@@ -833,9 +828,7 @@ mod tests {
 
         http_archive.extract(&mut progress_bar).unwrap();
 
-        if http_archive.archive.link == manifest::ArchiveLink::Soft {
-            http_archive.create_soft_link("tmp/toolchain").unwrap();
-        } else {
+        if http_archive.archive.link == manifest::ArchiveLink::Hard {
             http_archive.create_hard_links("tmp").unwrap();
         }
     }
