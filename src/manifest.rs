@@ -9,6 +9,7 @@ pub const SPACES_OVERLAY: &str = "{SPACES_OVERLAY}";
 pub const SPACE: &str = "{SPACE}";
 pub const USER: &str = "{USER}";
 pub const UNIQUE: &str = "{UNIQUE}";
+pub const SPACES_SYSROOT: &str = "{SPACES_SYSROOT}";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum CheckoutOption {

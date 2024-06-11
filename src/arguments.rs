@@ -33,6 +33,7 @@ pub struct Arguments {
     level: Option<Level>,
 }
 
+
 pub fn execute() -> anyhow::Result<()> {
     use crate::{archive, context::Context, ledger, workspace};
     let args = Arguments::parse();
@@ -44,6 +45,7 @@ pub fn execute() -> anyhow::Result<()> {
             level,
         } => {
             context.update_printer(level.map(|e| e.into()));
+            context.spaces_sysroot = Some(format!("{}/{}/sysroot", context.current_directory, name));
             workspace::create(context, &name, &config)?;
         }
 
@@ -52,6 +54,7 @@ pub fn execute() -> anyhow::Result<()> {
             level,
         } => {
             context.update_printer(level.map(|e| e.into()));
+            context.spaces_sysroot = Some(format!("{}/{}/sysroot", context.current_directory, name));
 
             let hash_key = git::BareRepository::get_workspace_name_from_url(&git)?;
 
@@ -76,6 +79,7 @@ pub fn execute() -> anyhow::Result<()> {
             level,
         } => {
             context.update_printer(level.map(|e| e.into()));
+            context.spaces_sysroot = Some(format!("{}/sysroot", context.current_directory));
             workspace::sync(context)?;
         }
 

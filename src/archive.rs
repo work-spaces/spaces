@@ -19,7 +19,7 @@ pub struct HttpArchive {
     archive: manifest::Archive,
     full_path_to_archive: String,
     files: HashSet<String>,
-    _context: std::sync::Arc<context::Context>,
+    context: std::sync::Arc<context::Context>,
 }
 
 impl HttpArchive {
@@ -38,7 +38,7 @@ impl HttpArchive {
             full_path_to_archive,
             spaces_key: spaces_key.to_string(),
             files: HashSet::new(),
-            _context: context,
+            context,
         })
     }
 
@@ -103,9 +103,16 @@ impl HttpArchive {
         }
 
         for file in self.files.iter() {
-            if let Some(file) = self.transform_extracted_destination(file) {
-                let target_path = format!("{}/{}", target_path, file);
+            if let Some(target_path) = self.transform_extracted_destination(&target_path, file) {
                 let source = format!("{}/{}", source, file);
+
+                if let Some(parent) = std::path::Path::new(&target_path).parent() {
+                    std::fs::create_dir_all(parent).with_context(|| {
+                        format_error_context!(
+                            "while creating parent directory for hard link {target_path}"
+                        )
+                    })?;
+                }
 
                 Self::create_hard_link(target_path, source)
                     .with_context(|| format_error_context!("while hardlinking archive file"))?;
@@ -170,11 +177,12 @@ impl HttpArchive {
         Ok(join_handle)
     }
 
-    fn transform_extracted_destination(&self, relative_path: &String) -> Option<String> {
-        let mut path = relative_path.clone();
-        if let Some(add_prefix) = self.archive.add_prefix.as_ref() {
-            path = format!("{add_prefix}/{path}");
-        }
+    fn transform_extracted_destination(
+        &self,
+        target_path: &str,
+        relative_path: &str,
+    ) -> Option<String> {
+        let mut path = relative_path.to_owned();
 
         if let Some(strip_prefix) = self.archive.strip_prefix.as_ref() {
             path = path.strip_prefix(strip_prefix).unwrap_or(&path).to_string();
@@ -182,14 +190,30 @@ impl HttpArchive {
 
         if let Some(files) = self.archive.files.as_ref() {
             //this needs to check for a glob_match
+            let mut is_match = false;
             for pattern in files {
                 if glob_match::glob_match(pattern, &path) {
-                    return Some(path);
+                    is_match = true;
+                    break;
                 }
             }
-            return None;
+            if !is_match {
+                return None;
+            }
         }
-        Some(path)
+
+        let mut target_path = target_path.to_owned();
+
+        if let Some(add_prefix) = self.archive.add_prefix.as_ref() {
+            if let (Some(sysroot), true) = (
+                self.context.spaces_sysroot.as_ref(),
+                add_prefix.starts_with(manifest::SPACES_SYSROOT),
+            ) {
+                target_path = add_prefix.replace(manifest::SPACES_SYSROOT, sysroot);
+            }
+        }
+
+        Some(format!("{target_path}/{path}"))
     }
 
     fn extract_tar_archive(
@@ -219,24 +243,6 @@ impl HttpArchive {
         let tar_contents = tar_contents_handle
             .join()
             .map_err(|_| anyhow_error!("Internal Error: Extract thread failed"))?;
-
-        let mut tar_archive_collect = tar::Archive::new(tar_contents.as_slice());
-        let entries_collect = tar_archive_collect.entries()?;
-
-        let mut all_files_in_archive = Vec::new();
-        for file in entries_collect {
-            if let Ok(file) = file {
-                let file_path = file.path()?;
-                all_files_in_archive.push(
-                    file_path
-                        .to_str()
-                        .ok_or(anyhow_error!("Internal Error: File is not a str"))?
-                        .to_string(),
-                );
-            }
-        }
-
-        progress.set_total(all_files_in_archive.len() as u64);
 
         let output_folder = self.get_path_to_extracted_files();
         if !std::path::Path::new(output_folder.as_str()).exists() {
@@ -786,7 +792,7 @@ mod tests {
 
     #[test]
     fn test_http_archive() {
-        let mut context = std::sync::Arc::new(context::Context::default());
+        let context = std::sync::Arc::new(context::Context::new().unwrap());
 
         let mut printer = context.printer.write().expect("Internal Error: No printer");
 

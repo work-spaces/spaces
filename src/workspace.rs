@@ -10,14 +10,6 @@ use crate::{
     manifest::{self, Dependency, Workspace, WorkspaceConfig},
 };
 
-fn get_current_directory() -> anyhow::Result<String> {
-    let current_directory = std::env::current_dir()?;
-    let current_directory_str = current_directory.to_str().ok_or(anyhow::anyhow!(
-        "Internal Error: Path is not a valid string"
-    ))?;
-    Ok(current_directory_str.to_string())
-}
-
 pub fn create(
     context: context::Context,
     space_name: &String,
@@ -35,8 +27,7 @@ pub fn create_from_config(
     config: WorkspaceConfig,
 ) -> anyhow::Result<()> {
     // don't create if we are in a .git repository
-    let current_directory = get_current_directory()
-        .with_context(|| format_error_context!("while creating workspace using {config:?}"))?;
+    let current_directory = context.current_directory.clone();
 
     {
         let path = std::path::Path::new(&current_directory);
@@ -55,11 +46,9 @@ pub fn create_from_config(
     let directory = format!("{current_directory}/{space_name}");
     let context = std::sync::Arc::new(context);
 
-    if !context.is_dry_run {
-        std::fs::create_dir(std::path::Path::new(space_name)).with_context(|| {
-            format_error_context!("When creating workspace {space_name} in current directory")
-        })?;
-    }
+    std::fs::create_dir(std::path::Path::new(space_name)).with_context(|| {
+        format_error_context!("When creating workspace {space_name} in current directory")
+    })?;
 
     let workspace = config.to_workspace(space_name).with_context(|| {
         format_error_context!("When creating workspace {space_name} from workspace config")
@@ -127,7 +116,7 @@ pub fn create_from_config(
 }
 
 pub fn sync(context: context::Context) -> anyhow::Result<()> {
-    let full_path = get_current_directory()?;
+    let full_path = context.current_directory.clone();
     let space_name = std::path::Path::new(&full_path)
         .file_name()
         .ok_or(anyhow_error!(
@@ -143,6 +132,7 @@ pub fn sync(context: context::Context) -> anyhow::Result<()> {
         space_name.to_string(),
         full_path,
     )?;
+
     state.sync_full_path()?;
     Ok(())
 }
@@ -407,7 +397,7 @@ impl State {
 
     fn get_new_deps(
         context: std::sync::Arc<context::Context>,
-        parent_spaces_key: &String,
+        parent_spaces_key: &str,
         spaces_deps: &manifest::Deps,
     ) -> anyhow::Result<Vec<SyncDep>> {
         let mut new_deps = Vec::new();
@@ -427,7 +417,7 @@ impl State {
             for (key, platform_archive) in map.iter() {
                 if let Some(archive) = platform_archive.get_archive() {
                     let effective_key = if key.starts_with(manifest::SPACES_OVERLAY) {
-                        key.replace(manifest::SPACES_OVERLAY, &parent_spaces_key)
+                        key.replace(manifest::SPACES_OVERLAY, parent_spaces_key)
                     } else {
                         key.to_owned()
                     };

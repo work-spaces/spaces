@@ -16,12 +16,14 @@ macro_rules! anyhow_error {
     }};
 }
 
-pub use format_error_context;
 pub use anyhow_error;
+pub use format_error_context;
 
 #[derive(Serialize)]
 pub struct Context {
     pub bare_store_base: String,
+    pub current_directory: String,
+    pub spaces_sysroot: Option<String>,
     #[serde(skip)]
     pub async_runtime: tokio::runtime::Runtime,
     #[serde(skip)]
@@ -29,8 +31,8 @@ pub struct Context {
     pub is_dry_run: bool,
 }
 
-impl Default for Context {
-    fn default() -> Self {
+impl Context {
+    pub fn new() -> anyhow::Result<Self> {
         let mut home_directory = home::home_dir().expect("No home directory found");
         home_directory.push(".spaces");
         home_directory.push("store");
@@ -49,19 +51,19 @@ impl Default for Context {
             .build()
             .expect("Internal Error: Failed to create async runtime");
 
-        Context {
+        let current_directory = std::env::current_dir()?;
+        let current_directory_str = current_directory.to_str().ok_or(anyhow::anyhow!(
+            "Internal Error: Path is not a valid string"
+        ))?;
+
+        Ok(Context {
             bare_store_base,
             async_runtime,
+            spaces_sysroot: None,
             printer: std::sync::RwLock::new(printer::Printer::new_stdout()),
             is_dry_run: false,
-        }
-    }
-}
-
-impl Context {
-    pub fn new() -> anyhow::Result<Self> {
-        let result = Context::default();
-        Ok(result)
+            current_directory: current_directory_str.to_string(),
+        })
     }
 
     pub fn get_bare_store_path(&self, name: &str) -> String {
