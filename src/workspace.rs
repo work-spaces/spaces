@@ -269,7 +269,7 @@ impl State {
                         self.sync_archive(multi_progress, spaces_key, http_archive)?
                     }
                     SyncDep::PlatformArchive(spaces_key, http_archive) => {
-                        self.sync_platform_archive(multi_progress, spaces_key, http_archive)?
+                        self.sync_archive(multi_progress, spaces_key, http_archive)?
                     }
                     SyncDep::BareRepository(spaces_key, dependency) => {
                         self.sync_bare_repository(multi_progress, spaces_key, dependency)?
@@ -362,7 +362,7 @@ impl State {
             http_archive.sync(context.clone(), full_path.as_str(), progress_bar)?;
 
             if let Some(deps) =
-                manifest::Deps::new(format!("{full_path}/{}", http_archive.spaces_key).as_str())?
+                manifest::Deps::new(http_archive.get_path_to_extracted_files().as_str())?
             {
                 new_deps.extend(Self::get_new_deps(
                     context.clone(),
@@ -372,24 +372,6 @@ impl State {
             }
 
             Ok::<_, anyhow::Error>(new_deps)
-        });
-
-        Ok(handle)
-    }
-
-    fn sync_platform_archive(
-        &self,
-        multi_progress: &mut printer::MultiProgress,
-        spaces_key: String,
-        mut http_archive: archive::HttpArchive,
-    ) -> anyhow::Result<std::thread::JoinHandle<Result<Vec<SyncDep>, anyhow::Error>>> {
-        let progress_bar = multi_progress.add_progress(&spaces_key, Some(100), None);
-        let context = self.context.clone();
-        let full_path = self.full_path.clone();
-
-        let handle = std::thread::spawn(move || {
-            http_archive.sync(context.clone(), full_path.as_str(), progress_bar)?;
-            Ok::<_, anyhow::Error>(Vec::new())
         });
 
         Ok(handle)

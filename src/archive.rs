@@ -42,7 +42,7 @@ impl HttpArchive {
         })
     }
 
-    fn get_path_to_extracted_files(&self) -> String {
+    pub fn get_path_to_extracted_files(&self) -> String {
         format!("{}_files", self.full_path_to_archive)
     }
 
