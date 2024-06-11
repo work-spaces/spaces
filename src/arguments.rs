@@ -1,4 +1,7 @@
-use crate::{git, manifest::{self, WorkspaceConfig}};
+use crate::{
+    git,
+    manifest::{self, WorkspaceConfig},
+};
 use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
@@ -33,7 +36,6 @@ pub struct Arguments {
     level: Option<Level>,
 }
 
-
 pub fn execute() -> anyhow::Result<()> {
     use crate::{archive, context::Context, ledger, workspace};
     let args = Arguments::parse();
@@ -45,16 +47,24 @@ pub fn execute() -> anyhow::Result<()> {
             level,
         } => {
             context.update_printer(level.map(|e| e.into()));
-            context.spaces_sysroot = Some(format!("{}/{}/sysroot", context.current_directory, name));
+            context.spaces_sysroot =
+                Some(format!("{}/{}/sysroot", context.current_directory, name));
             workspace::create(context, &name, &config)?;
         }
 
-        Arguments{
-            commands: Commands::CreateWorktree { name, git, branch, dev_branch },
+        Arguments {
+            commands:
+                Commands::CreateWorktree {
+                    name,
+                    git,
+                    branch,
+                    dev_branch,
+                },
             level,
         } => {
             context.update_printer(level.map(|e| e.into()));
-            context.spaces_sysroot = Some(format!("{}/{}/sysroot", context.current_directory, name));
+            context.spaces_sysroot =
+                Some(format!("{}/{}/sysroot", context.current_directory, name));
 
             let hash_key = git::BareRepository::get_workspace_name_from_url(&git)?;
 
@@ -71,7 +81,6 @@ pub fn execute() -> anyhow::Result<()> {
             };
 
             workspace::create_from_config(context, &name, config)?;
-
         }
 
         Arguments {
@@ -93,29 +102,11 @@ pub fn execute() -> anyhow::Result<()> {
             ledger.show_status(arc_context)?;
         }
         Arguments {
-            commands:
-                Commands::CreateArchive {
-                    name,
-                    path,
-                    macos_aarch64,
-                    macos_x86_64,
-                    windows_aarch64,
-                    windows_x86_64,
-                    linux_aarch64,
-                    linux_x86_64,
-                },
+            commands: Commands::CreateArchive {},
             level,
         } => {
             context.update_printer(level.map(|e| e.into()));
-            let executable_paths = archive::PlatformPaths {
-                macos_x86_64,
-                macos_aarch64,
-                windows_x86_64,
-                windows_aarch64,
-                linux_x86_64,
-                linux_aarch64,
-            };
-            archive::create(context, name, path, executable_paths)?;
+            archive::create(context, ".".to_string())?;
         }
         Arguments {
             commands: Commands::InspectArchive { path },
@@ -197,32 +188,8 @@ enum Commands {
     Sync {},
     /// Lists the workspaces in the spaces store on the local machine.
     List {},
-    CreateArchive {
-        /// The name of the archive to create (without .zip)
-        #[arg(long)]
-        name: String,
-        /// The path to the files to compress
-        #[arg(long)]
-        path: String,
-        /// Path to macos_x86_64 executables
-        #[arg(long)]
-        macos_x86_64: Option<String>,
-        /// Path to macos_aarch64 executables
-        #[arg(long)]
-        macos_aarch64: Option<String>,
-        /// Path to windows_x86_64 executables
-        #[arg(long)]
-        windows_x86_64: Option<String>,
-        /// Path to windows_aarch64 executables
-        #[arg(long)]
-        windows_aarch64: Option<String>,
-        /// Path to linux_x86_64 executables
-        #[arg(long)]
-        linux_x86_64: Option<String>,
-        /// Path to linux_aarch64 executables
-        #[arg(long)]
-        linux_aarch64: Option<String>,
-    },
+    /// Create an archive using spaces_create_archive.toml in the current directory.
+    CreateArchive {},
     InspectArchive {
         /// The path of the .zip archive to inspect
         #[arg(long)]

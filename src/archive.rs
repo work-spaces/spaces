@@ -468,15 +468,6 @@ impl HttpArchive {
     }
 }
 
-pub struct PlatformPaths {
-    pub macos_x86_64: Option<String>,
-    pub macos_aarch64: Option<String>,
-    pub windows_x86_64: Option<String>,
-    pub windows_aarch64: Option<String>,
-    pub linux_x86_64: Option<String>,
-    pub linux_aarch64: Option<String>,
-}
-
 fn create_platform_archive(
     progress: &mut printer::MultiProgressBar,
     name: &str,
@@ -532,42 +523,41 @@ fn create_platform_archive(
 }
 
 fn create_platform_archives(
-    name: &str,
     multi_progress: &mut printer::MultiProgress,
     config: &manifest::CreateArchive,
-    platform_paths: PlatformPaths,
 ) -> anyhow::Result<()> {
-    let mut deps = manifest::Deps::new(config.path.as_str())?
+    let mut deps = manifest::Deps::new(config.input.as_str())?
         .ok_or(anyhow_error!("no need to create platform archives"))
-        .with_context(|| format_error_context!("while looking at deps in {name}"))?;
+        .with_context(|| format_error_context!("while looking at deps in {}", config.output))?;
 
     let overlay_archive = deps
         .platform_archives
         .as_mut()
-        .and_then(|e| e.get_mut(manifest::SPACES_OVERLAY))
+        .and_then(|e| e.get_mut(&config.platform_archives))
         .ok_or(anyhow_error!(
-            "deps {name} does not have a {}",
-            manifest::SPACES_OVERLAY
+            "deps {} does not have a {}",
+            config.output,
+            config.platform_archives
         ))?;
 
     let mut handles = Vec::new();
     let combinations = &[
-        (platform_paths.macos_x86_64, manifest::Platform::MacosX86_64),
+        (config.macos_x86_64.clone(), manifest::Platform::MacosX86_64),
         (
-            platform_paths.macos_aarch64,
+            config.macos_aarch64.clone(),
             manifest::Platform::MacosAarch64,
         ),
         (
-            platform_paths.windows_x86_64,
+            config.windows_x86_64.clone(),
             manifest::Platform::WindowsX86_64,
         ),
         (
-            platform_paths.windows_aarch64,
+            config.windows_aarch64.clone(),
             manifest::Platform::WindowsAarch64,
         ),
-        (platform_paths.linux_x86_64, manifest::Platform::LinuxX86_64),
+        (config.linux_x86_64.clone(), manifest::Platform::LinuxX86_64),
         (
-            platform_paths.linux_aarch64,
+            config.linux_aarch64.clone(),
             manifest::Platform::LinuxX86_64,
         ),
     ];
@@ -591,7 +581,7 @@ fn create_platform_archives(
 
             let platform = *platform;
             let path = path.to_owned();
-            let name = name.to_owned();
+            let name = config.output.to_owned();
 
             let handle = std::thread::spawn(move || {
                 let result = create_platform_archive(
@@ -621,23 +611,18 @@ fn create_platform_archives(
         }
     }
 
-    deps.save(config.path.as_str()).with_context(|| {
-        format_error_context!("Failed to save overlay deps for {}", config.path)
+    deps.save(config.input.as_str()).with_context(|| {
+        format_error_context!("Failed to save overlay deps for {}", config.input)
     })?;
 
     Ok(())
 }
 
-pub fn create(
-    context: context::Context,
-    name: String,
-    config_path: String,
-    platform_paths: PlatformPaths,
-) -> anyhow::Result<()> {
+pub fn create(context: context::Context, config_path: String) -> anyhow::Result<()> {
     let config = manifest::CreateArchive::new(&config_path)
         .with_context(|| format_error_context!("While loading config path {config_path}"))?;
 
-    let walk_dir: Vec<_> = walkdir::WalkDir::new(config.path.as_str())
+    let walk_dir: Vec<_> = walkdir::WalkDir::new(config.input.as_str())
         .into_iter()
         .filter_map(|entry| entry.ok())
         .collect();
@@ -647,11 +632,11 @@ pub fn create(
         .write()
         .expect("Internal Error: Printer is not set");
 
-    let arhive_name = format!("{name}.zip");
+    let arhive_name = format!("{}.zip", config.output);
 
     {
         let mut multi_progress = printer::MultiProgress::new(&mut printer);
-        create_platform_archives(name.as_str(), &mut multi_progress, &config, platform_paths)?;
+        create_platform_archives(&mut multi_progress, &config)?;
     }
 
     {
@@ -663,18 +648,21 @@ pub fn create(
 
         let walk_dir_list = walk_dir.iter().collect::<Vec<_>>();
 
-        let mut progress =
-            multi_progress.add_progress(name.as_str(), Some(walk_dir_list.len() as u64), None);
+        let mut progress = multi_progress.add_progress(
+            config.output.as_str(),
+            Some(walk_dir_list.len() as u64),
+            None,
+        );
 
         for entry in walk_dir_list {
             if entry.file_type().is_file() {
                 let relative_path = entry
                     .path()
-                    .strip_prefix(config.path.as_str())
+                    .strip_prefix(config.input.as_str())
                     .with_context(|| {
                         format_error_context!(
                             "Internal error: {:?} not stripped from {entry:?}",
-                            config.path
+                            config.input
                         )
                     })?;
                 let relative_path_string = relative_path.to_str().with_context(|| {
@@ -684,7 +672,7 @@ pub fn create(
                 progress.set_message(relative_path_string);
                 let full_path = entry.path();
 
-                let file_contents = if let Some(files) = config.files.as_ref() {
+                let file_contents = if let Some(files) = config.executables.as_ref() {
                     let is_executable = files
                         .iter()
                         .any(|entry| entry.as_str() == relative_path_string);
@@ -726,7 +714,7 @@ pub fn create(
 
     let contents = std::fs::read(arhive_name.as_str())?;
     let digest = sha256::digest(contents);
-    printer.info(name.as_str(), &digest)?;
+    printer.info(config.output.as_str(), &digest)?;
 
     Ok(())
 }

@@ -103,12 +103,21 @@ impl Dependency {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateArchive {
-    pub path: String,
-    pub files: Option<Vec<String>>,
+    pub input: String,
+    pub output: String,
+    pub platform_archives: String,
+    pub executables: Option<Vec<String>>,
+    pub macos_x86_64: Option<String>,
+    pub macos_aarch64: Option<String>,
+    pub windows_x86_64: Option<String>,
+    pub windows_aarch64: Option<String>,
+    pub linux_x86_64: Option<String>,
+    pub linux_aarch64: Option<String>,
+
 }
 
 impl CreateArchive {
-    const FILE_NAME: &'static str = "spaces_executables.toml";
+    const FILE_NAME: &'static str = "spaces_create_archive.toml";
 
     pub fn new(path: &str) -> anyhow::Result<Self> {
         let file_path = format!("{path}/{}", Self::FILE_NAME); //change to spaces_dependencies.toml
