@@ -142,6 +142,8 @@ enum SyncDep {
     Repository(BareRepository, Dependency),
     Archive(String, archive::HttpArchive),
     PlatformArchive(String, archive::HttpArchive),
+    VsCode(String, manifest::VsCodeConfig),
+    Asset(String, HashMap<String, manifest::WorkspaceAsset>),
 }
 
 struct State {
@@ -266,13 +268,13 @@ impl State {
             if let Some(next_dep) = self.all_deps.pop_back() {
                 let handle = match next_dep {
                     SyncDep::Archive(spaces_key, http_archive) => {
-                        self.sync_archive(multi_progress, spaces_key, http_archive)?
+                        Some(self.sync_archive(multi_progress, spaces_key, http_archive)?)
                     }
                     SyncDep::PlatformArchive(spaces_key, http_archive) => {
-                        self.sync_archive(multi_progress, spaces_key, http_archive)?
+                        Some(self.sync_archive(multi_progress, spaces_key, http_archive)?)
                     }
                     SyncDep::BareRepository(spaces_key, dependency) => {
-                        self.sync_bare_repository(multi_progress, spaces_key, dependency)?
+                        Some(self.sync_bare_repository(multi_progress, spaces_key, dependency)?)
                     }
                     SyncDep::Repository(bare_repository, dependency) => {
                         if !self
@@ -285,11 +287,28 @@ impl State {
                                 .insert(bare_repository.spaces_key.clone(), dependency.clone());
                         }
 
-                        self.sync_dependency(multi_progress, bare_repository, dependency)?
+                        Some(self.sync_dependency(multi_progress, bare_repository, dependency)?)
+                    }
+                    SyncDep::VsCode(_spaces_key, config) => {
+                        config.apply(self.full_path.as_str())?;
+                        None
+                    }
+                    SyncDep::Asset(spaces_key, asset_map) => {
+                        for (key, asset) in asset_map.iter() {
+                            asset
+                                .apply(self.full_path.as_str(), spaces_key.as_str(), key.as_str())
+                                .with_context(|| {
+                                    format_error_context!("while apply workspace asset {asset:?} from {}/{}", spaces_key, key)
+                                })?;
+                        }
+
+                        None
                     }
                 };
 
-                handles.push(Some(handle));
+                if let Some(handle) = handle {
+                    handles.push(Some(handle));
+                }
             } else {
                 let mut all_finished = true;
                 for handle_option in handles.iter_mut() {
@@ -459,40 +478,12 @@ impl State {
                     &spaces_deps,
                 )?);
 
-                if let Some(asset_map) = spaces_deps.assets {
-                    for (key, asset) in asset_map.iter() {
-                        let path = format!("{}/{key}", worktree.full_path);
-                        let dest_path = format!("{full_path}/{}", asset.path);
+                if let Some(vscode) = spaces_deps.vscode {
+                    new_deps.push(SyncDep::VsCode(parent_spaces_key.clone(), vscode));
+                }
 
-                        match asset.type_ {
-                            manifest::AssetType::HardLink => {
-                                if std::path::Path::new(dest_path.as_str()).exists() {
-                                    std::fs::remove_file(dest_path.as_str()).with_context(
-                                        || format_error_context!("While removing {dest_path}"),
-                                    )?;
-                                }
-                                std::fs::hard_link(path.as_str(), dest_path.as_str())
-                                    .with_context(|| {
-                                        format_error_context!(
-                                            "While creating hard link from {path} to {dest_path}"
-                                        )
-                                    })?;
-                            }
-                            manifest::AssetType::Template => {
-                                let contents =
-                                    std::fs::read_to_string(&path).with_context(|| {
-                                        format_error_context!("While reading {path}")
-                                    })?;
-
-                                // do the substitutions
-
-                                // create a copy
-                                std::fs::write(dest_path.as_str(), contents).with_context(
-                                    || format_error_context!("While writing to {dest_path}"),
-                                )?;
-                            }
-                        }
-                    }
+                if let Some(assets) = spaces_deps.assets {
+                    new_deps.push(SyncDep::Asset(parent_spaces_key.clone(), assets));
                 }
             }
 

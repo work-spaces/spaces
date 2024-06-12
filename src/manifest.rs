@@ -2,8 +2,7 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::format_error_context;
-
+use crate::{anyhow_error, format_error_context};
 
 pub const SPACES_OVERLAY: &str = "{SPACES_OVERLAY}";
 pub const SPACE: &str = "{SPACE}";
@@ -113,7 +112,6 @@ pub struct CreateArchive {
     pub windows_aarch64: Option<String>,
     pub linux_x86_64: Option<String>,
     pub linux_aarch64: Option<String>,
-
 }
 
 impl CreateArchive {
@@ -227,17 +225,52 @@ impl PlatformArchive {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum AssetType {
     HardLink,
     Template,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WorkspaceAsset {
     pub path: String,
     #[serde(rename = "type")]
     pub type_: AssetType,
+}
+
+impl WorkspaceAsset {
+    pub fn apply(
+        &self,
+        workspace_path: &str,
+        dependency_name: &str,
+        key: &str,
+    ) -> anyhow::Result<()> {
+        let path = format!("{workspace_path}/{dependency_name}/{key}");
+        let dest_path = format!("{workspace_path}/{}", self.path);
+
+        match self.type_ {
+            AssetType::HardLink => {
+                if std::path::Path::new(dest_path.as_str()).exists() {
+                    std::fs::remove_file(dest_path.as_str())
+                        .with_context(|| format_error_context!("While removing {dest_path}"))?;
+                }
+                std::fs::hard_link(path.as_str(), dest_path.as_str()).with_context(|| {
+                    format_error_context!("While creating hard link from {path} to {dest_path}")
+                })?;
+            }
+            AssetType::Template => {
+                let contents = std::fs::read_to_string(&path)
+                    .with_context(|| format_error_context!("While reading {path}"))?;
+
+                // do the substitutions
+
+                // create a copy
+                std::fs::write(dest_path.as_str(), contents)
+                    .with_context(|| format_error_context!("While writing to {dest_path}"))?;
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -246,6 +279,7 @@ pub struct Deps {
     pub archives: Option<HashMap<String, Archive>>,
     pub platform_archives: Option<HashMap<String, PlatformArchive>>,
     pub assets: Option<HashMap<String, WorkspaceAsset>>,
+    pub vscode: Option<VsCodeConfig>,
 }
 
 impl Deps {
@@ -319,7 +353,7 @@ impl BuckConfig {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct VsCodeTask {
     #[serde(rename = "type")]
     pub type_: String,
@@ -327,21 +361,144 @@ pub struct VsCodeTask {
     #[serde(rename = "problemMatcher")]
     pub problem_matcher: Vec<String>,
     pub arguments: Vec<String>,
+    pub options: HashMap<String, String>,
     pub label: String,
     pub group: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct VsCodeConfig {
-    tasks: Vec<VsCodeTask>,
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct VsCodeExtensions {
+    pub recommendations: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct VsCodeConfig {
+    tasks: Option<Vec<VsCodeTask>>,
+    settings: Option<HashMap<String, toml::Value>>,
+    extensions: Option<VsCodeExtensions>,
+}
+
+impl VsCodeConfig {
+    fn load_json_file(
+        path: &str,
+        default_value: serde_json::Value,
+    ) -> anyhow::Result<serde_json::Value> {
+        let contents = std::fs::read(path);
+        let result = if let Ok(contents) = contents {
+            serde_json::from_slice(&contents)
+                .with_context(|| format_error_context!("failed to parse {path} as JSON"))?
+        } else {
+            default_value
+        };
+        Ok(result)
+    }
+
+    fn save_json_file(path: &str, value: serde_json::Value) -> anyhow::Result<()> {
+        let contents = serde_json::to_string_pretty(&value)
+            .with_context(|| format_error_context!("failed to serialize JSON to {path}"))?;
+        std::fs::write(path, contents)
+            .with_context(|| format_error_context!("failed to write JSON to {path}"))?;
+        Ok(())
+    }
+
+    pub fn apply(&self, workspace_path: &str) -> anyhow::Result<()> {
+        let vs_code_directory = format!("{workspace_path}/.vscode");
+        std::fs::create_dir_all(vs_code_directory.as_str()).with_context(|| {
+            format_error_context!("failed to create director {vs_code_directory}")
+        })?;
+
+        if let Some(own_tasks) = self.tasks.as_ref() {
+            let tasks_file = format!("{vs_code_directory}/tasks.json");
+            let mut tasks = Self::load_json_file(
+                tasks_file.as_str(),
+                serde_json::json!({
+                    "version": "2.0.0",
+                    "tasks": []
+                }),
+            )
+            .with_context(|| format_error_context!("while loading {tasks_file}"))?;
+
+            let tasks_list = tasks
+                .as_object_mut()
+                .and_then(|e| e.get_mut("tasks"))
+                .and_then(|e| e.as_array_mut())
+                .ok_or(anyhow::anyhow!(
+                    "Failed to get tasks from {tasks_file} JSON object"
+                ))?;
+
+            for task in own_tasks.iter() {
+                let entry = serde_json::to_value(task).with_context(|| {
+                    format_error_context!("Internal Error: failed to serialize task {task:?}")
+                })?;
+                tasks_list.push(entry);
+            }
+
+            Self::save_json_file(tasks_file.as_str(), tasks)
+                .with_context(|| format_error_context!("while saving {tasks_file}"))?;
+        }
+
+        if let Some(own_settings) = self.settings.as_ref() {
+            let settings_file = format!("{vs_code_directory}/settings.json");
+            let mut settings = Self::load_json_file(settings_file.as_str(), serde_json::json!({}))
+                .with_context(|| format_error_context!("while loading {settings_file}"))?;
+
+            let settings_object = settings.as_object_mut().ok_or(anyhow::anyhow!(
+                "Failed to get settings from {settings_file} JSON object"
+            ))?;
+
+            for (key, value) in own_settings {
+                let json_value = serde_json::to_value(value).with_context(|| {
+                    format_error_context!("toml value {value:?} cannot be converted to JSON")
+                })?;
+
+                settings_object.insert(key.clone(), json_value);
+            }
+            Self::save_json_file(settings_file.as_str(), settings)
+                .with_context(|| format_error_context!("while saving {settings_file}"))?;
+        }
+
+        if let Some(own_extensions) = self.extensions.as_ref() {
+            let extensions_file = format!("{vs_code_directory}/extensions.json");
+            let mut extensions = Self::load_json_file(
+                extensions_file.as_str(),
+                serde_json::json!({"recommendations": []}),
+            )
+            .with_context(|| format_error_context!("while loading {extensions_file}"))?;
+
+            let extensions_object = extensions.as_object_mut().ok_or(anyhow_error!(
+                "Failed to get extensions from {extensions_file} JSON object"
+            ))?;
+            if !extensions_object.contains_key("recommendations") {
+                extensions_object.insert("recommendations".to_string(), serde_json::json!({}));
+            }
+
+            let recommendations_array = extensions_object
+                .get_mut("recommendations")
+                .and_then(|e| e.as_array_mut())
+                .ok_or(anyhow_error!(
+                "Internl Erorr: Failed to get recommendations from {extensions_file} JSON object"
+            ))?;
+
+            for value in own_extensions.recommendations.iter() {
+                let value = serde_json::Value::String(value.clone());
+                if !recommendations_array.contains(&value) {
+                    recommendations_array.push(value);
+                }
+            }
+
+            Self::save_json_file(&extensions_file, extensions)
+                .with_context(|| format_error_context!("while saving {extensions_file}"))?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WorkspaceConfigSettings {
     pub branch: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
 pub struct WorkspaceConfig {
     pub repositories: HashMap<String, Dependency>,
     pub buck: Option<BuckConfig>,
@@ -408,6 +565,8 @@ impl WorkspaceConfig {
             buck: self.buck.clone(),
             cargo: self.cargo.clone(),
             dependencies: HashMap::new(),
+            assets: None,
+            vscode: self.vscode.clone(),
         })
     }
 }
@@ -418,6 +577,8 @@ pub struct Workspace {
     pub dependencies: HashMap<String, Dependency>,
     pub buck: Option<BuckConfig>,
     pub cargo: Option<CargoConfig>,
+    pub assets: Option<HashMap<String, WorkspaceAsset>>,
+    pub vscode: Option<VsCodeConfig>,
 }
 
 impl Workspace {
