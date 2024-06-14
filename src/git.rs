@@ -110,6 +110,16 @@ impl BareRepository {
                 "--filter=blob:none".to_string(),
                 url.to_string(),
             ];
+            
+            progress_bar
+                .execute_process("git", &options)
+                .with_context(|| {
+                    format_error_context!(
+                        "failed to run {}",
+                        options.get_full_command_in_working_directory("git")
+                    )
+                })?;
+
 
             Self::configure_repository(progress_bar, full_path.as_str()).with_context(|| {
                 format_error_context!("failed to configure {full_path} after bare clone")

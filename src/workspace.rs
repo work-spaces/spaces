@@ -215,6 +215,12 @@ impl State {
         self.update_cargo(&mut multi_progress)
             .with_context(|| format_error_context!("While updating cargo"))?;
 
+        if let Some(vscode) = self.workspace.vscode.as_ref() {
+            vscode.apply(&self.full_path).with_context(|| {
+                format_error_context!("While applying VS code for {}", self.full_path)
+            })?;
+        }
+
         self.workspace.save(&self.full_path).with_context(|| {
             format_error_context!("While saving workspace in {}", self.full_path)
         })?;

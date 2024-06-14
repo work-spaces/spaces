@@ -10,7 +10,7 @@ Consider the file `config/develop_spaces.toml`:
 
 ```toml
 [settings]
-branch = "user/{USER}/{SPACE}-{UNIQUE}"
+branch = "{SPACE}-{UNIQUE}"
 
 [vscode.extensions]
 recommendations = ["rust-lang.rust-analyzer"]
@@ -19,8 +19,8 @@ recommendations = ["rust-lang.rust-analyzer"]
 "editor.formatOnSave" = true
 
 [repositories]
-spaces = { git = "https://github.com/tyler-gilbert/spaces", branch = "main" }
-printer = { git = "https://github.com/tyler-gilbert/printer-rs", branch = "main" }
+spaces = { git = "https://github.com/tyler-gilbert/spaces", branch = "development" }
+printer = { git = "https://github.com/tyler-gilbert/printer-rs", branch = "development" }
 
 [cargo.patches]
 spaces = ["printer"]
@@ -45,6 +45,19 @@ This will create:
   - .config/cargo.toml
   - spaces
   - printer-rs
+
+## Contributing
+
+Install the latest version to `spaces`.
+
+```sh
+git clone https://github.com/work-spaces/workflows
+spaces create --name=spaces-my-issue --config=workflows=spaces_develop.toml
+```
+
+Open the `spaces-my-issue` folder in VSCode (or your editor of choice) and start editing.
+
+When you are ready, create a PR and request to merge to the `development` branch.
 
 
 
