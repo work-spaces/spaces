@@ -132,15 +132,7 @@ pub fn create_from_config(
 
 pub fn sync(context: context::Context) -> anyhow::Result<()> {
     let full_path = context.current_directory.clone();
-    let space_name = std::path::Path::new(&full_path)
-        .file_name()
-        .ok_or(anyhow_error!(
-            "{full_path} directory is not a space workspace"
-        ))?
-        .to_str()
-        .ok_or(anyhow_error!(
-            "{full_path} directory is not a space workspace"
-        ))?;
+    let space_name = context::get_workspace_name(full_path.as_str()).with_context(|| format_error_context!("while syncing worksapce {full_path}"))?;
 
     let mut state = State::new(
         std::sync::Arc::new(context),

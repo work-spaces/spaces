@@ -206,7 +206,9 @@ impl HttpArchive {
 
         if let Some(add_prefix) = self.archive.add_prefix.as_ref() {
             if let (sysroot, true) = (
-                self.context.get_sysroot().expect("Internal Error: sysroot not set"),
+                self.context
+                    .get_sysroot()
+                    .expect("Internal Error: sysroot not set"),
                 add_prefix.starts_with(manifest::SPACES_SYSROOT),
             ) {
                 target_path = add_prefix.replace(manifest::SPACES_SYSROOT, sysroot.as_str());
@@ -769,6 +771,67 @@ pub fn inspect(context: context::Context, path: String) -> anyhow::Result<()> {
     }
 
     printer.info("files", &files)?;
+
+    Ok(())
+}
+
+pub fn create_binary_archive(
+    context: context::Context,
+    input: String,
+    output: String,
+    name: String,
+    version: String,
+) -> anyhow::Result<()> {
+    let mut printer = context
+        .printer
+        .write()
+        .expect("Internal Error: Printer is not set");
+
+    let platform = manifest::Platform::get_platform()
+        .ok_or(anyhow_error!("This platform is not supported"))?;
+
+    let destination = format!("{output}/{name}-v{version}-{platform}.zip");
+
+    if !std::path::Path::new(output.as_str()).exists() {
+        return Err(anyhow_error!("Output directory {output} does not exist"));
+    }
+
+    {
+        let file_contents = std::fs::read(input.as_str())
+            .with_context(|| format_error_context!("failed to read input file {input}"))?;
+
+        let input_path = std::path::Path::new(input.as_str());
+        let input_file_name = input_path
+            .file_name()
+            .ok_or(anyhow_error!("Can't file a file name for {input}"))?
+            .to_string_lossy();
+
+        let mut archive = zip::ZipWriter::new(
+            std::fs::File::create(destination.as_str())
+                .with_context(|| format_error_context!("while creating {destination}"))?,
+        );
+
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated)
+            .unix_permissions(0o755);
+
+        archive
+            .start_file(input_file_name.to_owned(), options)
+            .with_context(|| format_error_context!("Failed to start archive file {input}"))?;
+
+        use std::io::Write;
+        archive
+            .write_all(file_contents.as_slice())
+            .with_context(|| {
+                format_error_context!("Failed to write contents of archive file {input}")
+            })?;
+
+        archive.finish()?;
+    }
+
+    let contents = std::fs::read(destination.as_str())?;
+    let digest = sha256::digest(contents);
+    printer.info(&destination, &digest)?;
 
     Ok(())
 }

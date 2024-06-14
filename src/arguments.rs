@@ -1,5 +1,5 @@
 use crate::{
-    context, format_error_context, git,
+    action, context, format_error_context, git,
     manifest::{self, WorkspaceConfig},
 };
 use anyhow::Context;
@@ -93,6 +93,36 @@ pub fn execute() -> anyhow::Result<()> {
         }
 
         Arguments {
+            commands: Commands::RunAction { name },
+            level,
+        } => {
+            context.update_printer(level.map(|e| e.into()));
+            context
+                .update_substitution(
+                    context::SPACES_SYSROOT,
+                    format!("{}/sysroot", context.current_directory).as_str(),
+                )
+                .with_context(|| format_error_context!("Internal error"))?;
+
+            action::run_action(context, name.clone())
+                .with_context(|| format_error_context!("while running action {name}"))?;
+        }
+
+        Arguments {
+            commands: Commands::ShowActions {},
+            level,
+        } => {
+            context.update_printer(level.map(|e| e.into()));
+            context
+                .update_substitution(
+                    context::SPACES_SYSROOT,
+                    format!("{}/sysroot", context.current_directory).as_str(),
+                )
+                .with_context(|| format_error_context!("Internal error"))?;
+            action::show_actions(context)?;
+        }
+
+        Arguments {
             commands: Commands::Sync {},
             level,
         } => {
@@ -112,9 +142,26 @@ pub fn execute() -> anyhow::Result<()> {
         } => {
             context.update_printer(level.map(|e| e.into()));
             let arc_context = std::sync::Arc::new(context);
-            let ledger = ledger::Ledger::new(arc_context.clone())?;
+            let ledger = ledger::Ledger::new(arc_context.clone())
+                .with_context(|| format_error_context!("while creating ledger"))?;
             ledger.show_status(arc_context)?;
         }
+
+        Arguments {
+            commands:
+                Commands::CreateBinaryArchive {
+                    input,
+                    output,
+                    name,
+                    version,
+                },
+            level,
+        } => {
+            context.update_printer(level.map(|e| e.into()));
+            archive::create_binary_archive(context, input, output, name, version)
+                .with_context(|| format_error_context!("while creating binary archive"))?;
+        }
+
         Arguments {
             commands: Commands::CreateArchive {},
             level,
@@ -185,7 +232,7 @@ impl From<Platform> for manifest::Platform {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    /// Creates a new workspace
+    /// Creates a new workspace using a workspace configuration file.
     Create {
         /// The name of the workspace
         #[arg(long)]
@@ -209,12 +256,35 @@ enum Commands {
         #[arg(long)]
         dev_branch: Option<String>,
     },
-    /// Synchronize the current workspace. This is useful if you modify the workspace after creating it.
+    /// Synchronizes the current workspace.
     Sync {},
+    /// Execute configure steps.
+    RunAction {
+        /// The name of the build step. Execute all by default.
+        #[arg(long)]
+        name: String,
+    },
+    /// Shows the actions available in the current workspace.
+    ShowActions {},
     /// Lists the workspaces in the spaces store on the local machine.
     List {},
-    /// Create an archive using spaces_create_archive.toml in the current directory.
+    /// Creates an archive using spaces_create_archive.toml in the current directory.
     CreateArchive {},
+    /// Creates an archive using spaces_create_archive.toml in the current directory.
+    CreateBinaryArchive {
+        /// The path of the binary to archive
+        #[arg(long)]
+        input: String,
+        /// The path to the output directory
+        #[arg(long)]
+        output: String,
+        /// The name of the output archive
+        #[arg(long)]
+        name: String,
+        /// The version of the output
+        #[arg(long)]
+        version: String,
+    },
     /// Inspect the contents of a .zip archive created by spaces.
     InspectArchive {
         /// The path of the .zip archive to inspect

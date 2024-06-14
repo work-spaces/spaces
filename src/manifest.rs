@@ -155,6 +155,31 @@ pub enum Platform {
     LinuxAarch64,
 }
 
+impl Platform {
+    pub fn get_platform() -> Option<Platform> {
+        if cfg!(target_os = "macos") {
+            if cfg!(target_arch = "x86_64") {
+                return Some(Self::MacosX86_64);
+            } else if cfg!(target_arch = "aarch64") {
+                return Some(Self::MacosAarch64);
+            }
+        } else if cfg!(target_os = "windows") {
+            if cfg!(target_arch = "x86_64") {
+                return Some(Self::WindowsX86_64);
+            } else if cfg!(target_arch = "aarch64") {
+                return Some(Self::WindowsAarch64);
+            }
+        } else if cfg!(target_os = "linux") {
+            if cfg!(target_arch = "x86_64") {
+                return Some(Self::LinuxX86_64);
+            } else if cfg!(target_arch = "aarch64") {
+                return Some(Self::LinuxAarch64);
+            }
+        }
+        None
+    }
+}
+
 impl std::fmt::Display for Platform {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -180,26 +205,11 @@ pub struct PlatformArchive {
 
 impl PlatformArchive {
     pub fn get_archive(&self) -> Option<Archive> {
-        if cfg!(target_os = "macos") {
-            if cfg!(target_arch = "x86_64") {
-                return self.macos_x86_64.clone();
-            } else if cfg!(target_arch = "aarch64") {
-                return self.macos_aarch64.clone();
-            }
-        } else if cfg!(target_os = "windows") {
-            if cfg!(target_arch = "x86_64") {
-                return self.windows_x86_64.clone();
-            } else if cfg!(target_arch = "aarch64") {
-                return self.windows_aarch64.clone();
-            }
-        } else if cfg!(target_os = "linux") {
-            if cfg!(target_arch = "x86_64") {
-                return self.linux_x86_64.clone();
-            } else if cfg!(target_arch = "aarch64") {
-                return self.linux_aarch64.clone();
-            }
+        if let Some(platform) = Platform::get_platform() {
+            self.get_archive_from_platform(platform)
+        } else {
+            None
         }
-        None
     }
 
     pub fn get_archive_from_platform(&self, platform: Platform) -> Option<Archive> {
@@ -505,6 +515,7 @@ pub struct WorkspaceConfig {
     pub cargo: Option<CargoConfig>,
     pub settings: Option<WorkspaceConfigSettings>,
     pub vscode: Option<VsCodeConfig>,
+    pub actions: Option<HashMap<String, Vec<Action>>>,
 }
 
 impl WorkspaceConfig {
@@ -567,8 +578,19 @@ impl WorkspaceConfig {
             dependencies: HashMap::new(),
             assets: None,
             vscode: self.vscode.clone(),
+            actions: self.actions.clone(),
         })
     }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Action {
+    pub name: String,
+    pub command: String,
+    pub arguments: Option<Vec<String>>,
+    pub environment: Option<HashMap<String, String>>,
+    pub working_directory: Option<String>,
+    pub display: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -579,6 +601,7 @@ pub struct Workspace {
     pub cargo: Option<CargoConfig>,
     pub assets: Option<HashMap<String, WorkspaceAsset>>,
     pub vscode: Option<VsCodeConfig>,
+    pub actions: Option<HashMap<String, Vec<Action>>>,
 }
 
 impl Workspace {
