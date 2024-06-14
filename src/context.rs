@@ -16,19 +16,32 @@ macro_rules! anyhow_error {
     }};
 }
 
+pub const SPACES_OVERLAY: &str = "{SPACES_OVERLAY}";
+pub const SPACE: &str = "{SPACE}";
+pub const USER: &str = "{USER}";
+pub const UNIQUE: &str = "{UNIQUE}";
+pub const SPACES_SYSROOT: &str = "{SPACES_SYSROOT}";
+pub const SPACES_PATH: &str = "{SPACES_PATH}";
+pub const SPACES_BRANCH: &str = "{SPACES_BRANCH}";
+
 pub use anyhow_error;
 pub use format_error_context;
+
+#[derive(Serialize)]
+pub struct Substitution {
+    pub template_value: String,
+    pub replacement_value: String,
+}
 
 #[derive(Serialize)]
 pub struct Context {
     pub bare_store_base: String,
     pub current_directory: String,
-    pub spaces_sysroot: Option<String>,
     #[serde(skip)]
     pub async_runtime: tokio::runtime::Runtime,
     #[serde(skip)]
     pub printer: std::sync::RwLock<printer::Printer>,
-    pub is_dry_run: bool,
+    pub substitutions: std::collections::HashMap<&'static str, (Option<String>, &'static str)>,
 }
 
 impl Context {
@@ -56,13 +69,31 @@ impl Context {
             "Internal Error: Path is not a valid string"
         ))?;
 
+        let user = std::env::var("USER").ok();
+       
+        let unique_timestamp = format!(
+            "{}",
+            std::time::Instant::now().elapsed().as_nanos()
+        );
+        let unique_sha256 = sha256::digest(unique_timestamp.as_bytes());
+        let unique = unique_sha256.as_str()[0..8].to_string();
+
+        let substitutions = maplit::hashmap! {
+            SPACE => (None, "Name of the space being created or sync'd"),
+            SPACES_BRANCH => (None, "The name of the development branch for repositories in the space"),
+            SPACES_SYSROOT => (None, "The path to the space's sysroot directory"),
+            SPACES_OVERLAY => (None, "The name of the repository or dependency containing the substitution value"),
+            SPACES_PATH => (Self::get_spaces_path(), "Parent directory of the spaces binary found in the PATH"),
+            UNIQUE => (Some(unique), "A unique 8-character identifier generated from a timestamp"),
+            USER => (user, "Value of USER in env"),
+        };
+
         Ok(Context {
             bare_store_base,
             async_runtime,
-            spaces_sysroot: None,
             printer: std::sync::RwLock::new(printer::Printer::new_stdout()),
-            is_dry_run: false,
             current_directory: current_directory_str.to_string(),
+            substitutions,
         })
     }
 
@@ -77,5 +108,25 @@ impl Context {
         if let (Some(level), Ok(mut printer)) = (level, self.printer.write()) {
             printer.level = level;
         }
+    }
+
+    pub fn update_substitution(&mut self, key: &str, next_value: &str) -> anyhow::Result<()> {
+        if let Some((current_value, _)) = self.substitutions.get_mut(key) {
+            *current_value = Some(next_value.to_owned());
+        } else {
+            return Err(anyhow_error!("Invalid substitution key: {}", key));
+        }
+        Ok(())
+    }
+
+    pub fn get_sysroot(&self) -> anyhow::Result<&String> {
+        let (value, _description) = self.substitutions.get(SPACES_SYSROOT).ok_or(anyhow_error!("Internal Error: SPACES_SYSROOT not found in map"))?;
+        value.as_ref().ok_or(anyhow_error!("Internal Error: SPACES_SYSROOT not set"))
+    }
+
+    fn get_spaces_path() -> Option<String> {
+        let path = which::which("spaces").ok()?;
+        let parent = path.parent()?;
+        Some(parent.to_string_lossy().to_string())
     }
 }

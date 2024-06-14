@@ -31,6 +31,20 @@
 			],
 			"group": "build",
 			"label": "spaces:install"
+		},
+		{
+			"type": "cargo",
+			"command": "install",
+			"args": [
+				"--path=.",
+				"--root=${userHome}/.local",
+				"--profile=dev"
+			],
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "build",
+			"label": "spaces:install_dev"
 		}
 	]
 }

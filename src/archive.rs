@@ -205,11 +205,11 @@ impl HttpArchive {
         let mut target_path = target_path.to_owned();
 
         if let Some(add_prefix) = self.archive.add_prefix.as_ref() {
-            if let (Some(sysroot), true) = (
-                self.context.spaces_sysroot.as_ref(),
+            if let (sysroot, true) = (
+                self.context.get_sysroot().expect("Internal Error: sysroot not set"),
                 add_prefix.starts_with(manifest::SPACES_SYSROOT),
             ) {
-                target_path = add_prefix.replace(manifest::SPACES_SYSROOT, sysroot);
+                target_path = add_prefix.replace(manifest::SPACES_SYSROOT, sysroot.as_str());
             }
         }
 

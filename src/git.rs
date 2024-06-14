@@ -74,9 +74,8 @@ impl BareRepository {
 
         let bare_store_path = context.get_bare_store_path(relative_bare_store_path.as_str());
 
-        if !context.is_dry_run {
-            std::fs::create_dir_all(&bare_store_path)?;
-        }
+        std::fs::create_dir_all(&bare_store_path)
+            .with_context(|| format_error_context!("failed to creat dir {bare_store_path}"))?;
 
         let full_path = format!("{}{}", bare_store_path, name_dot_git);
 
@@ -101,9 +100,10 @@ impl BareRepository {
                 })?;
         } else {
             options.working_directory = Some(bare_store_path.clone());
-            if !context.is_dry_run {
-                std::fs::create_dir_all(&bare_store_path)?;
-            }
+
+            std::fs::create_dir_all(&bare_store_path)
+                .with_context(|| format_error_context!("failed to create dir {bare_store_path}"))?;
+
             options.arguments = vec![
                 "clone".to_string(),
                 "--bare".to_string(),
@@ -189,7 +189,7 @@ pub struct Worktree {
 
 impl Worktree {
     fn new(
-        context: std::sync::Arc<context::Context>,
+        _context: std::sync::Arc<context::Context>,
         progress_bar: &mut printer::MultiProgressBar,
         repository: &BareRepository,
         path: &str,
@@ -203,9 +203,8 @@ impl Worktree {
             ));
         }
 
-        if !context.is_dry_run {
-            std::fs::create_dir_all(path)?;
-        }
+        std::fs::create_dir_all(path)
+            .with_context(|| format_error_context!("failed to create dir {path}"))?;
 
         options.working_directory = Some(repository.full_path.clone());
         options.arguments = vec!["worktree".to_string(), "prune".to_string()];
@@ -219,7 +218,7 @@ impl Worktree {
             })?;
 
         let full_path = format!("{}/{}", path, repository.spaces_key);
-        if !context.is_dry_run && !std::path::Path::new(&full_path).exists() {
+        if !std::path::Path::new(&full_path).exists() {
             options.arguments = vec![
                 "worktree".to_string(),
                 "add".to_string(),

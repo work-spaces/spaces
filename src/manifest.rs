@@ -2,13 +2,14 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::{anyhow_error, format_error_context};
+use crate::{context, anyhow_error, format_error_context};
 
-pub const SPACES_OVERLAY: &str = "{SPACES_OVERLAY}";
-pub const SPACE: &str = "{SPACE}";
-pub const USER: &str = "{USER}";
-pub const UNIQUE: &str = "{UNIQUE}";
-pub const SPACES_SYSROOT: &str = "{SPACES_SYSROOT}";
+
+pub use context::SPACES_OVERLAY;
+pub use context::SPACE;
+pub use context::USER;
+pub use context::UNIQUE;
+pub use context::SPACES_SYSROOT;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum CheckoutOption {
@@ -241,6 +242,7 @@ pub struct WorkspaceAsset {
 impl WorkspaceAsset {
     pub fn apply(
         &self,
+        context: std::sync::Arc<context::Context>,
         workspace_path: &str,
         dependency_name: &str,
         key: &str,
@@ -259,10 +261,21 @@ impl WorkspaceAsset {
                 })?;
             }
             AssetType::Template => {
-                let contents = std::fs::read_to_string(&path)
+                // remove the destination file if it exists
+                if std::path::Path::new(dest_path.as_str()).exists() {
+                    std::fs::remove_file(dest_path.as_str()).with_context(|| format_error_context!("While removing {dest_path}"))?;
+                }
+
+                let mut contents = std::fs::read_to_string(&path)
                     .with_context(|| format_error_context!("While reading {path}"))?;
 
                 // do the substitutions
+                let substitutions = &context.substitutions;
+                for (key, (value, _)) in substitutions.iter() {
+                    if let Some(value) = value {
+                        contents = contents.replace(key, value);
+                    }
+                }
 
                 // create a copy
                 std::fs::write(dest_path.as_str(), contents)

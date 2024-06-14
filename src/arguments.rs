@@ -1,7 +1,8 @@
 use crate::{
-    git,
+    context, format_error_context, git,
     manifest::{self, WorkspaceConfig},
 };
+use anyhow::Context;
 use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
@@ -47,8 +48,12 @@ pub fn execute() -> anyhow::Result<()> {
             level,
         } => {
             context.update_printer(level.map(|e| e.into()));
-            context.spaces_sysroot =
-                Some(format!("{}/{}/sysroot", context.current_directory, name));
+            context
+                .update_substitution(
+                    context::SPACES_SYSROOT,
+                    format!("{}/{}/sysroot", context.current_directory, name).as_str(),
+                )
+                .with_context(|| format_error_context!("Internal error"))?;
             workspace::create(context, &name, &config)?;
         }
 
@@ -63,8 +68,12 @@ pub fn execute() -> anyhow::Result<()> {
             level,
         } => {
             context.update_printer(level.map(|e| e.into()));
-            context.spaces_sysroot =
-                Some(format!("{}/{}/sysroot", context.current_directory, name));
+            context
+                .update_substitution(
+                    context::SPACES_SYSROOT,
+                    format!("{}/{}/sysroot", context.current_directory, name).as_str(),
+                )
+                .with_context(|| format_error_context!("Internal error"))?;
 
             let hash_key = git::BareRepository::get_workspace_name_from_url(&git)?;
 
@@ -88,7 +97,12 @@ pub fn execute() -> anyhow::Result<()> {
             level,
         } => {
             context.update_printer(level.map(|e| e.into()));
-            context.spaces_sysroot = Some(format!("{}/sysroot", context.current_directory));
+            context
+                .update_substitution(
+                    context::SPACES_SYSROOT,
+                    format!("{}/sysroot", context.current_directory).as_str(),
+                )
+                .with_context(|| format_error_context!("Internal error"))?;
             workspace::sync(context)?;
         }
 
@@ -114,6 +128,17 @@ pub fn execute() -> anyhow::Result<()> {
         } => {
             context.update_printer(level.map(|e| e.into()));
             archive::inspect(context, path)?;
+        }
+        Arguments {
+            commands: Commands::TemplateHelp {},
+            level,
+        } => {
+            context.update_printer(level.map(|e| e.into()));
+            let mut printer = context
+                .printer
+                .write()
+                .expect("Internal error getting printer");
+            printer.info("substitutions", &context.substitutions)?;
         }
     }
 
@@ -190,9 +215,12 @@ enum Commands {
     List {},
     /// Create an archive using spaces_create_archive.toml in the current directory.
     CreateArchive {},
+    /// Inspect the contents of a .zip archive created by spaces.
     InspectArchive {
         /// The path of the .zip archive to inspect
         #[arg(long)]
         path: String,
     },
+    /// Show the list of substitions made when copying `Template` assets to a space
+    TemplateHelp {},
 }

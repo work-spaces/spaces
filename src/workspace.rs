@@ -11,12 +11,16 @@ use crate::{
 };
 
 pub fn create(
-    context: context::Context,
+    mut context: context::Context,
     space_name: &String,
     config: &String,
 ) -> anyhow::Result<()> {
     let workspace_config = WorkspaceConfig::new(config)
         .with_context(|| format_error_context!("Failed to load spaces configuration {config}"))?;
+
+    context
+        .update_substitution(context::SPACE, space_name.as_str())
+        .with_context(|| format_error_context!("Internal Error: invalid substitution"))?;
 
     create_from_config(context, space_name, workspace_config)
 }
@@ -82,12 +86,18 @@ pub fn create_from_config(
                     &mut progress_bar,
                     &spaces_key,
                     &dependency.git,
-                )?;
+                )
+                .with_context(|| format_error_context!("with new BareRepository {spaces_key}"))?;
 
-                let worktree =
-                    bare_repository.add_worktree(context.clone(), &mut progress_bar, &directory)?;
+                let worktree = bare_repository
+                    .add_worktree(context.clone(), &mut progress_bar, &directory)
+                    .with_context(|| format_error_context!("adding worktree to {spaces_key}"))?;
 
-                worktree.switch_new_branch(context, &mut progress_bar, &dependency)?;
+                worktree
+                    .switch_new_branch(context, &mut progress_bar, &dependency)
+                    .with_context(|| {
+                        format_error_context!("switching new branchs for {spaces_key}")
+                    })?;
 
                 Ok::<(), anyhow::Error>(())
             });
@@ -95,7 +105,10 @@ pub fn create_from_config(
         }
 
         for handle in handles {
-            handle.join().unwrap()?;
+            handle
+                .join()
+                .unwrap()
+                .with_context(|| format_error_context!("from join result"))?;
         }
     }
 
@@ -110,7 +123,9 @@ pub fn create_from_config(
         .write()
         .expect("Internal Error: Printer is not set");
 
-    printer.info(space_name, &workspace)?;
+    printer
+        .info(space_name, &workspace)
+        .with_context(|| format_error_context!("printing"))?;
 
     Ok::<(), anyhow::Error>(())
 }
@@ -133,7 +148,9 @@ pub fn sync(context: context::Context) -> anyhow::Result<()> {
         full_path,
     )?;
 
-    state.sync_full_path()?;
+    state
+        .sync_full_path()
+        .with_context(|| format_error_context!("syncing full path {}", state.full_path))?;
     Ok(())
 }
 
@@ -232,7 +249,8 @@ impl State {
                     &mut progress_bar,
                     &spaces_key,
                     &dependency.git,
-                )?;
+                )
+                .with_context(|| format_error_context!("new BareRepository {spaces_key}"))?;
 
                 Ok::<_, anyhow::Error>((bare_repository, dependency.clone()))
             });
@@ -267,15 +285,24 @@ impl State {
         loop {
             if let Some(next_dep) = self.all_deps.pop_back() {
                 let handle = match next_dep {
-                    SyncDep::Archive(spaces_key, http_archive) => {
-                        Some(self.sync_archive(multi_progress, spaces_key, http_archive)?)
-                    }
-                    SyncDep::PlatformArchive(spaces_key, http_archive) => {
-                        Some(self.sync_archive(multi_progress, spaces_key, http_archive)?)
-                    }
-                    SyncDep::BareRepository(spaces_key, dependency) => {
-                        Some(self.sync_bare_repository(multi_progress, spaces_key, dependency)?)
-                    }
+                    SyncDep::Archive(spaces_key, http_archive) => Some(
+                        self.sync_archive(multi_progress, spaces_key.clone(), http_archive)
+                            .with_context(|| {
+                                format_error_context!("syncing archive {spaces_key}")
+                            })?,
+                    ),
+                    SyncDep::PlatformArchive(spaces_key, http_archive) => Some(
+                        self.sync_archive(multi_progress, spaces_key.clone(), http_archive)
+                            .with_context(|| {
+                                format_error_context!("syncing platform archive {spaces_key}")
+                            })?,
+                    ),
+                    SyncDep::BareRepository(spaces_key, dependency) => Some(
+                        self.sync_bare_repository(multi_progress, spaces_key.clone(), dependency)
+                            .with_context(|| {
+                                format_error_context!("syncing bare repository {spaces_key}")
+                            })?,
+                    ),
                     SyncDep::Repository(bare_repository, dependency) => {
                         if !self
                             .workspace
@@ -287,18 +314,36 @@ impl State {
                                 .insert(bare_repository.spaces_key.clone(), dependency.clone());
                         }
 
-                        Some(self.sync_dependency(multi_progress, bare_repository, dependency)?)
+                        let spaces_key = bare_repository.spaces_key.clone();
+
+                        Some(
+                            self.sync_dependency(multi_progress, bare_repository, dependency)
+                                .with_context(|| {
+                                    format_error_context!("syncing repository {}", spaces_key)
+                                })?,
+                        )
                     }
-                    SyncDep::VsCode(_spaces_key, config) => {
-                        config.apply(self.full_path.as_str())?;
+                    SyncDep::VsCode(spaces_key, config) => {
+                        config.apply(self.full_path.as_str()).with_context(|| {
+                            format_error_context!("applying VS code for {}", spaces_key)
+                        })?;
                         None
                     }
                     SyncDep::Asset(spaces_key, asset_map) => {
                         for (key, asset) in asset_map.iter() {
                             asset
-                                .apply(self.full_path.as_str(), spaces_key.as_str(), key.as_str())
+                                .apply(
+                                    self.context.clone(),
+                                    self.full_path.as_str(),
+                                    spaces_key.as_str(),
+                                    key.as_str(),
+                                )
                                 .with_context(|| {
-                                    format_error_context!("while apply workspace asset {asset:?} from {}/{}", spaces_key, key)
+                                    format_error_context!(
+                                        "while apply workspace asset {asset:?} from {}/{}",
+                                        spaces_key,
+                                        key
+                                    )
                                 })?;
                         }
 
@@ -320,7 +365,8 @@ impl State {
                         } else {
                             let sync_deps = handle
                                 .join()
-                                .expect("Internal Error: failed to join handle")?;
+                                .expect("Internal Error: failed to join handle")
+                                .with_context(|| format_error_context!("while joining"))?;
 
                             for sync_dep in sync_deps {
                                 self.all_deps.push_back(sync_dep);
@@ -358,7 +404,8 @@ impl State {
                 &mut progress_bar,
                 &spaces_key,
                 &dependency.git,
-            )?;
+            )
+            .with_context(|| format_error_context!("new BareRepository {spaces_key}"))?;
             new_deps.push(SyncDep::Repository(bare_repository, dependency));
             Ok::<_, anyhow::Error>(new_deps)
         });
@@ -378,16 +425,20 @@ impl State {
 
         let handle = std::thread::spawn(move || {
             let mut new_deps = Vec::new();
-            http_archive.sync(context.clone(), full_path.as_str(), progress_bar)?;
+            http_archive
+                .sync(context.clone(), full_path.as_str(), progress_bar)
+                .with_context(|| format_error_context!("syncing archive {full_path}"))?;
 
             if let Some(deps) =
-                manifest::Deps::new(http_archive.get_path_to_extracted_files().as_str())?
+                manifest::Deps::new(http_archive.get_path_to_extracted_files().as_str())
+                    .with_context(|| format_error_context!("getting deps for {full_path}"))?
             {
-                new_deps.extend(Self::get_new_deps(
-                    context.clone(),
-                    &http_archive.spaces_key,
-                    &deps,
-                )?);
+                new_deps.extend(
+                    Self::get_new_deps(context.clone(), &http_archive.spaces_key, &deps)
+                        .with_context(|| {
+                            format_error_context!("getting deps for {}", http_archive.spaces_key)
+                        })?,
+                );
             }
 
             Ok::<_, anyhow::Error>(new_deps)
@@ -408,7 +459,8 @@ impl State {
 
         if let Some(map) = &spaces_deps.archives {
             for (key, archive) in map.iter() {
-                let http_archive = archive::HttpArchive::new(context.clone(), key, archive)?;
+                let http_archive = archive::HttpArchive::new(context.clone(), key, archive)
+                    .with_context(|| format_error_context!("for new archive {key}"))?;
 
                 new_deps.push(SyncDep::Archive(key.clone(), http_archive));
             }
@@ -424,7 +476,10 @@ impl State {
                     };
 
                     let http_archive =
-                        archive::HttpArchive::new(context.clone(), &effective_key, &archive)?;
+                        archive::HttpArchive::new(context.clone(), &effective_key, &archive)
+                            .with_context(|| {
+                                format_error_context!("new http archive {effective_key}")
+                            })?;
 
                     new_deps.push(SyncDep::PlatformArchive(
                         effective_key.clone(),
@@ -462,21 +517,38 @@ impl State {
 
             let parent_spaces_key = bare_repository.spaces_key.clone();
 
-            let worktree =
-                bare_repository.add_worktree(context.clone(), &mut progress_bar, &full_path)?;
+            let worktree = bare_repository
+                .add_worktree(context.clone(), &mut progress_bar, &full_path)
+                .with_context(|| format_error_context!("adding worktree {full_path} needs checkout? {needs_checked_out:?}"))?;
 
             if needs_checked_out {
-                worktree.checkout(context.clone(), &mut progress_bar, &dependency)?;
-                worktree.checkout_detached_head(context.clone(), &mut progress_bar)?;
+                worktree
+                    .checkout(context.clone(), &mut progress_bar, &dependency)
+                    .with_context(|| {
+                        format_error_context!("checking out worktree created from {full_path}")
+                    })?;
+                worktree
+                    .checkout_detached_head(context.clone(), &mut progress_bar)
+                    .with_context(|| {
+                        format_error_context!(
+                            "detaching head for worktree created from {full_path}"
+                        )
+                    })?;
             }
 
-            let spaces_deps = worktree.get_deps()?;
+            let spaces_deps = worktree.get_deps().with_context(|| {
+                format_error_context!("getting deps for {}", worktree.full_path)
+            })?;
             if let Some(spaces_deps) = spaces_deps {
-                new_deps.extend(Self::get_new_deps(
-                    context.clone(),
-                    &parent_spaces_key,
-                    &spaces_deps,
-                )?);
+                new_deps.extend(
+                    Self::get_new_deps(context.clone(), &parent_spaces_key, &spaces_deps)
+                        .with_context(|| {
+                            format_error_context!(
+                                "getting new deps based from {}",
+                                worktree.full_path
+                            )
+                        })?,
+                );
 
                 if let Some(vscode) = spaces_deps.vscode {
                     new_deps.push(SyncDep::VsCode(parent_spaces_key.clone(), vscode));
@@ -507,7 +579,8 @@ impl State {
                     buck_cells.insert(key.clone(), format!("./{key}"));
                 }
             }
-            buck.export(&self.full_path)?;
+            buck.export(&self.full_path)
+                .with_context(|| format_error_context!("exporting buck configuration"))?;
         }
         Ok(())
     }
@@ -520,16 +593,21 @@ impl State {
                 //read the cargo toml file to see how the dependency is specified crates-io or git
                 let cargo_toml_path = format!("{}/{spaces_key}/Cargo.toml", self.full_path);
                 let cargo_toml: toml::Value = {
-                    let cargo_toml_contents = std::fs::read_to_string(&cargo_toml_path)?;
-                    toml::from_str(&cargo_toml_contents)?
+                    let cargo_toml_contents = std::fs::read_to_string(&cargo_toml_path)
+                        .with_context(|| {
+                            format_error_context!("reading cargo path {cargo_toml_path}")
+                        })?;
+                    toml::from_str(&cargo_toml_contents).with_context(|| {
+                        format_error_context!("parsing contents of {cargo_toml_path}")
+                    })?
                 };
 
-                let dependencies = cargo_toml.get("dependencies").ok_or(anyhow::anyhow!(
+                let dependencies = cargo_toml.get("dependencies").ok_or(anyhow_error!(
                     "Cargo.toml does not have a dependencies section"
                 ))?;
 
                 for value in list {
-                    let dependency = dependencies.get(value.as_str()).ok_or(anyhow::anyhow!(
+                    let dependency = dependencies.get(value.as_str()).ok_or(anyhow_error!(
                         "Cargo.toml does not have a dependency named {}",
                         value
                     ))?;
