@@ -49,9 +49,9 @@ fn substitute(context: std::sync::Arc<context::Context>, input: String) -> anyho
         let parts = toml_access.split('.');
         let mut toml_value = &toml;
         for part in parts {
-            toml_value = toml_value
-                .get(part)
-                .ok_or(anyhow_error!("Invalid toml token while inspecting {part} in {input}"))?;
+            toml_value = toml_value.get(part).ok_or(anyhow_error!(
+                "Invalid toml token while inspecting {part} in {input}"
+            ))?;
         }
         let toml_string_value = toml_value.as_str().ok_or(anyhow_error!(
             "Invalid toml token {input} must be string, not {toml_value:?}"
@@ -156,7 +156,8 @@ pub fn run_action(context: context::Context, name: String) -> anyhow::Result<()>
 
     if let Some(actions) = workspace.actions {
         if let Some(action_list) = actions.get(name.as_str()) {
-            execute_action(context.clone(), &mut printer, action_list.clone())?;
+            execute_action(context.clone(), &mut printer, action_list.clone())
+                .with_context(|| format_error_context!("while executing action {name}"))?;
             Ok(())
         } else {
             Err(anyhow_error!("No actions found with this name"))?

@@ -1133,6 +1133,7 @@ dependencies = [
  "owo-colors",
  "serde",
  "serde_json",
+ "which",
 ]
 
 [[package]]
