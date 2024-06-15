@@ -797,22 +797,23 @@ pub fn create_binary_archive(
     }
 
     {
-        let file_contents = std::fs::read(input.as_str())
-            .with_context(|| format_error_context!("failed to read input file {input}"))?;
-
+        let exe_path = format!("{input}.exe");
         let mut input_path = std::path::Path::new(input.as_str()).to_path_buf();
         if !input_path.exists() && manifest::Platform::is_windows() {
-            let exe_path = std::path::Path::new(input.as_str()).join(".exe");
+            let exe_path = std::path::Path::new(exe_path.as_str());
             if exe_path.exists() {
-                input_path = exe_path.clone();
+                input_path = exe_path.to_path_buf();
             } else {
                 return Err(anyhow_error!(
-                    "Input file {input} does not exist (even with .exe extension)"
+                    "Input file {input_path:?} and {exe_path:?} does not exist (even with .exe extension)"
                 ));
             }
         } else {
             return Err(anyhow_error!("Input file {input} does not exist"));
         }
+
+        let file_contents = std::fs::read(&input_path)
+            .with_context(|| format_error_context!("failed to read input file {input_path:?}"))?;
 
         let input_file_name = input_path
             .file_name()
