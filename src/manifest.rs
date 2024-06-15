@@ -178,6 +178,13 @@ impl Platform {
         }
         None
     }
+
+    pub fn is_windows() -> bool {
+        match Self::get_platform() {
+            Some(Self::WindowsX86_64) | Some(Self::WindowsAarch64) => true,
+            _ => false,
+        }
+    }
 }
 
 impl std::fmt::Display for Platform {
