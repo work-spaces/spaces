@@ -2,14 +2,13 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::{context, anyhow_error, format_error_context};
+use crate::{anyhow_error, context, format_error_context};
 
-
-pub use context::SPACES_OVERLAY;
 pub use context::SPACE;
-pub use context::USER;
-pub use context::UNIQUE;
+pub use context::SPACES_OVERLAY;
 pub use context::SPACES_SYSROOT;
+pub use context::UNIQUE;
+pub use context::USER;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum CheckoutOption {
@@ -156,6 +155,38 @@ pub enum Platform {
     LinuxAarch64,
 }
 
+impl Platform {
+    pub fn get_platform() -> Option<Platform> {
+        if cfg!(target_os = "macos") {
+            if cfg!(target_arch = "x86_64") {
+                return Some(Self::MacosX86_64);
+            } else if cfg!(target_arch = "aarch64") {
+                return Some(Self::MacosAarch64);
+            }
+        } else if cfg!(target_os = "windows") {
+            if cfg!(target_arch = "x86_64") {
+                return Some(Self::WindowsX86_64);
+            } else if cfg!(target_arch = "aarch64") {
+                return Some(Self::WindowsAarch64);
+            }
+        } else if cfg!(target_os = "linux") {
+            if cfg!(target_arch = "x86_64") {
+                return Some(Self::LinuxX86_64);
+            } else if cfg!(target_arch = "aarch64") {
+                return Some(Self::LinuxAarch64);
+            }
+        }
+        None
+    }
+
+    pub fn is_windows() -> bool {
+        match Self::get_platform() {
+            Some(Self::WindowsX86_64) | Some(Self::WindowsAarch64) => true,
+            _ => false,
+        }
+    }
+}
+
 impl std::fmt::Display for Platform {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -181,26 +212,11 @@ pub struct PlatformArchive {
 
 impl PlatformArchive {
     pub fn get_archive(&self) -> Option<Archive> {
-        if cfg!(target_os = "macos") {
-            if cfg!(target_arch = "x86_64") {
-                return self.macos_x86_64.clone();
-            } else if cfg!(target_arch = "aarch64") {
-                return self.macos_aarch64.clone();
-            }
-        } else if cfg!(target_os = "windows") {
-            if cfg!(target_arch = "x86_64") {
-                return self.windows_x86_64.clone();
-            } else if cfg!(target_arch = "aarch64") {
-                return self.windows_aarch64.clone();
-            }
-        } else if cfg!(target_os = "linux") {
-            if cfg!(target_arch = "x86_64") {
-                return self.linux_x86_64.clone();
-            } else if cfg!(target_arch = "aarch64") {
-                return self.linux_aarch64.clone();
-            }
+        if let Some(platform) = Platform::get_platform() {
+            self.get_archive_from_platform(platform)
+        } else {
+            None
         }
-        None
     }
 
     pub fn get_archive_from_platform(&self, platform: Platform) -> Option<Archive> {
@@ -263,7 +279,8 @@ impl WorkspaceAsset {
             AssetType::Template => {
                 // remove the destination file if it exists
                 if std::path::Path::new(dest_path.as_str()).exists() {
-                    std::fs::remove_file(dest_path.as_str()).with_context(|| format_error_context!("While removing {dest_path}"))?;
+                    std::fs::remove_file(dest_path.as_str())
+                        .with_context(|| format_error_context!("While removing {dest_path}"))?;
                 }
 
                 let mut contents = std::fs::read_to_string(&path)
@@ -367,26 +384,13 @@ impl BuckConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct VsCodeTask {
-    #[serde(rename = "type")]
-    pub type_: String,
-    pub command: String,
-    #[serde(rename = "problemMatcher")]
-    pub problem_matcher: Vec<String>,
-    pub arguments: Vec<String>,
-    pub options: HashMap<String, String>,
-    pub label: String,
-    pub group: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct VsCodeExtensions {
     pub recommendations: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct VsCodeConfig {
-    tasks: Option<Vec<VsCodeTask>>,
+    tasks: Option<HashMap<String, toml::Value>>,
     settings: Option<HashMap<String, toml::Value>>,
     extensions: Option<VsCodeExtensions>,
 }
@@ -424,28 +428,28 @@ impl VsCodeConfig {
             let tasks_file = format!("{vs_code_directory}/tasks.json");
             let mut tasks = Self::load_json_file(
                 tasks_file.as_str(),
-                serde_json::json!({
-                    "version": "2.0.0",
-                    "tasks": []
-                }),
+                serde_json::json!({"version": "2.0.0", "tasks": []}),
             )
             .with_context(|| format_error_context!("while loading {tasks_file}"))?;
 
-            let tasks_list = tasks
-                .as_object_mut()
-                .and_then(|e| e.get_mut("tasks"))
+            let tasks_object = tasks.as_object_mut().ok_or(anyhow::anyhow!(
+                "Failed to get settings from {tasks_file} JSON object"
+            ))?;
+
+            let tasks_array = tasks_object
+                .get_mut("tasks")
                 .and_then(|e| e.as_array_mut())
                 .ok_or(anyhow::anyhow!(
                     "Failed to get tasks from {tasks_file} JSON object"
                 ))?;
 
-            for task in own_tasks.iter() {
-                let entry = serde_json::to_value(task).with_context(|| {
-                    format_error_context!("Internal Error: failed to serialize task {task:?}")
+            for (_key, value) in own_tasks {
+                let json_value = serde_json::to_value(value).with_context(|| {
+                    format_error_context!("toml value {value:?} cannot be converted to JSON")
                 })?;
-                tasks_list.push(entry);
-            }
 
+                tasks_array.push(json_value);
+            }
             Self::save_json_file(tasks_file.as_str(), tasks)
                 .with_context(|| format_error_context!("while saving {tasks_file}"))?;
         }
@@ -518,6 +522,7 @@ pub struct WorkspaceConfig {
     pub cargo: Option<CargoConfig>,
     pub settings: Option<WorkspaceConfigSettings>,
     pub vscode: Option<VsCodeConfig>,
+    pub actions: Option<HashMap<String, Vec<Action>>>,
 }
 
 impl WorkspaceConfig {
@@ -580,8 +585,19 @@ impl WorkspaceConfig {
             dependencies: HashMap::new(),
             assets: None,
             vscode: self.vscode.clone(),
+            actions: self.actions.clone(),
         })
     }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Action {
+    pub name: String,
+    pub command: String,
+    pub arguments: Option<Vec<String>>,
+    pub environment: Option<HashMap<String, String>>,
+    pub working_directory: Option<String>,
+    pub display: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -592,6 +608,7 @@ pub struct Workspace {
     pub cargo: Option<CargoConfig>,
     pub assets: Option<HashMap<String, WorkspaceAsset>>,
     pub vscode: Option<VsCodeConfig>,
+    pub actions: Option<HashMap<String, Vec<Action>>>,
 }
 
 impl Workspace {
