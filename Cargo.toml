@@ -4,7 +4,7 @@ version = "0.5.0-beta.0"
 edition = "2021"
 
 [dependencies]
-clap = {version = "4.5.4", features = ["derive"] }
+clap = { version = "4.5.4", features = ["derive"] }
 anyhow = "1.0.44"
 
 serde = { version = "1.0.130", features = ["derive"] }
@@ -14,8 +14,8 @@ url = "2.5.0"
 home = "0.5.9"
 printer = { git = "https://github.com/work-spaces/printer-rs", rev = "b4f0389285550725577d06fb0b3b28f3c4ea5a76" }
 
-reqwest = { version = "0.12", features = ["json"] }
-tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12" }
+tokio = { version = "1", features = ["rt-multi-thread"] }
 flume = "0.11.0"
 flate2 = "1.0"
 sha256 = "1.5.0"
