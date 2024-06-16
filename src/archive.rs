@@ -808,8 +808,6 @@ pub fn create_binary_archive(
                     "Input file {input_path:?} and {exe_path:?} does not exist (even with .exe extension)"
                 ));
             }
-        } else {
-            return Err(anyhow_error!("Input file {input} does not exist"));
         }
 
         let file_contents = std::fs::read(&input_path)
