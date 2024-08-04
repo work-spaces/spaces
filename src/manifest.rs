@@ -2,7 +2,8 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::{anyhow_error, context, format_error_context};
+use crate::context;
+use anyhow_source_location::{format_context, format_error};
 
 pub use context::SPACE;
 pub use context::SPACES_OVERLAY;
@@ -100,34 +101,6 @@ impl Dependency {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateArchive {
-    pub input: String,
-    pub output: String,
-    pub platform_archives: String,
-    pub executables: Option<Vec<String>>,
-    pub macos_x86_64: Option<String>,
-    pub macos_aarch64: Option<String>,
-    pub windows_x86_64: Option<String>,
-    pub windows_aarch64: Option<String>,
-    pub linux_x86_64: Option<String>,
-    pub linux_aarch64: Option<String>,
-}
-
-impl CreateArchive {
-    const FILE_NAME: &'static str = "spaces_create_archive.toml";
-
-    pub fn new(path: &str) -> anyhow::Result<Self> {
-        let file_path = format!("{path}/{}", Self::FILE_NAME); //change to spaces_dependencies.toml
-        let contents = std::fs::read_to_string(&file_path)
-            .with_context(|| format!("Failed to read create archive file {file_path}"))?;
-
-        let result: Self = toml::from_str(&contents)
-            .with_context(|| format!("Failed to parse create archive file {file_path}"))?;
-
-        Ok(result)
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ArchiveLink {
@@ -145,13 +118,19 @@ pub struct Archive {
     pub add_prefix: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum Platform {
+    #[serde(rename = "macos-x86_64")]
     MacosX86_64,
+    #[serde(rename = "macos-aarch64")]
     MacosAarch64,
+    #[serde(rename = "windows-x86_64")]
     WindowsX86_64,
+    #[serde(rename = "windows-aarch64")]
     WindowsAarch64,
+    #[serde(rename = "linux-x86_64")]
     LinuxX86_64,
+    #[serde(rename = "linux-aarch64")]
     LinuxAarch64,
 }
 
@@ -198,6 +177,60 @@ impl std::fmt::Display for Platform {
             Platform::LinuxAarch64 => write!(f, "linux-aarch64"),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ArchiveDriver {
+    #[serde(rename = "tar.gz")]
+    TarGz,
+    #[serde(rename = "tar.bz2")]
+    TarBz2,
+    #[serde(rename = "tar.7z")]
+    Tar7z,
+    #[serde(rename = "zip")]
+    Zip,
+}
+
+impl ArchiveDriver {
+    fn get_extension(&self) -> &'static str {
+        match self {
+            ArchiveDriver::TarGz => "tar.gz",
+            ArchiveDriver::TarBz2 => "tar.bz2",
+            ArchiveDriver::Tar7z => "tar.7z",
+            ArchiveDriver::Zip => "zip",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateArchive {
+    pub input: String,
+    pub output: String,
+    pub version: String,
+    pub driver: ArchiveDriver,
+    pub platform: Option<Platform>,
+    pub include_globs: Option<Vec<String>>,
+    pub exclude_globs: Option<Vec<String>>,
+
+}
+
+impl CreateArchive {
+    pub fn new(path: &str) -> anyhow::Result<Self> {
+        let contents = std::fs::read_to_string(&path).context(format_context!("{path}"))?;
+        let result: Self = toml::from_str(&contents).context(format_context!("{path}"))?;
+        Ok(result)
+    }
+
+    pub fn get_output_file(&self) -> String {
+        let mut result = format!("{}-{}", self.output, self.version);
+        if let Some(platform) = self.platform.as_ref() {
+            result.push_str(format!("-{}", platform).as_str());
+        }
+        result.push('.');
+        result.push_str(self.driver.get_extension());
+        result
+    }
+
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -270,21 +303,21 @@ impl WorkspaceAsset {
             AssetType::HardLink => {
                 if std::path::Path::new(dest_path.as_str()).exists() {
                     std::fs::remove_file(dest_path.as_str())
-                        .with_context(|| format_error_context!("While removing {dest_path}"))?;
+                        .context(format_context!("While removing {dest_path}"))?;
                 }
-                std::fs::hard_link(path.as_str(), dest_path.as_str()).with_context(|| {
-                    format_error_context!("While creating hard link from {path} to {dest_path}")
-                })?;
+                std::fs::hard_link(path.as_str(), dest_path.as_str()).context(format_context!(
+                    "While creating hard link from {path} to {dest_path}"
+                ))?;
             }
             AssetType::Template => {
                 // remove the destination file if it exists
                 if std::path::Path::new(dest_path.as_str()).exists() {
                     std::fs::remove_file(dest_path.as_str())
-                        .with_context(|| format_error_context!("While removing {dest_path}"))?;
+                        .context(format_context!("While removing {dest_path}"))?;
                 }
 
                 let mut contents = std::fs::read_to_string(&path)
-                    .with_context(|| format_error_context!("While reading {path}"))?;
+                    .context(format_context!("While reading {path}"))?;
 
                 // do the substitutions
                 let substitutions = &context.substitutions;
@@ -296,7 +329,7 @@ impl WorkspaceAsset {
 
                 // create a copy
                 std::fs::write(dest_path.as_str(), contents)
-                    .with_context(|| format_error_context!("While writing to {dest_path}"))?;
+                    .context(format_context!("While writing to {dest_path}"))?;
             }
         }
         Ok(())
@@ -318,11 +351,11 @@ impl Deps {
     pub fn new(path: &str) -> anyhow::Result<Option<Self>> {
         let file_path = format!("{path}/{}", Self::FILE_NAME); //change to spaces_dependencies.toml
         let contents = std::fs::read_to_string(&file_path)
-            .with_context(|| format!("Failed to read deps file {file_path}"));
+            .context(format_context!("Failed to read deps file {file_path}"));
 
         if let Ok(contents) = contents {
             let result: Self = toml::from_str(&contents)
-                .with_context(|| format!("Failed to parse deps file {file_path}"))?;
+                .context(format_context!("Failed to parse deps file {file_path}"))?;
             Ok(Some(result))
         } else {
             Ok(None)
@@ -331,11 +364,11 @@ impl Deps {
 
     pub fn save(&self, path: &str) -> anyhow::Result<()> {
         let file_path = format!("{path}/{}", Self::FILE_NAME); //change to spaces_dependencies.toml
-        let contents = toml::to_string(&self).with_context(|| {
-            format_error_context!("failed to build toml string for {file_path}")
-        })?;
+        let contents = toml::to_string(&self).context(format_context!(
+            "failed to build toml string for {file_path}"
+        ))?;
         std::fs::write(&file_path, contents)
-            .with_context(|| format_error_context!("failed write file to {file_path}"))?;
+            .context(format_context!("failed write file to {file_path}"))?;
         Ok(())
     }
 }
@@ -378,7 +411,7 @@ impl BuckConfig {
         contents.push_str(&Self::stringify("parser", &self.parser));
         contents.push_str(&Self::stringify("project", &self.project));
         std::fs::write(&file_path, contents)
-            .with_context(|| format!("Failed to write buckconfig file {file_path}"))?;
+            .context(format_context!("Failed to write buckconfig file {file_path}"))?;
         Ok(())
     }
 }
@@ -403,7 +436,7 @@ impl VsCodeConfig {
         let contents = std::fs::read(path);
         let result = if let Ok(contents) = contents {
             serde_json::from_slice(&contents)
-                .with_context(|| format_error_context!("failed to parse {path} as JSON"))?
+                .context(format_context!("failed to parse {path} as JSON"))?
         } else {
             default_value
         };
@@ -412,17 +445,17 @@ impl VsCodeConfig {
 
     fn save_json_file(path: &str, value: serde_json::Value) -> anyhow::Result<()> {
         let contents = serde_json::to_string_pretty(&value)
-            .with_context(|| format_error_context!("failed to serialize JSON to {path}"))?;
+            .context(format_context!("failed to serialize JSON to {path}"))?;
         std::fs::write(path, contents)
-            .with_context(|| format_error_context!("failed to write JSON to {path}"))?;
+            .context(format_context!("failed to write JSON to {path}"))?;
         Ok(())
     }
 
     pub fn apply(&self, workspace_path: &str) -> anyhow::Result<()> {
         let vs_code_directory = format!("{workspace_path}/.vscode");
-        std::fs::create_dir_all(vs_code_directory.as_str()).with_context(|| {
-            format_error_context!("failed to create director {vs_code_directory}")
-        })?;
+        std::fs::create_dir_all(vs_code_directory.as_str()).context(format_context!(
+            "failed to create director {vs_code_directory}"
+        ))?;
 
         if let Some(own_tasks) = self.tasks.as_ref() {
             let tasks_file = format!("{vs_code_directory}/tasks.json");
@@ -430,7 +463,7 @@ impl VsCodeConfig {
                 tasks_file.as_str(),
                 serde_json::json!({"version": "2.0.0", "tasks": []}),
             )
-            .with_context(|| format_error_context!("while loading {tasks_file}"))?;
+            .context(format_context!("while loading {tasks_file}"))?;
 
             let tasks_object = tasks.as_object_mut().ok_or(anyhow::anyhow!(
                 "Failed to get settings from {tasks_file} JSON object"
@@ -444,34 +477,34 @@ impl VsCodeConfig {
                 ))?;
 
             for (_key, value) in own_tasks {
-                let json_value = serde_json::to_value(value).with_context(|| {
-                    format_error_context!("toml value {value:?} cannot be converted to JSON")
-                })?;
+                let json_value = serde_json::to_value(value).context(format_context!(
+                    "toml value {value:?} cannot be converted to JSON"
+                ))?;
 
                 tasks_array.push(json_value);
             }
             Self::save_json_file(tasks_file.as_str(), tasks)
-                .with_context(|| format_error_context!("while saving {tasks_file}"))?;
+                .context(format_context!("while saving {tasks_file}"))?;
         }
 
         if let Some(own_settings) = self.settings.as_ref() {
             let settings_file = format!("{vs_code_directory}/settings.json");
             let mut settings = Self::load_json_file(settings_file.as_str(), serde_json::json!({}))
-                .with_context(|| format_error_context!("while loading {settings_file}"))?;
+                .context(format_context!("while loading {settings_file}"))?;
 
             let settings_object = settings.as_object_mut().ok_or(anyhow::anyhow!(
                 "Failed to get settings from {settings_file} JSON object"
             ))?;
 
             for (key, value) in own_settings {
-                let json_value = serde_json::to_value(value).with_context(|| {
-                    format_error_context!("toml value {value:?} cannot be converted to JSON")
+                let json_value = serde_json::to_value(value).context({
+                    format_context!("toml value {value:?} cannot be converted to JSON")
                 })?;
 
                 settings_object.insert(key.clone(), json_value);
             }
             Self::save_json_file(settings_file.as_str(), settings)
-                .with_context(|| format_error_context!("while saving {settings_file}"))?;
+                .context(format_context!("while saving {settings_file}"))?;
         }
 
         if let Some(own_extensions) = self.extensions.as_ref() {
@@ -480,9 +513,9 @@ impl VsCodeConfig {
                 extensions_file.as_str(),
                 serde_json::json!({"recommendations": []}),
             )
-            .with_context(|| format_error_context!("while loading {extensions_file}"))?;
+            .context(format_context!("while loading {extensions_file}"))?;
 
-            let extensions_object = extensions.as_object_mut().ok_or(anyhow_error!(
+            let extensions_object = extensions.as_object_mut().ok_or(format_error!(
                 "Failed to get extensions from {extensions_file} JSON object"
             ))?;
             if !extensions_object.contains_key("recommendations") {
@@ -492,7 +525,7 @@ impl VsCodeConfig {
             let recommendations_array = extensions_object
                 .get_mut("recommendations")
                 .and_then(|e| e.as_array_mut())
-                .ok_or(anyhow_error!(
+                .ok_or(format_error!(
                 "Internl Erorr: Failed to get recommendations from {extensions_file} JSON object"
             ))?;
 
@@ -504,7 +537,7 @@ impl VsCodeConfig {
             }
 
             Self::save_json_file(&extensions_file, extensions)
-                .with_context(|| format_error_context!("while saving {extensions_file}"))?;
+                .context(format_context!("while saving {extensions_file}"))?;
         }
         Ok(())
     }
@@ -527,10 +560,12 @@ pub struct WorkspaceConfig {
 
 impl WorkspaceConfig {
     pub fn new(path: &str) -> anyhow::Result<Self> {
-        let contents = std::fs::read_to_string(path)
-            .with_context(|| format!("Failed to read spaces workspace config file {path}"))?;
-        let result: WorkspaceConfig = toml::from_str(&contents)
-            .with_context(|| format!("Failed to parse spaces workspace config file {path}"))?;
+        let contents = std::fs::read_to_string(path).context(format_context!(
+            "Failed to read spaces workspace config file {path}"
+        ))?;
+        let result: WorkspaceConfig = toml::from_str(&contents).context(format_context!(
+            "Failed to parse spaces workspace config file {path}"
+        ))?;
         Ok(result)
     }
 
@@ -549,9 +584,9 @@ impl WorkspaceConfig {
             };
 
             if dev_branch.contains(USER) {
-                let user = std::env::var("USER").with_context(|| {
-                    format!("Failed to replace {USER} with $USER for {dev_branch} naming")
-                })?;
+                let user = std::env::var("USER").context(format_context!(
+                    "Failed to replace {USER} with $USER for {dev_branch} naming"
+                ))?;
                 dev_branch = dev_branch.replace(USER, &user);
             }
 
@@ -617,19 +652,19 @@ impl Workspace {
     pub fn new(path: &str) -> anyhow::Result<Self> {
         let file_path = format!("{path}/{}", Self::FILE_NAME);
         let contents = std::fs::read_to_string(&file_path)
-            .with_context(|| format!("Failed to read workspace file {file_path}"))?;
-        let result: Workspace = toml::from_str(&contents)
-            .with_context(|| format!("Failed to workspace file {file_path}"))?;
+            .context(format_context!("Failed to read workspace file {file_path}"))?;
+        let result: Workspace =
+            toml::from_str(&contents).context(format_context!("Failed to workspace file {file_path}"))?;
         Ok(result)
     }
 
     pub fn save(&self, path: &str) -> anyhow::Result<()> {
         let file_path = format!("{path}/{}", Self::FILE_NAME);
-        let contents = toml::to_string(&self)
-            .with_context(|| format!("Failed to serialize workspace {self:?}"))?;
+        let contents =
+            toml::to_string(&self).context(format_context!("Failed to serialize workspace {self:?}"))?;
 
         std::fs::write(&file_path, contents)
-            .with_context(|| format!("Failed to save workspace file {file_path}"))?;
+            .context(format_context!("Failed to save workspace file {file_path}"))?;
         Ok(())
     }
 
@@ -657,17 +692,16 @@ pub struct Ledger {
 
 impl Ledger {
     pub fn new(path: &str) -> anyhow::Result<Self> {
-        let contents = std::fs::read_to_string(path)
-            .with_context(|| format!("Failed to read ledger file {path}"))?;
-        let result: Ledger = toml::from_str(&contents)
-            .with_context(|| format!("Failed to parse ledger file {path}"))?;
+        let contents =
+            std::fs::read_to_string(path).context(format_context!("Failed to read ledger file {path}"))?;
+        let result: Ledger =
+            toml::from_str(&contents).context(format_context!("Failed to parse ledger file {path}"))?;
         Ok(result)
     }
 
     pub fn save(&self, path: &str) -> anyhow::Result<()> {
-        let contents = toml::to_string(&self).with_context(|| "Failed to serialize ledger")?;
-        std::fs::write(path, contents)
-            .with_context(|| format!("Failed to save ledger file {path}"))?;
+        let contents = toml::to_string(&self).context("Failed to serialize ledger")?;
+        std::fs::write(path, contents).context(format_context!("Failed to save ledger file {path}"))?;
         Ok(())
     }
 }

@@ -1,20 +1,5 @@
 use serde::Serialize;
-
-#[macro_export]
-macro_rules! format_error_context {
-    ($($arg:tt)*) => {{
-        let res = format!($($arg)*);
-        format!("[{}:{}] {}", file!(), line!(), res)
-    }};
-}
-
-#[macro_export]
-macro_rules! anyhow_error {
-    ($($arg:tt)*) => {{
-        let res = format!($($arg)*);
-        anyhow::anyhow!("[{}:{}] {}", file!(), line!(), res)
-    }};
-}
+use anyhow_source_location::format_error;
 
 pub const SPACES_OVERLAY: &str = "{SPACES_OVERLAY}";
 pub const SPACE: &str = "{SPACE}";
@@ -26,19 +11,16 @@ pub const SPACES_PATH: &str = "{SPACES_PATH}";
 pub const SPACES_BRANCH: &str = "{SPACES_BRANCH}";
 pub const SPACES_TOML: &str = "{SPACES_TOML:";
 
-pub use anyhow_error;
-pub use format_error_context;
-
 use crate::manifest;
 
 pub fn get_workspace_name(full_path: &str) -> anyhow::Result<String> {
     let space_name = std::path::Path::new(full_path)
         .file_name()
-        .ok_or(anyhow_error!(
+        .ok_or(format_error!(
             "{full_path} directory is not a space workspace"
         ))?
         .to_str()
-        .ok_or(anyhow_error!(
+        .ok_or(format_error!(
             "{full_path} directory is not a space workspace"
         ))?;
     Ok(space_name.to_string())
@@ -129,18 +111,18 @@ impl Context {
         if let Some((current_value, _)) = self.substitutions.get_mut(key) {
             *current_value = Some(next_value.to_owned());
         } else {
-            return Err(anyhow_error!("Invalid substitution key: {}", key));
+            return Err(format_error!("Invalid substitution key: {}", key));
         }
         Ok(())
     }
 
     pub fn get_sysroot(&self) -> anyhow::Result<&String> {
-        let (value, _description) = self.substitutions.get(SPACES_SYSROOT).ok_or(anyhow_error!(
+        let (value, _description) = self.substitutions.get(SPACES_SYSROOT).ok_or(format_error!(
             "Internal Error: SPACES_SYSROOT not found in map"
         ))?;
         value
             .as_ref()
-            .ok_or(anyhow_error!("Internal Error: SPACES_SYSROOT not set"))
+            .ok_or(format_error!("Internal Error: SPACES_SYSROOT not set"))
     }
 
     fn get_spaces_path() -> Option<String> {

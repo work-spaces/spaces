@@ -1,8 +1,8 @@
 use crate::{
     context,
-    context::{anyhow_error, format_error_context},
     manifest::{self, Dependency},
 };
+use anyhow_source_location::{format_context, format_error};
 use anyhow::Context;
 use serde::Serialize;
 
@@ -44,7 +44,7 @@ impl BareRepository {
         progress_bar
             .execute_process("git", &options_git_config)
             .with_context(|| {
-                format_error_context!(
+                format_context!(
                     "failed to run {}",
                     options_git_config.get_full_command_in_working_directory("git")
                 )
@@ -53,7 +53,7 @@ impl BareRepository {
         progress_bar
             .execute_process("git", &options_git_config_auto_push)
             .with_context(|| {
-                format_error_context!(
+                format_context!(
                     "failed to run {}",
                     options_git_config_auto_push.get_full_command_in_working_directory("git")
                 )
@@ -70,12 +70,12 @@ impl BareRepository {
         let mut options = printer::ExecuteOptions::default();
 
         let (relative_bare_store_path, name_dot_git) = Self::url_to_relative_path_and_name(url)
-            .with_context(|| format_error_context!("Failed to parse {spaces_key} url: {url}"))?;
+            .with_context(|| format_context!("Failed to parse {spaces_key} url: {url}"))?;
 
         let bare_store_path = context.get_bare_store_path(relative_bare_store_path.as_str());
 
         std::fs::create_dir_all(&bare_store_path)
-            .with_context(|| format_error_context!("failed to creat dir {bare_store_path}"))?;
+            .with_context(|| format_context!("failed to creat dir {bare_store_path}"))?;
 
         let full_path = format!("{}{}", bare_store_path, name_dot_git);
 
@@ -84,7 +84,7 @@ impl BareRepository {
             // This will grab newly created branches
 
             Self::configure_repository(progress_bar, full_path.as_str()).with_context(|| {
-                format_error_context!("failed to configure {full_path} before fetch")
+                format_context!("failed to configure {full_path} before fetch")
             })?;
 
             options.working_directory = Some(full_path.clone());
@@ -93,7 +93,7 @@ impl BareRepository {
             progress_bar
                 .execute_process("git", &options)
                 .with_context(|| {
-                    format_error_context!(
+                    format_context!(
                         "failed to run {}",
                         options.get_full_command_in_working_directory("git")
                     )
@@ -102,7 +102,7 @@ impl BareRepository {
             options.working_directory = Some(bare_store_path.clone());
 
             std::fs::create_dir_all(&bare_store_path)
-                .with_context(|| format_error_context!("failed to create dir {bare_store_path}"))?;
+                .with_context(|| format_context!("failed to create dir {bare_store_path}"))?;
 
             options.arguments = vec![
                 "clone".to_string(),
@@ -114,14 +114,14 @@ impl BareRepository {
             progress_bar
                 .execute_process("git", &options)
                 .with_context(|| {
-                    format_error_context!(
+                    format_context!(
                         "failed to run {}",
                         options.get_full_command_in_working_directory("git")
                     )
                 })?;
 
             Self::configure_repository(progress_bar, full_path.as_str()).with_context(|| {
-                format_error_context!("failed to configure {full_path} after bare clone")
+                format_context!("failed to configure {full_path} after bare clone")
             })?;
         }
 
@@ -140,21 +140,21 @@ impl BareRepository {
         path: &str,
     ) -> anyhow::Result<Worktree> {
         let result = Worktree::new(context, progress_bar, self, path)
-            .with_context(|| format_error_context!("Adding working to {} at {path}", self.url))?;
+            .with_context(|| format_context!("Adding working to {} at {path}", self.url))?;
         Ok(result)
     }
 
     fn url_to_relative_path_and_name(url: &str) -> anyhow::Result<(String, String)> {
         let repo_url = url::Url::parse(url)
-            .with_context(|| format_error_context!("Failed to parse bare store url {url}"))?;
+            .with_context(|| format_context!("Failed to parse bare store url {url}"))?;
 
         let host = repo_url
             .host_str()
-            .ok_or(anyhow_error!("No host found in url {}", url))?;
+            .ok_or(format_error!("No host found in url {}", url))?;
         let scheme = repo_url.scheme();
         let path_segments = repo_url
             .path_segments()
-            .ok_or(anyhow_error!("No path found in url {}", url))?;
+            .ok_or(format_error!("No path found in url {}", url))?;
 
         let mut path = String::new();
         let mut repo_name = String::new();
@@ -184,7 +184,7 @@ impl BareRepository {
 
         repo_name
             .strip_suffix(".git")
-            .ok_or(anyhow_error!(
+            .ok_or(format_error!(
                 "Failed to extract a workspace name from  {url}",
             ))
             .map(|e| e.to_string())
@@ -205,21 +205,21 @@ impl Worktree {
         let mut options = printer::ExecuteOptions::default();
 
         if !std::path::Path::new(&path).is_absolute() {
-            return Err(anyhow_error!(
+            return Err(format_error!(
                 "Path to worktree must be an absolute path: {}",
                 path
             ));
         }
 
         std::fs::create_dir_all(path)
-            .with_context(|| format_error_context!("failed to create dir {path}"))?;
+            .with_context(|| format_context!("failed to create dir {path}"))?;
 
         options.working_directory = Some(repository.full_path.clone());
         options.arguments = vec!["worktree".to_string(), "prune".to_string()];
         progress_bar
             .execute_process("git", &options)
             .with_context(|| {
-                format_error_context!(
+                format_context!(
                     "failed to run {}",
                     options.get_full_command_in_working_directory("git")
                 )
@@ -237,7 +237,7 @@ impl Worktree {
             progress_bar
                 .execute_process("git", &options)
                 .with_context(|| {
-                    format_error_context!(
+                    format_context!(
                         "failed to run {}",
                         options.get_full_command_in_working_directory("git")
                     )
@@ -263,7 +263,7 @@ impl Worktree {
         };
 
         let checkout = dependency.get_checkout().with_context(|| {
-            format_error_context!("failed to get checkout type for {dependency:?}")
+            format_context!("failed to get checkout type for {dependency:?}")
         })?;
 
         match &checkout {
@@ -274,13 +274,13 @@ impl Worktree {
                 options.arguments = vec!["checkout".to_string(), value.clone()];
             }
             manifest::Checkout::Develop(value) => {
-                return Err(anyhow_error!(
+                return Err(format_error!(
                     "Internal Error: cannot call checkout() with `Checkout::Develop` {}",
                     value
                 ));
             }
             manifest::Checkout::Artifact(artifact) => {
-                return Err(anyhow_error!(
+                return Err(format_error!(
                     "Artifact checkout is not yet supported {}",
                     artifact
                 ));
@@ -290,7 +290,7 @@ impl Worktree {
         progress_bar
             .execute_process("git", &options)
             .with_context(|| {
-                format_error_context!(
+                format_context!(
                     "failed to run {}",
                     options.get_full_command_in_working_directory("git")
                 )
@@ -315,7 +315,7 @@ impl Worktree {
         progress_bar
             .execute_process("git", &options)
             .with_context(|| {
-                format_error_context!(
+                format_context!(
                     "failed to run {}",
                     options.get_full_command_in_working_directory("git")
                 )
@@ -338,7 +338,7 @@ impl Worktree {
             let checkout_type = self
                 .checkout(context, progress_bar, &original_checkout_dependency)
                 .with_context(|| {
-                    format_error_context!("when checking for {original_checkout_dependency:?}")
+                    format_context!("when checking for {original_checkout_dependency:?}")
                 })?;
 
             if *checkout == manifest::CheckoutOption::Develop {
@@ -356,7 +356,7 @@ impl Worktree {
                     progress_bar
                         .execute_process("git", &options)
                         .with_context(|| {
-                            format_error_context!(
+                            format_context!(
                                 "failed to run {}",
                                 options.get_full_command_in_working_directory("git")
                             )
@@ -369,26 +369,26 @@ impl Worktree {
                 progress_bar
                     .execute_process("git", &options)
                     .with_context(|| {
-                        format_error_context!(
+                        format_context!(
                             "failed to run {}",
                             options.get_full_command_in_working_directory("git")
                         )
                     })?;
             } else {
-                return Err(anyhow_error!(
+                return Err(format_error!(
                     "No `dev` found for dependency {}",
                     dependency.git
                 ));
             }
         } else {
             if dependency.checkout.is_none() {
-                return Err(anyhow_error!(
+                return Err(format_error!(
                     "No `checkout` found for dependency {}",
                     dependency.git
                 ));
             }
 
-            return Err(anyhow_error!(
+            return Err(format_error!(
                 "No `dev` found for dependency {}",
                 dependency.git
             ));

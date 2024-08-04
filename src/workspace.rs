@@ -1,10 +1,11 @@
 use std::collections::{HashMap, VecDeque};
 
 use anyhow::Context;
+use anyhow_source_location::{format_context, format_error};
 
 use crate::{
     archive,
-    context::{self, anyhow_error, format_error_context},
+    context::{self},
     git::{self, BareRepository},
     ledger,
     manifest::{self, Dependency, Workspace, WorkspaceConfig},
@@ -16,11 +17,11 @@ pub fn create(
     config: &String,
 ) -> anyhow::Result<()> {
     let workspace_config = WorkspaceConfig::new(config)
-        .with_context(|| format_error_context!("Failed to load spaces configuration {config}"))?;
+        .with_context(|| format_context!("Failed to load spaces configuration {config}"))?;
 
     context
         .update_substitution(context::SPACE, space_name.as_str())
-        .with_context(|| format_error_context!("Internal Error: invalid substitution"))?;
+        .with_context(|| format_context!("Internal Error: invalid substitution"))?;
 
     create_from_config(context, space_name, workspace_config)
 }
@@ -39,7 +40,7 @@ pub fn create_from_config(
         while let Some(parent) = path.parent() {
             let git_path = parent.join(".git");
             if git_path.exists() {
-                return Err(anyhow_error!(
+                return Err(format_error!(
                     "Cannot create a spaces workspace in a git repository: {git_path:?}"
                 ));
             }
@@ -51,15 +52,15 @@ pub fn create_from_config(
     let context = std::sync::Arc::new(context);
 
     std::fs::create_dir(std::path::Path::new(space_name)).with_context(|| {
-        format_error_context!("When creating workspace {space_name} in current directory")
+        format_context!("When creating workspace {space_name} in current directory")
     })?;
 
     let workspace = config.to_workspace(space_name).with_context(|| {
-        format_error_context!("When creating workspace {space_name} from workspace config")
+        format_context!("When creating workspace {space_name} from workspace config")
     })?;
     workspace
         .save(&directory)
-        .with_context(|| format_error_context!("When trying to save workspace for {space_name}"))?;
+        .with_context(|| format_context!("When trying to save workspace for {space_name}"))?;
 
     {
         let mut printer = context
@@ -87,16 +88,16 @@ pub fn create_from_config(
                     &spaces_key,
                     &dependency.git,
                 )
-                .with_context(|| format_error_context!("with new BareRepository {spaces_key}"))?;
+                .with_context(|| format_context!("with new BareRepository {spaces_key}"))?;
 
                 let worktree = bare_repository
                     .add_worktree(context.clone(), &mut progress_bar, &directory)
-                    .with_context(|| format_error_context!("adding worktree to {spaces_key}"))?;
+                    .with_context(|| format_context!("adding worktree to {spaces_key}"))?;
 
                 worktree
                     .switch_new_branch(context, &mut progress_bar, &dependency)
                     .with_context(|| {
-                        format_error_context!("switching new branchs for {spaces_key}")
+                        format_context!("switching new branchs for {spaces_key}")
                     })?;
 
                 Ok::<(), anyhow::Error>(())
@@ -108,14 +109,14 @@ pub fn create_from_config(
             handle
                 .join()
                 .unwrap()
-                .with_context(|| format_error_context!("from join result"))?;
+                .with_context(|| format_context!("from join result"))?;
         }
     }
 
     let mut state = State::new(context.clone(), space_name.clone(), directory.clone())
-        .with_context(|| format_error_context!("While creating workspace state"))?;
+        .with_context(|| format_context!("While creating workspace state"))?;
     state.sync_full_path().with_context(|| {
-        format_error_context!("While syncing full path during workspace creation")
+        format_context!("While syncing full path during workspace creation")
     })?;
 
     let mut printer = context
@@ -125,14 +126,14 @@ pub fn create_from_config(
 
     printer
         .info(space_name, &workspace)
-        .with_context(|| format_error_context!("printing"))?;
+        .with_context(|| format_context!("printing"))?;
 
     Ok::<(), anyhow::Error>(())
 }
 
 pub fn sync(context: context::Context) -> anyhow::Result<()> {
     let full_path = context.current_directory.clone();
-    let space_name = context::get_workspace_name(full_path.as_str()).with_context(|| format_error_context!("while syncing worksapce {full_path}"))?;
+    let space_name = context::get_workspace_name(full_path.as_str()).with_context(|| format_context!("while syncing worksapce {full_path}"))?;
 
     let mut state = State::new(
         std::sync::Arc::new(context),
@@ -142,7 +143,7 @@ pub fn sync(context: context::Context) -> anyhow::Result<()> {
 
     state
         .sync_full_path()
-        .with_context(|| format_error_context!("syncing full path {}", state.full_path))?;
+        .with_context(|| format_context!("syncing full path {}", state.full_path))?;
     Ok(())
 }
 
@@ -175,7 +176,7 @@ impl State {
             _spaces_name: spaces_name,
             full_path: full_path.clone(),
             workspace: Workspace::new(&full_path).with_context(|| {
-                format_error_context!("{full_path} when creating workspace state")
+                format_context!("{full_path} when creating workspace state")
             })?,
             deps_map: HashMap::new(),
             all_deps: VecDeque::new(),
@@ -187,7 +188,7 @@ impl State {
 
         let log_path = format!("{}/spaces_logs", self.full_path);
         std::fs::create_dir_all(log_path.as_str())
-            .with_context(|| format_error_context!("Trying to create {log_path}"))?;
+            .with_context(|| format_context!("Trying to create {log_path}"))?;
 
         let mut printer = context
             .printer
@@ -197,31 +198,31 @@ impl State {
         let mut multi_progress = printer::MultiProgress::new(&mut printer);
 
         self.sync_repositories(&mut multi_progress)
-            .with_context(|| format_error_context!("While syncing repositories"))?;
+            .with_context(|| format_context!("While syncing repositories"))?;
         self.sync_dependencies(&mut multi_progress)
-            .with_context(|| format_error_context!("While syncing dependencies"))?;
+            .with_context(|| format_context!("While syncing dependencies"))?;
 
         self.export_buck_config(&mut multi_progress)
-            .with_context(|| format_error_context!("While exporting buck config"))?;
+            .with_context(|| format_context!("While exporting buck config"))?;
 
         self.update_cargo(&mut multi_progress)
-            .with_context(|| format_error_context!("While updating cargo"))?;
+            .with_context(|| format_context!("While updating cargo"))?;
 
         if let Some(vscode) = self.workspace.vscode.as_ref() {
             vscode.apply(&self.full_path).with_context(|| {
-                format_error_context!("While applying VS code for {}", self.full_path)
+                format_context!("While applying VS code for {}", self.full_path)
             })?;
         }
 
         self.workspace.save(&self.full_path).with_context(|| {
-            format_error_context!("While saving workspace in {}", self.full_path)
+            format_context!("While saving workspace in {}", self.full_path)
         })?;
 
         let mut ledger = ledger::Ledger::new(context.clone())?;
         ledger
             .update(&self.full_path, &self.workspace)
             .with_context(|| {
-                format_error_context!("While updating ledger with {}", self.full_path)
+                format_context!("While updating ledger with {}", self.full_path)
             })?;
 
         Ok(())
@@ -248,7 +249,7 @@ impl State {
                     &spaces_key,
                     &dependency.git,
                 )
-                .with_context(|| format_error_context!("new BareRepository {spaces_key}"))?;
+                .with_context(|| format_context!("new BareRepository {spaces_key}"))?;
 
                 Ok::<_, anyhow::Error>((bare_repository, dependency.clone()))
             });
@@ -286,19 +287,19 @@ impl State {
                     SyncDep::Archive(spaces_key, http_archive) => Some(
                         self.sync_archive(multi_progress, spaces_key.clone(), http_archive)
                             .with_context(|| {
-                                format_error_context!("syncing archive {spaces_key}")
+                                format_context!("syncing archive {spaces_key}")
                             })?,
                     ),
                     SyncDep::PlatformArchive(spaces_key, http_archive) => Some(
                         self.sync_archive(multi_progress, spaces_key.clone(), http_archive)
                             .with_context(|| {
-                                format_error_context!("syncing platform archive {spaces_key}")
+                                format_context!("syncing platform archive {spaces_key}")
                             })?,
                     ),
                     SyncDep::BareRepository(spaces_key, dependency) => Some(
                         self.sync_bare_repository(multi_progress, spaces_key.clone(), dependency)
                             .with_context(|| {
-                                format_error_context!("syncing bare repository {spaces_key}")
+                                format_context!("syncing bare repository {spaces_key}")
                             })?,
                     ),
                     SyncDep::Repository(bare_repository, dependency) => {
@@ -317,13 +318,13 @@ impl State {
                         Some(
                             self.sync_dependency(multi_progress, bare_repository, dependency)
                                 .with_context(|| {
-                                    format_error_context!("syncing repository {}", spaces_key)
+                                    format_context!("syncing repository {}", spaces_key)
                                 })?,
                         )
                     }
                     SyncDep::VsCode(spaces_key, config) => {
                         config.apply(self.full_path.as_str()).with_context(|| {
-                            format_error_context!("applying VS code for {}", spaces_key)
+                            format_context!("applying VS code for {}", spaces_key)
                         })?;
                         None
                     }
@@ -337,7 +338,7 @@ impl State {
                                     key.as_str(),
                                 )
                                 .with_context(|| {
-                                    format_error_context!(
+                                    format_context!(
                                         "while apply workspace asset {asset:?} from {}/{}",
                                         spaces_key,
                                         key
@@ -364,7 +365,7 @@ impl State {
                             let sync_deps = handle
                                 .join()
                                 .expect("Internal Error: failed to join handle")
-                                .with_context(|| format_error_context!("while joining"))?;
+                                .with_context(|| format_context!("while joining"))?;
 
                             for sync_dep in sync_deps {
                                 self.all_deps.push_back(sync_dep);
@@ -403,7 +404,7 @@ impl State {
                 &spaces_key,
                 &dependency.git,
             )
-            .with_context(|| format_error_context!("new BareRepository {spaces_key}"))?;
+            .with_context(|| format_context!("new BareRepository {spaces_key}"))?;
             new_deps.push(SyncDep::Repository(bare_repository, dependency));
             Ok::<_, anyhow::Error>(new_deps)
         });
@@ -425,16 +426,16 @@ impl State {
             let mut new_deps = Vec::new();
             http_archive
                 .sync(context.clone(), full_path.as_str(), progress_bar)
-                .with_context(|| format_error_context!("syncing archive {full_path}"))?;
+                .with_context(|| format_context!("syncing archive {full_path}"))?;
 
             if let Some(deps) =
                 manifest::Deps::new(http_archive.get_path_to_extracted_files().as_str())
-                    .with_context(|| format_error_context!("getting deps for {full_path}"))?
+                    .with_context(|| format_context!("getting deps for {full_path}"))?
             {
                 new_deps.extend(
                     Self::get_new_deps(context.clone(), &http_archive.spaces_key, &deps)
                         .with_context(|| {
-                            format_error_context!("getting deps for {}", http_archive.spaces_key)
+                            format_context!("getting deps for {}", http_archive.spaces_key)
                         })?,
                 );
             }
@@ -458,7 +459,7 @@ impl State {
         if let Some(map) = &spaces_deps.archives {
             for (key, archive) in map.iter() {
                 let http_archive = archive::HttpArchive::new(context.clone(), key, archive)
-                    .with_context(|| format_error_context!("for new archive {key}"))?;
+                    .with_context(|| format_context!("for new archive {key}"))?;
 
                 new_deps.push(SyncDep::Archive(key.clone(), http_archive));
             }
@@ -476,7 +477,7 @@ impl State {
                     let http_archive =
                         archive::HttpArchive::new(context.clone(), &effective_key, &archive)
                             .with_context(|| {
-                                format_error_context!("new http archive {effective_key}")
+                                format_context!("new http archive {effective_key}")
                             })?;
 
                     new_deps.push(SyncDep::PlatformArchive(
@@ -517,31 +518,31 @@ impl State {
 
             let worktree = bare_repository
                 .add_worktree(context.clone(), &mut progress_bar, &full_path)
-                .with_context(|| format_error_context!("adding worktree {full_path} needs checkout? {needs_checked_out:?}"))?;
+                .with_context(|| format_context!("adding worktree {full_path} needs checkout? {needs_checked_out:?}"))?;
 
             if needs_checked_out {
                 worktree
                     .checkout(context.clone(), &mut progress_bar, &dependency)
                     .with_context(|| {
-                        format_error_context!("checking out worktree created from {full_path}")
+                        format_context!("checking out worktree created from {full_path}")
                     })?;
                 worktree
                     .checkout_detached_head(context.clone(), &mut progress_bar)
                     .with_context(|| {
-                        format_error_context!(
+                        format_context!(
                             "detaching head for worktree created from {full_path}"
                         )
                     })?;
             }
 
             let spaces_deps = worktree.get_deps().with_context(|| {
-                format_error_context!("getting deps for {}", worktree.full_path)
+                format_context!("getting deps for {}", worktree.full_path)
             })?;
             if let Some(spaces_deps) = spaces_deps {
                 new_deps.extend(
                     Self::get_new_deps(context.clone(), &parent_spaces_key, &spaces_deps)
                         .with_context(|| {
-                            format_error_context!(
+                            format_context!(
                                 "getting new deps based from {}",
                                 worktree.full_path
                             )
@@ -578,7 +579,7 @@ impl State {
                 }
             }
             buck.export(&self.full_path)
-                .with_context(|| format_error_context!("exporting buck configuration"))?;
+                .with_context(|| format_context!("exporting buck configuration"))?;
         }
         Ok(())
     }
@@ -593,19 +594,19 @@ impl State {
                 let cargo_toml: toml::Value = {
                     let cargo_toml_contents = std::fs::read_to_string(&cargo_toml_path)
                         .with_context(|| {
-                            format_error_context!("reading cargo path {cargo_toml_path}")
+                            format_context!("reading cargo path {cargo_toml_path}")
                         })?;
                     toml::from_str(&cargo_toml_contents).with_context(|| {
-                        format_error_context!("parsing contents of {cargo_toml_path}")
+                        format_context!("parsing contents of {cargo_toml_path}")
                     })?
                 };
 
-                let dependencies = cargo_toml.get("dependencies").ok_or(anyhow_error!(
+                let dependencies = cargo_toml.get("dependencies").ok_or(format_error!(
                     "Cargo.toml does not have a dependencies section"
                 ))?;
 
                 for value in list {
-                    let dependency = dependencies.get(value.as_str()).ok_or(anyhow_error!(
+                    let dependency = dependencies.get(value.as_str()).ok_or(format_error!(
                         "Cargo.toml does not have a dependency named {}",
                         value
                     ))?;
@@ -649,9 +650,9 @@ impl State {
 
         let config_path = format!("{}/.cargo", self.full_path);
         std::fs::create_dir_all(std::path::Path::new(&config_path))
-            .with_context(|| format_error_context!("Trying to create {config_path}"))?;
+            .with_context(|| format_context!("Trying to create {config_path}"))?;
         std::fs::write(format!("{config_path}/config.toml"), config_contents).with_context(
-            || format_error_context!("While trying to write contents to {config_path}/config.toml"),
+            || format_context!("While trying to write contents to {config_path}/config.toml"),
         )?;
 
         Ok(())

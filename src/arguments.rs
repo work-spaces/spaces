@@ -1,8 +1,10 @@
 use crate::{
-    action, context, format_error_context, git,
+    action, context, git,
     manifest::{self, WorkspaceConfig},
 };
+
 use anyhow::Context;
+use anyhow_source_location::format_context;
 use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
@@ -53,7 +55,7 @@ pub fn execute() -> anyhow::Result<()> {
                     context::SPACES_SYSROOT,
                     format!("{}/{}/sysroot", context.current_directory, name).as_str(),
                 )
-                .with_context(|| format_error_context!("Internal error"))?;
+                .with_context(|| format_context!("Internal error"))?;
             workspace::create(context, &name, &config)?;
         }
 
@@ -73,7 +75,7 @@ pub fn execute() -> anyhow::Result<()> {
                     context::SPACES_SYSROOT,
                     format!("{}/{}/sysroot", context.current_directory, name).as_str(),
                 )
-                .with_context(|| format_error_context!("Internal error"))?;
+                .with_context(|| format_context!("Internal error"))?;
 
             let hash_key = git::BareRepository::get_workspace_name_from_url(&git)?;
 
@@ -102,10 +104,10 @@ pub fn execute() -> anyhow::Result<()> {
                     context::SPACES_SYSROOT,
                     format!("{}/sysroot", context.current_directory).as_str(),
                 )
-                .with_context(|| format_error_context!("Internal error"))?;
+                .with_context(|| format_context!("Internal error"))?;
 
             action::run_action(context, name.clone())
-                .with_context(|| format_error_context!("while running action {name}"))?;
+                .with_context(|| format_context!("while running action {name}"))?;
         }
 
         Arguments {
@@ -118,7 +120,7 @@ pub fn execute() -> anyhow::Result<()> {
                     context::SPACES_SYSROOT,
                     format!("{}/sysroot", context.current_directory).as_str(),
                 )
-                .with_context(|| format_error_context!("Internal error"))?;
+                .with_context(|| format_context!("Internal error"))?;
             action::show_actions(context)?;
         }
 
@@ -132,7 +134,7 @@ pub fn execute() -> anyhow::Result<()> {
                     context::SPACES_SYSROOT,
                     format!("{}/sysroot", context.current_directory).as_str(),
                 )
-                .with_context(|| format_error_context!("Internal error"))?;
+                .with_context(|| format_context!("Internal error"))?;
             workspace::sync(context)?;
         }
 
@@ -143,38 +145,17 @@ pub fn execute() -> anyhow::Result<()> {
             context.update_printer(level.map(|e| e.into()));
             let arc_context = std::sync::Arc::new(context);
             let ledger = ledger::Ledger::new(arc_context.clone())
-                .with_context(|| format_error_context!("while creating ledger"))?;
+                .with_context(|| format_context!("while creating ledger"))?;
             ledger.show_status(arc_context)?;
         }
 
         Arguments {
-            commands:
-                Commands::CreateBinaryArchive {
-                    input,
-                    output,
-                    name,
-                    version,
-                },
+            commands: Commands::CreateArchive { manifest },
             level,
         } => {
+            let manifest_path = manifest.unwrap_or("spaces_create_archive.toml".to_string());
             context.update_printer(level.map(|e| e.into()));
-            archive::create_binary_archive(context, input, output, name, version)
-                .with_context(|| format_error_context!("while creating binary archive"))?;
-        }
-
-        Arguments {
-            commands: Commands::CreateArchive {},
-            level,
-        } => {
-            context.update_printer(level.map(|e| e.into()));
-            archive::create(context, ".".to_string())?;
-        }
-        Arguments {
-            commands: Commands::InspectArchive { path },
-            level,
-        } => {
-            context.update_printer(level.map(|e| e.into()));
-            archive::inspect(context, path)?;
+            archive::create(context, manifest_path)?;
         }
         Arguments {
             commands: Commands::TemplateHelp {},
@@ -268,28 +249,11 @@ enum Commands {
     ShowActions {},
     /// Lists the workspaces in the spaces store on the local machine.
     List {},
-    /// Creates an archive using spaces_create_archive.toml in the current directory.
-    CreateArchive {},
-    /// Creates an archive using spaces_create_archive.toml in the current directory.
-    CreateBinaryArchive {
-        /// The path of the binary to archive
+    /// Creates an archive using a spaces create archive manifest.
+    CreateArchive {
+        /// spaces_create_archive.toml is the default
         #[arg(long)]
-        input: String,
-        /// The path to the output directory
-        #[arg(long)]
-        output: String,
-        /// The name of the output archive
-        #[arg(long)]
-        name: String,
-        /// The version of the output
-        #[arg(long)]
-        version: String,
-    },
-    /// Inspect the contents of a .zip archive created by spaces.
-    InspectArchive {
-        /// The path of the .zip archive to inspect
-        #[arg(long)]
-        path: String,
+        manifest: Option<String>,
     },
     /// Show the list of substitions made when copying `Template` assets to a space
     TemplateHelp {},
