@@ -1,17 +1,7 @@
-use serde::Serialize;
 use anyhow_source_location::format_error;
+use serde::Serialize;
 
-pub const SPACES_OVERLAY: &str = "{SPACES_OVERLAY}";
-pub const SPACE: &str = "{SPACE}";
-pub const USER: &str = "{USER}";
-pub const UNIQUE: &str = "{UNIQUE}";
-pub const SPACES_SYSROOT: &str = "{SPACES_SYSROOT}";
-pub const SPACES_PLATFORM: &str = "{SPACES_PLATFORM}";
-pub const SPACES_PATH: &str = "{SPACES_PATH}";
-pub const SPACES_BRANCH: &str = "{SPACES_BRANCH}";
-pub const SPACES_TOML: &str = "{SPACES_TOML:";
-
-use crate::manifest;
+use crate::template;
 
 pub fn get_workspace_name(full_path: &str) -> anyhow::Result<String> {
     let space_name = std::path::Path::new(full_path)
@@ -40,7 +30,7 @@ pub struct Context {
     pub async_runtime: tokio::runtime::Runtime,
     #[serde(skip)]
     pub printer: std::sync::RwLock<printer::Printer>,
-    pub substitutions: std::collections::HashMap<&'static str, (Option<String>, &'static str)>,
+    pub template_model: template::Model,
 }
 
 impl Context {
@@ -68,21 +58,9 @@ impl Context {
             "Internal Error: Path is not a valid string"
         ))?;
 
-        let user = std::env::var("USER").ok();
-
-        let unique_timestamp = format!("{}", std::time::Instant::now().elapsed().as_nanos());
-        let unique_sha256 = sha256::digest(unique_timestamp.as_bytes());
-        let unique = unique_sha256.as_str()[0..8].to_string();
-
-        let substitutions = maplit::hashmap! {
-            SPACE => (None, "Name of the space being created or sync'd"),
-            SPACES_BRANCH => (None, "The name of the development branch for repositories in the space"),
-            SPACES_SYSROOT => (None, "The path to the space's sysroot directory"),
-            SPACES_OVERLAY => (None, "The name of the repository or dependency containing the substitution value"),
-            SPACES_PATH => (Self::get_spaces_path(), "Parent directory of the spaces binary found in the PATH"),
-            SPACES_PLATFORM => (manifest::Platform::get_platform().map(|e| e.to_string()), "The platform of the current system"),
-            UNIQUE => (Some(unique), "A unique 8-character identifier generated from a timestamp"),
-            USER => (user, "Value of USER in env"),
+        let template_model = {
+            use anyhow::Context;
+            template::Model::new().context(format_error!(""))?
         };
 
         Ok(Context {
@@ -90,7 +68,7 @@ impl Context {
             async_runtime,
             printer: std::sync::RwLock::new(printer::Printer::new_stdout()),
             current_directory: current_directory_str.to_string(),
-            substitutions,
+            template_model,
         })
     }
 
@@ -101,33 +79,23 @@ impl Context {
         result
     }
 
-    pub fn update_printer(&mut self, level: Option<printer::Level>) {
-        if let (Some(level), Ok(mut printer)) = (level, self.printer.write()) {
-            printer.level = level;
-        }
-    }
-
-    pub fn update_substitution(&mut self, key: &str, next_value: &str) -> anyhow::Result<()> {
-        if let Some((current_value, _)) = self.substitutions.get_mut(key) {
-            *current_value = Some(next_value.to_owned());
-        } else {
-            return Err(format_error!("Invalid substitution key: {}", key));
-        }
-        Ok(())
-    }
-
-    pub fn get_sysroot(&self) -> anyhow::Result<&String> {
-        let (value, _description) = self.substitutions.get(SPACES_SYSROOT).ok_or(format_error!(
-            "Internal Error: SPACES_SYSROOT not found in map"
-        ))?;
-        value
-            .as_ref()
-            .ok_or(format_error!("Internal Error: SPACES_SYSROOT not set"))
-    }
-
+    #[allow(dead_code)]
     fn get_spaces_path() -> Option<String> {
         let path = which::which("spaces").ok()?;
         let parent = path.parent()?;
         Some(parent.to_string_lossy().to_string())
+    }
+}
+
+pub struct ExecutionContext {
+    pub printer: printer::Printer,
+    pub context: Context,
+}
+
+impl ExecutionContext {
+    pub fn new() -> anyhow::Result<Self> {
+        let context = Context::new()?;
+        let printer = printer::Printer::new_stdout();
+        Ok(ExecutionContext { printer, context })
     }
 }

@@ -10,6 +10,7 @@ struct Files {
     files: HashSet<String>,
 }
 
+#[derive(Clone)]
 pub struct HttpArchive {
     pub spaces_key: String,
     archive: manifest::Archive,
@@ -60,7 +61,7 @@ impl HttpArchive {
         (source, target_path)
     }
 
-    fn create_links(&mut self, space_directory: &str) -> anyhow::Result<()> {
+    pub fn create_links(&mut self, space_directory: &str) -> anyhow::Result<()> {
         match self.archive.link {
             manifest::ArchiveLink::Hard => {
                 self.create_hard_links(space_directory)
@@ -80,15 +81,14 @@ impl HttpArchive {
         let original = std::path::Path::new(source.as_str());
 
         if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent).context(format_context!(
-                "when creating parent for hardlink {target_path} -> {source}"
-            ))?;
+            std::fs::create_dir_all(parent)
+                .context(format_context!("{target_path} -> {source}"))?;
         }
 
         let _ = std::fs::remove_file(target);
 
         std::fs::hard_link(original, target).context(format_context!(
-            "hardlinking {} -> {}",
+            "{} -> {}",
             target_path,
             source
         ))?;
@@ -113,8 +113,7 @@ impl HttpArchive {
                     ))?;
                 }
 
-                Self::create_hard_link(target_path, source)
-                    .context(format_context!("while hardlinking archive file"))?;
+                Self::create_hard_link(target_path, source).context(format_context!(""))?;
             }
         }
         Ok(())
@@ -136,7 +135,7 @@ impl HttpArchive {
         self.extract(next_progress_bar)
             .context(format_context!("failed to extract archive for {full_path}"))?;
 
-        self.create_links(full_path)?;
+        //self.create_links(full_path)?;
 
         Ok(())
     }
@@ -201,18 +200,17 @@ impl HttpArchive {
             }
         }
 
-        let mut target_path = target_path.to_owned();
+        let target_path_with_prefix = if let Some(add_prefix) = self.archive.add_prefix.as_ref() {
+            format!("{add_prefix}/{target_path}")
+        } else {
+            target_path.to_string()
+        };
 
-        if let Some(add_prefix) = self.archive.add_prefix.as_ref() {
-            if let (sysroot, true) = (
-                self.context
-                    .get_sysroot()
-                    .expect("Internal Error: sysroot not set"),
-                add_prefix.starts_with(manifest::SPACES_SYSROOT),
-            ) {
-                target_path = add_prefix.replace(manifest::SPACES_SYSROOT, sysroot.as_str());
-            }
-        }
+        let target_path = self
+            .context
+            .template_model
+            .render_template_string(target_path_with_prefix.as_str())
+            .ok()?;
 
         Some(format!("{target_path}/{path}"))
     }
@@ -285,14 +283,14 @@ impl HttpArchive {
     }
 }
 
-pub fn create(context: context::Context, manifest_path: String) -> anyhow::Result<()> {
+pub fn create(
+    execution_context: context::ExecutionContext,
+    manifest_path: String,
+) -> anyhow::Result<()> {
     let config = manifest::CreateArchive::new(&manifest_path)
         .context(format_context!("While loading config path {manifest_path}"))?;
 
-    let mut printer = context
-        .printer
-        .write()
-        .expect("Internal Error: Printer is not set");
+    let mut printer = execution_context.printer;
 
     let walk_dir: Vec<_> = walkdir::WalkDir::new(config.input.as_str())
         .into_iter()
@@ -328,7 +326,9 @@ pub fn create(context: context::Context, manifest_path: String) -> anyhow::Resul
         let archive_path = item
             .path()
             .strip_prefix(config.input.as_str())
-            .context(format_context!("{item:?}"))?.to_string_lossy().to_string();
+            .context(format_context!("{item:?}"))?
+            .to_string_lossy()
+            .to_string();
 
         let file_path = item.path().to_string_lossy().to_string();
 

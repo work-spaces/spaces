@@ -1,5 +1,5 @@
 use crate::{
-    action, context, git,
+    context, git, platform,
     manifest::{self, WorkspaceConfig},
 };
 
@@ -39,24 +39,39 @@ pub struct Arguments {
     level: Option<Level>,
 }
 
+fn update_execution_context(
+    execution_context: &mut context::ExecutionContext,
+    space_name: Option<&String>,
+    level: Option<Level>,
+) {
+    if let Some(level) = level {
+        execution_context.printer.level = level.into();
+    }
+
+    execution_context.context.template_model.spaces.sysroot = if let Some(name) = space_name {
+        // for create
+        format!(
+            "{}/{name}/sysroot",
+            execution_context.context.current_directory
+        )
+    } else {
+        // for sync
+        format!("{}/sysroot", execution_context.context.current_directory)
+    };
+}
+
 pub fn execute() -> anyhow::Result<()> {
-    use crate::{archive, context::Context, ledger, workspace};
+    use crate::{archive, ledger, workspace};
     let args = Arguments::parse();
-    let mut context = Context::new()?;
+    let mut execution_context = context::ExecutionContext::new()?;
 
     match args {
         Arguments {
             commands: Commands::Create { name, config },
             level,
         } => {
-            context.update_printer(level.map(|e| e.into()));
-            context
-                .update_substitution(
-                    context::SPACES_SYSROOT,
-                    format!("{}/{}/sysroot", context.current_directory, name).as_str(),
-                )
-                .with_context(|| format_context!("Internal error"))?;
-            workspace::create(context, &name, &config)?;
+            update_execution_context(&mut execution_context, Some(&name), level);
+            workspace::create(execution_context, &name, &config)?;
         }
 
         Arguments {
@@ -69,14 +84,7 @@ pub fn execute() -> anyhow::Result<()> {
                 },
             level,
         } => {
-            context.update_printer(level.map(|e| e.into()));
-            context
-                .update_substitution(
-                    context::SPACES_SYSROOT,
-                    format!("{}/{}/sysroot", context.current_directory, name).as_str(),
-                )
-                .with_context(|| format_context!("Internal error"))?;
-
+            update_execution_context(&mut execution_context, Some(&name), level);
             let hash_key = git::BareRepository::get_workspace_name_from_url(&git)?;
 
             let config = WorkspaceConfig {
@@ -90,60 +98,23 @@ pub fn execute() -> anyhow::Result<()> {
                 },
                 ..Default::default()
             };
-
-            workspace::create_from_config(context, &name, config)?;
-        }
-
-        Arguments {
-            commands: Commands::RunAction { name },
-            level,
-        } => {
-            context.update_printer(level.map(|e| e.into()));
-            context
-                .update_substitution(
-                    context::SPACES_SYSROOT,
-                    format!("{}/sysroot", context.current_directory).as_str(),
-                )
-                .with_context(|| format_context!("Internal error"))?;
-
-            action::run_action(context, name.clone())
-                .with_context(|| format_context!("while running action {name}"))?;
-        }
-
-        Arguments {
-            commands: Commands::ShowActions {},
-            level,
-        } => {
-            context.update_printer(level.map(|e| e.into()));
-            context
-                .update_substitution(
-                    context::SPACES_SYSROOT,
-                    format!("{}/sysroot", context.current_directory).as_str(),
-                )
-                .with_context(|| format_context!("Internal error"))?;
-            action::show_actions(context)?;
+            workspace::create_from_config(execution_context, &name, config)?;
         }
 
         Arguments {
             commands: Commands::Sync {},
             level,
         } => {
-            context.update_printer(level.map(|e| e.into()));
-            context
-                .update_substitution(
-                    context::SPACES_SYSROOT,
-                    format!("{}/sysroot", context.current_directory).as_str(),
-                )
-                .with_context(|| format_context!("Internal error"))?;
-            workspace::sync(context)?;
+            update_execution_context(&mut execution_context, None, level);
+            workspace::sync(execution_context)?;
         }
 
         Arguments {
             commands: Commands::List {},
             level,
         } => {
-            context.update_printer(level.map(|e| e.into()));
-            let arc_context = std::sync::Arc::new(context);
+            update_execution_context(&mut execution_context, None, level);
+            let arc_context = std::sync::Arc::new(execution_context.context);
             let ledger = ledger::Ledger::new(arc_context.clone())
                 .with_context(|| format_context!("while creating ledger"))?;
             ledger.show_status(arc_context)?;
@@ -153,20 +124,17 @@ pub fn execute() -> anyhow::Result<()> {
             commands: Commands::CreateArchive { manifest },
             level,
         } => {
+            update_execution_context(&mut execution_context, None, level);
             let manifest_path = manifest.unwrap_or("spaces_create_archive.toml".to_string());
-            context.update_printer(level.map(|e| e.into()));
-            archive::create(context, manifest_path)?;
+            archive::create(execution_context, manifest_path)?;
         }
         Arguments {
             commands: Commands::TemplateHelp {},
             level,
         } => {
-            context.update_printer(level.map(|e| e.into()));
-            let mut printer = context
-                .printer
-                .write()
-                .expect("Internal error getting printer");
-            printer.info("substitutions", &context.substitutions)?;
+            update_execution_context(&mut execution_context, None, level);
+            let mut printer = execution_context.printer;
+            printer.info("substitutions", &execution_context.context.template_model)?;
         }
     }
 
@@ -198,15 +166,15 @@ pub enum Platform {
     LinuxAarch64,
 }
 
-impl From<Platform> for manifest::Platform {
-    fn from(platform: Platform) -> manifest::Platform {
+impl From<Platform> for platform::Platform {
+    fn from(platform: Platform) -> platform::Platform {
         match platform {
-            Platform::MacosX86_64 => manifest::Platform::MacosX86_64,
-            Platform::MacosAarch64 => manifest::Platform::MacosAarch64,
-            Platform::WindowsX86_64 => manifest::Platform::WindowsX86_64,
-            Platform::WindowsAarch64 => manifest::Platform::WindowsAarch64,
-            Platform::LinuxX86_64 => manifest::Platform::LinuxX86_64,
-            Platform::LinuxAarch64 => manifest::Platform::LinuxAarch64,
+            Platform::MacosX86_64 => platform::Platform::MacosX86_64,
+            Platform::MacosAarch64 => platform::Platform::MacosAarch64,
+            Platform::WindowsX86_64 => platform::Platform::WindowsX86_64,
+            Platform::WindowsAarch64 => platform::Platform::WindowsAarch64,
+            Platform::LinuxX86_64 => platform::Platform::LinuxX86_64,
+            Platform::LinuxAarch64 => platform::Platform::LinuxAarch64,
         }
     }
 }
@@ -239,14 +207,6 @@ enum Commands {
     },
     /// Synchronizes the current workspace.
     Sync {},
-    /// Execute configure steps.
-    RunAction {
-        /// The name of the build step. Execute all by default.
-        #[arg(long)]
-        name: String,
-    },
-    /// Shows the actions available in the current workspace.
-    ShowActions {},
     /// Lists the workspaces in the spaces store on the local machine.
     List {},
     /// Creates an archive using a spaces create archive manifest.

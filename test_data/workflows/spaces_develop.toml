@@ -1,0 +1,50 @@
+[settings]
+branch = "{{ spaces.space_name }}-{{ spaces.unique }}"
+
+[vscode.extensions]
+recommendations = ["rust-lang.rust-analyzer"]
+
+[vscode.settings]
+"editor.formatOnSave" = true
+
+[vscode.tasks.build_spaces]
+type = "cargo"
+command = "build"
+args = ["--manifest-path=spaces/Cargo.toml"]
+problemMatcher = ["$rustc"]
+group = "build"
+label = "build:spaces"
+
+[vscode.tasks.install_dev_spaces]
+type = "cargo"
+command = "install"
+args = ["--path=spaces", "--root=${userHome}/.local", "--profile=dev"]
+problemMatcher = ["$rustc"]
+group = "build"
+label = "install_dev:spaces"
+
+[vscode.tasks.install_spaces]
+type = "cargo"
+command = "install"
+args = ["--path=spaces", "--root=${userHome}/.local", "--profile=release"]
+problemMatcher = ["$rustc"]
+group = "build"
+label = "install:spaces"
+
+[vscode.tasks.build_printer]
+type = "cargo"
+command = "build"
+args = ["--manifest-path=printer/Cargo.toml"]
+problemMatcher = ["$rustc"]
+group = "build"
+label = "build:printer"
+
+[repositories]
+spaces = { git = "https://github.com/work-spaces/spaces", branch = "development" }
+printer = { git = "https://github.com/work-spaces/printer-rs", branch = "development" }
+
+[cargo.patches]
+spaces = ["printer"]
+
+[cargo.build]
+rustc-wrapper = "sccache"

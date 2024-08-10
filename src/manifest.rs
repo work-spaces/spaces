@@ -2,14 +2,8 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::context;
+use crate::{context, platform};
 use anyhow_source_location::{format_context, format_error};
-
-pub use context::SPACE;
-pub use context::SPACES_OVERLAY;
-pub use context::SPACES_SYSROOT;
-pub use context::UNIQUE;
-pub use context::USER;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum CheckoutOption {
@@ -101,7 +95,6 @@ impl Dependency {
     }
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ArchiveLink {
     None,
@@ -116,67 +109,6 @@ pub struct Archive {
     pub files: Option<Vec<String>>,
     pub strip_prefix: Option<String>,
     pub add_prefix: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-pub enum Platform {
-    #[serde(rename = "macos-x86_64")]
-    MacosX86_64,
-    #[serde(rename = "macos-aarch64")]
-    MacosAarch64,
-    #[serde(rename = "windows-x86_64")]
-    WindowsX86_64,
-    #[serde(rename = "windows-aarch64")]
-    WindowsAarch64,
-    #[serde(rename = "linux-x86_64")]
-    LinuxX86_64,
-    #[serde(rename = "linux-aarch64")]
-    LinuxAarch64,
-}
-
-impl Platform {
-    pub fn get_platform() -> Option<Platform> {
-        if cfg!(target_os = "macos") {
-            if cfg!(target_arch = "x86_64") {
-                return Some(Self::MacosX86_64);
-            } else if cfg!(target_arch = "aarch64") {
-                return Some(Self::MacosAarch64);
-            }
-        } else if cfg!(target_os = "windows") {
-            if cfg!(target_arch = "x86_64") {
-                return Some(Self::WindowsX86_64);
-            } else if cfg!(target_arch = "aarch64") {
-                return Some(Self::WindowsAarch64);
-            }
-        } else if cfg!(target_os = "linux") {
-            if cfg!(target_arch = "x86_64") {
-                return Some(Self::LinuxX86_64);
-            } else if cfg!(target_arch = "aarch64") {
-                return Some(Self::LinuxAarch64);
-            }
-        }
-        None
-    }
-
-    pub fn is_windows() -> bool {
-        match Self::get_platform() {
-            Some(Self::WindowsX86_64) | Some(Self::WindowsAarch64) => true,
-            _ => false,
-        }
-    }
-}
-
-impl std::fmt::Display for Platform {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Platform::MacosX86_64 => write!(f, "macos-x86_64"),
-            Platform::MacosAarch64 => write!(f, "macos-aarch64"),
-            Platform::WindowsX86_64 => write!(f, "windows-x86_64"),
-            Platform::WindowsAarch64 => write!(f, "windows-aarch64"),
-            Platform::LinuxX86_64 => write!(f, "linux-x86_64"),
-            Platform::LinuxAarch64 => write!(f, "linux-aarch64"),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -208,15 +140,14 @@ pub struct CreateArchive {
     pub output: String,
     pub version: String,
     pub driver: ArchiveDriver,
-    pub platform: Option<Platform>,
+    pub platform: Option<platform::Platform>,
     pub include_globs: Option<Vec<String>>,
     pub exclude_globs: Option<Vec<String>>,
-
 }
 
 impl CreateArchive {
     pub fn new(path: &str) -> anyhow::Result<Self> {
-        let contents = std::fs::read_to_string(&path).context(format_context!("{path}"))?;
+        let contents = std::fs::read_to_string(path).context(format_context!("{path}"))?;
         let result: Self = toml::from_str(&contents).context(format_context!("{path}"))?;
         Ok(result)
     }
@@ -230,7 +161,6 @@ impl CreateArchive {
         result.push_str(self.driver.get_extension());
         result
     }
-
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -245,32 +175,36 @@ pub struct PlatformArchive {
 
 impl PlatformArchive {
     pub fn get_archive(&self) -> Option<Archive> {
-        if let Some(platform) = Platform::get_platform() {
+        if let Some(platform) = platform::Platform::get_platform() {
             self.get_archive_from_platform(platform)
         } else {
             None
         }
     }
 
-    pub fn get_archive_from_platform(&self, platform: Platform) -> Option<Archive> {
+    pub fn get_archive_from_platform(&self, platform: platform::Platform) -> Option<Archive> {
         match platform {
-            Platform::MacosX86_64 => self.macos_x86_64.clone(),
-            Platform::MacosAarch64 => self.macos_aarch64.clone(),
-            Platform::WindowsX86_64 => self.windows_x86_64.clone(),
-            Platform::WindowsAarch64 => self.windows_aarch64.clone(),
-            Platform::LinuxX86_64 => self.linux_x86_64.clone(),
-            Platform::LinuxAarch64 => self.linux_aarch64.clone(),
+            platform::Platform::MacosX86_64 => self.macos_x86_64.clone(),
+            platform::Platform::MacosAarch64 => self.macos_aarch64.clone(),
+            platform::Platform::WindowsX86_64 => self.windows_x86_64.clone(),
+            platform::Platform::WindowsAarch64 => self.windows_aarch64.clone(),
+            platform::Platform::LinuxX86_64 => self.linux_x86_64.clone(),
+            platform::Platform::LinuxAarch64 => self.linux_aarch64.clone(),
         }
     }
 
-    pub fn get_archive_from_platform_mut(&mut self, platform: Platform) -> Option<&mut Archive> {
+    #[allow(dead_code)]
+    pub fn get_archive_from_platform_mut(
+        &mut self,
+        platform: platform::Platform,
+    ) -> Option<&mut Archive> {
         match platform {
-            Platform::MacosX86_64 => self.macos_x86_64.as_mut(),
-            Platform::MacosAarch64 => self.macos_aarch64.as_mut(),
-            Platform::WindowsX86_64 => self.windows_x86_64.as_mut(),
-            Platform::WindowsAarch64 => self.windows_aarch64.as_mut(),
-            Platform::LinuxX86_64 => self.linux_x86_64.as_mut(),
-            Platform::LinuxAarch64 => self.linux_aarch64.as_mut(),
+            platform::Platform::MacosX86_64 => self.macos_x86_64.as_mut(),
+            platform::Platform::MacosAarch64 => self.macos_aarch64.as_mut(),
+            platform::Platform::WindowsX86_64 => self.windows_x86_64.as_mut(),
+            platform::Platform::WindowsAarch64 => self.windows_aarch64.as_mut(),
+            platform::Platform::LinuxX86_64 => self.linux_x86_64.as_mut(),
+            platform::Platform::LinuxAarch64 => self.linux_aarch64.as_mut(),
         }
     }
 }
@@ -303,33 +237,26 @@ impl WorkspaceAsset {
             AssetType::HardLink => {
                 if std::path::Path::new(dest_path.as_str()).exists() {
                     std::fs::remove_file(dest_path.as_str())
-                        .context(format_context!("While removing {dest_path}"))?;
+                        .context(format_context!("{dest_path}"))?;
                 }
-                std::fs::hard_link(path.as_str(), dest_path.as_str()).context(format_context!(
-                    "While creating hard link from {path} to {dest_path}"
-                ))?;
+                std::fs::hard_link(path.as_str(), dest_path.as_str())
+                    .context(format_context!("{path} -> {dest_path}"))?;
             }
             AssetType::Template => {
                 // remove the destination file if it exists
                 if std::path::Path::new(dest_path.as_str()).exists() {
                     std::fs::remove_file(dest_path.as_str())
-                        .context(format_context!("While removing {dest_path}"))?;
+                        .context(format_context!("{dest_path}"))?;
                 }
 
-                let mut contents = std::fs::read_to_string(&path)
-                    .context(format_context!("While reading {path}"))?;
-
-                // do the substitutions
-                let substitutions = &context.substitutions;
-                for (key, (value, _)) in substitutions.iter() {
-                    if let Some(value) = value {
-                        contents = contents.replace(key, value);
-                    }
-                }
+                let contents = context
+                    .template_model
+                    .render_template_path(&path)
+                    .context(format_context!(""))?;
 
                 // create a copy
                 std::fs::write(dest_path.as_str(), contents)
-                    .context(format_context!("While writing to {dest_path}"))?;
+                    .context(format_context!("{dest_path}"))?;
             }
         }
         Ok(())
@@ -362,6 +289,7 @@ impl Deps {
         }
     }
 
+    #[allow(dead_code)]
     pub fn save(&self, path: &str) -> anyhow::Result<()> {
         let file_path = format!("{path}/{}", Self::FILE_NAME); //change to spaces_dependencies.toml
         let contents = toml::to_string(&self).context(format_context!(
@@ -410,8 +338,9 @@ impl BuckConfig {
         contents.push_str(&Self::stringify("cell_aliases", &self.cell_aliases));
         contents.push_str(&Self::stringify("parser", &self.parser));
         contents.push_str(&Self::stringify("project", &self.project));
-        std::fs::write(&file_path, contents)
-            .context(format_context!("Failed to write buckconfig file {file_path}"))?;
+        std::fs::write(&file_path, contents).context(format_context!(
+            "Failed to write buckconfig file {file_path}"
+        ))?;
         Ok(())
     }
 }
@@ -476,7 +405,7 @@ impl VsCodeConfig {
                     "Failed to get tasks from {tasks_file} JSON object"
                 ))?;
 
-            for (_key, value) in own_tasks {
+            for value in own_tasks.values() {
                 let json_value = serde_json::to_value(value).context(format_context!(
                     "toml value {value:?} cannot be converted to JSON"
                 ))?;
@@ -569,10 +498,13 @@ impl WorkspaceConfig {
         Ok(result)
     }
 
-    pub fn to_workspace(&self, space_name: &str) -> anyhow::Result<Workspace> {
+    pub fn to_workspace(
+        &self,
+        context: std::sync::Arc<context::Context>
+    ) -> anyhow::Result<Workspace> {
         let mut repositories = self.repositories.clone();
         for (_key, dependency) in repositories.iter_mut() {
-            let mut dev_branch = if let Some(branch) = self
+            let dev_branch = if let Some(branch) = self
                 .settings
                 .as_ref()
                 .and_then(|e| e.branch.as_ref())
@@ -580,35 +512,13 @@ impl WorkspaceConfig {
             {
                 (*branch).to_owned()
             } else {
-                format!("user/{USER}/{SPACE}-{UNIQUE}")
+                r#"user/{{ spaces.user }}/{{ spaces.space_name }}-{{ spaces.unique }}"#.to_string()
             };
 
-            if dev_branch.contains(USER) {
-                let user = std::env::var("USER").context(format_context!(
-                    "Failed to replace {USER} with $USER for {dev_branch} naming"
-                ))?;
-                dev_branch = dev_branch.replace(USER, &user);
-            }
-
-            if dev_branch.contains(SPACE) {
-                dev_branch = dev_branch.replace(SPACE, space_name);
-            } else {
-                return Err(anyhow::anyhow!(
-                    "Branch name {dev_branch} must contain {SPACE}"
-                ));
-            }
-
-            if dev_branch.contains(UNIQUE) {
-                //create a unique digest from the current time
-                let unique = format!(
-                    "{dev_branch}{}",
-                    std::time::Instant::now().elapsed().as_nanos()
-                );
-                let unique_sha256 = sha256::digest(unique.as_bytes());
-                let unique_start = unique_sha256.as_str()[0..8].to_string();
-
-                dev_branch = dev_branch.replace(UNIQUE, unique_start.as_str());
-            }
+            let dev_branch = context
+                .template_model
+                .render_template_string(&dev_branch)
+                .context(format_context!("{dev_branch}"))?;
 
             dependency.dev = Some(dev_branch);
             dependency.checkout = Some(CheckoutOption::Develop);
@@ -653,15 +563,15 @@ impl Workspace {
         let file_path = format!("{path}/{}", Self::FILE_NAME);
         let contents = std::fs::read_to_string(&file_path)
             .context(format_context!("Failed to read workspace file {file_path}"))?;
-        let result: Workspace =
-            toml::from_str(&contents).context(format_context!("Failed to workspace file {file_path}"))?;
+        let result: Workspace = toml::from_str(&contents)
+            .context(format_context!("Failed to workspace file {file_path}"))?;
         Ok(result)
     }
 
     pub fn save(&self, path: &str) -> anyhow::Result<()> {
         let file_path = format!("{path}/{}", Self::FILE_NAME);
-        let contents =
-            toml::to_string(&self).context(format_context!("Failed to serialize workspace {self:?}"))?;
+        let contents = toml::to_string(&self)
+            .context(format_context!("Failed to serialize workspace {self:?}"))?;
 
         std::fs::write(&file_path, contents)
             .context(format_context!("Failed to save workspace file {file_path}"))?;
@@ -692,16 +602,53 @@ pub struct Ledger {
 
 impl Ledger {
     pub fn new(path: &str) -> anyhow::Result<Self> {
-        let contents =
-            std::fs::read_to_string(path).context(format_context!("Failed to read ledger file {path}"))?;
-        let result: Ledger =
-            toml::from_str(&contents).context(format_context!("Failed to parse ledger file {path}"))?;
+        let contents = std::fs::read_to_string(path)
+            .context(format_context!("Failed to read ledger file {path}"))?;
+        let result: Ledger = toml::from_str(&contents)
+            .context(format_context!("Failed to parse ledger file {path}"))?;
         Ok(result)
     }
 
     pub fn save(&self, path: &str) -> anyhow::Result<()> {
         let contents = toml::to_string(&self).context("Failed to serialize ledger")?;
-        std::fs::write(path, contents).context(format_context!("Failed to save ledger file {path}"))?;
+        std::fs::write(path, contents)
+            .context(format_context!("Failed to save ledger file {path}"))?;
         Ok(())
+    }
+}
+
+
+
+#[cfg(test)]
+mod test {
+
+    use super::*;
+
+    const UNIQUE: &str = "1234";
+
+    fn get_execution_context() -> context::ExecutionContext {
+        let mut execution_context = context::ExecutionContext::new().unwrap();
+        execution_context.context.template_model.spaces.space_name = "spaces-dev".to_string();
+        execution_context.context.template_model.spaces.sysroot = "test_data/spaces/spaces-dev/sysroot".to_string();
+        execution_context.context.template_model.spaces.unique = UNIQUE.to_string();
+        execution_context.context.template_model.spaces.user = "test".to_string();
+        execution_context
+    }
+
+    fn test_to_workspace_path(path: &str){
+        let workspace_config = WorkspaceConfig::new(path).unwrap();
+        let execution_context = get_execution_context();
+        let context = std::sync::Arc::new(execution_context.context);
+        let workspace = workspace_config.to_workspace(context).unwrap();
+        for (_space_name, dependency) in workspace.dependencies.iter() {
+            let dev_branch = dependency.dev.as_ref().unwrap();
+            assert_eq!(dev_branch, "spaces-dev-1234");
+        }
+    }
+
+    #[test]
+    fn test_to_workspace(){
+        test_to_workspace_path("test_data/workflows/spaces_develop.toml");
+        test_to_workspace_path("test_data/workflows/spaces_develop_legacy.toml");
     }
 }
