@@ -436,7 +436,7 @@ dependencies = [
 [[package]]
 name = "easy-archiver"
 version = "0.1.0"
-source = "git+https://github.com/work-spaces/easy-archiver?rev=9a85d042fbde9c2e834acb603f68fabba06964f4#9a85d042fbde9c2e834acb603f68fabba06964f4"
+source = "git+https://github.com/work-spaces/easy-archiver?rev=66f095b4df69964a6cf5550a133797ada6ec2eb9#66f095b4df69964a6cf5550a133797ada6ec2eb9"
 dependencies = [
  "anyhow",
  "anyhow-source-location",
@@ -1249,9 +1249,10 @@ checksum = "5b40af805b3121feab8a3c29f04d8ad262fa8e0561883e7653e024ae4479e6de"
 [[package]]
 name = "printer"
 version = "0.1.0"
-source = "git+https://github.com/work-spaces/printer-rs?rev=37ee985785eda17ee65b394fde77680eab835949#37ee985785eda17ee65b394fde77680eab835949"
+source = "git+https://github.com/work-spaces/printer-rs?rev=8e97ad653c7b3ce40757361023bd5bc22e9cb91f#8e97ad653c7b3ce40757361023bd5bc22e9cb91f"
 dependencies = [
  "anyhow",
+ "anyhow-source-location",
  "console",
  "indicatif",
  "owo-colors",

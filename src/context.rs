@@ -31,6 +31,7 @@ pub struct Context {
     #[serde(skip)]
     pub printer: std::sync::RwLock<printer::Printer>,
     pub template_model: template::Model,
+    pub active_repository: std::sync::Mutex<std::collections::HashSet<String>>
 }
 
 impl Context {
@@ -68,6 +69,7 @@ impl Context {
             async_runtime,
             printer: std::sync::RwLock::new(printer::Printer::new_stdout()),
             current_directory: current_directory_str.to_string(),
+            active_repository: std::sync::Mutex::new(std::collections::HashSet::new()),
             template_model,
         })
     }

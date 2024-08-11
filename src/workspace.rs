@@ -20,7 +20,7 @@ pub fn create(
         "Failed to load spaces configuration {config}"
     ))?;
 
-    execution_context.context.template_model.spaces.space_name = space_name.clone();
+    execution_context.context.template_model.spaces.space_name.clone_from(space_name);
 
     create_from_config(execution_context, space_name, workspace_config)
 }

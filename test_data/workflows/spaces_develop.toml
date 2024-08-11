@@ -40,8 +40,8 @@ group = "build"
 label = "build:printer"
 
 [repositories]
-spaces = { git = "https://github.com/work-spaces/spaces", branch = "development" }
-printer = { git = "https://github.com/work-spaces/printer-rs", branch = "development" }
+spaces = { git = "https://github.com/work-spaces/spaces", branch = "development", checkout = "NewBranch" }
+printer = { git = "https://github.com/work-spaces/printer-rs", branch = "development", checkout = "NewBranch" }
 
 [cargo.patches]
 spaces = ["printer"]

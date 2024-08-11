@@ -25,6 +25,7 @@ pub struct Spaces {
     pub platform: String,
     pub path: String,
     pub branch: String,
+    pub log_directory: String,
 }
 
 #[derive(Serialize, Debug)]
@@ -61,6 +62,19 @@ impl Model {
             },
             files: HashMap::new(),
         })
+    }
+
+    pub fn set_space_directory(&mut self, path: &str){
+        if let Some(space_name) = std::path::Path::new(path).file_name(){
+            self.spaces.space_name = space_name.to_string_lossy().to_string();
+
+            let sysroot = std::path::Path::new(path).join("sysroot");
+            self.spaces.sysroot = sysroot.to_string_lossy().to_string();
+
+            let log_directory = std::path::Path::new(path).join("spaces_logs");
+            self.spaces.log_directory = log_directory.to_string_lossy().to_string();
+
+        }
     }
 
     pub fn render_template_string(&self, template_contents: &str) -> anyhow::Result<String> {
@@ -101,6 +115,7 @@ impl Model {
         Ok(rendered)
     }
 
+
     #[allow(dead_code)]
     pub fn add_file(&mut self, path: &str) -> anyhow::Result<()> {
         let contents = std::fs::read_to_string(path)
@@ -110,8 +125,8 @@ impl Model {
             .context(format_context!("Failed to parse file {path}"))?;
 
         let mut sanitized_path = path.to_string();
-        sanitized_path = sanitized_path.replace("/", "_");
-        sanitized_path = sanitized_path.replace(".", "_");
+        sanitized_path = sanitized_path.replace('/', "_");
+        sanitized_path = sanitized_path.replace('.', "_");
 
         self.files.insert(sanitized_path, value);
         Ok(())

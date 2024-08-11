@@ -48,16 +48,18 @@ fn update_execution_context(
         execution_context.printer.level = level.into();
     }
 
-    execution_context.context.template_model.spaces.sysroot = if let Some(name) = space_name {
+    let space_directory = if let Some(name) = space_name {
         // for create
         format!(
-            "{}/{name}/sysroot",
+            "{}/{name}",
             execution_context.context.current_directory
         )
     } else {
         // for sync
-        format!("{}/sysroot", execution_context.context.current_directory)
+        execution_context.context.current_directory.clone()
     };
+
+    execution_context.context.template_model.set_space_directory(space_directory.as_str());
 }
 
 pub fn execute() -> anyhow::Result<()> {
