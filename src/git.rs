@@ -2,8 +2,8 @@ use crate::{
     context,
     manifest::{self, Dependency},
 };
-use anyhow_source_location::{format_context, format_error};
 use anyhow::Context;
+use anyhow_source_location::{format_context, format_error};
 use serde::Serialize;
 
 #[derive(Clone, Serialize, Debug)]
@@ -24,7 +24,7 @@ impl BareRepository {
             arguments: vec![
                 "config".to_string(),
                 "remote.origin.fetch".to_string(),
-                "\"+refs/heads/*:refs/remotes/origin/*\"".to_string(),
+                "+refs/heads/*:refs/remotes/origin/*".to_string(),
             ],
             ..Default::default()
         };
@@ -83,9 +83,8 @@ impl BareRepository {
             // config to fetch all heads/refs
             // This will grab newly created branches
 
-            Self::configure_repository(progress_bar, full_path.as_str()).with_context(|| {
-                format_context!("failed to configure {full_path} before fetch")
-            })?;
+            Self::configure_repository(progress_bar, full_path.as_str())
+                .with_context(|| format_context!("failed to configure {full_path} before fetch"))?;
 
             options.working_directory = Some(full_path.clone());
             options.arguments = vec!["fetch".to_string()];
@@ -262,22 +261,19 @@ impl Worktree {
             ..Default::default()
         };
 
-        let checkout = dependency.get_checkout().with_context(|| {
-            format_context!("failed to get checkout type for {dependency:?}")
-        })?;
+        let checkout = dependency
+            .get_checkout()
+            .with_context(|| format_context!("failed to get checkout type for {dependency:?}"))?;
 
         match &checkout {
-            manifest::Checkout::ReadOnly(value) => {
+            manifest::Checkout::Revision(value) => {
                 options.arguments = vec!["checkout".to_string(), value.clone()];
             }
-            manifest::Checkout::ReadOnlyBranch(value) => {
+            manifest::Checkout::BranchHead(value) => {
                 options.arguments = vec!["checkout".to_string(), value.clone()];
             }
-            manifest::Checkout::Develop(value) => {
-                return Err(format_error!(
-                    "Internal Error: cannot call checkout() with `Checkout::Develop` {}",
-                    value
-                ));
+            manifest::Checkout::NewBranch(value) => {
+                options.arguments = vec!["checkout".to_string(), value.clone()];
             }
             manifest::Checkout::Artifact(artifact) => {
                 return Err(format_error!(
@@ -330,41 +326,18 @@ impl Worktree {
         progress_bar: &mut printer::MultiProgressBar,
         dependency: &Dependency,
     ) -> anyhow::Result<()> {
-        if let (Some(checkout), Some(dev)) = (dependency.checkout.as_ref(), dependency.dev.as_ref())
-        {
-            let mut original_checkout_dependency = dependency.clone();
-            original_checkout_dependency.checkout = None;
+        self.checkout(context, progress_bar, dependency)
+            .context(format_context!("{}", dependency.git))?;
 
-            let checkout_type = self
-                .checkout(context, progress_bar, &original_checkout_dependency)
-                .with_context(|| {
-                    format_context!("when checking for {original_checkout_dependency:?}")
-                })?;
-
-            if *checkout == manifest::CheckoutOption::Develop {
+        if let Some(branch) = dependency.branch.as_ref() {
+            if dependency.checkout == manifest::CheckoutOption::NewBranch {
                 let options = printer::ExecuteOptions {
                     working_directory: Some(self.full_path.clone()),
                     ..Default::default()
                 };
 
-                if let manifest::Checkout::ReadOnlyBranch(branch) = checkout_type {
-                    let mut options = options.clone();
-
-                    options.arguments =
-                        vec!["pull".to_string(), "origin".to_string(), branch.clone()];
-
-                    progress_bar
-                        .execute_process("git", &options)
-                        .with_context(|| {
-                            format_context!(
-                                "failed to run {}",
-                                options.get_full_command_in_working_directory("git")
-                            )
-                        })?;
-                }
-
                 let mut options = options.clone();
-                options.arguments = vec!["switch".to_string(), "-c".to_string(), dev.clone()];
+                options.arguments = vec!["switch".to_string(), "-c".to_string(), branch.clone()];
 
                 progress_bar
                     .execute_process("git", &options)
@@ -381,15 +354,8 @@ impl Worktree {
                 ));
             }
         } else {
-            if dependency.checkout.is_none() {
-                return Err(format_error!(
-                    "No `checkout` found for dependency {}",
-                    dependency.git
-                ));
-            }
-
             return Err(format_error!(
-                "No `dev` found for dependency {}",
+                "No `branch` found for dependency {}",
                 dependency.git
             ));
         }

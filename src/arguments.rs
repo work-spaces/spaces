@@ -1,6 +1,6 @@
 use crate::{
-    context, git, platform,
-    manifest::{self, WorkspaceConfig},
+    context,
+    platform,
 };
 
 use anyhow::Context;
@@ -72,33 +72,6 @@ pub fn execute() -> anyhow::Result<()> {
         } => {
             update_execution_context(&mut execution_context, Some(&name), level);
             workspace::create(execution_context, &name, &config)?;
-        }
-
-        Arguments {
-            commands:
-                Commands::CreateWorktree {
-                    name,
-                    git,
-                    branch,
-                    dev_branch,
-                },
-            level,
-        } => {
-            update_execution_context(&mut execution_context, Some(&name), level);
-            let hash_key = git::BareRepository::get_workspace_name_from_url(&git)?;
-
-            let config = WorkspaceConfig {
-                repositories: maplit::hashmap! {
-                    hash_key.clone() => manifest::Dependency {
-                        git,
-                        branch: Some(branch),
-                        dev: dev_branch,
-                        ..Default::default()
-                    }
-                },
-                ..Default::default()
-            };
-            workspace::create_from_config(execution_context, &name, config)?;
         }
 
         Arguments {
@@ -189,21 +162,6 @@ enum Commands {
         /// The path to the configuration file
         #[arg(long)]
         config: String,
-    },
-    /// Creates a workspace using a single git repository plus its deps.
-    CreateWorktree {
-        /// The name of the workspace
-        #[arg(long)]
-        name: String,
-        /// The URL to the git repository
-        #[arg(long)]
-        git: String,
-        /// The base branch
-        #[arg(long)]
-        branch: String,
-        /// The development branch `user/{USER}/{SPACE}-{UNIQUE}` is the default value
-        #[arg(long)]
-        dev_branch: Option<String>,
     },
     /// Synchronizes the current workspace.
     Sync {},

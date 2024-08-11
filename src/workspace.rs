@@ -94,7 +94,7 @@ pub fn create_from_config(
 
                 worktree
                     .switch_new_branch(context, &mut progress_bar, &dependency)
-                    .context(format_context!("switching new branchs for {spaces_key}"))?;
+                    .context(format_context!("switching new branch for {spaces_key}"))?;
 
                 Ok::<(), anyhow::Error>(())
             });

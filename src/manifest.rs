@@ -5,41 +5,40 @@ use std::collections::HashMap;
 use crate::{context, platform};
 use anyhow_source_location::{format_context, format_error};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum CheckoutOption {
-    Revision,
-    Branch,
     Artifact,
-    Develop,
+    #[default]
+    Revision,
+    BranchHead,
+    NewBranch,
 }
 
 pub enum Checkout {
     Artifact(String),
-    ReadOnly(String),
-    ReadOnlyBranch(String),
-    Develop(String),
+    Revision(String),
+    BranchHead(String),
+    NewBranch(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Dependency {
     /// The git https or ssh URL
     pub git: String,
-    /// The revision of the dependency. This can be a commit digest, a branch name, or a tag.
+    /// The revision of the dependency. This can be a commit digest or a tag.
     pub rev: Option<String>,
     /// The branch associated with the dependency.
     pub branch: Option<String>,
     /// The URL to the artifact tar.gz file
     pub artifact: Option<String>,
-    /// The branch associated with the dependency.
-    pub checkout: Option<CheckoutOption>,
-    /// The branch associated with the dependency.
-    pub dev: Option<String>,
+    /// The checkout option.
+    pub checkout: CheckoutOption,
 }
 
 impl Dependency {
     pub fn get_checkout(&self) -> anyhow::Result<Checkout> {
         match &self.checkout {
-            Some(CheckoutOption::Artifact) => {
+            CheckoutOption::Artifact => {
                 if let Some(value) = &self.artifact {
                     Ok(Checkout::Artifact(value.clone()))
                 } else {
@@ -49,9 +48,9 @@ impl Dependency {
                     ))
                 }
             }
-            Some(CheckoutOption::Revision) => {
+            CheckoutOption::Revision => {
                 if let Some(value) = &self.rev {
-                    Ok(Checkout::ReadOnly(value.clone()))
+                    Ok(Checkout::Revision(value.clone()))
                 } else {
                     Err(anyhow::anyhow!(
                         "No `rev` found for dependency {}",
@@ -59,9 +58,9 @@ impl Dependency {
                     ))
                 }
             }
-            Some(CheckoutOption::Branch) => {
+            CheckoutOption::BranchHead => {
                 if let Some(value) = &self.branch {
-                    Ok(Checkout::ReadOnlyBranch(value.clone()))
+                    Ok(Checkout::BranchHead(value.clone()))
                 } else {
                     Err(anyhow::anyhow!(
                         "No `branch` found for dependency {}",
@@ -69,24 +68,12 @@ impl Dependency {
                     ))
                 }
             }
-            Some(CheckoutOption::Develop) => {
-                if let Some(value) = &self.dev {
-                    Ok(Checkout::Develop(value.clone()))
+            CheckoutOption::NewBranch => {
+                if let Some(value) = &self.branch {
+                    Ok(Checkout::NewBranch((*value).clone()))
                 } else {
                     Err(anyhow::anyhow!(
-                        "No `dev` found for dependency {}",
-                        self.git
-                    ))
-                }
-            }
-            None => {
-                if let Some(value) = &self.rev {
-                    Ok(Checkout::ReadOnly(value.clone()))
-                } else if let Some(value) = &self.branch {
-                    Ok(Checkout::ReadOnlyBranch(value.clone()))
-                } else {
-                    Err(anyhow::anyhow!(
-                        "No checkout option found for dependency {}. Please specify a `branch`, `rev`, or `artifact`",
+                        "No `branch` found for dependency {}",
                         self.git
                     ))
                 }
@@ -503,7 +490,7 @@ impl WorkspaceConfig {
         context: std::sync::Arc<context::Context>
     ) -> anyhow::Result<Workspace> {
         let mut repositories = self.repositories.clone();
-        for (_key, dependency) in repositories.iter_mut() {
+        for dependency in repositories.values_mut() {
             let dev_branch = if let Some(branch) = self
                 .settings
                 .as_ref()
@@ -520,8 +507,8 @@ impl WorkspaceConfig {
                 .render_template_string(&dev_branch)
                 .context(format_context!("{dev_branch}"))?;
 
-            dependency.dev = Some(dev_branch);
-            dependency.checkout = Some(CheckoutOption::Develop);
+            dependency.branch = Some(dev_branch);
+            dependency.checkout = CheckoutOption::NewBranch;
         }
         Ok(Workspace {
             repositories,
@@ -641,7 +628,7 @@ mod test {
         let context = std::sync::Arc::new(execution_context.context);
         let workspace = workspace_config.to_workspace(context).unwrap();
         for (_space_name, dependency) in workspace.dependencies.iter() {
-            let dev_branch = dependency.dev.as_ref().unwrap();
+            let dev_branch = dependency.branch.as_ref().unwrap();
             assert_eq!(dev_branch, "spaces-dev-1234");
         }
     }
