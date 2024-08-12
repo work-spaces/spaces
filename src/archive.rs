@@ -275,6 +275,9 @@ impl HttpArchive {
             return Ok(progress_bar);
         }
 
+        std::fs::create_dir_all(self.get_path_to_extracted_files().as_str())
+            .context(format_context!("creating {}", self.full_path_to_archive))?;
+
         let decoder = easy_archiver::Decoder::new(
             self.full_path_to_archive.as_str(),
             Some(self.archive.sha256.clone()),
