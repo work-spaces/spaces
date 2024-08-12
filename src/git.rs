@@ -31,6 +31,20 @@ fn execute_git_command(
         }
     }
 
+    let mut options = options.clone();
+
+    let log_file_name = format!(
+        "git_{}.log",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis()
+    );
+
+    let log_file_path = format!("{}/{log_file_name}", context.get_log_directory());
+
+    options.log_file_path = Some(log_file_path);
+
     let full_command = options.get_full_command_in_working_directory("git");
     progress_bar
         .execute_process("git", options)
@@ -53,48 +67,6 @@ pub struct BareRepository {
 }
 
 impl BareRepository {
-    fn configure_repository(
-        context: std::sync::Arc<context::Context>,
-        progress_bar: &mut printer::MultiProgressBar,
-        url: &str,
-        full_path: &str,
-    ) -> anyhow::Result<()> {
-        let options_git_config = printer::ExecuteOptions {
-            working_directory: Some(full_path.to_string()),
-            arguments: vec![
-                "config".to_string(),
-                "remote.origin.fetch".to_string(),
-                "+refs/heads/*:refs/remotes/origin/*".to_string(),
-            ],
-            ..Default::default()
-        };
-
-        let options_git_config_auto_push = printer::ExecuteOptions {
-            working_directory: Some(full_path.to_string()),
-            arguments: vec![
-                "config".to_string(),
-                "--add".to_string(),
-                "--bool".to_string(),
-                "push.autoSetupRemote".to_string(),
-                "true".to_string(),
-            ],
-            ..Default::default()
-        };
-
-        execute_git_command(context.clone(), url, progress_bar, options_git_config)
-            .context(format_context!(""))?;
-
-        execute_git_command(
-            context.clone(),
-            url,
-            progress_bar,
-            options_git_config_auto_push,
-        )
-        .context(format_context!(""))?;
-
-        Ok(())
-    }
-
     pub fn new(
         context: std::sync::Arc<context::Context>,
         progress_bar: &mut printer::MultiProgressBar,
@@ -117,10 +89,18 @@ impl BareRepository {
             // config to fetch all heads/refs
             // This will grab newly created branches
 
-            Self::configure_repository(context.clone(), progress_bar, url, full_path.as_str())
-                .context(format_context!(
-                    "failed to configure {full_path} before fetch"
-                ))?;
+            let options_git_config = printer::ExecuteOptions {
+                working_directory: Some(full_path.to_string()),
+                arguments: vec![
+                    "config".to_string(),
+                    "remote.origin.fetch".to_string(),
+                    "+refs/heads/*:refs/remotes/origin/*".to_string(),
+                ],
+                ..Default::default()
+            };
+
+            execute_git_command(context.clone(), url, progress_bar, options_git_config)
+                .context(format_context!(""))?;
 
             options.working_directory = Some(full_path.clone());
             options.arguments = vec!["fetch".to_string()];
@@ -143,9 +123,25 @@ impl BareRepository {
             execute_git_command(context.clone(), url, progress_bar, options)
                 .context(format_context!(""))?;
 
-            Self::configure_repository(context, progress_bar, url, full_path.as_str()).context(
-                format_context!("failed to configure {full_path} after bare clone"),
-            )?;
+            let options_git_config_auto_push = printer::ExecuteOptions {
+                working_directory: Some(full_path.to_string()),
+                arguments: vec![
+                    "config".to_string(),
+                    "--add".to_string(),
+                    "--bool".to_string(),
+                    "push.autoSetupRemote".to_string(),
+                    "true".to_string(),
+                ],
+                ..Default::default()
+            };
+
+            execute_git_command(
+                context.clone(),
+                url,
+                progress_bar,
+                options_git_config_auto_push,
+            )
+            .context(format_context!(""))?;
         }
 
         Ok(Self {
@@ -282,6 +278,15 @@ impl Worktree {
             working_directory: Some(self.full_path.clone()),
             ..Default::default()
         };
+
+        options.arguments = vec![
+            "fetch".to_string(),
+            "origin".to_string(),
+            "+refs/heads/*:refs/heads/*".to_string(),
+        ];
+
+        execute_git_command(context.clone(), &self.url, progress_bar, options.clone())
+            .context(format_context!("fetching {}", self.url))?;
 
         let checkout = dependency.get_checkout().context(format_context!(
             "failed to get checkout type for {dependency:?}"

@@ -31,7 +31,7 @@ pub struct Context {
     #[serde(skip)]
     pub printer: std::sync::RwLock<printer::Printer>,
     pub template_model: template::Model,
-    pub active_repository: std::sync::Mutex<std::collections::HashSet<String>>
+    pub active_repository: std::sync::Mutex<std::collections::HashSet<String>>,
 }
 
 impl Context {
@@ -59,9 +59,17 @@ impl Context {
             "Internal Error: Path is not a valid string"
         ))?;
 
+        let log_directory = format!("{bare_store_base}/spaces_logs");
+
+        {
+            use anyhow::Context;
+            std::fs::create_dir_all(log_directory.as_str())
+                .context(format_error!("Failed to create log directory"))?;
+        }
+
         let template_model = {
             use anyhow::Context;
-            template::Model::new().context(format_error!(""))?
+            template::Model::new(log_directory.as_str()).context(format_error!(""))?
         };
 
         Ok(Context {
@@ -79,6 +87,10 @@ impl Context {
         result.push('/');
         result.push_str(name);
         result
+    }
+
+    pub fn get_log_directory(&self) -> &str {
+        self.template_model.spaces.log_directory.as_str()
     }
 
     #[allow(dead_code)]

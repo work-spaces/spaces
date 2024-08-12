@@ -59,6 +59,10 @@ pub fn create_from_config(
         "When creating workspace {space_name} in current directory"
     ))?;
 
+    let log_directory = context.template_model.spaces.log_directory.as_str();
+    std::fs::create_dir_all(log_directory)
+    .context(format_context!("Failed to create {log_directory:?}"))?;
+
     let workspace = config
         .to_workspace(context.clone())
         .context(format_context!(
@@ -641,17 +645,25 @@ impl State {
                 };
 
                 let dependencies = cargo_toml.get("dependencies").ok_or(format_error!(
-                    "Cargo.toml does not have a dependencies section"
+                    "{spaces_key}/Cargo.toml does not have a dependencies section"
                 ))?;
 
                 for value in list {
                     let dependency = dependencies.get(value.as_str()).ok_or(format_error!(
-                        "Cargo.toml does not have a dependency named {}",
+                        "{spaces_key}/Cargo.toml does not have a dependency named {}",
                         value
                     ))?;
 
                     if let Some(git) = dependency.get("git").and_then(|e| e.as_str()) {
                         let patch = format!("[patch.'{}']\n", git);
+                        let path = format!("{value} = {{ path = \"./{value}\" }}\n");
+                        config_contents.push_str(patch.as_str());
+                        config_contents.push_str(path.as_str());
+                    }
+
+                    //patch crates-io dependencies
+                    if dependency.get("version").is_some() {
+                        let patch = format!("[patch.crates-io.'{}']\n", value);
                         let path = format!("{value} = {{ path = \"./{value}\" }}\n");
                         config_contents.push_str(patch.as_str());
                         config_contents.push_str(path.as_str());

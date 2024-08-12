@@ -1,6 +1,6 @@
 use crate::platform;
 use anyhow::Context;
-use anyhow_source_location::format_context;
+use anyhow_source_location::{format_context, format_error};
 use serde::Serialize;
 use std::collections::HashMap;
 
@@ -46,7 +46,7 @@ impl Model {
         Ok(unique_sha256.as_str()[0..4].to_string())
     }
 
-    pub fn new() -> anyhow::Result<Self> {
+    pub fn new(default_log_directory: &str) -> anyhow::Result<Self> {
         let unique = Self::get_unique().context(format_context!(""))?;
         let platform = platform::Platform::get_platform()
             .context(format_context!("Unknown platform"))?
@@ -58,14 +58,15 @@ impl Model {
                 unique,
                 platform,
                 user,
+                log_directory: default_log_directory.to_string(),
                 ..Default::default()
             },
             files: HashMap::new(),
         })
     }
 
-    pub fn set_space_directory(&mut self, path: &str){
-        if let Some(space_name) = std::path::Path::new(path).file_name(){
+    pub fn set_space_directory(&mut self, path: &str) -> anyhow::Result<()> {
+        if let Some(space_name) = std::path::Path::new(path).file_name() {
             self.spaces.space_name = space_name.to_string_lossy().to_string();
 
             let sysroot = std::path::Path::new(path).join("sysroot");
@@ -74,11 +75,13 @@ impl Model {
             let log_directory = std::path::Path::new(path).join("spaces_logs");
             self.spaces.log_directory = log_directory.to_string_lossy().to_string();
 
+            Ok(())
+        } else {
+            Err(format_error!("{path} is not a valid workspace"))
         }
     }
 
     pub fn render_template_string(&self, template_contents: &str) -> anyhow::Result<String> {
-
         // add support for legacy replacements
         let legacy_replacements = maplit::hashmap! {
             SPACES_OVERLAY => "{{ spaces.overlay }}",
@@ -115,11 +118,10 @@ impl Model {
         Ok(rendered)
     }
 
-
     #[allow(dead_code)]
     pub fn add_file(&mut self, path: &str) -> anyhow::Result<()> {
-        let contents = std::fs::read_to_string(path)
-            .context(format_context!("Failed to read file {path}"))?;
+        let contents =
+            std::fs::read_to_string(path).context(format_context!("Failed to read file {path}"))?;
 
         let value = serde_json::from_str(contents.as_str())
             .context(format_context!("Failed to parse file {path}"))?;
@@ -131,7 +133,6 @@ impl Model {
         self.files.insert(sanitized_path, value);
         Ok(())
     }
-
 }
 
 #[cfg(test)]
@@ -142,7 +143,7 @@ mod test {
 
     #[test]
     fn test_template_model() {
-        let mut model = Model::new().unwrap();
+        let mut model = Model::new("test_data/spaces_logs").unwrap();
 
         model.spaces.space_name = "spaces-dev".to_string();
         model.files.insert(
@@ -180,20 +181,33 @@ mod test {
         assert_eq!(rendered, template_string0_output);
     }
 
-
     #[test]
-    fn test_model(){
-        let mut model = Model::new().unwrap();
+    fn test_model() {
+        let mut model = Model::new("test_data/spaces_logs").unwrap();
 
         model.spaces.space_name = "spaces-dev".to_string();
         model.spaces.unique = UNIQUE.to_string();
         model.spaces.sysroot = "test_data/spaces/spaces-dev/sysroot".to_string();
-       
-        assert_eq!(model.render_template_string(r#"{SPACES_SYSROOT}"#).unwrap(), "test_data/spaces/spaces-dev/sysroot");
-        assert_eq!(model.render_template_string(r#"{SPACE}-{UNIQUE}"#).unwrap(), "spaces-dev-1234");
-        assert_eq!(model.render_template_string(r#"{{ spaces.space_name }}-{{spaces.unique}}"#).unwrap(), "spaces-dev-1234");
-        assert_eq!(model.render_template_string(r#"{{ spaces.sysroot }}"#).unwrap(), "test_data/spaces/spaces-dev/sysroot");
 
+        assert_eq!(
+            model.render_template_string(r#"{SPACES_SYSROOT}"#).unwrap(),
+            "test_data/spaces/spaces-dev/sysroot"
+        );
+        assert_eq!(
+            model.render_template_string(r#"{SPACE}-{UNIQUE}"#).unwrap(),
+            "spaces-dev-1234"
+        );
+        assert_eq!(
+            model
+                .render_template_string(r#"{{ spaces.space_name }}-{{spaces.unique}}"#)
+                .unwrap(),
+            "spaces-dev-1234"
+        );
+        assert_eq!(
+            model
+                .render_template_string(r#"{{ spaces.sysroot }}"#)
+                .unwrap(),
+            "test_data/spaces/spaces-dev/sysroot"
+        );
     }
-
 }

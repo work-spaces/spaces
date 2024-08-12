@@ -1,7 +1,4 @@
-use crate::{
-    context,
-    platform,
-};
+use crate::{context, platform};
 
 use anyhow::Context;
 use anyhow_source_location::format_context;
@@ -43,23 +40,26 @@ fn update_execution_context(
     execution_context: &mut context::ExecutionContext,
     space_name: Option<&String>,
     level: Option<Level>,
-) {
+)-> anyhow::Result<()> {
     if let Some(level) = level {
         execution_context.printer.level = level.into();
     }
 
     let space_directory = if let Some(name) = space_name {
         // for create
-        format!(
-            "{}/{name}",
-            execution_context.context.current_directory
-        )
+        format!("{}/{name}", execution_context.context.current_directory)
     } else {
         // for sync
         execution_context.context.current_directory.clone()
     };
 
-    execution_context.context.template_model.set_space_directory(space_directory.as_str());
+    execution_context
+        .context
+        .template_model
+        .set_space_directory(space_directory.as_str())
+        .context(format_context!("while initializing"))?;
+
+    Ok(())
 }
 
 pub fn execute() -> anyhow::Result<()> {
@@ -72,7 +72,7 @@ pub fn execute() -> anyhow::Result<()> {
             commands: Commands::Create { name, config },
             level,
         } => {
-            update_execution_context(&mut execution_context, Some(&name), level);
+            update_execution_context(&mut execution_context, Some(&name), level)?;
             workspace::create(execution_context, &name, &config)?;
         }
 
@@ -80,7 +80,7 @@ pub fn execute() -> anyhow::Result<()> {
             commands: Commands::Sync {},
             level,
         } => {
-            update_execution_context(&mut execution_context, None, level);
+            update_execution_context(&mut execution_context, None, level)?;
             workspace::sync(execution_context)?;
         }
 
@@ -88,7 +88,7 @@ pub fn execute() -> anyhow::Result<()> {
             commands: Commands::List {},
             level,
         } => {
-            update_execution_context(&mut execution_context, None, level);
+            update_execution_context(&mut execution_context, None, level)?;
             let arc_context = std::sync::Arc::new(execution_context.context);
             let ledger = ledger::Ledger::new(arc_context.clone())
                 .with_context(|| format_context!("while creating ledger"))?;
@@ -99,7 +99,7 @@ pub fn execute() -> anyhow::Result<()> {
             commands: Commands::CreateArchive { manifest },
             level,
         } => {
-            update_execution_context(&mut execution_context, None, level);
+            update_execution_context(&mut execution_context, None, level)?;
             let manifest_path = manifest.unwrap_or("spaces_create_archive.toml".to_string());
             archive::create(execution_context, manifest_path)?;
         }
@@ -107,7 +107,7 @@ pub fn execute() -> anyhow::Result<()> {
             commands: Commands::TemplateHelp {},
             level,
         } => {
-            update_execution_context(&mut execution_context, None, level);
+            update_execution_context(&mut execution_context, None, level)?;
             let mut printer = execution_context.printer;
             printer.info("substitutions", &execution_context.context.template_model)?;
         }
