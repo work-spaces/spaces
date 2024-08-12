@@ -28,7 +28,19 @@ impl HttpArchive {
         let full_path_to_archive =
             context.get_bare_store_path(Self::url_to_relative_path(archive.url.as_str())?.as_str());
 
-        let full_path_to_archive = format!("{}/{}", full_path_to_archive, archive.sha256);
+        let archive_driver = easy_archiver::driver::Driver::from_filename(archive.url.as_str())
+            .context(format_context!("Failed to get driver for {}", archive.url))
+            .context(format_context!(
+                "url {} has invalid archive suffix",
+                archive.url
+            ))?;
+
+        let full_path_to_archive = format!(
+            "{}/{}.{}",
+            full_path_to_archive,
+            archive.sha256,
+            archive_driver.extension()
+        );
 
         Ok(Self {
             archive: archive.clone(),
@@ -55,22 +67,81 @@ impl HttpArchive {
         !std::path::Path::new(self.get_path_to_extracted_files().as_str()).exists()
     }
 
-    fn get_link_paths(&self, space_directory: &str) -> (String, String) {
-        let target_path = format!("{space_directory}/{}", self.spaces_key);
-        let source = self.get_path_to_extracted_files();
-        (source, target_path)
-    }
+    pub fn create_links(
+        &mut self,
+        progress_bar: &mut printer::MultiProgressBar,
+        space_directory: &str,
+    ) -> anyhow::Result<()> {
+        //construct a list of files to link
+        if self.files.is_empty() {
+            self.load_files_json()
+                .context(format_context!("failed to load files"))?;
+        }
 
-    pub fn create_links(&mut self, space_directory: &str) -> anyhow::Result<()> {
-        match self.archive.link {
-            manifest::ArchiveLink::Hard => {
-                self.create_hard_links(space_directory)
-                    .context(format_context!(
-                        "Failed to create hard links for {}",
-                        self.archive.url
-                    ))?;
+        let mut files = Vec::new();
+        let all_files = &self.files;
+        for file in all_files.iter() {
+            let mut is_match = true;
+            if let Some(includes) = self.archive.includes.as_ref() {
+                is_match = false;
+                for pattern in includes {
+                    if glob_match::glob_match(pattern, &file) {
+                        is_match = true;
+                        break;
+                    }
+                }
             }
-            manifest::ArchiveLink::None => (),
+            if is_match {
+                files.push(file);
+            }
+        }
+
+        if let Some(excludes) = self.archive.excludes.as_ref() {
+            for pattern in excludes {
+                files.retain(|file| !glob_match::glob_match(pattern, file));
+            }
+        }
+
+        let target_prefix = if let Some(add_prefix) = self.archive.add_prefix.as_ref() {
+            add_prefix.to_string()
+        } else {
+            space_directory.to_string()
+        };
+        progress_bar.set_prefix("linking");
+        progress_bar.set_total(files.len() as u64);
+
+        for file in files {
+            let source = format!("{}/{}", self.get_path_to_extracted_files(), file);
+
+            progress_bar.set_message(file.as_str());
+            let relative_target_path =
+                if let Some(strip_prefix) = self.archive.strip_prefix.as_ref() {
+                    file.strip_prefix(strip_prefix)
+                } else {
+                    Some(file.as_str())
+                };
+
+            if let Some(relative_target_path) = relative_target_path {
+                let full_target_path = format!("{}/{}", target_prefix, relative_target_path);
+
+                let full_target_path = self
+                    .context
+                    .template_model
+                    .render_template_string(full_target_path.as_str())
+                    .context(format_context!(
+                        "template replacement failed {full_target_path}"
+                    ))?;
+
+                match self.archive.link {
+                    manifest::ArchiveLink::Hard => {
+                        Self::create_hard_link(full_target_path.clone(), source.clone()).context(
+                            format_context!("hard link {full_target_path} -> {source}",),
+                        )?;
+                    }
+                    manifest::ArchiveLink::None => (),
+                }
+            }
+            progress_bar.increment(1);
         }
 
         Ok(())
@@ -87,35 +158,32 @@ impl HttpArchive {
 
         let _ = std::fs::remove_file(target);
 
+        //if the source is a symlink, read the symlink and create a symlink
+        if original.is_symlink() {
+            let link = std::fs::read_link(original).context(format_context!(
+                "failed to read link {original:?} -> {target_path}"
+            ))?;
+
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(link.clone(), target).context(format_context!(
+                "failed to create symlink {link:?} -> {target_path}"
+            ))?;
+
+            #[cfg(windows)]
+            #[cfg(unix)]
+            std::os::windows::fs::symlink_file(link.clone(), target).context(format_context!(
+                "failed to create symlink {link:?} -> {target_path}"
+            ))?;
+
+            return Ok(());
+        }
+
         std::fs::hard_link(original, target).context(format_context!(
             "{} -> {}",
             target_path,
             source
         ))?;
 
-        Ok(())
-    }
-
-    fn create_hard_links(&mut self, space_directory: &str) -> anyhow::Result<()> {
-        let (source, target_path) = self.get_link_paths(space_directory);
-
-        if self.files.is_empty() {
-            self.load_files_json()?;
-        }
-
-        for file in self.files.iter() {
-            if let Some(target_path) = self.transform_extracted_destination(&target_path, file) {
-                let source = format!("{}/{}", source, file);
-
-                if let Some(parent) = std::path::Path::new(&target_path).parent() {
-                    std::fs::create_dir_all(parent).context(format_context!(
-                        "while creating parent directory for hard link {target_path}"
-                    ))?;
-                }
-
-                Self::create_hard_link(target_path, source).context(format_context!(""))?;
-            }
-        }
         Ok(())
     }
 
@@ -175,46 +243,6 @@ impl HttpArchive {
         Ok(join_handle)
     }
 
-    fn transform_extracted_destination(
-        &self,
-        target_path: &str,
-        relative_path: &str,
-    ) -> Option<String> {
-        let mut path = relative_path.to_owned();
-
-        if let Some(strip_prefix) = self.archive.strip_prefix.as_ref() {
-            path = path.strip_prefix(strip_prefix).unwrap_or(&path).to_string();
-        }
-
-        if let Some(files) = self.archive.files.as_ref() {
-            //this needs to check for a glob_match
-            let mut is_match = false;
-            for pattern in files {
-                if glob_match::glob_match(pattern, &path) {
-                    is_match = true;
-                    break;
-                }
-            }
-            if !is_match {
-                return None;
-            }
-        }
-
-        let target_path_with_prefix = if let Some(add_prefix) = self.archive.add_prefix.as_ref() {
-            format!("{add_prefix}/{target_path}")
-        } else {
-            target_path.to_string()
-        };
-
-        let target_path = self
-            .context
-            .template_model
-            .render_template_string(target_path_with_prefix.as_str())
-            .ok()?;
-
-        Some(format!("{target_path}/{path}"))
-    }
-
     fn save_files_json(&self) -> anyhow::Result<()> {
         let files = Files {
             files: self.files.clone(),
@@ -265,6 +293,7 @@ impl HttpArchive {
             self.get_path_to_extracted_files()
         ))?;
 
+        self.files = extracted.files;
         self.save_files_json()?;
 
         Ok(extracted.progress_bar)
@@ -365,7 +394,8 @@ mod tests {
             url: "https://github.com/StratifyLabs/SDK/releases/download/v8.3.1/arm-none-eabi-8-2019-q3-update-macos-x86_64.tar.gz".to_string(),
             sha256: "930dcd8b837916c82608bdf198d9f34f71deefd432024fe98271449b742a3623".to_string(),
             link: manifest::ArchiveLink::Hard,
-            files: None,
+            includes: None,
+            excludes: None,
             add_prefix: None,
             strip_prefix: None
         };
@@ -374,7 +404,8 @@ mod tests {
             url: "https://github.com/StratifyLabs/SDK/releases/download/v8.3.1/stratifyos-arm-none-eabi-libstd-8.3.1.zip".to_string(),
             sha256: "2b9cbca5867c70bf1f890f1dc25adfbe7ff08ef6ea385784b0e5877a298b7ff1".to_string(),
             link: manifest::ArchiveLink::Hard,
-            files: None,
+            includes: None,
+            excludes: None,
             add_prefix: None,
             strip_prefix: None
         };
@@ -398,9 +429,6 @@ mod tests {
         }
 
         http_archive.extract(progress_bar).unwrap();
-
-        if http_archive.archive.link == manifest::ArchiveLink::Hard {
-            http_archive.create_hard_links("tmp").unwrap();
-        }
+        http_archive.create_links("tmp").unwrap();
     }
 }

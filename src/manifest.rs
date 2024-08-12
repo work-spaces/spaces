@@ -94,7 +94,8 @@ pub struct Archive {
     pub url: String,
     pub sha256: String,
     pub link: ArchiveLink,
-    pub files: Option<Vec<String>>,
+    pub includes: Option<Vec<String>>,
+    pub excludes: Option<Vec<String>>,
     pub strip_prefix: Option<String>,
     pub add_prefix: Option<String>,
 }
@@ -263,7 +264,7 @@ impl WorkspaceAsset {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Deps {
-    pub deps: HashMap<String, Dependency>,
+    pub deps: Option<HashMap<String, Dependency>>,
     pub archives: Option<HashMap<String, Archive>>,
     pub platform_archives: Option<HashMap<String, PlatformArchive>>,
     pub assets: Option<HashMap<String, WorkspaceAsset>>,
@@ -517,7 +518,6 @@ impl WorkspaceConfig {
         })
     }
 }
-
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Workspace {
