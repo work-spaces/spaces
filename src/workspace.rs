@@ -61,7 +61,7 @@ pub fn create_from_config(
 
     let log_directory = context.template_model.spaces.log_directory.as_str();
     std::fs::create_dir_all(log_directory)
-    .context(format_context!("Failed to create {log_directory:?}"))?;
+        .context(format_context!("Failed to create {log_directory:?}"))?;
 
     let workspace = config
         .to_workspace(context.clone())
@@ -227,7 +227,7 @@ impl State {
         self.update_cargo(&mut multi_progress)
             .context(format_context!("While updating cargo"))?;
 
-        self.sync_deferred_actions()
+        self.sync_deferred_actions(&mut multi_progress)
             .context(format_context!("While syncing deferred actions"))?;
 
         if let Some(vscode) = self.workspace.vscode.as_ref() {
@@ -312,7 +312,12 @@ impl State {
         Ok(())
     }
 
-    fn sync_deferred_actions(&mut self) -> anyhow::Result<()> {
+    fn sync_deferred_actions(
+        &mut self,
+        multi_progress: &mut printer::MultiProgress,
+    ) -> anyhow::Result<()> {
+        let mut progress_bar = multi_progress.add_progress("actions", Some(100), None);
+
         for action in self.deferred_actions.iter_mut() {
             match action {
                 DeferredAction::ApplyAsset(spaces_key, asset_map) => {
@@ -338,7 +343,7 @@ impl State {
                 }
                 DeferredAction::LinkArchive(spaces_key, http_archive) => {
                     http_archive
-                        .create_links(&self.full_path)
+                        .create_links(&mut progress_bar, &self.full_path)
                         .context(format_context!(
                             "while creating links for archive {spaces_key}"
                         ))?;
@@ -514,8 +519,10 @@ impl State {
         spaces_deps: &manifest::Deps,
     ) -> anyhow::Result<Vec<SyncDep>> {
         let mut new_deps = Vec::new();
-        for (spaces_key, dep) in spaces_deps.deps.iter() {
-            new_deps.push(SyncDep::BareRepository(spaces_key.clone(), dep.clone()));
+        if let Some(deps) = spaces_deps.deps.as_ref() {
+            for (spaces_key, dep) in deps.iter() {
+                new_deps.push(SyncDep::BareRepository(spaces_key.clone(), dep.clone()));
+            }
         }
 
         if let Some(map) = &spaces_deps.archives {
