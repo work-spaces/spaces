@@ -117,9 +117,10 @@ impl BareRepository {
             // config to fetch all heads/refs
             // This will grab newly created branches
 
-            Self::configure_repository(context.clone(), progress_bar, url, full_path.as_str()).context(
-                format_context!("failed to configure {full_path} before fetch"),
-            )?;
+            Self::configure_repository(context.clone(), progress_bar, url, full_path.as_str())
+                .context(format_context!(
+                    "failed to configure {full_path} before fetch"
+                ))?;
 
             options.working_directory = Some(full_path.clone());
             options.arguments = vec!["fetch".to_string()];
@@ -216,7 +217,7 @@ impl BareRepository {
 
 pub struct Worktree {
     pub full_path: String,
-    pub url: String
+    pub url: String,
 }
 
 impl Worktree {
@@ -240,8 +241,13 @@ impl Worktree {
         options.working_directory = Some(repository.full_path.clone());
         options.arguments = vec!["worktree".to_string(), "prune".to_string()];
 
-        execute_git_command(context.clone(), &repository.url, progress_bar, options.clone())
-            .context(format_context!(""))?;
+        execute_git_command(
+            context.clone(),
+            &repository.url,
+            progress_bar,
+            options.clone(),
+        )
+        .context(format_context!(""))?;
 
         let full_path = format!("{}/{}", path, repository.spaces_key);
         if !std::path::Path::new(&full_path).exists() {
@@ -256,7 +262,10 @@ impl Worktree {
                 .context(format_context!(""))?;
         }
 
-        Ok(Self { full_path, url: repository.url.clone() })
+        Ok(Self {
+            full_path,
+            url: repository.url.clone(),
+        })
     }
 
     pub fn get_deps(&self) -> anyhow::Result<Option<manifest::Deps>> {
@@ -297,7 +306,7 @@ impl Worktree {
         }
 
         execute_git_command(context.clone(), &self.url, progress_bar, options)
-            .context(format_context!(""))?;
+            .context(format_context!("checkout {checkout:?}"))?;
 
         Ok(checkout)
     }
@@ -318,7 +327,7 @@ impl Worktree {
         };
 
         execute_git_command(context.clone(), &self.url, progress_bar, options)
-            .context(format_context!(""))?;
+            .context(format_context!("detech head"))?;
 
         Ok(())
     }
@@ -326,23 +335,27 @@ impl Worktree {
     pub fn switch_new_branch(
         &self,
         context: std::sync::Arc<context::Context>,
+        branch_template: &str,
         progress_bar: &mut printer::MultiProgressBar,
         dependency: &Dependency,
     ) -> anyhow::Result<()> {
         self.checkout(context.clone(), progress_bar, dependency)
-            .context(format_context!("{}", dependency.git))?;
+            .context(format_context!("switch new branch {}", dependency.git))?;
 
-        if let Some(branch) = dependency.branch.as_ref() {
-            if dependency.checkout == manifest::CheckoutOption::NewBranch {
-                let options = printer::ExecuteOptions {
-                    working_directory: Some(self.full_path.clone()),
-                    arguments: vec!["switch".to_string(), "-c".to_string(), branch.clone()],
-                    ..Default::default()
-                };
+        if dependency.checkout == manifest::CheckoutOption::NewBranch {
+            let dev_branch = context
+                .template_model
+                .render_template_string(branch_template)
+                .context(format_context!("{branch_template}"))?;
 
-                execute_git_command(context.clone(), &self.url, progress_bar, options)
-                    .context(format_context!(""))?;
-            }
+            let options = printer::ExecuteOptions {
+                working_directory: Some(self.full_path.clone()),
+                arguments: vec!["switch".to_string(), "-c".to_string(), dev_branch.clone()],
+                ..Default::default()
+            };
+
+            execute_git_command(context.clone(), &self.url, progress_bar, options)
+                .context(format_context!("switch new branch"))?;
         }
 
         Ok(())

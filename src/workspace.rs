@@ -20,7 +20,12 @@ pub fn create(
         "Failed to load spaces configuration {config}"
     ))?;
 
-    execution_context.context.template_model.spaces.space_name.clone_from(space_name);
+    execution_context
+        .context
+        .template_model
+        .spaces
+        .space_name
+        .clone_from(space_name);
 
     create_from_config(execution_context, space_name, workspace_config)
 }
@@ -65,10 +70,8 @@ pub fn create_from_config(
 
     {
         let mut printer = execution_context.printer;
-
         let mut multi_progress = printer::MultiProgress::new(&mut printer);
-
-        let mut handles: Vec<std::thread::JoinHandle<anyhow::Result<(), _>>> = Vec::new();
+        let mut handles = Vec::new();
 
         for (spaces_key, dependency) in workspace.repositories.iter() {
             let progress_bar = multi_progress.add_progress(spaces_key, None, None);
@@ -77,6 +80,7 @@ pub fn create_from_config(
             let spaces_key = spaces_key.to_owned();
             let dependency = dependency.clone();
             let directory = directory.clone();
+            let branch_template = workspace.branch_template.clone();
 
             let handle = std::thread::spawn(move || {
                 let mut progress_bar = progress_bar;
@@ -93,7 +97,12 @@ pub fn create_from_config(
                     .context(format_context!("adding worktree to {spaces_key}"))?;
 
                 worktree
-                    .switch_new_branch(context, &mut progress_bar, &dependency)
+                    .switch_new_branch(
+                        context,
+                        &branch_template.as_str(),
+                        &mut progress_bar,
+                        &dependency,
+                    )
                     .context(format_context!("switching new branch for {spaces_key}"))?;
 
                 Ok::<(), anyhow::Error>(())
@@ -222,6 +231,16 @@ impl State {
                 "While applying VS code for {}",
                 self.full_path
             ))?;
+        }
+
+        if let Some(assets) = self.workspace.assets.as_ref() {
+            for (key, asset) in assets.iter() {
+                asset
+                    .apply(context.clone(), self.full_path.as_str(), "", key.as_str())
+                    .context(format_context!(
+                        "while applying workspace asset{key}: {asset:?}"
+                    ))?;
+            }
         }
 
         self.workspace

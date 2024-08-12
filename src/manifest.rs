@@ -14,6 +14,7 @@ pub enum CheckoutOption {
     NewBranch,
 }
 
+#[derive(Debug)]
 pub enum Checkout {
     Artifact(String),
     Revision(String),
@@ -200,6 +201,7 @@ impl PlatformArchive {
 pub enum AssetType {
     HardLink,
     Template,
+    String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -207,6 +209,7 @@ pub struct WorkspaceAsset {
     pub path: String,
     #[serde(rename = "type")]
     pub type_: AssetType,
+    pub contents: Option<String>,
 }
 
 impl WorkspaceAsset {
@@ -228,6 +231,14 @@ impl WorkspaceAsset {
                 }
                 std::fs::hard_link(path.as_str(), dest_path.as_str())
                     .context(format_context!("{path} -> {dest_path}"))?;
+            }
+            AssetType::String => {
+                if let Some(contents) = self.contents.as_ref() {
+                    std::fs::write(dest_path.as_str(), contents)
+                        .context(format_context!("while writing to {dest_path}"))?;
+                } else {
+                    return Err(format_error!("Asset type is string but contents is None"));
+                }
             }
             AssetType::Template => {
                 // remove the destination file if it exists
@@ -471,7 +482,7 @@ pub struct WorkspaceConfig {
     pub cargo: Option<CargoConfig>,
     pub settings: Option<WorkspaceConfigSettings>,
     pub vscode: Option<VsCodeConfig>,
-    pub actions: Option<HashMap<String, Vec<Action>>>,
+    pub assets: Option<HashMap<String, WorkspaceAsset>>,
 }
 
 impl WorkspaceConfig {
@@ -487,60 +498,36 @@ impl WorkspaceConfig {
 
     pub fn to_workspace(
         &self,
-        context: std::sync::Arc<context::Context>
+        _context: std::sync::Arc<context::Context>,
     ) -> anyhow::Result<Workspace> {
-        let mut repositories = self.repositories.clone();
-        for dependency in repositories.values_mut() {
-            let dev_branch = if let Some(branch) = self
-                .settings
-                .as_ref()
-                .and_then(|e| e.branch.as_ref())
-                .as_ref()
-            {
-                (*branch).to_owned()
-            } else {
-                r#"user/{{ spaces.user }}/{{ spaces.space_name }}-{{ spaces.unique }}"#.to_string()
-            };
+        let mut branch_template = "{{spaces.space_name}}/{{spaces.unique}}".to_string();
 
-            let dev_branch = context
-                .template_model
-                .render_template_string(&dev_branch)
-                .context(format_context!("{dev_branch}"))?;
-
-            dependency.branch = Some(dev_branch);
-            dependency.checkout = CheckoutOption::NewBranch;
+        if let Some(ws_branch_template) = self.settings.as_ref().and_then(|e| e.branch.as_ref()) {
+            branch_template = ws_branch_template.clone();
         }
+
         Ok(Workspace {
-            repositories,
+            repositories: self.repositories.clone(),
             buck: self.buck.clone(),
             cargo: self.cargo.clone(),
             dependencies: HashMap::new(),
-            assets: None,
+            assets: self.assets.clone(),
+            branch_template,
             vscode: self.vscode.clone(),
-            actions: self.actions.clone(),
         })
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Action {
-    pub name: String,
-    pub command: String,
-    pub arguments: Option<Vec<String>>,
-    pub environment: Option<HashMap<String, String>>,
-    pub working_directory: Option<String>,
-    pub display: Option<bool>,
-}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Workspace {
+    pub branch_template: String,
     pub repositories: HashMap<String, Dependency>,
     pub dependencies: HashMap<String, Dependency>,
     pub buck: Option<BuckConfig>,
     pub cargo: Option<CargoConfig>,
     pub assets: Option<HashMap<String, WorkspaceAsset>>,
     pub vscode: Option<VsCodeConfig>,
-    pub actions: Option<HashMap<String, Vec<Action>>>,
 }
 
 impl Workspace {
@@ -604,8 +591,6 @@ impl Ledger {
     }
 }
 
-
-
 #[cfg(test)]
 mod test {
 
@@ -616,13 +601,14 @@ mod test {
     fn get_execution_context() -> context::ExecutionContext {
         let mut execution_context = context::ExecutionContext::new().unwrap();
         execution_context.context.template_model.spaces.space_name = "spaces-dev".to_string();
-        execution_context.context.template_model.spaces.sysroot = "test_data/spaces/spaces-dev/sysroot".to_string();
+        execution_context.context.template_model.spaces.sysroot =
+            "test_data/spaces/spaces-dev/sysroot".to_string();
         execution_context.context.template_model.spaces.unique = UNIQUE.to_string();
         execution_context.context.template_model.spaces.user = "test".to_string();
         execution_context
     }
 
-    fn test_to_workspace_path(path: &str){
+    fn test_to_workspace_path(path: &str) {
         let workspace_config = WorkspaceConfig::new(path).unwrap();
         let execution_context = get_execution_context();
         let context = std::sync::Arc::new(execution_context.context);
@@ -634,7 +620,7 @@ mod test {
     }
 
     #[test]
-    fn test_to_workspace(){
+    fn test_to_workspace() {
         test_to_workspace_path("test_data/workflows/spaces_develop.toml");
         test_to_workspace_path("test_data/workflows/spaces_develop_legacy.toml");
     }
