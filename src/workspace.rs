@@ -103,7 +103,7 @@ pub fn create_from_config(
                 worktree
                     .switch_new_branch(
                         context,
-                        &branch_template.as_str(),
+                        branch_template.as_str(),
                         &mut progress_bar,
                         &dependency,
                     )
@@ -162,6 +162,7 @@ enum SyncDep {
     Repository(BareRepository, Dependency),
     Archive(String, archive::HttpArchive),
     PlatformArchive(String, archive::HttpArchive),
+    Env(manifest::EnvConfig),
     VsCode(String, manifest::VsCodeConfig),
     Asset(String, HashMap<String, manifest::WorkspaceAsset>),
 }
@@ -171,6 +172,7 @@ enum SyncDep {
 enum DeferredAction {
     ApplyAsset(String, HashMap<String, manifest::WorkspaceAsset>),
     ApplyVsCode(String, manifest::VsCodeConfig),
+    ApplyEnv(manifest::EnvConfig),
     LinkArchive(String, archive::HttpArchive),
 }
 
@@ -231,10 +233,12 @@ impl State {
             .context(format_context!("While syncing deferred actions"))?;
 
         if let Some(vscode) = self.workspace.vscode.as_ref() {
-            vscode.apply(&self.full_path).context(format_context!(
-                "While applying VS code for {}",
-                self.full_path
-            ))?;
+            vscode
+                .apply(self.context.clone(), &self.full_path)
+                .context(format_context!(
+                    "While applying VS code for {}",
+                    self.full_path
+                ))?;
         }
 
         if let Some(assets) = self.workspace.assets.as_ref() {
@@ -318,6 +322,8 @@ impl State {
     ) -> anyhow::Result<()> {
         let mut progress_bar = multi_progress.add_progress("actions", Some(100), None);
 
+        let mut env_config_collection = manifest::EnvConfigCollection::new();
+
         for action in self.deferred_actions.iter_mut() {
             match action {
                 DeferredAction::ApplyAsset(spaces_key, asset_map) => {
@@ -338,8 +344,11 @@ impl State {
                 }
                 DeferredAction::ApplyVsCode(spaces_key, config) => {
                     config
-                        .apply(self.full_path.as_str())
+                        .apply(self.context.clone(), self.full_path.as_str())
                         .context(format_context!("applying VS code for {}", spaces_key))?;
+                }
+                DeferredAction::ApplyEnv(env) => {
+                    env_config_collection.envs.push(env.clone());
                 }
                 DeferredAction::LinkArchive(spaces_key, http_archive) => {
                     http_archive
@@ -350,6 +359,16 @@ impl State {
                 }
             }
         }
+
+        if let Some(env) = self.workspace.env.as_ref() {
+            env_config_collection.envs.push(env.clone());
+        }
+
+        let env_file_path = format!("{}/env", self.full_path);
+        env_config_collection
+            .apply(self.context.clone(), env_file_path.as_str())
+            .context(format_context!("applying env config {env_file_path}"))?;
+
         Ok(())
     }
 
@@ -405,6 +424,11 @@ impl State {
                             self.sync_dependency(multi_progress, bare_repository, dependency)
                                 .context(format_context!("syncing repository {}", spaces_key))?,
                         )
+                    }
+                    SyncDep::Env(env) => {
+                        self.deferred_actions
+                            .push_back(DeferredAction::ApplyEnv(env));
+                        None
                     }
                     SyncDep::VsCode(spaces_key, config) => {
                         self.deferred_actions
@@ -604,6 +628,10 @@ impl State {
 
                 if let Some(vscode) = spaces_deps.vscode {
                     new_deps.push(SyncDep::VsCode(parent_spaces_key.clone(), vscode));
+                }
+
+                if let Some(env) = spaces_deps.env {
+                    new_deps.push(SyncDep::Env(env));
                 }
 
                 if let Some(assets) = spaces_deps.assets {

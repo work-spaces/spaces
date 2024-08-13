@@ -24,7 +24,6 @@ pub struct Substitution {
 
 #[derive(Serialize)]
 pub struct Context {
-    pub bare_store_base: String,
     pub current_directory: String,
     #[serde(skip)]
     pub async_runtime: tokio::runtime::Runtime,
@@ -69,11 +68,13 @@ impl Context {
 
         let template_model = {
             use anyhow::Context;
-            template::Model::new(log_directory.as_str()).context(format_error!(""))?
+            let mut model =
+                template::Model::new(log_directory.as_str()).context(format_error!(""))?;
+            model.spaces.store = bare_store_base;
+            model
         };
 
         Ok(Context {
-            bare_store_base,
             async_runtime,
             printer: std::sync::RwLock::new(printer::Printer::new_stdout()),
             current_directory: current_directory_str.to_string(),
@@ -83,10 +84,7 @@ impl Context {
     }
 
     pub fn get_bare_store_path(&self, name: &str) -> String {
-        let mut result = self.bare_store_base.clone();
-        result.push('/');
-        result.push_str(name);
-        result
+        format!("{}/{name}", self.template_model.spaces.store)
     }
 
     pub fn get_log_directory(&self) -> &str {

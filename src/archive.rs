@@ -14,6 +14,7 @@ struct Files {
 pub struct HttpArchive {
     pub spaces_key: String,
     archive: manifest::Archive,
+    archive_driver: Option<easy_archiver::driver::Driver>,
     full_path_to_archive: String,
     files: HashSet<String>,
     context: std::sync::Arc<context::Context>,
@@ -25,25 +26,43 @@ impl HttpArchive {
         spaces_key: &str,
         archive: &manifest::Archive,
     ) -> anyhow::Result<Self> {
-        let full_path_to_archive =
-            context.get_bare_store_path(Self::url_to_relative_path(archive.url.as_str())?.as_str());
+        let relative_path = Self::url_to_relative_path(archive.url.as_str())
+            .context(format_context!("no relative path for {}", archive.url))?;
 
-        let archive_driver = easy_archiver::driver::Driver::from_filename(archive.url.as_str())
-            .context(format_context!("Failed to get driver for {}", archive.url))
-            .context(format_context!(
-                "url {} has invalid archive suffix",
-                archive.url
-            ))?;
+        let full_path_to_archive = context.get_bare_store_path(relative_path.as_str());
 
-        let full_path_to_archive = format!(
-            "{}/{}.{}",
-            full_path_to_archive,
-            archive.sha256,
-            archive_driver.extension()
-        );
+        let archive_path = std::path::Path::new(full_path_to_archive.as_str());
+
+        let archive_file_name = archive_path
+            .file_name()
+            .ok_or(format_error!(
+                "No file name found in archive path {full_path_to_archive}"
+            ))?
+            .to_string_lossy()
+            .to_string();
+
+        let archive_driver_result =
+            easy_archiver::driver::Driver::from_filename(archive_file_name.as_str()).context(
+                format_context!("Failed to get driver for {archive_file_name}"),
+            );
+
+        let mut archive_driver = None;
+        let full_path_to_archive = match archive_driver_result {
+            Ok(driver) => {
+                archive_driver = Some(driver);
+                format!(
+                    "{}/{}.{}",
+                    full_path_to_archive,
+                    archive.sha256,
+                    driver.extension()
+                )
+            }
+            Err(_) => format!("{full_path_to_archive}/{archive_file_name}"),
+        };
 
         Ok(Self {
             archive: archive.clone(),
+            archive_driver,
             full_path_to_archive,
             spaces_key: spaces_key.to_string(),
             files: HashSet::new(),
@@ -75,7 +94,7 @@ impl HttpArchive {
         //construct a list of files to link
         if self.files.is_empty() {
             self.load_files_json()
-                .context(format_context!("failed to load files"))?;
+                .context(format_context!("failed to load json files manifest"))?;
         }
 
         let mut files = Vec::new();
@@ -85,7 +104,7 @@ impl HttpArchive {
             if let Some(includes) = self.archive.includes.as_ref() {
                 is_match = false;
                 for pattern in includes {
-                    if glob_match::glob_match(pattern, &file) {
+                    if glob_match::glob_match(pattern, file) {
                         is_match = true;
                         break;
                     }
@@ -278,28 +297,52 @@ impl HttpArchive {
         std::fs::create_dir_all(self.get_path_to_extracted_files().as_str())
             .context(format_context!("creating {}", self.full_path_to_archive))?;
 
-        let decoder = easy_archiver::Decoder::new(
-            self.full_path_to_archive.as_str(),
-            Some(self.archive.sha256.clone()),
-            &self.get_path_to_extracted_files(),
-            progress_bar,
-        )
-        .context(format_context!(
-            "{} -> {}",
-            self.full_path_to_archive.as_str(),
-            self.get_path_to_extracted_files()
-        ))?;
+        let next_progress_bar = if self.archive_driver.is_some() {
+            let decoder = easy_archiver::Decoder::new(
+                self.full_path_to_archive.as_str(),
+                Some(self.archive.sha256.clone()),
+                &self.get_path_to_extracted_files(),
+                progress_bar,
+            )
+            .context(format_context!(
+                "{} -> {}",
+                self.full_path_to_archive.as_str(),
+                self.get_path_to_extracted_files()
+            ))?;
 
-        let extracted = decoder.extract().context(format_context!(
-            "{} -> {}",
-            self.full_path_to_archive,
-            self.get_path_to_extracted_files()
-        ))?;
+            let extracted = decoder.extract().context(format_context!(
+                "{} -> {}",
+                self.full_path_to_archive,
+                self.get_path_to_extracted_files()
+            ))?;
 
-        self.files = extracted.files;
-        self.save_files_json()?;
+            self.files = extracted.files;
+            extracted.progress_bar
+        } else {
+            let path_to_artifact = std::path::Path::new(self.full_path_to_archive.as_str());
+            let file_name = path_to_artifact.file_name().ok_or(format_error!(
+                "No file name found in archive path {path_to_artifact:?}"
+            ))?;
+            let path_to_extracted_files = self.get_path_to_extracted_files();
 
-        Ok(extracted.progress_bar)
+            let path_to_files = std::path::Path::new(path_to_extracted_files.as_str());
+            let path_to_destination = path_to_files.join(file_name).to_string_lossy().to_string();
+
+            Self::create_hard_link(
+                path_to_destination.clone(),
+                path_to_artifact.to_string_lossy().to_string(),
+            )
+            .context(format_context!(
+                "hard link {path_to_destination} -> {path_to_artifact:?}"
+            ))?;
+
+            self.files = HashSet::new();
+            self.files.insert(file_name.to_string_lossy().to_string());
+            progress_bar
+        };
+        self.save_files_json()
+            .context(format_context!("Failed to save json files manifest"))?;
+        Ok(next_progress_bar)
     }
 
     fn url_to_relative_path(url: &str) -> anyhow::Result<String> {
@@ -431,7 +474,9 @@ mod tests {
             }
         }
 
-        http_archive.extract(progress_bar).unwrap();
-        http_archive.create_links("tmp").unwrap();
+        let mut next_progress = http_archive.extract(progress_bar).unwrap();
+        http_archive
+            .create_links(&mut next_progress, "tmp")
+            .unwrap();
     }
 }
