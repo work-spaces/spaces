@@ -269,6 +269,7 @@ pub struct Deps {
     pub platform_archives: Option<HashMap<String, PlatformArchive>>,
     pub assets: Option<HashMap<String, WorkspaceAsset>>,
     pub vscode: Option<VsCodeConfig>,
+    pub env: Option<EnvConfig>,
 }
 
 impl Deps {
@@ -344,6 +345,69 @@ impl BuckConfig {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct EnvConfig {
+    pub paths: Option<Vec<String>>,
+    pub vars: Option<HashMap<String, String>>,
+    pub script: Option<String>,
+}
+
+pub struct EnvConfigCollection {
+    pub envs: Vec<EnvConfig>,
+}
+
+impl EnvConfigCollection {
+    pub fn new() -> Self {
+        Self { envs: Vec::new() }
+    }
+
+    pub fn apply(
+        &self,
+        context: std::sync::Arc<context::Context>,
+        output_file: &str,
+    ) -> anyhow::Result<()> {
+        let mut paths = Vec::new();
+        let mut vars = HashMap::new();
+        let mut scripts = Vec::new();
+
+        for env in self.envs.iter() {
+            if let Some(env_paths) = env.paths.as_ref() {
+                paths.extend(env_paths.iter().cloned());
+            }
+
+            if let Some(env_vars) = env.vars.as_ref() {
+                vars.extend(env_vars);
+            }
+
+            if let Some(script) = env.script.as_ref() {
+                scripts.push(script.clone());
+            }
+        }
+
+        let sysroot_bin = "{{spaces.sysroot}}/bin";
+
+        let export_path = format!("export PATH={sysroot_bin}:{}\n", paths.join(":"));
+        let export_vars = vars
+            .iter()
+            .map(|(key, value)| format!("export {}={}\n", key, value))
+            .collect::<Vec<String>>()
+            .join("");
+
+        let execute_scripts = format!("{}\n", scripts.join("\n"));
+
+        let contents = format!("{}\n{}\n{}\n", export_path, export_vars, execute_scripts);
+        let contents = context
+            .template_model
+            .render_template_string(&contents)
+            .context(format_context!("failed to replace env {contents}"))?;
+
+        std::fs::write(output_file, contents)
+            .context(format_context!("Failed to write env file {output_file}"))?;
+
+        Ok(())
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct VsCodeExtensions {
     pub recommendations: Vec<String>,
@@ -371,15 +435,29 @@ impl VsCodeConfig {
         Ok(result)
     }
 
-    fn save_json_file(path: &str, value: serde_json::Value) -> anyhow::Result<()> {
+    fn save_json_file(
+        context: std::sync::Arc<context::Context>,
+        path: &str,
+        value: serde_json::Value,
+    ) -> anyhow::Result<()> {
         let contents = serde_json::to_string_pretty(&value)
             .context(format_context!("failed to serialize JSON to {path}"))?;
+
+        let contents = context
+            .template_model
+            .render_template_string(&contents)
+            .context(format_context!("failed to render template {contents}"))?;
+
         std::fs::write(path, contents)
             .context(format_context!("failed to write JSON to {path}"))?;
         Ok(())
     }
 
-    pub fn apply(&self, workspace_path: &str) -> anyhow::Result<()> {
+    pub fn apply(
+        &self,
+        context: std::sync::Arc<context::Context>,
+        workspace_path: &str,
+    ) -> anyhow::Result<()> {
         let vs_code_directory = format!("{workspace_path}/.vscode");
         std::fs::create_dir_all(vs_code_directory.as_str()).context(format_context!(
             "failed to create director {vs_code_directory}"
@@ -411,7 +489,7 @@ impl VsCodeConfig {
 
                 tasks_array.push(json_value);
             }
-            Self::save_json_file(tasks_file.as_str(), tasks)
+            Self::save_json_file(context.clone(), tasks_file.as_str(), tasks)
                 .context(format_context!("while saving {tasks_file}"))?;
         }
 
@@ -431,7 +509,7 @@ impl VsCodeConfig {
 
                 settings_object.insert(key.clone(), json_value);
             }
-            Self::save_json_file(settings_file.as_str(), settings)
+            Self::save_json_file(context.clone(), settings_file.as_str(), settings)
                 .context(format_context!("while saving {settings_file}"))?;
         }
 
@@ -464,7 +542,7 @@ impl VsCodeConfig {
                 }
             }
 
-            Self::save_json_file(&extensions_file, extensions)
+            Self::save_json_file(context.clone(), &extensions_file, extensions)
                 .context(format_context!("while saving {extensions_file}"))?;
         }
         Ok(())
@@ -484,6 +562,7 @@ pub struct WorkspaceConfig {
     pub settings: Option<WorkspaceConfigSettings>,
     pub vscode: Option<VsCodeConfig>,
     pub assets: Option<HashMap<String, WorkspaceAsset>>,
+    pub env: Option<EnvConfig>,
 }
 
 impl WorkspaceConfig {
@@ -504,7 +583,7 @@ impl WorkspaceConfig {
         let mut branch_template = "{{spaces.space_name}}/{{spaces.unique}}".to_string();
 
         if let Some(ws_branch_template) = self.settings.as_ref().and_then(|e| e.branch.as_ref()) {
-            branch_template = ws_branch_template.clone();
+            branch_template.clone_from(ws_branch_template);
         }
 
         Ok(Workspace {
@@ -515,6 +594,7 @@ impl WorkspaceConfig {
             assets: self.assets.clone(),
             branch_template,
             vscode: self.vscode.clone(),
+            env: self.env.clone(),
         })
     }
 }
@@ -528,6 +608,7 @@ pub struct Workspace {
     pub cargo: Option<CargoConfig>,
     pub assets: Option<HashMap<String, WorkspaceAsset>>,
     pub vscode: Option<VsCodeConfig>,
+    pub env: Option<EnvConfig>,
 }
 
 impl Workspace {

@@ -19,6 +19,7 @@ pub const SPACES_BRANCH: &str = "{SPACES_BRANCH}";
 #[derive(Serialize, Default, Debug)]
 pub struct Spaces {
     pub space_name: String,
+    pub store: String,
     pub user: String,
     pub unique: String,
     pub sysroot: String,
