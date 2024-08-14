@@ -7,7 +7,7 @@ edition = "2021"
 clap = { version = "4.5.4", features = ["derive"] }
 anyhow = "1.0.44"
 anyhow-source-location = { git = "https://github.com/work-spaces/anyhow-source-location", rev = "019b7804e35a72f945b3b4b3a96520cdbaa77f70" }
-easy-archiver = { git = "https://github.com/work-spaces/easy-archiver", rev = "645f542a819955f670e947594f674272cbfcce18", features = [
+easy-archiver = { git = "https://github.com/work-spaces/easy-archiver", rev = "b9bf315556389f45da23595cadac28520b7ef0bf", features = [
     "printer",
 ] }
 
