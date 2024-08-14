@@ -12,7 +12,7 @@ use crate::{
 };
 
 pub fn create(
-    mut execution_context: context::ExecutionContext,
+    execution_context: context::ExecutionContext,
     space_name: &String,
     config: &String,
 ) -> anyhow::Result<()> {
@@ -20,12 +20,12 @@ pub fn create(
         "Failed to load spaces configuration {config}"
     ))?;
 
-    execution_context
+    let _ = execution_context
         .context
         .template_model
-        .spaces
-        .space_name
-        .clone_from(space_name);
+        .model
+        .lock()
+        .map(|mut model| model.spaces.space_name.clone_from(space_name));
 
     create_from_config(execution_context, space_name, workspace_config)
 }
@@ -59,8 +59,9 @@ pub fn create_from_config(
         "When creating workspace {space_name} in current directory"
     ))?;
 
-    let log_directory = context.template_model.spaces.log_directory.as_str();
-    std::fs::create_dir_all(log_directory)
+    let log_directory = context.get_log_directory();
+
+    std::fs::create_dir_all(log_directory.as_str())
         .context(format_context!("Failed to create {log_directory:?}"))?;
 
     let workspace = config
@@ -163,6 +164,7 @@ enum SyncDep {
     Archive(String, archive::HttpArchive),
     PlatformArchive(String, archive::HttpArchive),
     Env(manifest::EnvConfig),
+    CargoMake(toml::Value),
     VsCode(String, manifest::VsCodeConfig),
     Asset(String, HashMap<String, manifest::WorkspaceAsset>),
 }
@@ -173,6 +175,7 @@ enum DeferredAction {
     ApplyAsset(String, HashMap<String, manifest::WorkspaceAsset>),
     ApplyVsCode(String, manifest::VsCodeConfig),
     ApplyEnv(manifest::EnvConfig),
+    ApplyCargoMake(toml::Value),
     LinkArchive(String, archive::HttpArchive),
 }
 
@@ -220,6 +223,7 @@ impl State {
 
         self.sync_repositories(&mut multi_progress)
             .context(format_context!("While syncing repositories"))?;
+
         self.sync_dependencies(&mut multi_progress)
             .context(format_context!("While syncing dependencies"))?;
 
@@ -245,9 +249,7 @@ impl State {
             for (key, asset) in assets.iter() {
                 asset
                     .apply(context.clone(), self.full_path.as_str(), "", key.as_str())
-                    .context(format_context!(
-                        "while applying workspace asset{key}: {asset:?}"
-                    ))?;
+                    .context(format_context!("while applying workspace asset {key}"))?;
             }
         }
 
@@ -323,6 +325,7 @@ impl State {
         let mut progress_bar = multi_progress.add_progress("actions", Some(100), None);
 
         let mut env_config_collection = manifest::EnvConfigCollection::new();
+        let mut cargo_make_collection = manifest::CargoMakeCollection::new();
 
         for action in self.deferred_actions.iter_mut() {
             match action {
@@ -350,6 +353,9 @@ impl State {
                 DeferredAction::ApplyEnv(env) => {
                     env_config_collection.envs.push(env.clone());
                 }
+                DeferredAction::ApplyCargoMake(cargo_make) => {
+                    cargo_make_collection.cargo_makes.push(cargo_make.clone());
+                }
                 DeferredAction::LinkArchive(spaces_key, http_archive) => {
                     http_archive
                         .create_links(&mut progress_bar, &self.full_path)
@@ -364,10 +370,23 @@ impl State {
             env_config_collection.envs.push(env.clone());
         }
 
+        if let Some(cargo_make) = self.workspace.cargo_make.as_ref() {
+            cargo_make_collection.cargo_makes.push(cargo_make.clone());
+        }
+
         let env_file_path = format!("{}/env", self.full_path);
         env_config_collection
             .apply(self.context.clone(), env_file_path.as_str())
             .context(format_context!("applying env config {env_file_path}"))?;
+
+        if !cargo_make_collection.cargo_makes.is_empty() {
+            let cargo_make_file_path = format!("{}/Makefile.toml", self.full_path);
+            cargo_make_collection
+                .apply(self.context.clone(), cargo_make_file_path.as_str())
+                .context(format_context!(
+                    "applying cargo make {cargo_make_file_path}"
+                ))?;
+        }
 
         Ok(())
     }
@@ -428,6 +447,11 @@ impl State {
                     SyncDep::Env(env) => {
                         self.deferred_actions
                             .push_back(DeferredAction::ApplyEnv(env));
+                        None
+                    }
+                    SyncDep::CargoMake(cargo_make) => {
+                        self.deferred_actions
+                            .push_back(DeferredAction::ApplyCargoMake(cargo_make));
                         None
                     }
                     SyncDep::VsCode(spaces_key, config) => {
@@ -632,6 +656,10 @@ impl State {
 
                 if let Some(env) = spaces_deps.env {
                     new_deps.push(SyncDep::Env(env));
+                }
+
+                if let Some(cargo_make) = spaces_deps.cargo_make {
+                    new_deps.push(SyncDep::CargoMake(cargo_make));
                 }
 
                 if let Some(assets) = spaces_deps.assets {

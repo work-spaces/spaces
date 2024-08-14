@@ -209,7 +209,7 @@ impl HttpArchive {
     pub fn sync(
         &mut self,
         context: std::sync::Arc<context::Context>,
-        full_path: &str,
+        _full_path: &str,
         progress_bar: printer::MultiProgressBar,
     ) -> anyhow::Result<()> {
         let next_progress_bar = if self.is_download_required() {
@@ -219,11 +219,10 @@ impl HttpArchive {
             progress_bar
         };
 
-        self.extract(next_progress_bar)
-            .context(format_context!("failed to extract archive for {full_path}"))?;
-
-        //self.create_links(full_path)?;
-
+        self.extract(next_progress_bar).context(format_context!(
+            "extract failed {}",
+            self.full_path_to_archive
+        ))?;
         Ok(())
     }
 
@@ -398,6 +397,7 @@ pub fn create(
     .context(format_context!("{output_path_string}"))?;
 
     for item in walk_dir {
+        println!("item: {:?}", item);
         let archive_path = item
             .path()
             .strip_prefix(config.input.as_str())

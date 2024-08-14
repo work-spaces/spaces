@@ -37,7 +37,12 @@ pub struct Model {
     pub files: HashMap<String, serde_json::Value>,
 }
 
-impl Model {
+pub struct TemplateModel {
+    pub model: std::sync::Mutex<Model>,
+    pub space_directory: String,
+}
+
+impl TemplateModel {
     fn get_unique() -> anyhow::Result<String> {
         let duration_since_epoch = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -55,27 +60,31 @@ impl Model {
         let user = std::env::var("USER").unwrap_or("NOUSER".to_string());
 
         Ok(Self {
-            spaces: Spaces {
-                unique,
-                platform,
-                user,
-                log_directory: default_log_directory.to_string(),
-                ..Default::default()
-            },
-            files: HashMap::new(),
+            space_directory: "./".to_string(),
+            model: std::sync::Mutex::new(Model {
+                spaces: Spaces {
+                    unique,
+                    platform,
+                    user,
+                    log_directory: default_log_directory.to_string(),
+                    ..Default::default()
+                },
+                files: HashMap::new(),
+            }),
         })
     }
 
-    pub fn set_space_directory(&mut self, path: &str) -> anyhow::Result<()> {
+    pub fn set_space_directory(&self, path: &str) -> anyhow::Result<()> {
         if let Some(space_name) = std::path::Path::new(path).file_name() {
-            self.spaces.space_name = space_name.to_string_lossy().to_string();
+            let _ = self.model.lock().map(|mut model| {
+                model.spaces.space_name = space_name.to_string_lossy().to_string();
 
-            let sysroot = std::path::Path::new(path).join("sysroot");
-            self.spaces.sysroot = sysroot.to_string_lossy().to_string();
+                let sysroot = std::path::Path::new(path).join("sysroot");
+                model.spaces.sysroot = sysroot.to_string_lossy().to_string();
 
-            let log_directory = std::path::Path::new(path).join("spaces_logs");
-            self.spaces.log_directory = log_directory.to_string_lossy().to_string();
-
+                let log_directory = std::path::Path::new(path).join("spaces_logs");
+                model.spaces.log_directory = log_directory.to_string_lossy().to_string();
+            });
             Ok(())
         } else {
             Err(format_error!("{path} is not a valid workspace"))
@@ -101,9 +110,73 @@ impl Model {
             update_contents = update_contents.replace(key, value);
         }
 
+        // Regex to find the pattern {{files.'path/filename.extension'.key}}
+        let re = regex::Regex::new(r"\{\{files\.'([^']+\.(json|toml|yaml))'\.([^}]+)\}\}")
+            .context(format_context!("Failed to compile regex"))?;
+
+        for caps in re.captures_iter(&update_contents) {
+            let path = &caps[1];
+            let replacement = path.replace(['/', '.'], "_");
+
+            let extension = std::path::Path::new(path)
+                .extension()
+                .context(format_context!("Failed to get extension of {path}"))?
+                .to_string_lossy()
+                .to_string();
+
+            let full_path = format!("{}/{}", self.space_directory, path);
+            let contents = std::fs::read_to_string(full_path.as_str())
+                .context(format_context!("Failed to read file {path} in replacement"))?;
+
+            let json_value = match extension.as_str() {
+                "json" => {
+                    let value: serde_json::Value = serde_json::from_str(contents.as_str())
+                        .context(format_context!("Failed to parse json file {path}"))?;
+
+                    value
+                }
+                "toml" => {
+                    let value: toml::Value = toml::from_str(contents.as_str())
+                        .context(format_context!("Failed to parse toml file {path}"))?;
+
+                    // convert toml::Value to serde_json::Value
+                    serde_json::from_str(&serde_json::to_string(&value)?)
+                        .context(format_context!("Failed to convert toml to json"))?
+                }
+                "yaml" => {
+                    let value: serde_yaml::Value = serde_yaml::from_str(contents.as_str())
+                        .context(format_context!("Failed to parse yaml file {path}"))?;
+
+                    serde_json::from_str(&serde_json::to_string(&value)?)
+                        .context(format_context!("Failed to convert yaml to json"))?
+                }
+                _ => {
+                    return Err(format_error!(
+                        "Unsupported extension {extension} for file {path} use `json`, `toml`, or `yaml`"
+                    ));
+                }
+            };
+
+            let _ = self
+                .model
+                .lock()
+                .map(|mut model| (*model).files.insert(replacement, json_value));
+        }
+
+        update_contents = re
+            .replace_all(&update_contents, |caps: &regex::Captures| {
+                format!(
+                    "{{{{files.{}.{}}}}}",
+                    caps[1].replace(['/', '.'], "_"),
+                    &caps[3]
+                )
+            })
+            .to_string();
+
         let handlebars = handlebars::Handlebars::new();
+        let model = self.model.lock().unwrap();
         let rendered = handlebars
-            .render_template(update_contents.as_str(), &self)
+            .render_template(update_contents.as_str(), &(*model))
             .context(format_context!("Failed to render template contents"))?;
 
         Ok(rendered)
@@ -118,22 +191,6 @@ impl Model {
             .context(format_context!("Failed to render template {template_path}"))?;
         Ok(rendered)
     }
-
-    #[allow(dead_code)]
-    pub fn add_file(&mut self, path: &str) -> anyhow::Result<()> {
-        let contents =
-            std::fs::read_to_string(path).context(format_context!("Failed to read file {path}"))?;
-
-        let value = serde_json::from_str(contents.as_str())
-            .context(format_context!("Failed to parse file {path}"))?;
-
-        let mut sanitized_path = path.to_string();
-        sanitized_path = sanitized_path.replace('/', "_");
-        sanitized_path = sanitized_path.replace('.', "_");
-
-        self.files.insert(sanitized_path, value);
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -144,19 +201,22 @@ mod test {
 
     #[test]
     fn test_template_model() {
-        let mut model = Model::new("test_data/spaces_logs").unwrap();
+        let template_model = TemplateModel::new("test_data/spaces_logs").unwrap();
 
-        model.spaces.space_name = "spaces-dev".to_string();
-        model.files.insert(
-            "spaces_Cargo_toml".to_string(),
-            serde_json::json!({
-                "package": {
-                    "name": "spaces",
-                    "version": "0.1.0",
-                    "authors": ["user"]
-                }
-            }),
-        );
+        {
+            let mut model = template_model.model.lock().unwrap();
+            model.spaces.space_name = "spaces-dev".to_string();
+            model.files.insert(
+                "spaces_Cargo_toml".to_string(),
+                serde_json::json!({
+                    "package": {
+                        "name": "spaces",
+                        "version": "0.1.0",
+                        "authors": ["user"]
+                    }
+                }),
+            );
+        }
 
         let template_string0 = r#"This is the space name {{ spaces.space_name }}"#;
         let template_string1 = r#"This is the space name {{spaces.space_name}}"#;
@@ -164,48 +224,62 @@ mod test {
 
         let handlebars = handlebars::Handlebars::new();
 
+        let model = template_model.model.lock().unwrap();
         let rendered = handlebars
-            .render_template(template_string0, &model)
+            .render_template(template_string0, &*model)
             .unwrap();
         assert_eq!(rendered, template_string_output);
 
         let rendered = handlebars
-            .render_template(template_string1, &model)
+            .render_template(template_string1, &*model)
             .unwrap();
         assert_eq!(rendered, template_string_output);
 
         let template_string0 = r#"{{ spaces.space_name }} spaces version '{{ files.spaces_Cargo_toml.package.version }}'"#;
         let template_string0_output = r#"spaces-dev spaces version '0.1.0'"#;
         let rendered = handlebars
-            .render_template(template_string0, &model)
+            .render_template(template_string0, &*model)
             .unwrap();
         assert_eq!(rendered, template_string0_output);
     }
 
     #[test]
     fn test_model() {
-        let mut model = Model::new("test_data/spaces_logs").unwrap();
-
-        model.spaces.space_name = "spaces-dev".to_string();
-        model.spaces.unique = UNIQUE.to_string();
-        model.spaces.sysroot = "test_data/spaces/spaces-dev/sysroot".to_string();
+        let template_model = TemplateModel::new("test_data/spaces_logs").unwrap();
+        {
+            let mut model = template_model.model.lock().unwrap();
+            model.spaces.space_name = "spaces-dev".to_string();
+            model.spaces.unique = UNIQUE.to_string();
+            model.spaces.sysroot = "test_data/spaces/spaces-dev/sysroot".to_string();
+        }
 
         assert_eq!(
-            model.render_template_string(r#"{SPACES_SYSROOT}"#).unwrap(),
+            template_model
+                .render_template_string(r#"{{files.'test_data/spaces_cargo.toml'.package.name}}"#)
+                .unwrap(),
+            "spaces"
+        );
+
+        assert_eq!(
+            template_model
+                .render_template_string(r#"{SPACES_SYSROOT}"#)
+                .unwrap(),
             "test_data/spaces/spaces-dev/sysroot"
         );
         assert_eq!(
-            model.render_template_string(r#"{SPACE}-{UNIQUE}"#).unwrap(),
+            template_model
+                .render_template_string(r#"{SPACE}-{UNIQUE}"#)
+                .unwrap(),
             "spaces-dev-1234"
         );
         assert_eq!(
-            model
+            template_model
                 .render_template_string(r#"{{ spaces.space_name }}-{{spaces.unique}}"#)
                 .unwrap(),
             "spaces-dev-1234"
         );
         assert_eq!(
-            model
+            template_model
                 .render_template_string(r#"{{ spaces.sysroot }}"#)
                 .unwrap(),
             "test_data/spaces/spaces-dev/sysroot"
