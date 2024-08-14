@@ -126,7 +126,7 @@ impl ArchiveDriver {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateArchive {
     pub input: String,
-    pub output: String,
+    pub name: String,
     pub version: String,
     pub driver: ArchiveDriver,
     pub platform: Option<platform::Platform>,
@@ -142,7 +142,7 @@ impl CreateArchive {
     }
 
     pub fn get_output_file(&self) -> String {
-        let mut result = format!("{}-{}", self.output, self.version);
+        let mut result = format!("{}-{}", self.name, self.version);
         if let Some(platform) = self.platform.as_ref() {
             result.push_str(format!("-{}", platform).as_str());
         }

@@ -360,47 +360,50 @@ impl HttpArchive {
 pub fn create(
     execution_context: context::ExecutionContext,
     manifest_path: String,
+    output_directory: String,
 ) -> anyhow::Result<()> {
     let config = manifest::CreateArchive::new(&manifest_path)
         .context(format_context!("While loading config path {manifest_path}"))?;
 
     let mut printer = execution_context.printer;
 
+    let input_as_path = std::path::Path::new(config.input.as_str());
+
+    let strip_prefix = if input_as_path.is_dir() {
+        config.input.clone()
+    } else {
+        if let Some(parent) = input_as_path.parent() {
+            parent.to_string_lossy().to_string()
+        } else {
+            "".to_string()
+        }
+    };
+
     let walk_dir: Vec<_> = walkdir::WalkDir::new(config.input.as_str())
         .into_iter()
         .filter_map(|entry| entry.ok())
         .collect();
 
-    let output_path_string = config.get_output_file();
-    let output_path = std::path::Path::new(output_path_string.as_str());
-    let output_directory = output_path
-        .parent()
-        .context(format_context!("{output_path_string}"))?
-        .to_string_lossy()
-        .to_string();
-    let output_file_name = output_path
-        .file_name()
-        .context(format_context!("{output_path_string}"))?
-        .to_string_lossy()
-        .to_string();
+    let output_file_name = config.get_output_file();
 
     std::fs::create_dir_all(output_directory.clone())?;
 
     let mut multi_progress = printer::MultiProgress::new(&mut printer);
     let progress_bar = multi_progress.add_progress("Archiving", Some(100), None);
 
+    let output_file_path = format!("{}/{}", output_directory, output_file_name);
+
     let mut encoder = easy_archiver::Encoder::new(
         output_directory.as_str(),
         output_file_name.as_str(),
         progress_bar,
     )
-    .context(format_context!("{output_path_string}"))?;
+    .context(format_context!("{output_file_path}"))?;
 
     for item in walk_dir {
-        println!("item: {:?}", item);
         let archive_path = item
             .path()
-            .strip_prefix(config.input.as_str())
+            .strip_prefix(strip_prefix.as_str())
             .context(format_context!("{item:?}"))?
             .to_string_lossy()
             .to_string();
@@ -420,7 +423,7 @@ pub fn create(
         .digest()
         .context(format_context!("{output_directory}"))?;
 
-    printer.info(config.output.as_str(), &digest.sha256)?;
+    printer.info(output_file_path.as_str(), &digest.sha256)?;
 
     Ok(())
 }
