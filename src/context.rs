@@ -22,14 +22,11 @@ pub struct Substitution {
     pub replacement_value: String,
 }
 
-#[derive(Serialize)]
 pub struct Context {
     pub current_directory: String,
-    #[serde(skip)]
     pub async_runtime: tokio::runtime::Runtime,
-    #[serde(skip)]
     pub printer: std::sync::RwLock<printer::Printer>,
-    pub template_model: template::Model,
+    pub template_model: template::TemplateModel,
     pub active_repository: std::sync::Mutex<std::collections::HashSet<String>>,
 }
 
@@ -68,10 +65,13 @@ impl Context {
 
         let template_model = {
             use anyhow::Context;
-            let mut model =
-                template::Model::new(log_directory.as_str()).context(format_error!(""))?;
-            model.spaces.store = bare_store_base;
-            model
+            let template_model =
+                template::TemplateModel::new(log_directory.as_str()).context(format_error!(""))?;
+            {
+                let mut model = template_model.model.lock().unwrap();
+                model.spaces.store = bare_store_base;
+            }
+            template_model
         };
 
         Ok(Context {
@@ -84,11 +84,13 @@ impl Context {
     }
 
     pub fn get_bare_store_path(&self, name: &str) -> String {
-        format!("{}/{name}", self.template_model.spaces.store)
+        let model = self.template_model.model.lock().unwrap();
+        format!("{}/{name}", model.spaces.store)
     }
 
-    pub fn get_log_directory(&self) -> &str {
-        self.template_model.spaces.log_directory.as_str()
+    pub fn get_log_directory(&self) -> String {
+        let model = self.template_model.model.lock().unwrap();
+        model.spaces.log_directory.clone()
     }
 
     #[allow(dead_code)]

@@ -40,13 +40,18 @@ fn update_execution_context(
     execution_context: &mut context::ExecutionContext,
     space_name: Option<&String>,
     level: Option<Level>,
-)-> anyhow::Result<()> {
+) -> anyhow::Result<()> {
     if let Some(level) = level {
         execution_context.printer.level = level.into();
     }
 
     let space_directory = if let Some(name) = space_name {
         // for create
+        execution_context
+            .context
+            .template_model
+            .space_directory
+            .clone_from(name);
         format!("{}/{name}", execution_context.context.current_directory)
     } else {
         // for sync
@@ -96,12 +101,16 @@ pub fn execute() -> anyhow::Result<()> {
         }
 
         Arguments {
-            commands: Commands::CreateArchive { manifest },
+            commands:
+                Commands::CreateArchive {
+                    manifest,
+                    output_directory,
+                },
             level,
         } => {
             update_execution_context(&mut execution_context, None, level)?;
             let manifest_path = manifest.unwrap_or("spaces_create_archive.toml".to_string());
-            archive::create(execution_context, manifest_path)?;
+            archive::create(execution_context, manifest_path, output_directory)?;
         }
         Arguments {
             commands: Commands::TemplateHelp {},
@@ -109,7 +118,13 @@ pub fn execute() -> anyhow::Result<()> {
         } => {
             update_execution_context(&mut execution_context, None, level)?;
             let mut printer = execution_context.printer;
-            printer.info("substitutions", &execution_context.context.template_model)?;
+            let model = execution_context
+                .context
+                .template_model
+                .model
+                .lock()
+                .unwrap();
+            printer.info("substitutions", &*model)?;
         }
     }
 
@@ -174,6 +189,9 @@ enum Commands {
         /// spaces_create_archive.toml is the default
         #[arg(long)]
         manifest: Option<String>,
+        /// The output directory to store the archive
+        #[arg(long)]
+        output_directory: String,
     },
     /// Show the list of substitions made when copying `Template` assets to a space
     TemplateHelp {},

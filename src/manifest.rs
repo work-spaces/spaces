@@ -126,12 +126,12 @@ impl ArchiveDriver {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateArchive {
     pub input: String,
-    pub output: String,
+    pub name: String,
     pub version: String,
     pub driver: ArchiveDriver,
     pub platform: Option<platform::Platform>,
-    pub include_globs: Option<Vec<String>>,
-    pub exclude_globs: Option<Vec<String>>,
+    pub includes: Option<Vec<String>>,
+    pub excludes: Option<Vec<String>>,
 }
 
 impl CreateArchive {
@@ -142,7 +142,7 @@ impl CreateArchive {
     }
 
     pub fn get_output_file(&self) -> String {
-        let mut result = format!("{}-{}", self.output, self.version);
+        let mut result = format!("{}-{}", self.name, self.version);
         if let Some(platform) = self.platform.as_ref() {
             result.push_str(format!("-{}", platform).as_str());
         }
@@ -235,6 +235,11 @@ impl WorkspaceAsset {
             }
             AssetType::String => {
                 if let Some(contents) = self.contents.as_ref() {
+                    let contents = context
+                        .template_model
+                        .render_template_string(contents)
+                        .context(format_context!("while rendering template {contents}"))?;
+
                     std::fs::write(dest_path.as_str(), contents)
                         .context(format_context!("while writing to {dest_path}"))?;
                 } else {
@@ -270,6 +275,8 @@ pub struct Deps {
     pub assets: Option<HashMap<String, WorkspaceAsset>>,
     pub vscode: Option<VsCodeConfig>,
     pub env: Option<EnvConfig>,
+    #[serde(rename = "cargo-make")]
+    pub cargo_make: Option<toml::Value>,
 }
 
 impl Deps {
@@ -404,6 +411,41 @@ impl EnvConfigCollection {
         std::fs::write(output_file, contents)
             .context(format_context!("Failed to write env file {output_file}"))?;
 
+        Ok(())
+    }
+}
+
+pub struct CargoMakeCollection {
+    pub cargo_makes: Vec<toml::Value>,
+}
+
+impl CargoMakeCollection {
+    pub fn new() -> Self {
+        Self {
+            cargo_makes: Vec::new(),
+        }
+    }
+
+    pub fn apply(
+        &self,
+        context: std::sync::Arc<context::Context>,
+        output_file: &str,
+    ) -> anyhow::Result<()> {
+        let mut contents = String::new();
+        for cargo_make in self.cargo_makes.iter() {
+            let cargo_make =
+                toml::to_string_pretty(cargo_make).context(format_context!("formatting toml"))?;
+            let cargo_make = context
+                .template_model
+                .render_template_string(&cargo_make)
+                .context(format_context!("failed to replace cargo make {cargo_make}"))?;
+            contents.push_str(&cargo_make);
+            contents.push('\n');
+        }
+
+        std::fs::write(output_file, contents).context(format_context!(
+            "Failed to write cargo make file {output_file}"
+        ))?;
         Ok(())
     }
 }
@@ -559,6 +601,8 @@ pub struct WorkspaceConfig {
     pub repositories: HashMap<String, Dependency>,
     pub buck: Option<BuckConfig>,
     pub cargo: Option<CargoConfig>,
+    #[serde(rename = "cargo-make")]
+    pub cargo_make: Option<toml::Value>,
     pub settings: Option<WorkspaceConfigSettings>,
     pub vscode: Option<VsCodeConfig>,
     pub assets: Option<HashMap<String, WorkspaceAsset>>,
@@ -593,6 +637,7 @@ impl WorkspaceConfig {
             dependencies: HashMap::new(),
             assets: self.assets.clone(),
             branch_template,
+            cargo_make: self.cargo_make.clone(),
             vscode: self.vscode.clone(),
             env: self.env.clone(),
         })
@@ -604,6 +649,8 @@ pub struct Workspace {
     pub branch_template: String,
     pub repositories: HashMap<String, Dependency>,
     pub dependencies: HashMap<String, Dependency>,
+    #[serde(rename = "cargo-make")]
+    pub cargo_make: Option<toml::Value>,
     pub buck: Option<BuckConfig>,
     pub cargo: Option<CargoConfig>,
     pub assets: Option<HashMap<String, WorkspaceAsset>>,
@@ -680,12 +727,20 @@ mod test {
     const UNIQUE: &str = "1234";
 
     fn get_execution_context() -> context::ExecutionContext {
-        let mut execution_context = context::ExecutionContext::new().unwrap();
-        execution_context.context.template_model.spaces.space_name = "spaces-dev".to_string();
-        execution_context.context.template_model.spaces.sysroot =
-            "test_data/spaces/spaces-dev/sysroot".to_string();
-        execution_context.context.template_model.spaces.unique = UNIQUE.to_string();
-        execution_context.context.template_model.spaces.user = "test".to_string();
+        let execution_context = context::ExecutionContext::new().unwrap();
+
+        let _ = execution_context
+            .context
+            .template_model
+            .model
+            .lock()
+            .map(|mut model| {
+                model.spaces.space_name = "spaces-dev".to_string();
+                model.spaces.sysroot = "test_data/spaces/spaces-dev/sysroot".to_string();
+                model.spaces.unique = UNIQUE.to_string();
+                model.spaces.user = "test".to_string();
+            });
+
         execution_context
     }
 
