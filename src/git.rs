@@ -94,19 +94,19 @@ impl BareRepository {
                 arguments: vec![
                     "config".to_string(),
                     "remote.origin.fetch".to_string(),
-                    "+refs/heads/*:refs/remotes/origin/*".to_string(),
+                    "refs/heads/*:refs/heads/*".to_string(),
                 ],
                 ..Default::default()
             };
 
             execute_git_command(context.clone(), url, progress_bar, options_git_config)
-                .context(format_context!(""))?;
+                .context(format_context!("while setting git options"))?;
 
             options.working_directory = Some(full_path.clone());
             options.arguments = vec!["fetch".to_string()];
 
             execute_git_command(context.clone(), url, progress_bar, options)
-                .context(format_context!(""))?;
+                .context(format_context!("while fetching existing bare repository"))?;
         } else {
             options.working_directory = Some(bare_store_path.clone());
 
@@ -121,7 +121,7 @@ impl BareRepository {
             ];
 
             execute_git_command(context.clone(), url, progress_bar, options)
-                .context(format_context!(""))?;
+                .context(format_context!("while creating bare repo"))?;
 
             let options_git_config_auto_push = printer::ExecuteOptions {
                 working_directory: Some(full_path.to_string()),
@@ -141,7 +141,7 @@ impl BareRepository {
                 progress_bar,
                 options_git_config_auto_push,
             )
-            .context(format_context!(""))?;
+            .context(format_context!("while configuring auto-push"))?;
         }
 
         Ok(Self {
@@ -243,7 +243,7 @@ impl Worktree {
             progress_bar,
             options.clone(),
         )
-        .context(format_context!(""))?;
+        .context(format_context!("while pruning worktree"))?;
 
         let full_path = format!("{}/{}", path, repository.spaces_key);
         if !std::path::Path::new(&full_path).exists() {
@@ -255,7 +255,7 @@ impl Worktree {
             ];
 
             execute_git_command(context.clone(), &repository.url, progress_bar, options)
-                .context(format_context!(""))?;
+                .context(format_context!("while adding detached worktree"))?;
         }
 
         Ok(Self {
@@ -282,7 +282,6 @@ impl Worktree {
         options.arguments = vec![
             "fetch".to_string(),
             "origin".to_string(),
-            "+refs/heads/*:refs/heads/*".to_string(),
         ];
 
         execute_git_command(context.clone(), &self.url, progress_bar, options.clone())
@@ -297,7 +296,11 @@ impl Worktree {
                 options.arguments = vec!["checkout".to_string(), value.clone()];
             }
             manifest::Checkout::BranchHead(value) => {
-                options.arguments = vec!["checkout".to_string(), value.clone()];
+                options.arguments = vec![
+                    "checkout".to_string(),
+                    "--detach".to_string(),
+                    value.clone(),
+                ];
             }
             manifest::Checkout::NewBranch(value) => {
                 options.arguments = vec!["checkout".to_string(), value.clone()];
