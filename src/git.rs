@@ -101,12 +101,6 @@ impl BareRepository {
 
             execute_git_command(context.clone(), url, progress_bar, options_git_config)
                 .context(format_context!("while setting git options"))?;
-
-            options.working_directory = Some(full_path.clone());
-            options.arguments = vec!["fetch".to_string()];
-
-            execute_git_command(context.clone(), url, progress_bar, options)
-                .context(format_context!("while fetching existing bare repository"))?;
         } else {
             options.working_directory = Some(bare_store_path.clone());
 
@@ -245,6 +239,11 @@ impl Worktree {
         )
         .context(format_context!("while pruning worktree"))?;
 
+        options.arguments = vec!["fetch".to_string()];
+
+        execute_git_command(context.clone(), &repository.url, progress_bar, options.clone())
+            .context(format_context!("while fetching existing bare repository"))?;
+
         let full_path = format!("{}/{}", path, repository.spaces_key);
         if !std::path::Path::new(&full_path).exists() {
             options.arguments = vec![
@@ -279,10 +278,7 @@ impl Worktree {
             ..Default::default()
         };
 
-        options.arguments = vec![
-            "fetch".to_string(),
-            "origin".to_string(),
-        ];
+        options.arguments = vec!["fetch".to_string(), "origin".to_string()];
 
         execute_git_command(context.clone(), &self.url, progress_bar, options.clone())
             .context(format_context!("fetching {}", self.url))?;

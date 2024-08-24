@@ -30,7 +30,7 @@ pub fn create(
     create_from_config(execution_context, space_name, workspace_config)
 }
 
-pub fn create_from_config(
+fn create_from_config(
     execution_context: context::ExecutionContext,
     space_name: &String,
     config: WorkspaceConfig,
@@ -135,7 +135,7 @@ pub fn create_from_config(
         .expect("Internal Error: Printer is not set");
 
     printer
-        .info(space_name, &workspace)
+        .info("spaces", &space_name)
         .context(format_context!("printing"))?;
 
     Ok::<(), anyhow::Error>(())
@@ -738,11 +738,11 @@ impl State {
         fn write_cargo_section(
             config_contents: &mut String,
             section_name: &str,
-            section: &HashMap<String, String>,
+            section: &HashMap<String, toml::Value>,
         ) {
             config_contents.push_str(&format!("[{}]\n", section_name));
             for (key, value) in section.iter() {
-                config_contents.push_str(&format!("{} = \"{}\"\n", key, value));
+                config_contents.push_str(&format!("{} = {}\n", key, value));
             }
         }
 

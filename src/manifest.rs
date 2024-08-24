@@ -311,9 +311,9 @@ impl Deps {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CargoConfig {
     pub patches: Option<HashMap<String, Vec<String>>>,
-    pub net: Option<HashMap<String, String>>,
-    pub http: Option<HashMap<String, String>>,
-    pub build: Option<HashMap<String, String>>,
+    pub net: Option<HashMap<String, toml::Value>>,
+    pub http: Option<HashMap<String, toml::Value>>,
+    pub build: Option<HashMap<String, toml::Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -684,15 +684,15 @@ impl Workspace {
         self.cargo.as_ref().and_then(|e| e.patches.as_ref())
     }
 
-    pub fn get_cargo_build(&self) -> Option<&HashMap<String, String>> {
+    pub fn get_cargo_build(&self) -> Option<&HashMap<String, toml::Value>> {
         self.cargo.as_ref().and_then(|e| e.build.as_ref())
     }
 
-    pub fn get_cargo_net(&self) -> Option<&HashMap<String, String>> {
+    pub fn get_cargo_net(&self) -> Option<&HashMap<String, toml::Value>> {
         self.cargo.as_ref().and_then(|e| e.net.as_ref())
     }
 
-    pub fn get_cargo_http(&self) -> Option<&HashMap<String, String>> {
+    pub fn get_cargo_http(&self) -> Option<&HashMap<String, toml::Value>> {
         self.cargo.as_ref().and_then(|e| e.http.as_ref())
     }
 }
