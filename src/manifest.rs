@@ -222,7 +222,23 @@ impl WorkspaceAsset {
         key: &str,
     ) -> anyhow::Result<()> {
         let path = format!("{workspace_path}/{dependency_name}/{key}");
-        let dest_path = format!("{workspace_path}/{}", self.path);
+
+        let target_path = context
+            .template_model
+            .render_template_string(&self.path)
+            .context(format_context!("while rendering template {}", self.path))?;
+
+        let dest_path = if target_path.starts_with('/') {
+            target_path.clone()
+        } else {
+            format!("{workspace_path}/{target_path}")
+        };
+
+        let dest_as_path = std::path::Path::new(dest_path.as_str());
+        if let Some(parent) = dest_as_path.parent() {
+            std::fs::create_dir_all(parent)
+                .context(format_context!("while creating {parent:?}"))?;
+        }
 
         match self.type_ {
             AssetType::HardLink => {
@@ -231,7 +247,7 @@ impl WorkspaceAsset {
                         .context(format_context!("{dest_path}"))?;
                 }
                 std::fs::hard_link(path.as_str(), dest_path.as_str())
-                    .context(format_context!("{path} -> {dest_path}"))?;
+                    .context(format_context!("hardlinking: {path} -> {dest_path}"))?;
             }
             AssetType::String => {
                 if let Some(contents) = self.contents.as_ref() {
