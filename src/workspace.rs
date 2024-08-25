@@ -694,80 +694,17 @@ impl State {
     }
 
     fn update_cargo(&self, _multi_progress: &mut printer::MultiProgress) -> anyhow::Result<()> {
-        let mut config_contents = String::new();
 
-        if let Some(cargo) = self.workspace.get_cargo_patches() {
-            for (spaces_key, list) in cargo.iter() {
-                //read the cargo toml file to see how the dependency is specified crates-io or git
-                let cargo_toml_path = format!("{}/{spaces_key}/Cargo.toml", self.full_path);
-                let cargo_toml: toml::Value = {
-                    let cargo_toml_contents = std::fs::read_to_string(&cargo_toml_path)
-                        .context(format_context!("reading cargo path {cargo_toml_path}"))?;
-                    toml::from_str(&cargo_toml_contents)
-                        .context(format_context!("parsing contents of {cargo_toml_path}"))?
-                };
+        if let Some(cargo_config) = self.workspace.cargo.as_ref() {
+            let config_path = format!("{}/.cargo", self.full_path);
+            std::fs::create_dir_all(std::path::Path::new(&config_path))
+                .context(format_context!("Trying to create {config_path}"))?;
+            let contents = toml::to_string_pretty(cargo_config).context(format_context!("Failed to format cargo contents"))?;
 
-                let dependencies = cargo_toml.get("dependencies").ok_or(format_error!(
-                    "{spaces_key}/Cargo.toml does not have a dependencies section"
-                ))?;
-
-                for value in list {
-                    let dependency = dependencies.get(value.as_str()).ok_or(format_error!(
-                        "{spaces_key}/Cargo.toml does not have a dependency named {}",
-                        value
-                    ))?;
-
-                    if let Some(git) = dependency.get("git").and_then(|e| e.as_str()) {
-                        let patch = format!("[patch.'{}']\n", git);
-                        let path = format!("{value} = {{ path = \"./{value}\" }}\n");
-                        config_contents.push_str(patch.as_str());
-                        config_contents.push_str(path.as_str());
-                    }
-
-                    //patch crates-io dependencies
-                    if dependency.get("version").is_some() {
-                        let patch = format!("[patch.crates-io.'{}']\n", value);
-                        let path = format!("{value} = {{ path = \"./{value}\" }}\n");
-                        config_contents.push_str(patch.as_str());
-                        config_contents.push_str(path.as_str());
-                    }
-                }
-            }
+            std::fs::write(format!("{config_path}/config.toml"), contents).with_context(
+                || format_context!("While trying to write contents to {config_path}/config.toml"),
+            )?;
         }
-
-        fn write_cargo_section(
-            config_contents: &mut String,
-            section_name: &str,
-            section: &HashMap<String, toml::Value>,
-        ) {
-            config_contents.push_str(&format!("[{}]\n", section_name));
-            for (key, value) in section.iter() {
-                config_contents.push_str(&format!("{} = {}\n", key, value));
-            }
-        }
-
-        if let Some(build) = self.workspace.get_cargo_build() {
-            write_cargo_section(&mut config_contents, "build", build);
-        }
-
-        if let Some(net) = self.workspace.get_cargo_net() {
-            write_cargo_section(&mut config_contents, "net", net);
-        }
-
-        if let Some(http) = self.workspace.get_cargo_http() {
-            write_cargo_section(&mut config_contents, "http", http);
-        }
-
-        if config_contents.is_empty() {
-            return Ok(());
-        }
-
-        let config_path = format!("{}/.cargo", self.full_path);
-        std::fs::create_dir_all(std::path::Path::new(&config_path))
-            .context(format_context!("Trying to create {config_path}"))?;
-        std::fs::write(format!("{config_path}/config.toml"), config_contents).with_context(
-            || format_context!("While trying to write contents to {config_path}/config.toml"),
-        )?;
 
         Ok(())
     }
