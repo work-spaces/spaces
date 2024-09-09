@@ -1,6 +1,40 @@
 # spaces
 
-`spaces` is a poly-repo workflow and task-runner tool. It is powered by `starlark` and `rust`.
+`spaces` is a workspace builder and task-runner. It is powered by `starlark` and `rust`.
+
+You simply define a starlark script that defines what code you need and what command to run and `spaces` does the rest.
+
+`config/spaces_build.star`:
+
+```star
+checkout.add_repo(
+    rule = { "name": "spaces" },
+    repo = {
+        "url": "https://github.com/work-spaces/spaces",
+        "rev": "main",
+        "checkout": "Revision",
+    },
+)
+
+run.add_exec(
+    rule = { "name": "build" },
+    exec = {
+        "command": "cargo",
+        "working_directory": "spaces",
+        "args": [
+            "build",
+            "--profile=release",
+        ],
+    },
+)
+```
+
+```sh
+# checkout does an efficient clone (bare repo plus worktree)
+spaces checkout config/spaces_build --space=spaces-test
+cd spaces-test
+spaces run build
+```
 
 ## Using spaces
 
@@ -33,108 +67,6 @@ The run rules execute tasks in order and as needed. Run rules have:
 
 Specified inputs are hashed. If the inputs haven't changed, the rule is skipped. If no `inputs` are specified, the rule always runs.
 
-
-
-
-For example:
-
-```star
-checkout.add_repo(
-    name = "spaces",
-    git = "https://github.com/work-spaces/spaces",
-    branch = "main",
-    checkout = "BranchHead",
-)
-```
-
-When running `spaces checkout`, the `spaces` repo will be cloned as a bare repository in the spaces store (`$HOME/.spaces/store`) and add a worktree to the workspace. `spaces` will check the repository for a `spaces.star` starlark script and run the checkout phase to ensure transitive dependencies are added.
-
-```star
-checkout.add_platform_archive(
-    name = "rustup-init",
-    platforms = { 
-        "macos_aarch64": {
-            "url": "https://static.rust-lang.org/rustup/dist/aarch64-apple-darwin/rustup-init",
-            "sha256": "f547d77c32d50d82b8228899b936bf2b3c72ce0a70fb3b364e7fba8891eba781",
-            "add_prefix": "sysroot/bin",
-            "link": "Hard"
-        },
-        "macos_x86_64": {
-            "url": "https://static.rust-lang.org/rustup/dist/x86_64-apple-darwin/rustup-init",
-            "sha256": "f547d77c32d50d82b8228899b936bf2b3c72ce0a70fb3b364e7fba8891eba781",
-            "add_prefix": "sysroot/bin",
-            "link": "Hard"
-        }
-    }
-)
-```
-
-The script above will download and extract the `rustup-init` binary to the spaces store if it doesn't already exist. It will hardlink the `rustup-init` binary in the workspace at `sysroot/bin/rustup-init`.
-
-### Checkout Rules
-
-
-```star
-
-
-```
-
-## Cargo Example
-
-This example creates a workspace that allows you to develop `spaces` right next to `printer-rs`. `printer-rs` provides the `spaces` printer and is commonly developed alongside `spaces`.
-
-Consider the file `config/develop_spaces.toml`:
-
-```toml
-[settings]
-branch = "{SPACE}-{UNIQUE}"
-
-[vscode.extensions]
-recommendations = ["rust-lang.rust-analyzer"]
-
-[vscode.settings]
-"editor.formatOnSave" = true
-
-[repositories]
-spaces = { git = "https://github.com/tyler-gilbert/spaces", branch = "development" }
-printer = { git = "https://github.com/tyler-gilbert/printer-rs", branch = "development" }
-
-[cargo.patches]
-spaces = ["printer"]
-
-[cargo.build]
-rustc-wrapper = "sccache"
-```
-
-I can run:
-
-```sh
-spaces create --name=spaces-dev --config=config/develop_spaces.toml
-```
-
-This will create:
-
-- spaces-dev
-  - .vscode
-    - extensions.json
-    - settings.json
-    - tasks.json (coming soon)
-  - .config/cargo.toml
-  - spaces
-  - printer-rs
-
-## Contributing
-
-Install the latest version to `spaces`.
-
-```sh
-git clone https://github.com/work-spaces/workflows
-spaces create --name=spaces-my-issue --config=workflows=spaces_develop.toml
-```
-
-Open the `spaces-my-issue` folder in VSCode (or your editor of choice) and start editing.
-
-When you are ready, create a PR and request to merge to the `development` branch.
 
 
 
