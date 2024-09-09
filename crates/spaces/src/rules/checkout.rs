@@ -1,10 +1,9 @@
 use crate::{executor, info, rules};
 use anyhow::Context;
-use anyhow_source_location::{format_context, format_error};
+use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
 use starlark::environment::GlobalsBuilder;
 use starlark::values::none::NoneType;
-use std::collections::HashSet;
 use std::vec;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -21,10 +20,13 @@ pub struct PlatformArchive {
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
     fn add_repo(
-        #[starlark(require = named)] name: &str,
+        #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] repo: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
         let repo: git::Repo = serde_json::from_value(repo.to_json_value()?)
+            .context(format_context!("bad options for repo"))?;
+
+        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for repo"))?;
 
         let worktree_path = info::get_workspace_absolute_path()
@@ -32,17 +34,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let mut state = rules::get_state().write().unwrap();
         let checkout = repo.get_checkout();
+        let spaces_key = rule.name.clone();
         state.tasks.insert(
-            name.to_string(),
+            rule.name.clone(),
             rules::Task::new(
-                name,
+                rule,
                 rules::Phase::Checkout,
-                Vec::new(),
-                HashSet::new(),
-                HashSet::new(),
                 executor::Task::Git(executor::git::Git {
                     url: repo.url,
-                    spaces_key: name.to_string(),
+                    spaces_key,
                     worktree_path,
                     checkout,
                 }),
@@ -52,9 +52,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     }
 
     fn add_platform_archive(
-        #[starlark(require = named)] name: &str,
+        #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] platforms: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
+        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+            .context(format_context!("bad options for repo"))?;
         //convert platforms to starlark value
         let platforms: PlatformArchive = serde_json::from_value(platforms.to_json_value()?)?;
 
@@ -68,29 +70,35 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             _ => None,
         };
 
-        add_http_archive(name, platform_archive)
+        add_http_archive(rule, platform_archive)
             .context(format_context!("Failed to add archive"))?;
 
         Ok(NoneType)
     }
 
     fn add_archive(
-        #[starlark(require = named)] name: &str,
+        #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] archive: starlark::values::Value,
         // includes, excludes, strip_prefix
     ) -> anyhow::Result<NoneType> {
+        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+            .context(format_context!("bad options for repo"))?;
+
         let archive: http_archive::Archive = serde_json::from_value(archive.to_json_value()?)
             .context(format_context!("Failed to parse archive arguments"))?;
 
-        add_http_archive(name, Some(archive)).context(format_context!("Failed to add archive"))?;
+        add_http_archive(rule, Some(archive)).context(format_context!("Failed to add archive"))?;
 
         Ok(NoneType)
     }
 
     fn add_asset(
-        #[starlark(require = named)] name: &str,
+        #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] asset: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
+        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+            .context(format_context!("bad options for repo"))?;
+
         let add_asset: executor::asset::AddAsset =
             serde_json::from_value(asset.to_json_value()?)
                 .context(format_context!("Failed to parse archive arguments"))?;
@@ -98,13 +106,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let mut state = rules::get_state().write().unwrap();
 
         state.tasks.insert(
-            name.to_string(),
+            rule.name.to_string(),
             rules::Task::new(
-                name,
+                rule,
                 rules::Phase::PostCheckout,
-                Vec::new(),
-                HashSet::new(),
-                HashSet::new(),
                 executor::Task::AddAsset(add_asset),
             ),
         );
@@ -112,9 +117,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     }
 
     fn update_asset(
-        #[starlark(require = named)] name: &str,
+        #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] asset: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
+        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+            .context(format_context!("bad options for repo"))?;
         // support JSON, yaml, and toml
         let update_asset: executor::asset::UpdateAsset =
             serde_json::from_value(asset.to_json_value()?)
@@ -123,13 +130,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let mut state = rules::get_state().write().unwrap();
 
         state.tasks.insert(
-            name.to_string(),
+            rule.name.to_string(),
             rules::Task::new(
-                name,
+                rule,
                 rules::Phase::PostCheckout,
-                Vec::new(),
-                HashSet::new(),
-                HashSet::new(),
                 executor::Task::UpdateAsset(update_asset),
             ),
         );
@@ -138,9 +142,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     }
 
     fn update_env(
-        #[starlark(require = named)] name: &str,
+        #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] env: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
+        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+            .context(format_context!("bad options for repo"))?;
+
         // support JSON, yaml, and toml
         let update_env: executor::env::UpdateEnv = serde_json::from_value(env.to_json_value()?)
             .context(format_context!("Failed to parse archive arguments"))?;
@@ -148,13 +155,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let mut state = rules::get_state().write().unwrap();
 
         state.tasks.insert(
-            name.to_string(),
+            rule.name.to_string(),
             rules::Task::new(
-                name,
+                rule,
                 rules::Phase::PostCheckout,
-                Vec::new(),
-                HashSet::new(),
-                HashSet::new(),
                 executor::Task::UpdateEnv(update_env),
             ),
         );
@@ -164,28 +168,35 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 }
 
 fn add_http_archive(
-    name: &str,
+    mut rule: rules::Rule,
     archive_option: Option<http_archive::Archive>,
 ) -> anyhow::Result<()> {
     if let Some(archive) = archive_option {
         let mut state = rules::get_state().write().unwrap();
 
-        let sync_name = format!("{}_sync", name);
-
         //create a target that waits for all downloads
         //then create links based on all downloads being complete
 
-        let http_archive = http_archive::HttpArchive::new(&info::get_store_path(), name, &archive)
-            .context(format_context!("Failed to create http_archive {}", name))?;
+        let http_archive =
+            http_archive::HttpArchive::new(&info::get_store_path(), rule.name.as_str(), &archive)
+                .context(format_context!(
+                "Failed to create http_archive {}",
+                rule.name
+            ))?;
+
+        let mut sync_rule = rule.clone();
+        sync_rule.name = format!("{}_sync", rule.name);
+        if let Some(deps) = rule.deps.as_mut() {
+            deps.push(sync_rule.name.clone());
+        } else {
+            rule.deps = Some(vec![sync_rule.name.clone()]);
+        }
 
         state.tasks.insert(
-            sync_name.clone(),
+            sync_rule.name.clone(),
             rules::Task::new(
-                sync_name.as_str(),
+                sync_rule,
                 rules::Phase::Checkout,
-                Vec::new(),
-                HashSet::new(),
-                HashSet::new(),
                 executor::Task::HttpArchiveSync(executor::http_archive::HttpArchiveSync {
                     http_archive: http_archive.clone(),
                 }),
@@ -193,13 +204,10 @@ fn add_http_archive(
         );
 
         state.tasks.insert(
-            name.to_string(),
+            rule.name.to_string(),
             rules::Task::new(
-                name,
+                rule,
                 rules::Phase::PostCheckout,
-                vec![sync_name],
-                HashSet::new(),
-                HashSet::new(),
                 executor::Task::HttpArchiveCreateLinks(
                     executor::http_archive::HttpArchiveCreateLinks {
                         http_archive: http_archive.clone(),

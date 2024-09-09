@@ -24,7 +24,7 @@ codegen-units = 1
 """
 
 checkout.add_asset(
-    name = "workspace.Cargo.toml",
+    rule = { "name": "workspace.Cargo.toml" },
     asset = {
         "destination": "Cargo.toml",
         "content": cargo_toml_contents,
@@ -32,7 +32,7 @@ checkout.add_asset(
 )
 
 checkout.add_platform_archive(
-    name = "rustup-init",
+    rule = { "name": "rustup-init" },
     platforms = {
         "macos_aarch64": {
             "url": "https://static.rust-lang.org/rustup/dist/aarch64-apple-darwin/rustup-init",
@@ -50,7 +50,7 @@ checkout.add_platform_archive(
 )
 
 checkout.add_repo(
-    name = "printer",
+    rule = { "name": "printer" },
     repo = {
         "url": "https://github.com/work-spaces/printer-rs",
         "rev": "main",
@@ -59,7 +59,7 @@ checkout.add_repo(
 )
 
 checkout.add_repo(
-    name = "easy-archiver",
+    rule = { "name": "easy-archiver" },
     repo = {
         "url": "https://github.com/work-spaces/easy-archiver",
         "rev": "main",
@@ -68,7 +68,7 @@ checkout.add_repo(
 )
 
 checkout.add_repo(
-    name = "tools/sysroot-rust",
+    rule = { "name": "tools/sysroot-rust" },
     repo = {
         "url": "https://github.com/work-spaces/sysroot-rust",
         "rev": "main",
@@ -77,7 +77,7 @@ checkout.add_repo(
 )
 
 checkout.add_repo(
-    name = "tools/sysroot-sccache",
+    rule = { "name": "tools/sysroot-sccache" },
     repo = {
         "url": "https://github.com/work-spaces/sysroot-sccache",
         "rev": "v0",
@@ -92,7 +92,7 @@ cargo_vscode_task = {
 }
 
 checkout.update_asset(
-    name = ".vscode/tasks.json",
+    rule = { "name": "vscode_tasks" },
     asset = {
         "destination": ".vscode/tasks.json",
         "format": "json",
@@ -124,7 +124,7 @@ checkout.update_asset(
 )
 
 checkout.update_asset(
-    name = ".cargo/config.toml",
+    rule = { "name": "cargo_config" },
     asset = {
         "destination": ".cargo/config.toml",
         "format": "toml",
@@ -139,7 +139,7 @@ checkout.update_asset(
 )
 
 checkout.update_env(
-    name = "rust-env",
+    rule = { "name": "rust_env" },
     env = {
         "vars": {"RUST_TOOLCHAIN": "1.80", "PS1": '"(spaces) $PS1"'},
         "paths": ["/usr/bin", "/bin"],

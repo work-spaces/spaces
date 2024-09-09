@@ -16,6 +16,9 @@ state = "0.6.0"
 petgraph = "0.6.5"
 glob-match = "0.2.1"
 url = "2.5.2"
+toml = "0.8.19"
+serde_yaml = "0.9"
+
 
 git.path = "crates/git"
 graph.path = "crates/graph"

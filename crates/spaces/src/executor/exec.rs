@@ -1,41 +1,31 @@
 use anyhow::Context;
 use anyhow_source_location::format_context;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Exec {
     pub command: String,
-    pub args: Vec<String>,
-    pub env: Vec<(String, String)>,
+    pub args: Option<Vec<String>>,
+    pub env: Option<Vec<(String, String)>>,
     pub working_directory: Option<String>,
     pub redirect_stdout: Option<String>,
 }
 
 impl Exec {
-    pub fn new(
-        command: &str,
-        args: Vec<String>,
-        working_directory: Option<String>,
-        env: Vec<(String, String)>,
-        redirect_stdout: Option<&str>,
-    ) -> Self {
-        Exec {
-            command: command.to_string(),
-            working_directory,
-            args,
-            env,
-            redirect_stdout: redirect_stdout.map(|s| s.to_string()),
-        }
-    }
 
     pub fn execute(
         &self,
         name: &str,
         mut progress: printer::MultiProgressBar,
     ) -> anyhow::Result<()> {
+
+        let arguments = self.args.clone().unwrap_or_default();
+        let environment = self.env.clone().unwrap_or_default();
+
         let options = printer::ExecuteOptions {
             label: name.to_string(),
-            arguments: self.args.clone(),
-            environment: self.env.clone(),
+            arguments,
+            environment,
             working_directory: self.working_directory.clone(),
             is_return_stdout: self.redirect_stdout.is_some(),
             ..Default::default()

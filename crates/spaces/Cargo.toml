@@ -22,9 +22,9 @@ http-archive.workspace = true
 easy-archiver.workspace = true
 glob-match.workspace = true
 url.workspace = true
+serde_yaml.workspace = true
+toml.workspace = true
 
-serde_yaml = "0.9"
-toml = "0.8.19"
 home = "0.5.9"
 sha256 = "1.5.0"
 

@@ -1,15 +1,24 @@
-use anyhow::Context;
-use anyhow_source_location::format_context;
+#[allow(unused)]
 
-#[derive(Debug, Clone)]
+use anyhow::Context;
+#[allow(unused)]
+use anyhow_source_location::format_context;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ArchiveDriver {
+    #[serde(rename = "tar.gz")]
     TarGz,
+    #[serde(rename = "tar.bz2")]
     TarBz2,
+    #[serde(rename = "tar.7z")]
     Tar7z,
+    #[serde(rename = "zip")]
     Zip,
 }
 
 impl ArchiveDriver {
+    #[allow(unused)]
     fn get_extension(&self) -> &'static str {
         match self {
             ArchiveDriver::TarGz => "tar.gz",
@@ -20,7 +29,7 @@ impl ArchiveDriver {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Archive {
     pub input: String,
     pub name: String,
@@ -32,6 +41,7 @@ pub struct Archive {
 }
 
 impl Archive {
+    #[allow(unused)]
     pub fn get_output_file(&self) -> String {
         let mut result = format!("{}-{}", self.name, self.version);
         if let Some(platform) = self.platform.as_ref() {
@@ -49,7 +59,6 @@ impl Archive {
     ) -> anyhow::Result<()> {
 
 
-        
         Ok(())
     }
 }
