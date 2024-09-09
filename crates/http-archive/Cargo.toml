@@ -1,0 +1,19 @@
+[package]
+name = "http-archive"
+version = "0.6.0-beta.2"
+edition = "2021"
+
+
+[dependencies]
+reqwest = { version = "0.12" }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+
+anyhow-source-location.workspace = true
+anyhow.workspace = true
+printer.workspace = true
+state.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+easy-archiver.workspace = true
+glob-match.workspace = true
+url.workspace = true

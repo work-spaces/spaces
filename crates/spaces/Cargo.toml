@@ -1,0 +1,37 @@
+[package]
+name = "spaces"
+version = "0.6.0-beta.3"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.5.4", features = ["derive"] }
+anyhow.workspace = true
+anyhow-source-location.workspace = true
+
+starlark.workspace = true
+git.workspace = true
+platform.workspace = true
+graph.workspace = true
+printer.workspace = true
+state.workspace = true
+serde.workspace = true
+starstd.workspace = true
+petgraph.workspace = true
+serde_json.workspace = true
+http-archive.workspace = true
+easy-archiver.workspace = true
+glob-match.workspace = true
+url.workspace = true
+
+serde_yaml = "0.9"
+toml = "0.8.19"
+home = "0.5.9"
+sha256 = "1.5.0"
+
+json_value_merge = "2.0.0"
+regex = "1.10.6"
+flume = "0.11.0"
+cfg-if = "1.0.0"
+walkdir = "2.5.0"
+maplit = "1.0.2"
+which = "6.0.1"

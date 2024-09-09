@@ -1,0 +1,15 @@
+[package]
+name = "git"
+version = "0.6.0-beta.2"
+edition = "2021"
+
+
+[dependencies]
+petgraph = "0.6.5"
+url = "2.5.2"
+
+anyhow-source-location.workspace = true
+anyhow.workspace = true
+printer.workspace = true
+state.workspace = true
+serde.workspace = true

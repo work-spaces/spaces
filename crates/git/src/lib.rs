@@ -1,37 +1,62 @@
-use std::ops::DerefMut;
-
-use crate::{
-    context,
-    manifest::{self, Dependency},
-};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::sync::RwLock;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CheckoutOption {
+    Revision,
+    NewBranch,
+}
+
+#[derive(Debug, Clone)]
+pub enum Checkout {
+    Revision(String),
+    NewBranch(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Repo {
+    pub url: String,
+    pub checkout: CheckoutOption,
+    pub rev: String,
+}
+
+impl Repo {
+    pub fn get_checkout(&self) -> Checkout {
+        match &self.checkout {
+            CheckoutOption::Revision => Checkout::Revision(self.rev.clone()),
+            CheckoutOption::NewBranch => Checkout::NewBranch(self.rev.clone()),
+        }
+    }
+}
+
+struct State {
+    active_repos: HashSet<String>,
+    log_directory: Option<String>,
+}
+
+static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
+
+fn get_state() -> &'static RwLock<State> {
+    if let Some(state) = STATE.try_get() {
+        return state;
+    }
+    STATE.set(RwLock::new(State {
+        active_repos: HashSet::new(),
+        log_directory: None,
+    }));
+    STATE.get()
+}
 
 fn execute_git_command(
-    context: std::sync::Arc<context::Context>,
     url: &str,
     progress_bar: &mut printer::MultiProgressBar,
     options: printer::ExecuteOptions,
 ) -> anyhow::Result<()> {
     let mut is_ready = false;
-    while !is_ready {
-        {
-            let mut active_repos_lock = context.active_repository.lock().unwrap();
-            let active_repos = active_repos_lock.deref_mut();
-            if active_repos.contains(url) {
-                is_ready = false;
-            } else {
-                active_repos.insert(url.to_string());
-                is_ready = true;
-            }
-        }
-        if !is_ready {
-            std::thread::sleep(std::time::Duration::from_millis(500));
-        }
-    }
-
-    let mut options = options.clone();
+    use std::ops::DerefMut;
 
     let log_file_name = format!(
         "git_{}.log",
@@ -41,9 +66,31 @@ fn execute_git_command(
             .as_millis()
     );
 
-    let log_file_path = format!("{}/{log_file_name}", context.get_log_directory());
+    let mut log_file_path = None;
+    while !is_ready {
+        {
+            let mut state_lock = get_state().write().unwrap();
+            let state = state_lock.deref_mut();
 
-    options.log_file_path = Some(log_file_path);
+            if state.active_repos.contains(url) {
+                is_ready = false;
+            } else {
+                state.active_repos.insert(url.to_string());
+                is_ready = true;
+            }
+            log_file_path = state
+                .log_directory
+                .as_ref()
+                .map(|e| format!("{e}/{log_file_name}"));
+        }
+        if !is_ready {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+    }
+
+    let mut options = options.clone();
+
+    options.log_file_path = log_file_path;
 
     let full_command = options.get_full_command_in_working_directory("git");
     progress_bar
@@ -51,14 +98,15 @@ fn execute_git_command(
         .context(format_context!("{full_command}"))?;
 
     {
-        let mut active_repos_lock = context.active_repository.lock().unwrap();
-        active_repos_lock.remove(url);
+        let mut state_lock = get_state().write().unwrap();
+        let state = state_lock.deref_mut();
+        state.active_repos.remove(url);
     }
 
     Ok(())
 }
 
-#[derive(Clone, Serialize, Debug)]
+#[derive(Clone, Debug)]
 pub struct BareRepository {
     pub url: String,
     pub full_path: String,
@@ -68,8 +116,8 @@ pub struct BareRepository {
 
 impl BareRepository {
     pub fn new(
-        context: std::sync::Arc<context::Context>,
         progress_bar: &mut printer::MultiProgressBar,
+        bare_store_path: &str,
         spaces_key: &str,
         url: &str,
     ) -> anyhow::Result<Self> {
@@ -78,7 +126,7 @@ impl BareRepository {
         let (relative_bare_store_path, name_dot_git) = Self::url_to_relative_path_and_name(url)
             .context(format_context!("Failed to parse {spaces_key} url: {url}"))?;
 
-        let bare_store_path = context.get_bare_store_path(relative_bare_store_path.as_str());
+        let bare_store_path = format!("{bare_store_path}{relative_bare_store_path}");
 
         std::fs::create_dir_all(&bare_store_path)
             .context(format_context!("failed to creat dir {bare_store_path}"))?;
@@ -99,7 +147,7 @@ impl BareRepository {
                 ..Default::default()
             };
 
-            execute_git_command(context.clone(), url, progress_bar, options_git_config)
+            execute_git_command(url, progress_bar, options_git_config)
                 .context(format_context!("while setting git options"))?;
         } else {
             options.working_directory = Some(bare_store_path.clone());
@@ -114,7 +162,7 @@ impl BareRepository {
                 url.to_string(),
             ];
 
-            execute_git_command(context.clone(), url, progress_bar, options)
+            execute_git_command(url, progress_bar, options)
                 .context(format_context!("while creating bare repo"))?;
 
             let options_git_config_auto_push = printer::ExecuteOptions {
@@ -129,13 +177,8 @@ impl BareRepository {
                 ..Default::default()
             };
 
-            execute_git_command(
-                context.clone(),
-                url,
-                progress_bar,
-                options_git_config_auto_push,
-            )
-            .context(format_context!("while configuring auto-push"))?;
+            execute_git_command(url, progress_bar, options_git_config_auto_push)
+                .context(format_context!("while configuring auto-push"))?;
         }
 
         Ok(Self {
@@ -148,11 +191,10 @@ impl BareRepository {
 
     pub fn add_worktree(
         &self,
-        context: std::sync::Arc<context::Context>,
         progress_bar: &mut printer::MultiProgressBar,
         path: &str,
     ) -> anyhow::Result<Worktree> {
-        let result = Worktree::new(context, progress_bar, self, path)
+        let result = Worktree::new(progress_bar, self, path)
             .context(format_context!("Adding working to {} at {path}", self.url))?;
         Ok(result)
     }
@@ -212,7 +254,6 @@ pub struct Worktree {
 
 impl Worktree {
     fn new(
-        context: std::sync::Arc<context::Context>,
         progress_bar: &mut printer::MultiProgressBar,
         repository: &BareRepository,
         path: &str,
@@ -231,17 +272,12 @@ impl Worktree {
         options.working_directory = Some(repository.full_path.clone());
         options.arguments = vec!["worktree".to_string(), "prune".to_string()];
 
-        execute_git_command(
-            context.clone(),
-            &repository.url,
-            progress_bar,
-            options.clone(),
-        )
-        .context(format_context!("while pruning worktree"))?;
+        execute_git_command(&repository.url, progress_bar, options.clone())
+            .context(format_context!("while pruning worktree"))?;
 
         options.arguments = vec!["fetch".to_string()];
 
-        execute_git_command(context.clone(), &repository.url, progress_bar, options.clone())
+        execute_git_command(&repository.url, progress_bar, options.clone())
             .context(format_context!("while fetching existing bare repository"))?;
 
         let full_path = format!("{}/{}", path, repository.spaces_key);
@@ -253,7 +289,7 @@ impl Worktree {
                 full_path.to_string(),
             ];
 
-            execute_git_command(context.clone(), &repository.url, progress_bar, options)
+            execute_git_command(&repository.url, progress_bar, options)
                 .context(format_context!("while adding detached worktree"))?;
         }
 
@@ -263,16 +299,21 @@ impl Worktree {
         })
     }
 
-    pub fn get_deps(&self) -> anyhow::Result<Option<manifest::Deps>> {
-        manifest::Deps::new(&self.full_path)
+    pub fn get_spaces_star(&self) -> anyhow::Result<Option<String>> {
+        //check for spaces.star in full_path and return Some string if the file exists
+        let star_file = format!("{}/spaces.star", self.full_path);
+        if std::path::Path::new(&star_file).exists() {
+            Ok(Some(star_file))
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn checkout(
         &self,
-        context: std::sync::Arc<context::Context>,
         progress_bar: &mut printer::MultiProgressBar,
-        dependency: &manifest::Dependency,
-    ) -> anyhow::Result<manifest::Checkout> {
+        checkout: &Checkout,
+    ) -> anyhow::Result<()> {
         let mut options = printer::ExecuteOptions {
             working_directory: Some(self.full_path.clone()),
             ..Default::default()
@@ -280,44 +321,30 @@ impl Worktree {
 
         options.arguments = vec!["fetch".to_string(), "origin".to_string()];
 
-        execute_git_command(context.clone(), &self.url, progress_bar, options.clone())
+        execute_git_command(&self.url, progress_bar, options.clone())
             .context(format_context!("fetching {}", self.url))?;
 
-        let checkout = dependency.get_checkout().context(format_context!(
-            "failed to get checkout type for {dependency:?}"
-        ))?;
-
-        match &checkout {
-            manifest::Checkout::Revision(value) => {
-                options.arguments = vec!["checkout".to_string(), value.clone()];
-            }
-            manifest::Checkout::BranchHead(value) => {
+        match checkout {
+            Checkout::Revision(value) => {
                 options.arguments = vec![
                     "checkout".to_string(),
                     "--detach".to_string(),
                     value.clone(),
                 ];
             }
-            manifest::Checkout::NewBranch(value) => {
+            Checkout::NewBranch(value) => {
                 options.arguments = vec!["checkout".to_string(), value.clone()];
-            }
-            manifest::Checkout::Artifact(artifact) => {
-                return Err(format_error!(
-                    "Artifact checkout is not yet supported {}",
-                    artifact
-                ));
             }
         }
 
-        execute_git_command(context.clone(), &self.url, progress_bar, options)
+        execute_git_command(&self.url, progress_bar, options)
             .context(format_context!("checkout {checkout:?}"))?;
 
-        Ok(checkout)
+        Ok(())
     }
 
     pub fn checkout_detached_head(
         &self,
-        context: std::sync::Arc<context::Context>,
         progress_bar: &mut printer::MultiProgressBar,
     ) -> anyhow::Result<()> {
         let options = printer::ExecuteOptions {
@@ -330,7 +357,7 @@ impl Worktree {
             ..Default::default()
         };
 
-        execute_git_command(context.clone(), &self.url, progress_bar, options)
+        execute_git_command(&self.url, progress_bar, options)
             .context(format_context!("detech head"))?;
 
         Ok(())
@@ -338,29 +365,25 @@ impl Worktree {
 
     pub fn switch_new_branch(
         &self,
-        context: std::sync::Arc<context::Context>,
-        branch_template: &str,
         progress_bar: &mut printer::MultiProgressBar,
-        dependency: &Dependency,
+        dev_branch: &str,
+        checkout: &Checkout,
     ) -> anyhow::Result<()> {
-        self.checkout(context.clone(), progress_bar, dependency)
-            .context(format_context!("switch new branch {}", dependency.git))?;
+        self.checkout(progress_bar, checkout)
+            .context(format_context!("switch new branch {:?}", checkout))?;
 
-        if dependency.checkout == manifest::CheckoutOption::NewBranch {
-            let dev_branch = context
-                .template_model
-                .render_template_string(branch_template)
-                .context(format_context!("{branch_template}"))?;
+        let options = printer::ExecuteOptions {
+            working_directory: Some(self.full_path.clone()),
+            arguments: vec![
+                "switch".to_string(),
+                "-c".to_string(),
+                dev_branch.to_string(),
+            ],
+            ..Default::default()
+        };
 
-            let options = printer::ExecuteOptions {
-                working_directory: Some(self.full_path.clone()),
-                arguments: vec!["switch".to_string(), "-c".to_string(), dev_branch.clone()],
-                ..Default::default()
-            };
-
-            execute_git_command(context.clone(), &self.url, progress_bar, options)
-                .context(format_context!("switch new branch"))?;
-        }
+        execute_git_command(&self.url, progress_bar, options)
+            .context(format_context!("switch new branch"))?;
 
         Ok(())
     }
