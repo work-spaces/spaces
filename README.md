@@ -31,7 +31,9 @@ The run rules execute tasks in order and as needed. Run rules have:
 - `deps`: explicit dependencies that must run before this task
 - `inputs`/`outputs`: when inputs of one task match outputs of another task a dependency is created implicitly
 
-Specified inputs are hashed. If the inputs haven't changed, the rule is skipped. If no `inputs` are specified, the rule always runs. 
+Specified inputs are hashed. If the inputs haven't changed, the rule is skipped. If no `inputs` are specified, the rule always runs.
+
+
 
 
 For example:
