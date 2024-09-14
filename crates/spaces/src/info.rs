@@ -1,8 +1,8 @@
+use crate::executor;
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use starlark::environment::GlobalsBuilder;
 use std::sync::RwLock;
-use crate::executor;
 
 struct State {
     workspace_path: Option<String>,
@@ -93,5 +93,21 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
     fn workspace_path() -> anyhow::Result<String> {
         get_workspace_path().ok_or(format_error!("Workspace path not set"))
+    }
+
+    fn get_archive_output(
+        #[starlark(require = named)] archive: starlark::values::Value,
+    ) -> anyhow::Result<String> {
+        let create_archive: easy_archiver::CreateArchive =
+            serde_json::from_value(archive.to_json_value()?)
+                .context(format_context!("bad options for archive"))?;
+
+        let workspace_directory =
+            get_workspace_path().ok_or(format_error!("Workspace not available"))?;
+
+        Ok(format!(
+            "{workspace_directory}/build/{}",
+            create_archive.get_output_file()
+        ))
     }
 }

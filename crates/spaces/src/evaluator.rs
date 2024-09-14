@@ -12,6 +12,12 @@ fn evaluate_module(
     name: &str,
     content: String,
 ) -> anyhow::Result<FrozenModule> {
+
+    {
+        let mut state = rules::get_state().write().unwrap();
+        state.latest_starlark_module = Some(workspace_path.to_string());
+    }
+
     let ast =
         AstModule::parse(name, content, &Dialect::Standard).map_err(|e| format_error!("{e:?}"))?;
 
@@ -52,13 +58,13 @@ fn evaluate_module(
     Ok(module.freeze()?)
 }
 
-pub fn run_starlark_file(path: &str, phase: rules::Phase) -> anyhow::Result<()> {
+pub fn run_starlark_file(path: &str, phase: rules::Phase, target: Option<String>) -> anyhow::Result<()> {
     let content =
         std::fs::read_to_string(path).context(format_context!("Failed to read file {}", path))?;
-    run_starlark_script(path, content, phase)
+    run_starlark_script(path, content, phase, target)
 }
 
-pub fn run_starlark_script(name: &str, content: String, phase: rules::Phase) -> anyhow::Result<()> {
+pub fn run_starlark_script(name: &str, content: String, phase: rules::Phase, target: Option<String>) -> anyhow::Result<()> {
     let mut printer = printer::Printer::new_stdout();
 
     let mut module_queue = std::collections::VecDeque::new();
@@ -69,14 +75,14 @@ pub fn run_starlark_script(name: &str, content: String, phase: rules::Phase) -> 
         while !module_queue.is_empty() {
             if let Some((name, content)) = module_queue.pop_front() {
                 let _ = evaluate_module(".", name.as_str(), content)
-                    .context(format_context!("Failed to evaluate module {}", name))?;
+                    .context(format_context!("Failed to evaluate module {}", name))?;  
             }
         }
 
         let mut state = rules::get_state().write().unwrap();
 
         state
-            .sort_tasks()
+            .sort_tasks(target.clone())
             .context(format_context!("Failed to sort tasks"))?;
 
         let new_modules = state

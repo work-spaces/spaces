@@ -1,4 +1,5 @@
-use anyhow_source_location::format_error;
+use anyhow::Context;
+use anyhow_source_location::{format_context, format_error};
 
 #[derive(Debug)]
 pub struct Graph {
@@ -42,11 +43,35 @@ impl Graph {
         self.directed_graph[node].as_str()
     }
 
-    pub fn get_sorted_tasks(&self) -> Vec<petgraph::prelude::NodeIndex> {
-        let mut sorted_tasks =
-            petgraph::algo::toposort(&self.directed_graph, None).expect("Cycle detected");
+    pub fn get_sorted_tasks(
+        &self,
+        target: Option<String>,
+    ) -> anyhow::Result<Vec<petgraph::prelude::NodeIndex>> {
+        let mut sorted_tasks = if let Some(target) = target {
+            let target_node = self
+                .directed_graph
+                .node_indices()
+                .find(|&node| {
+                    let value = &self.directed_graph[node];
+                    value.as_str() == target.as_str()
+                })
+                .ok_or(format_error!("Target not found: {target}"))?;
 
-        sorted_tasks.reverse();
-        sorted_tasks
+            let mut tasks: Vec<petgraph::prelude::NodeIndex> = Vec::new();
+            let mut dfs = petgraph::visit::DfsPostOrder::new(&self.directed_graph, target_node);
+            while let Some(node) = dfs.next(&self.directed_graph) {
+                tasks.push(node);
+            }
+            tasks.push(target_node);
+            tasks
+        } else {
+            let mut tasks = petgraph::algo::toposort(&self.directed_graph, None)
+                .map_err(|err| format_error!("Found a circular dependency in the graph {err:?}"))?;
+            tasks.reverse();
+            tasks
+        };
+
+        println!("Sorted tasks: {:?}", sorted_tasks);
+        Ok(sorted_tasks)
     }
 }

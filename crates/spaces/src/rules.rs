@@ -13,10 +13,42 @@ pub struct State {
     pub tasks: HashMap<String, Task>,
     pub graph: graph::Graph,
     pub sorted: Vec<petgraph::prelude::NodeIndex>,
+    pub latest_starlark_module: Option<String>,
 }
 
 impl State {
-    pub fn sort_tasks(&mut self) -> anyhow::Result<()> {
+    pub fn get_updated_rule_name(&self, rule_name: &str) -> String {
+        if let Some(latest_module) = &self.latest_starlark_module {
+            format!("{latest_module}:{rule_name}")
+        } else {
+            rule_name.to_string()
+        }
+    }
+
+    fn is_rule_name_complete(rule: &str) -> bool {
+        rule.contains(':')
+    }
+
+    pub fn insert_task(&mut self, mut task: Task) {
+
+        // update the rule name to have the starlark module name
+        let rule_name = self.get_updated_rule_name(task.rule.name.as_str());
+        task.rule.name = rule_name.clone();
+
+        // update deps that refer to rules in the same starlark module
+        if let Some(deps) = task.rule.deps.as_mut() {
+            for dep in deps.iter_mut() {
+                if Self::is_rule_name_complete(dep) {
+                    continue;
+                }
+                *dep = self.get_updated_rule_name(dep.as_str());
+            }
+        }
+
+        self.tasks.insert(rule_name, task);
+    }
+
+    pub fn sort_tasks(&mut self, target: Option<String>) -> anyhow::Result<()> {
         for task in self.tasks.values() {
             self.graph.add_task(task.rule.name.clone());
         }
@@ -46,7 +78,7 @@ impl State {
                 }
             }
         }
-        self.sorted = self.graph.get_sorted_tasks();
+        self.sorted = self.graph.get_sorted_tasks(target).context(format_context!("Failed to sort tasks"))?;
         Ok(())
     }
 
@@ -112,6 +144,7 @@ pub fn get_state() -> &'static RwLock<State> {
         tasks: HashMap::new(),
         graph: graph::Graph::new(),
         sorted: Vec::new(),
+        latest_starlark_module: None,
     }));
     STATE.get()
 }
@@ -224,4 +257,3 @@ impl Task {
         self.deps_signals.push(task.signal.clone());
     }
 }
-

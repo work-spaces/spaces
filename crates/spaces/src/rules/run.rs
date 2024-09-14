@@ -15,8 +15,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let mut state = rules::get_state().write().unwrap();
 
-        state.tasks.insert(
-            rule.name.to_string(),
+        state.insert_task(
             rules::Task::new(rule, rules::Phase::Run, executor::Task::Target),
         );
 
@@ -31,11 +30,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .context(format_context!("bad options for repo"))?;
 
         let exec: executor::exec::Exec = serde_json::from_value(exec.to_json_value()?)
-            .context(format_context!("bad options for repo"))?;
+            .context(format_context!("bad options for exec"))?;
 
         let mut state = rules::get_state().write().unwrap();
-        state.tasks.insert(
-            rule.name.clone(),
+        state.insert_task(
             rules::Task::new(rule, rules::Phase::Run, executor::Task::Exec(exec)),
         );
         Ok(NoneType)
@@ -45,12 +43,20 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] archive: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
-        let _rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for repo"))?;
 
-        let _archive: executor::archive::Archive = serde_json::from_value(archive.to_json_value()?)
-            .context(format_context!("bad options for repo"))?;
+        let create_archive: easy_archiver::CreateArchive = serde_json::from_value(archive.to_json_value()?)
+        .context(format_context!("bad options for repo"))?;
 
+        let archive = executor::archive::Archive {
+            create_archive,
+        };
+
+        let mut state = rules::get_state().write().unwrap();
+        state.insert_task(
+            rules::Task::new(rule, rules::Phase::Run, executor::Task::CreateArchive(archive))
+        );
         Ok(NoneType)
     }
 }

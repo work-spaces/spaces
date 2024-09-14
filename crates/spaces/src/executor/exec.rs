@@ -1,12 +1,14 @@
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
+use starlark::environment;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Exec {
     pub command: String,
     pub args: Option<Vec<String>>,
-    pub env: Option<Vec<(String, String)>>,
+    pub env: Option<HashMap<String, String>>,
     pub working_directory: Option<String>,
     pub redirect_stdout: Option<String>,
 }
@@ -20,7 +22,12 @@ impl Exec {
     ) -> anyhow::Result<()> {
 
         let arguments = self.args.clone().unwrap_or_default();
-        let environment = self.env.clone().unwrap_or_default();
+        let environment_map = self.env.clone().unwrap_or_default();
+
+        let mut environment = Vec::new();
+        for (key, value) in environment_map {
+            environment.push((key, value));
+        }
 
         let options = printer::ExecuteOptions {
             label: name.to_string(),

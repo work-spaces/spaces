@@ -35,19 +35,16 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let mut state = rules::get_state().write().unwrap();
         let checkout = repo.get_checkout();
         let spaces_key = rule.name.clone();
-        state.tasks.insert(
-            rule.name.clone(),
-            rules::Task::new(
-                rule,
-                rules::Phase::Checkout,
-                executor::Task::Git(executor::git::Git {
-                    url: repo.url,
-                    spaces_key,
-                    worktree_path,
-                    checkout,
-                }),
-            ),
-        );
+        state.insert_task(rules::Task::new(
+            rule,
+            rules::Phase::Checkout,
+            executor::Task::Git(executor::git::Git {
+                url: repo.url,
+                spaces_key,
+                worktree_path,
+                checkout,
+            }),
+        ));
         Ok(NoneType)
     }
 
@@ -105,8 +102,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let mut state = rules::get_state().write().unwrap();
 
-        state.tasks.insert(
-            rule.name.to_string(),
+        state.insert_task(
             rules::Task::new(
                 rule,
                 rules::Phase::PostCheckout,
@@ -129,8 +125,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let mut state = rules::get_state().write().unwrap();
 
-        state.tasks.insert(
-            rule.name.to_string(),
+        state.insert_task(
             rules::Task::new(
                 rule,
                 rules::Phase::PostCheckout,
@@ -154,8 +149,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let mut state = rules::get_state().write().unwrap();
 
-        state.tasks.insert(
-            rule.name.to_string(),
+        state.insert_task(
             rules::Task::new(
                 rule,
                 rules::Phase::PostCheckout,
@@ -192,29 +186,23 @@ fn add_http_archive(
             rule.deps = Some(vec![sync_rule.name.clone()]);
         }
 
-        state.tasks.insert(
-            sync_rule.name.clone(),
-            rules::Task::new(
-                sync_rule,
-                rules::Phase::Checkout,
-                executor::Task::HttpArchiveSync(executor::http_archive::HttpArchiveSync {
-                    http_archive: http_archive.clone(),
-                }),
-            ),
-        );
+        state.insert_task(rules::Task::new(
+            sync_rule,
+            rules::Phase::Checkout,
+            executor::Task::HttpArchiveSync(executor::http_archive::HttpArchiveSync {
+                http_archive: http_archive.clone(),
+            }),
+        ));
 
-        state.tasks.insert(
-            rule.name.to_string(),
-            rules::Task::new(
-                rule,
-                rules::Phase::PostCheckout,
-                executor::Task::HttpArchiveCreateLinks(
-                    executor::http_archive::HttpArchiveCreateLinks {
-                        http_archive: http_archive.clone(),
-                    },
-                ),
+        state.insert_task(rules::Task::new(
+            rule,
+            rules::Phase::PostCheckout,
+            executor::Task::HttpArchiveCreateLinks(
+                executor::http_archive::HttpArchiveCreateLinks {
+                    http_archive: http_archive.clone(),
+                },
             ),
-        );
+        ));
     }
     Ok(())
 }

@@ -45,15 +45,17 @@ pub fn execute() -> anyhow::Result<()> {
                 .context(format_context!("while creating workspace directory {name}"))?;
             info::set_workspace_path(name.clone())
                 .context(format_context!("while setting workspace path"))?;
-            evaluator::run_starlark_file(script.as_str(), rules::Phase::Checkout)
-                .context(format_context!("while running checkout rules"))?;
+            evaluator::run_starlark_file(script.as_str(), rules::Phase::Checkout, None)
+                .context(format_context!("while executing checkout rules"))?;
         }
 
         Arguments {
-            commands: Commands::Run {},
+            commands: Commands::Run { target },
         } => {
-            evaluator::run_starlark_file("spaces.star", rules::Phase::Run)
-                .context(format_context!("while running checkout rules"))?;
+            info::set_workspace_path("".to_string())
+                .context(format_context!("while setting workspace path"))?;
+            evaluator::run_starlark_file("spaces.star", rules::Phase::Run, target)
+                .context(format_context!("while executing run rules"))?;
         }
 
         Arguments {
@@ -95,7 +97,11 @@ enum Commands {
         script: String,
     },
     /// Executes the Run phase rules.
-    Run {},
+    Run {
+        /// The path to the star file containing checkout rules.
+        #[arg(long)]
+        target: Option<String>,
+    },
     /// Lists the workspaces in the spaces store on the local machine.
     List {},
 }

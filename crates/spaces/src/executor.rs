@@ -13,7 +13,7 @@ use anyhow_source_location::format_context;
 pub enum Task {
     Exec(exec::Exec),
     Target,
-    Archive(archive::Archive),
+    CreateArchive(archive::Archive),
     HttpArchiveSync(http_archive::HttpArchiveSync),
     HttpArchiveCreateLinks(http_archive::HttpArchiveCreateLinks),
     UpdateAsset(asset::UpdateAsset),
@@ -33,7 +33,7 @@ impl Task {
             Task::HttpArchiveSync(archive) => archive.execute(name, progress),
             Task::HttpArchiveCreateLinks(archive) => archive.execute(name, progress),
             Task::Exec(exec) => exec.execute(name, progress),
-            Task::Archive(archive) => archive.execute(name, progress),
+            Task::CreateArchive(archive) => archive.execute(name, progress),
             Task::UpdateAsset(asset) => asset.execute(name, progress),
             Task::UpdateEnv(update_env) => update_env.execute(name, progress),
             Task::AddAsset(asset) => asset.execute(name, progress),
