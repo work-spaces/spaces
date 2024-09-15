@@ -1,8 +1,9 @@
 use crate::info;
 use anyhow::Context;
 use anyhow_source_location::format_context;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Git {
     pub url: String,
     pub spaces_key: String,
@@ -25,7 +26,6 @@ impl Git {
             &self.url,
         )
         .context(format_context!("Failed to create bare repository"))?;
-
 
         let worktree = bare_repo
             .add_worktree(&mut progress, &self.worktree_path)

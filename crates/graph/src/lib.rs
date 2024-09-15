@@ -1,5 +1,4 @@
-use anyhow::Context;
-use anyhow_source_location::{format_context, format_error};
+use anyhow_source_location::format_error;
 
 #[derive(Debug)]
 pub struct Graph {
@@ -47,7 +46,7 @@ impl Graph {
         &self,
         target: Option<String>,
     ) -> anyhow::Result<Vec<petgraph::prelude::NodeIndex>> {
-        let mut sorted_tasks = if let Some(target) = target {
+        let sorted_tasks = if let Some(target) = target {
             let target_node = self
                 .directed_graph
                 .node_indices()
@@ -71,7 +70,6 @@ impl Graph {
             tasks
         };
 
-        println!("Sorted tasks: {:?}", sorted_tasks);
         Ok(sorted_tasks)
     }
 }

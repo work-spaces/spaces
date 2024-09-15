@@ -1,4 +1,4 @@
-use crate::executor;
+use crate::{executor, rules};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use starlark::environment::GlobalsBuilder;
@@ -68,17 +68,6 @@ pub fn get_workspace_path() -> Option<String> {
     state.workspace_path.clone()
 }
 
-pub fn get_workspace_absolute_path() -> anyhow::Result<String> {
-    let cwd =
-        std::env::current_dir().context(format_context!("getting current working directory"))?;
-
-    let absolute_path = get_workspace_path()
-        .map(move |path| format!("{}/{path}", cwd.to_string_lossy()))
-        .ok_or(format_error!("Workspace path not set"))?;
-
-    Ok(absolute_path)
-}
-
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
     fn platform_name() -> anyhow::Result<String> {
@@ -91,8 +80,22 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(get_store_path())
     }
 
-    fn workspace_path() -> anyhow::Result<String> {
+    fn absolute_workspace_path() -> anyhow::Result<String> {
         get_workspace_path().ok_or(format_error!("Workspace path not set"))
+    }
+
+    fn current_workspace_path() -> anyhow::Result<String> {
+        let state = rules::get_state().read().unwrap();
+        if let Some(latest) = state.latest_starlark_module.as_ref() {
+            let path = std::path::Path::new(latest.as_str());
+            let parent = path
+                .parent()
+                .map(|e| e.to_string_lossy().to_string())
+                .unwrap_or(String::new());
+            Ok(parent)
+        } else {
+            Err(format_error!("No starlark module set"))
+        }
     }
 
     fn get_archive_output(

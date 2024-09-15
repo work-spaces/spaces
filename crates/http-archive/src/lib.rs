@@ -26,7 +26,7 @@ struct Files {
     files: HashSet<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpArchive {
     pub spaces_key: String,
     archive: Archive,
@@ -101,7 +101,6 @@ impl HttpArchive {
         space_directory: &str,
     ) -> anyhow::Result<()> {
         //construct a list of files to link
-
         let mut files = Vec::new();
         let all_files = self
             .load_files_json()

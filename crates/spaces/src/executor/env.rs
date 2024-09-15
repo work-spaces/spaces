@@ -13,14 +13,13 @@ pub struct UpdateEnv {
 impl UpdateEnv {
     pub fn execute(&self, _name: &str, _progress: printer::MultiProgressBar) -> anyhow::Result<()> {
         info::update_env(self.clone()).context(format_context!("failed to update env"))?;
-
         Ok(())
     }
 }
 
 pub fn finalize_env() -> anyhow::Result<()> {
     let env = info::get_env();
-    let workspace = info::get_workspace_absolute_path()
+    let workspace = info::get_workspace_path()
         .context(format_context!("Internal error: workspace path not set"))?;
     let workspace_path = std::path::Path::new(&workspace);
     let env_path = workspace_path.join("env");
@@ -32,7 +31,7 @@ pub fn finalize_env() -> anyhow::Result<()> {
         content.push_str(&line);
     }
     content.push_str("\n");
-    content.push_str(format!("PATH={}\n", env.paths.join(":")).as_str());
+    content.push_str(format!("PATH=$PWD/sysroot/bin:{}\n", env.paths.join(":")).as_str());
 
     std::fs::write(env_path.clone(), content)
         .context(format_context!("failed to write env file {env_path:?}"))?;

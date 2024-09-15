@@ -29,12 +29,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for repo"))?;
 
-        let worktree_path = info::get_workspace_absolute_path()
+        let worktree_path = info::get_workspace_path()
             .context(format_context!("Internal error: workspace path not set"))?;
 
         let mut state = rules::get_state().write().unwrap();
         let checkout = repo.get_checkout();
         let spaces_key = rule.name.clone();
+        let rule_name = rule.name.clone();
         state.insert_task(rules::Task::new(
             rule,
             rules::Phase::Checkout,
@@ -44,7 +45,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 worktree_path,
                 checkout,
             }),
-        ));
+        )).context(format_context!("Failed to insert task {rule_name}"))?;
         Ok(NoneType)
     }
 
@@ -101,6 +102,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 .context(format_context!("Failed to parse archive arguments"))?;
 
         let mut state = rules::get_state().write().unwrap();
+        let rule_name = rule.name.clone();
 
         state.insert_task(
             rules::Task::new(
@@ -108,7 +110,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 rules::Phase::PostCheckout,
                 executor::Task::AddAsset(add_asset),
             ),
-        );
+        ).context(format_context!("Failed to insert task {rule_name}"))?;
         Ok(NoneType)
     }
 
@@ -124,6 +126,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 .context(format_context!("Failed to parse archive arguments"))?;
 
         let mut state = rules::get_state().write().unwrap();
+        let rule_name = rule.name.clone();
 
         state.insert_task(
             rules::Task::new(
@@ -131,7 +134,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 rules::Phase::PostCheckout,
                 executor::Task::UpdateAsset(update_asset),
             ),
-        );
+        ).context(format_context!("Failed to insert task {rule_name}"))?;
 
         Ok(NoneType)
     }
@@ -148,6 +151,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .context(format_context!("Failed to parse archive arguments"))?;
 
         let mut state = rules::get_state().write().unwrap();
+        let rule_name = rule.name.clone();
 
         state.insert_task(
             rules::Task::new(
@@ -155,7 +159,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 rules::Phase::PostCheckout,
                 executor::Task::UpdateEnv(update_env),
             ),
-        );
+        ).context(format_context!("Failed to insert task {rule_name}"))?;
 
         Ok(NoneType)
     }
@@ -186,13 +190,15 @@ fn add_http_archive(
             rule.deps = Some(vec![sync_rule.name.clone()]);
         }
 
+        let sync_rule_name = sync_rule.name.clone();
+        let rule_name = rule.name.clone();
         state.insert_task(rules::Task::new(
             sync_rule,
             rules::Phase::Checkout,
             executor::Task::HttpArchiveSync(executor::http_archive::HttpArchiveSync {
                 http_archive: http_archive.clone(),
             }),
-        ));
+        )).context(format_context!("Failed to insert task {sync_rule_name} derived from {rule_name}"))?;
 
         state.insert_task(rules::Task::new(
             rule,
@@ -202,7 +208,7 @@ fn add_http_archive(
                     http_archive: http_archive.clone(),
                 },
             ),
-        ));
+        )).context(format_context!("Failed to insert task {rule_name}"))?;
     }
     Ok(())
 }

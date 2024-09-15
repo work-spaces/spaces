@@ -7,6 +7,7 @@ mod rules;
 mod evaluator;
 mod info;
 mod executor;
+mod workspace;
 
 
 fn main() -> anyhow::Result<()> {

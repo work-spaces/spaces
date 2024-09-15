@@ -1,4 +1,4 @@
-use crate::{evaluator, info, rules};
+use crate::{evaluator, info, rules, workspace};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use clap::{Parser, Subcommand, ValueEnum};
@@ -37,24 +37,43 @@ pub fn execute() -> anyhow::Result<()> {
     use crate::ledger;
     let args = Arguments::parse();
 
+    let mut printer = printer::Printer::new_stdout();
+
     match args {
         Arguments {
             commands: Commands::Checkout { name, script },
         } => {
             std::fs::create_dir_all(name.as_str())
                 .context(format_context!("while creating workspace directory {name}"))?;
-            info::set_workspace_path(name.clone())
+
+            let current_working_directory = std::env::current_dir()
+                .context(format_context!("while getting current working directory"))?
+                .to_string_lossy()
+                .to_string();
+
+            info::set_workspace_path(format!("{current_working_directory}/{name}"))
                 .context(format_context!("while setting workspace path"))?;
-            evaluator::run_starlark_file(script.as_str(), rules::Phase::Checkout, None)
-                .context(format_context!("while executing checkout rules"))?;
+            
+            evaluator::run_starlark_file(
+                &mut printer,
+                script.as_str(),
+                rules::Phase::Checkout,
+                None,
+            )
+            .context(format_context!("while executing checkout rules"))?;
         }
 
         Arguments {
             commands: Commands::Run { target },
         } => {
-            info::set_workspace_path("".to_string())
-                .context(format_context!("while setting workspace path"))?;
-            evaluator::run_starlark_file("spaces.star", rules::Phase::Run, target)
+            evaluator::run_starlark_workspace(&mut printer, rules::Phase::Run, target)
+                .context(format_context!("while executing run rules"))?;
+        }
+
+        Arguments {
+            commands: Commands::Evaluate { target },
+        } => {
+            evaluator::run_starlark_workspace(&mut printer, rules::Phase::Evaluate, target)
                 .context(format_context!("while executing run rules"))?;
         }
 
@@ -98,6 +117,11 @@ enum Commands {
     },
     /// Executes the Run phase rules.
     Run {
+        /// The path to the star file containing checkout rules.
+        #[arg(long)]
+        target: Option<String>,
+    },
+    Evaluate {
         /// The path to the star file containing checkout rules.
         #[arg(long)]
         target: Option<String>,

@@ -2,6 +2,10 @@
 
 """
 
+current_path = info.current_workspace_path()
+
+print("Current path is{}".format(current_path))
+
 run.add_exec(
     rule = {"name": "build", "deps": ["configure1", "configure2", "configure4"]},
     exec = {
@@ -21,7 +25,7 @@ run.add_exec(
 )
 
 run.add_exec(
-    rule = {"name": "pre-configure" },
+    rule = {"name": "pre-configure", "deps": ["workflows:pre-configure"] },
     exec = {
         "command": "sleep",
         "args": ["5"],

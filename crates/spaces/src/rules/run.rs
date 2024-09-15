@@ -14,10 +14,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .context(format_context!("bad options for repo"))?;
 
         let mut state = rules::get_state().write().unwrap();
-
+        let rule_name = rule.name.clone();
         state.insert_task(
             rules::Task::new(rule, rules::Phase::Run, executor::Task::Target),
-        );
+        ).context(format_context!("Failed to insert task {rule_name}"))?;
 
         Ok(NoneType)
     }
@@ -33,9 +33,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .context(format_context!("bad options for exec"))?;
 
         let mut state = rules::get_state().write().unwrap();
+        let rule_name = rule.name.clone();
         state.insert_task(
             rules::Task::new(rule, rules::Phase::Run, executor::Task::Exec(exec)),
-        );
+        ).context(format_context!("Failed to insert task {rule_name}"))?;
         Ok(NoneType)
     }
 
@@ -54,9 +55,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         };
 
         let mut state = rules::get_state().write().unwrap();
+        let rule_name = rule.name.clone();
         state.insert_task(
             rules::Task::new(rule, rules::Phase::Run, executor::Task::CreateArchive(archive))
-        );
+        ).context(format_context!("Failed to insert task {rule_name}"))?;
         Ok(NoneType)
     }
 }

@@ -70,7 +70,7 @@ impl AddAsset {
 }
 
 fn get_destination_path(destination: &str) -> anyhow::Result<std::path::PathBuf> {
-    let workspace_path = info::get_workspace_absolute_path()
+    let workspace_path = info::get_workspace_path()
         .context(format_context!("Failed to get workspace absolute path"))?;
 
     Ok(std::path::Path::new(&workspace_path).join(destination))

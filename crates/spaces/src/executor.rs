@@ -5,11 +5,12 @@ pub mod exec;
 pub mod git;
 pub mod http_archive;
 
-use crate::info;
+use crate::{info, workspace};
 use anyhow::Context;
 use anyhow_source_location::format_context;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Task {
     Exec(exec::Exec),
     Target,
@@ -51,11 +52,16 @@ impl Task {
             let workspace = info::get_workspace_path()
                 .context(format_context!("No workspace directory found"))?;
 
-            let workspace_path = std::path::Path::new(workspace.as_str());
-            let spaces_star_path = workspace_path.join(name).join("spaces.star");
+            let parts = name.split(':').collect::<Vec<&str>>();
 
-            if spaces_star_path.exists() {
-                new_modules.push(spaces_star_path.to_string_lossy().to_string());
+            if let Some(last) = parts.last() {
+                let workspace_path = std::path::Path::new(workspace.as_str());
+                let spaces_star_path = workspace_path
+                    .join(*last)
+                    .join(workspace::SPACES_MODULE_NAME);
+                if spaces_star_path.exists() {
+                    new_modules.push(spaces_star_path.to_string_lossy().to_string());
+                }
             }
         }
         Ok(new_modules)

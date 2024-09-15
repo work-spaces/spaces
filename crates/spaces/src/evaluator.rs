@@ -1,4 +1,4 @@
-use crate::rules;
+use crate::{info, rules, workspace};
 
 use anyhow::Context;
 
@@ -12,10 +12,10 @@ fn evaluate_module(
     name: &str,
     content: String,
 ) -> anyhow::Result<FrozenModule> {
-
     {
         let mut state = rules::get_state().write().unwrap();
-        state.latest_starlark_module = Some(workspace_path.to_string());
+        state.latest_starlark_module = Some(name.to_string());
+        state.all_modules.insert(name.to_string());
     }
 
     let ast =
@@ -58,53 +58,121 @@ fn evaluate_module(
     Ok(module.freeze()?)
 }
 
-pub fn run_starlark_file(path: &str, phase: rules::Phase, target: Option<String>) -> anyhow::Result<()> {
+pub fn run_starlark_file(
+    printer: &mut printer::Printer,
+    path: &str,
+    phase: rules::Phase,
+    target: Option<String>,
+) -> anyhow::Result<()> {
     let content =
         std::fs::read_to_string(path).context(format_context!("Failed to read file {}", path))?;
-    run_starlark_script(path, content, phase, target)
+    run_starlark_modules(printer, vec![(path.to_string(), content)], phase, target)
 }
 
-pub fn run_starlark_script(name: &str, content: String, phase: rules::Phase, target: Option<String>) -> anyhow::Result<()> {
-    let mut printer = printer::Printer::new_stdout();
+pub fn run_starlark_modules(
+    printer: &mut printer::Printer,
+    modules: Vec<(String, String)>,
+    phase: rules::Phase,
+    target: Option<String>,
+) -> anyhow::Result<()> {
+    let workspace_path = info::get_workspace_path().context(format_context!(
+        "Internal Error: Failed to get workspace path"
+    ))?;
 
     let mut module_queue = std::collections::VecDeque::new();
-    module_queue.push_back((name.to_string(), content));
+    module_queue.extend(modules);
 
     while !module_queue.is_empty() {
-
         while !module_queue.is_empty() {
             if let Some((name, content)) = module_queue.pop_front() {
-                let _ = evaluate_module(".", name.as_str(), content)
-                    .context(format_context!("Failed to evaluate module {}", name))?;  
+                let _ = evaluate_module(workspace_path.as_str(), name.as_str(), content)
+                    .context(format_context!("Failed to evaluate module {}", name))?;
             }
         }
 
         let mut state = rules::get_state().write().unwrap();
 
-        state
-            .sort_tasks(target.clone())
-            .context(format_context!("Failed to sort tasks"))?;
+        if phase == rules::Phase::Checkout {
+            state
+                .sort_tasks(target.clone())
+                .context(format_context!("Failed to sort tasks"))?;
+            
+            let new_modules = state
+                .execute(printer, phase)
+                .context(format_context!("Failed to execute tasks"))?;
 
-        let new_modules = state
-            .execute(&mut printer, phase)
-            .context(format_context!("Failed to execute tasks"))?;
-
-
-        for module in new_modules {
-            let content = std::fs::read_to_string(module.as_str())
-                .context(format_context!("Failed to read file {module}"))?;
-            module_queue.push_back((module, content));
+            for module in new_modules {
+                let content = std::fs::read_to_string(module.as_str())
+                    .context(format_context!("Failed to read file {module}"))?;
+                module_queue.push_back((module, content));
+            }
         }
     }
 
-    if phase == rules::Phase::Checkout {
-        let mut state = rules::get_state().write().unwrap();
-        state
-            .execute(&mut printer, rules::Phase::PostCheckout)
-            .context(format_context!("failed to execute post checkout phase"))?;
+    let mut state = rules::get_state().write().unwrap();
+    match phase {
+        rules::Phase::Run => {
+            state
+                .sort_tasks(target.clone())
+                .context(format_context!("Failed to sort tasks"))?;
 
-        crate::executor::env::finalize_env().context(format_context!("failed to finalize env"))?;
+            let _new_modules = state
+                .execute(printer, phase)
+                .context(format_context!("Failed to execute tasks"))?;
+        }
+        rules::Phase::Evaluate => {
+            state
+                .sort_tasks(target.clone())
+                .context(format_context!("Failed to sort tasks"))?;
+        }
+        rules::Phase::Checkout => {
+            state
+                .sort_tasks(target.clone())
+                .context(format_context!("Failed to sort tasks"))?;
+
+            state
+                .execute(printer, rules::Phase::PostCheckout)
+                .context(format_context!("failed to execute post checkout phase"))?;
+
+            crate::executor::env::finalize_env()
+                .context(format_context!("failed to finalize env"))?;
+
+            let workspace_file_content = r#"
+"""
+Spaces Workspace file
+"""
+            "#;
+            let workspace_file_path =
+                format!("{workspace_path}/{}", workspace::WORKSPACE_FILE_NAME);
+            std::fs::write(workspace_file_path.as_str(), workspace_file_content)
+                .context(format_context!("Failed to write workspace file"))?;
+        }
+        _ => {}
     }
 
     Ok(())
+}
+
+pub fn run_starlark_workspace(
+    printer: &mut printer::Printer,
+    phase: rules::Phase,
+    target: Option<String>,
+) -> anyhow::Result<()> {
+    let current_working_directory = std::env::current_dir()
+        .context(format_context!("Failed to get current working directory"))?
+        .to_string_lossy()
+        .to_string();
+
+    let workspace = {
+        let mut multi_progress = printer::MultiProgress::new(printer);
+        let progress = multi_progress.add_progress("loading workspace", Some(100), None);
+        workspace::Workspace::new(progress, current_working_directory.as_str())
+            .context(format_context!("while running workspace"))?
+    };
+
+    let (workspace_path, modules) = (workspace.absolute_path, workspace.modules);
+    info::set_workspace_path(workspace_path)
+        .context(format_context!("while setting workspace path"))?;
+
+    run_starlark_modules(printer, modules, phase, target)
 }

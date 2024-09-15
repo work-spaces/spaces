@@ -10,7 +10,7 @@ pub enum CheckoutOption {
     NewBranch,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Checkout {
     Revision(String),
     NewBranch(String),
@@ -126,7 +126,7 @@ impl BareRepository {
         let (relative_bare_store_path, name_dot_git) = Self::url_to_relative_path_and_name(url)
             .context(format_context!("Failed to parse {spaces_key} url: {url}"))?;
 
-        let bare_store_path = format!("{bare_store_path}{relative_bare_store_path}");
+        let bare_store_path = format!("{bare_store_path}/{relative_bare_store_path}");
 
         std::fs::create_dir_all(&bare_store_path)
             .context(format_context!("failed to creat dir {bare_store_path}"))?;
@@ -195,7 +195,7 @@ impl BareRepository {
         path: &str,
     ) -> anyhow::Result<Worktree> {
         let result = Worktree::new(progress_bar, self, path)
-            .context(format_context!("Adding working to {} at {path}", self.url))?;
+            .context(format_context!("Adding worktree to {} at {path}", self.url))?;
         Ok(result)
     }
 
@@ -275,11 +275,6 @@ impl Worktree {
         execute_git_command(&repository.url, progress_bar, options.clone())
             .context(format_context!("while pruning worktree"))?;
 
-        options.arguments = vec!["fetch".to_string()];
-
-        execute_git_command(&repository.url, progress_bar, options.clone())
-            .context(format_context!("while fetching existing bare repository"))?;
-
         let full_path = format!("{}/{}", path, repository.spaces_key);
         if !std::path::Path::new(&full_path).exists() {
             options.arguments = vec![
@@ -319,13 +314,13 @@ impl Worktree {
             ..Default::default()
         };
 
-        options.arguments = vec!["fetch".to_string(), "origin".to_string()];
-
-        execute_git_command(&self.url, progress_bar, options.clone())
-            .context(format_context!("fetching {}", self.url))?;
-
         match checkout {
             Checkout::Revision(value) => {
+                options.arguments = vec!["fetch".to_string(), "origin".to_string(), value.clone()];
+
+                execute_git_command(&self.url, progress_bar, options.clone())
+                    .context(format_context!("while fetching existing bare repository"))?;
+
                 options.arguments = vec![
                     "checkout".to_string(),
                     "--detach".to_string(),
@@ -333,6 +328,11 @@ impl Worktree {
                 ];
             }
             Checkout::NewBranch(value) => {
+                options.arguments = vec!["fetch".to_string(), "origin".to_string(), value.clone()];
+
+                execute_git_command(&self.url, progress_bar, options.clone())
+                    .context(format_context!("while fetching existing bare repository"))?;
+
                 options.arguments = vec!["checkout".to_string(), value.clone()];
             }
         }

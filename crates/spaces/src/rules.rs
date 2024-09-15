@@ -1,7 +1,7 @@
 pub mod checkout;
 pub mod run;
 
-use crate::executor;
+use crate::{executor, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -14,12 +14,16 @@ pub struct State {
     pub graph: graph::Graph,
     pub sorted: Vec<petgraph::prelude::NodeIndex>,
     pub latest_starlark_module: Option<String>,
+    pub all_modules: HashSet<String>,
 }
 
 impl State {
     pub fn get_updated_rule_name(&self, rule_name: &str) -> String {
         if let Some(latest_module) = &self.latest_starlark_module {
-            format!("{latest_module}:{rule_name}")
+            let rule_prefix = latest_module
+                .strip_suffix(format!("/{}",workspace::SPACES_MODULE_NAME).as_str())
+                .unwrap_or("");
+            format!("{rule_prefix}:{rule_name}")
         } else {
             rule_name.to_string()
         }
@@ -29,8 +33,8 @@ impl State {
         rule.contains(':')
     }
 
-    pub fn insert_task(&mut self, mut task: Task) {
 
+    pub fn insert_task(&mut self, mut task: Task) -> anyhow::Result<()> {
         // update the rule name to have the starlark module name
         let rule_name = self.get_updated_rule_name(task.rule.name.as_str());
         task.rule.name = rule_name.clone();
@@ -44,8 +48,14 @@ impl State {
                 *dep = self.get_updated_rule_name(dep.as_str());
             }
         }
+        if let Some(_) = self.tasks.get(&rule_name) {
+            return Err(format_error!("Task already exists {rule_name}"));
+        }
+
 
         self.tasks.insert(rule_name, task);
+
+        Ok(())
     }
 
     pub fn sort_tasks(&mut self, target: Option<String>) -> anyhow::Result<()> {
@@ -78,7 +88,10 @@ impl State {
                 }
             }
         }
-        self.sorted = self.graph.get_sorted_tasks(target).context(format_context!("Failed to sort tasks"))?;
+        self.sorted = self
+            .graph
+            .get_sorted_tasks(target)
+            .context(format_context!("Failed to sort tasks"))?;
         Ok(())
     }
 
@@ -145,15 +158,17 @@ pub fn get_state() -> &'static RwLock<State> {
         graph: graph::Graph::new(),
         sorted: Vec::new(),
         latest_starlark_module: None,
+        all_modules: HashSet::new(),
     }));
     STATE.get()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Phase {
     Checkout,
     PostCheckout,
     Run,
+    Evaluate,
     Complete,
 }
 
@@ -165,13 +180,14 @@ pub struct Rule {
     pub outputs: Option<HashSet<String>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
     pub executor: executor::Task,
     pub phase: Phase,
     pub rule: Rule,
-    pub _source: String,
+    #[serde(skip)]
     signal: Arc<(Mutex<bool>, Condvar)>,
+    #[serde(skip)]
     deps_signals: Vec<Arc<(Mutex<bool>, Condvar)>>,
 }
 
@@ -180,7 +196,6 @@ impl Task {
         Task {
             executor,
             phase,
-            _source: "".to_string(),
             signal: Arc::new((Mutex::new(false), Condvar::new())),
             deps_signals: Vec::new(),
             rule,

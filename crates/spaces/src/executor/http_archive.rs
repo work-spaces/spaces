@@ -1,8 +1,9 @@
 use crate::info;
 use anyhow::Context;
 use anyhow_source_location::format_context;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpArchiveSync {
     pub http_archive: http_archive::HttpArchive,
 }
@@ -17,7 +18,7 @@ impl HttpArchiveSync {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpArchiveCreateLinks {
     pub http_archive: http_archive::HttpArchive,
 }
