@@ -1,4 +1,4 @@
-use crate::{executor, rules};
+use crate::{executor, rules, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use starlark::environment::GlobalsBuilder;
@@ -6,7 +6,6 @@ use starlark::values::none::NoneType;
 use std::sync::RwLock;
 
 struct State {
-    workspace_path: Option<String>,
     new_branch_name: Option<String>,
     env: executor::env::UpdateEnv,
 }
@@ -18,7 +17,6 @@ fn get_state() -> &'static RwLock<State> {
         return state;
     }
     STATE.set(RwLock::new(State {
-        workspace_path: None,
         new_branch_name: None,
         env: executor::env::UpdateEnv {
             vars: std::collections::HashMap::new(),
@@ -40,11 +38,16 @@ fn get_unique() -> anyhow::Result<String> {
 pub fn set_workspace_path(path: String) -> anyhow::Result<()> {
     let mut state = get_state().write().unwrap();
     let unique = get_unique().context(format_context!("failed to get unique marker"))?;
+    let date = chrono::Local::now();
+    let log_folder = format!("{path}/spaces_logs/logs_{}", date.format("%Y%m%d-%H-%M-%S"));
+    std::fs::create_dir_all(log_folder.as_str())
+        .context(format_context!("Failed to create log folder {log_folder}"))?;
     state.env.paths.push(format!("{path}/sysroot/bin"));
     state.new_branch_name = Some(format!("{path}-{}", unique));
-    state.workspace_path = Some(path);
+
     Ok(())
 }
+
 
 pub fn update_env(env: executor::env::UpdateEnv) -> anyhow::Result<()> {
     let mut state = get_state().write().unwrap();
@@ -65,11 +68,6 @@ pub fn get_store_path() -> String {
     format!("{home}/.spaces/store")
 }
 
-pub fn get_workspace_path() -> Option<String> {
-    let state = get_state().read().unwrap();
-    state.workspace_path.clone()
-}
-
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
     fn platform_name() -> anyhow::Result<String> {
@@ -83,7 +81,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     }
 
     fn absolute_workspace_path() -> anyhow::Result<String> {
-        get_workspace_path().ok_or(format_error!("Workspace path not set"))
+        workspace::get_workspace_path().ok_or(format_error!("Workspace path not set"))
     }
 
     fn set_env(
@@ -120,7 +118,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 .context(format_context!("bad options for archive"))?;
 
         let workspace_directory =
-            get_workspace_path().ok_or(format_error!("Workspace not available"))?;
+            workspace::get_workspace_path().ok_or(format_error!("Workspace not available"))?;
 
         Ok(format!(
             "{workspace_directory}/build/{}",

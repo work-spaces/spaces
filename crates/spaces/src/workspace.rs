@@ -1,5 +1,6 @@
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
+use std::sync::RwLock;
 
 pub const WORKSPACE_FILE_NAME: &str = "spaces.workspace.star";
 pub const SPACES_MODULE_NAME: &str = "spaces.star";
@@ -8,6 +9,69 @@ pub const WORKSPACE_FILE_HEADER: &str = r#"
 Spaces Workspace file
 """
 "#;
+
+struct State {
+    workspace_path: Option<String>,
+    workspace_log_folder: Option<String>,
+}
+
+static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
+
+fn get_state() -> &'static RwLock<State> {
+    if let Some(state) = STATE.try_get() {
+        return state;
+    }
+    STATE.set(RwLock::new(State {
+        workspace_path: None,
+        workspace_log_folder: None,
+    }));
+    STATE.get()
+}
+
+pub fn get_workspace_log_file(rule_name: &str) -> anyhow::Result<String> {
+    let state = get_state().read().unwrap();
+    let log_folder = state
+        .workspace_log_folder
+        .as_ref()
+        .ok_or(format_error!("Internal Error: No workspace path"))?;
+
+    let rule_name = rule_name.replace('/', "_");
+    let rule_name = rule_name.replace(':', "_");
+
+    Ok(format!("{log_folder}/{rule_name}.log"))
+}
+
+
+pub fn set_workspace_path(path: String) -> anyhow::Result<()> {
+    let mut state = get_state().write().unwrap();
+    let date = chrono::Local::now();
+    let log_folder = format!("{path}/spaces_logs/logs_{}", date.format("%Y%m%d-%H-%M-%S"));
+    std::fs::create_dir_all(log_folder.as_str())
+        .context(format_context!("Failed to create log folder {log_folder}"))?;
+    state.workspace_log_folder = Some(log_folder);
+    state.workspace_path = Some(path);
+
+    Ok(())
+}
+
+
+pub fn get_workspace_path() -> Option<String> {
+    let state = get_state().read().unwrap();
+    state.workspace_path.clone()
+}
+
+pub fn get_workspace_io_path() -> anyhow::Result<String> {
+    if let Some(workspace_path) = get_workspace_path() {
+        let state = get_state().read().unwrap();
+        std::fs::create_dir_all(format!("{}/build", workspace_path).as_str())
+            .context(format_context!("Failed to create io.spaces directory"))?;
+        Ok(format!("{}/build/io.spaces", workspace_path))
+    } else {
+        Err(format_error!("Internal Error: No workspace path"))
+    }
+
+}
+
 
 #[derive(Debug)]
 pub struct Workspace {

@@ -31,6 +31,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(content)
     }
 
+    fn exists(path: &str) -> anyhow::Result<bool> {
+        Ok(std::path::Path::new(path).exists())
+    }
+
     fn read_toml<'v>(path: &str, heap: &'v Heap) -> anyhow::Result<Value<'v>> {
         let content = std::fs::read_to_string(path).context(format_context!(
             "Failed to read file {} all paths must be relative to the workspace root",

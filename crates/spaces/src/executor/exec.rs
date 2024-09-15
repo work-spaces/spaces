@@ -23,7 +23,7 @@ impl Exec {
         let workspace_env = info::get_env();
 
         let mut environment_map = HashMap::new();
-        
+
         environment_map.insert("PATH".to_string(), workspace_env.paths.join(":"));
         for (key, value) in workspace_env.vars {
             environment_map.insert(key, value);
@@ -49,6 +49,10 @@ impl Exec {
                 .clone()
                 .map(|cwd| format!("{}/{}", workspace_path, cwd)),
             is_return_stdout: self.redirect_stdout.is_some(),
+            log_file_path: Some(
+                info::get_workspace_log_file(name)
+                    .context(format_context!("Failed to get log file path for {name}"))?,
+            ),
             ..Default::default()
         };
 

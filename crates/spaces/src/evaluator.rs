@@ -146,7 +146,7 @@ pub fn run_starlark_modules(
             workspace_file_content.push_str("workspace_env = ");
             workspace_file_content
                 .push_str(format!("{}", serde_json::to_string_pretty(&info::get_env())?).as_str());
-            workspace_file_content.push_str("\n\ninfo.env(env = workspace_env) \n");
+            workspace_file_content.push_str("\n\ninfo.set_env(env = workspace_env) \n");
 
             let workspace_file_path =
                 format!("{workspace_path}/{}", workspace::WORKSPACE_FILE_NAME);

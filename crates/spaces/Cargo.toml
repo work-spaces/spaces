@@ -27,6 +27,9 @@ toml.workspace = true
 
 home = "0.5.9"
 sha256 = "1.5.0"
+chrono = "0.4.38"
+blake3 = "1.5.4"
+bincode = { version = "2.0.0-rc.3", features = ["derive"] }
 
 json_value_merge = "2.0.0"
 regex = "1.10.6"

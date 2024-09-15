@@ -1,7 +1,8 @@
 pub mod checkout;
 pub mod run;
+pub mod io;
 
-use crate::{executor, workspace};
+use crate::{executor, workspace, label};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -15,45 +16,31 @@ pub struct State {
     pub sorted: Vec<petgraph::prelude::NodeIndex>,
     pub latest_starlark_module: Option<String>,
     pub all_modules: HashSet<String>,
+    pub io: io::Io,
 }
 
 impl State {
-    pub fn get_updated_rule_name(&self, rule_name: &str) -> String {
-        if let Some(latest_module) = &self.latest_starlark_module {
-            let rule_prefix = latest_module
-                .strip_suffix(format!("/{}",workspace::SPACES_MODULE_NAME).as_str())
-                .unwrap_or("");
-            format!("{rule_prefix}:{rule_name}")
-        } else {
-            rule_name.to_string()
-        }
-    }
-
-    fn is_rule_name_complete(rule: &str) -> bool {
-        rule.contains(':')
-    }
-
-
     pub fn insert_task(&mut self, mut task: Task) -> anyhow::Result<()> {
+
         // update the rule name to have the starlark module name
-        let rule_name = self.get_updated_rule_name(task.rule.name.as_str());
-        task.rule.name = rule_name.clone();
+        let rule_label = label::sanitize_rule(task.rule.name.as_str(), self.latest_starlark_module.as_ref());
+        task.rule.name = rule_label.clone();
 
         // update deps that refer to rules in the same starlark module
         if let Some(deps) = task.rule.deps.as_mut() {
             for dep in deps.iter_mut() {
-                if Self::is_rule_name_complete(dep) {
+                if label::is_rule_sanitized(dep) {
                     continue;
                 }
-                *dep = self.get_updated_rule_name(dep.as_str());
+                *dep = label::sanitize_rule(dep.as_str(), self.latest_starlark_module.as_ref());
             }
         }
-        if let Some(_) = self.tasks.get(&rule_name) {
-            return Err(format_error!("Task already exists {rule_name}"));
+        if let Some(_) = self.tasks.get(&rule_label) {
+            return Err(format_error!("Task already exists {rule_label}"));
         }
 
 
-        self.tasks.insert(rule_name, task);
+        self.tasks.insert(rule_label, task);
 
         Ok(())
     }
@@ -111,6 +98,15 @@ impl State {
                 .get_mut(task_name)
                 .ok_or(format_error!("Task not found {task_name}"))?;
 
+            if let Some(inputs) = task.rule.inputs.as_ref() {
+                let mut state = get_state().write().unwrap();
+                
+                for input in inputs {
+                    
+                }
+            }
+
+
             if task.phase == phase {
                 let progress_bar = multi_progress.add_progress(task.rule.name.as_str(), None, None);
                 handle_list.push(task.execute(progress_bar));
@@ -153,12 +149,14 @@ pub fn get_state() -> &'static RwLock<State> {
     if let Some(state) = STATE.try_get() {
         return state;
     }
+    
     STATE.set(RwLock::new(State {
         tasks: HashMap::new(),
         graph: graph::Graph::new(),
         sorted: Vec::new(),
         latest_starlark_module: None,
         all_modules: HashSet::new(),
+        io: io::Io::new(),
     }));
     STATE.get()
 }

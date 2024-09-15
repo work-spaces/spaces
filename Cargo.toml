@@ -24,6 +24,7 @@ git.path = "crates/git"
 graph.path = "crates/graph"
 platform.path = "crates/platform"
 http-archive.path = "crates/http-archive"
+starstd.path = "crates/starstd"
 
 [profile.dev]
 opt-level = 3
