@@ -42,6 +42,7 @@ impl Ledger {
         })
     }
 
+    #[allow(dead_code)]
     pub fn update(
         &mut self,
         full_path_to_workspace: &str,

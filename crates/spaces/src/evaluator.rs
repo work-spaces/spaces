@@ -1,4 +1,4 @@
-use crate::{info, rules, workspace};
+use crate::{executor, info, rules, workspace};
 
 use anyhow::Context;
 
@@ -96,7 +96,7 @@ pub fn run_starlark_modules(
             state
                 .sort_tasks(target.clone())
                 .context(format_context!("Failed to sort tasks"))?;
-            
+
             let new_modules = state
                 .execute(printer, phase)
                 .context(format_context!("Failed to execute tasks"))?;
@@ -124,6 +124,9 @@ pub fn run_starlark_modules(
             state
                 .sort_tasks(target.clone())
                 .context(format_context!("Failed to sort tasks"))?;
+
+            printer.info("Evaluate", &state.tasks)?;
+
         }
         rules::Phase::Checkout => {
             state
@@ -134,14 +137,17 @@ pub fn run_starlark_modules(
                 .execute(printer, rules::Phase::PostCheckout)
                 .context(format_context!("failed to execute post checkout phase"))?;
 
-            crate::executor::env::finalize_env()
-                .context(format_context!("failed to finalize env"))?;
+            executor::env::finalize_env().context(format_context!("failed to finalize env"))?;
 
-            let workspace_file_content = r#"
-"""
-Spaces Workspace file
-"""
-            "#;
+            let mut workspace_file_content = String::new();
+            workspace_file_content.push_str(workspace::WORKSPACE_FILE_HEADER);
+            workspace_file_content.push_str("\n");
+
+            workspace_file_content.push_str("workspace_env = ");
+            workspace_file_content
+                .push_str(format!("{}", serde_json::to_string_pretty(&info::get_env())?).as_str());
+            workspace_file_content.push_str("\n\ninfo.env(env = workspace_env) \n");
+
             let workspace_file_path =
                 format!("{workspace_path}/{}", workspace::WORKSPACE_FILE_NAME);
             std::fs::write(workspace_file_path.as_str(), workspace_file_content)

@@ -2,6 +2,7 @@ use crate::{executor, rules};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use starlark::environment::GlobalsBuilder;
+use starlark::values::none::NoneType;
 use std::sync::RwLock;
 
 struct State {
@@ -39,6 +40,7 @@ fn get_unique() -> anyhow::Result<String> {
 pub fn set_workspace_path(path: String) -> anyhow::Result<()> {
     let mut state = get_state().write().unwrap();
     let unique = get_unique().context(format_context!("failed to get unique marker"))?;
+    state.env.paths.push(format!("{path}/sysroot/bin"));
     state.new_branch_name = Some(format!("{path}-{}", unique));
     state.workspace_path = Some(path);
     Ok(())
@@ -82,6 +84,18 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
     fn absolute_workspace_path() -> anyhow::Result<String> {
         get_workspace_path().ok_or(format_error!("Workspace path not set"))
+    }
+
+    fn set_env(
+        #[starlark(require = named)] env: starlark::values::Value,
+    ) -> anyhow::Result<NoneType> {
+        let mut state = get_state().write().unwrap();
+
+        // support JSON, yaml, and toml
+        state.env = serde_json::from_value(env.to_json_value()?)
+            .context(format_context!("Failed to parse archive arguments"))?;
+
+        Ok(NoneType)
     }
 
     fn current_workspace_path() -> anyhow::Result<String> {

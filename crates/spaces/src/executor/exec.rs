@@ -20,7 +20,18 @@ impl Exec {
         mut progress: printer::MultiProgressBar,
     ) -> anyhow::Result<()> {
         let arguments = self.args.clone().unwrap_or_default();
-        let environment_map = self.env.clone().unwrap_or_default();
+        let workspace_env = info::get_env();
+
+        let mut environment_map = HashMap::new();
+        
+        environment_map.insert("PATH".to_string(), workspace_env.paths.join(":"));
+        for (key, value) in workspace_env.vars {
+            environment_map.insert(key, value);
+        }
+        for (key, value) in self.env.clone().unwrap_or_default() {
+            environment_map.insert(key, value);
+        }
+
         let workspace_path =
             info::get_workspace_path().context(format_context!("No workspace directory found"))?;
 

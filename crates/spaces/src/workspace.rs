@@ -3,6 +3,11 @@ use anyhow_source_location::{format_context, format_error};
 
 pub const WORKSPACE_FILE_NAME: &str = "spaces.workspace.star";
 pub const SPACES_MODULE_NAME: &str = "spaces.star";
+pub const WORKSPACE_FILE_HEADER: &str = r#"
+"""
+Spaces Workspace file
+"""
+"#;
 
 #[derive(Debug)]
 pub struct Workspace {
@@ -45,7 +50,10 @@ impl Workspace {
         progress.set_prefix("scanning workspace");
         progress.set_total(walkdir.len() as u64);
 
-        let mut modules = vec![];
+        let workspace_content = std::fs::read_to_string(format!("{}/{}", absolute_path, WORKSPACE_FILE_NAME))
+            .context(format_context!("Failed to read workspace file"))?;
+
+        let mut modules = vec![(WORKSPACE_FILE_NAME.to_string(), workspace_content)];
         for entry in walkdir {
             progress.increment(1);
             if let Ok(entry) = entry.context(format_context!("While walking directory")) {

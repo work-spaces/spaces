@@ -31,7 +31,7 @@ pub fn finalize_env() -> anyhow::Result<()> {
         content.push_str(&line);
     }
     content.push_str("\n");
-    content.push_str(format!("PATH=$PWD/sysroot/bin:{}\n", env.paths.join(":")).as_str());
+    content.push_str(format!("PATH={}\n", env.paths.join(":")).as_str());
 
     std::fs::write(env_path.clone(), content)
         .context(format_context!("failed to write env file {env_path:?}"))?;

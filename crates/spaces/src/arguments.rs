@@ -1,4 +1,4 @@
-use crate::{evaluator, info, rules, workspace};
+use crate::{evaluator, info, rules};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use clap::{Parser, Subcommand, ValueEnum};

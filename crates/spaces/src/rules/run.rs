@@ -18,7 +18,6 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         state.insert_task(
             rules::Task::new(rule, rules::Phase::Run, executor::Task::Target),
         ).context(format_context!("Failed to insert task {rule_name}"))?;
-
         Ok(NoneType)
     }
 
