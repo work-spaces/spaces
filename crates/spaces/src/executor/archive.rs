@@ -1,7 +1,5 @@
-use crate::info;
-#[allow(unused)]
+use crate::workspace;
 use anyhow::Context;
-#[allow(unused)]
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
 
@@ -12,7 +10,7 @@ pub struct Archive {
 
 impl Archive {
     pub fn execute(&self, name: &str, progress: printer::MultiProgressBar) -> anyhow::Result<()> {
-        let workspace_directory = info::get_workspace_path()
+        let workspace_directory = workspace::get_workspace_path()
             .context(format_context!("failed to get workspace directory"))?;
 
         let output_directory = format!("{workspace_directory}/build/{name}");

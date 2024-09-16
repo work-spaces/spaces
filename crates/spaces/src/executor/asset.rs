@@ -2,7 +2,7 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
 
-use crate::info;
+use crate::workspace;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum AssetFormat {
@@ -70,7 +70,7 @@ impl AddAsset {
 }
 
 fn get_destination_path(destination: &str) -> anyhow::Result<std::path::PathBuf> {
-    let workspace_path = info::get_workspace_path()
+    let workspace_path = workspace::get_workspace_path()
         .context(format_context!("Failed to get workspace absolute path"))?;
 
     Ok(std::path::Path::new(&workspace_path).join(destination))

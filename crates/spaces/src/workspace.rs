@@ -62,7 +62,6 @@ pub fn get_workspace_path() -> Option<String> {
 
 pub fn get_workspace_io_path() -> anyhow::Result<String> {
     if let Some(workspace_path) = get_workspace_path() {
-        let state = get_state().read().unwrap();
         std::fs::create_dir_all(format!("{}/build", workspace_path).as_str())
             .context(format_context!("Failed to create io.spaces directory"))?;
         Ok(format!("{}/build/io.spaces", workspace_path))

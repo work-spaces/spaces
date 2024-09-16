@@ -2,7 +2,7 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
 
-use crate::info;
+use crate::{workspace, info};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateEnv {
@@ -19,7 +19,7 @@ impl UpdateEnv {
 
 pub fn finalize_env() -> anyhow::Result<()> {
     let env = info::get_env();
-    let workspace = info::get_workspace_path()
+    let workspace = workspace::get_workspace_path()
         .context(format_context!("Internal error: workspace path not set"))?;
     let workspace_path = std::path::Path::new(&workspace);
     let env_path = workspace_path.join("env");

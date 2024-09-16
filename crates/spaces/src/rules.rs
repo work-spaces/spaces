@@ -1,8 +1,8 @@
 pub mod checkout;
-pub mod run;
 pub mod io;
+pub mod run;
 
-use crate::{executor, workspace, label};
+use crate::{executor, label};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -16,14 +16,15 @@ pub struct State {
     pub sorted: Vec<petgraph::prelude::NodeIndex>,
     pub latest_starlark_module: Option<String>,
     pub all_modules: HashSet<String>,
-    pub io: io::Io,
 }
 
 impl State {
     pub fn insert_task(&mut self, mut task: Task) -> anyhow::Result<()> {
-
         // update the rule name to have the starlark module name
-        let rule_label = label::sanitize_rule(task.rule.name.as_str(), self.latest_starlark_module.as_ref());
+        let rule_label = label::sanitize_rule(
+            task.rule.name.as_str(),
+            self.latest_starlark_module.as_ref(),
+        );
         task.rule.name = rule_label.clone();
 
         // update deps that refer to rules in the same starlark module
@@ -38,7 +39,6 @@ impl State {
         if let Some(_) = self.tasks.get(&rule_label) {
             return Err(format_error!("Task already exists {rule_label}"));
         }
-
 
         self.tasks.insert(rule_label, task);
 
@@ -98,15 +98,6 @@ impl State {
                 .get_mut(task_name)
                 .ok_or(format_error!("Task not found {task_name}"))?;
 
-            if let Some(inputs) = task.rule.inputs.as_ref() {
-                let mut state = get_state().write().unwrap();
-                
-                for input in inputs {
-                    
-                }
-            }
-
-
             if task.phase == phase {
                 let progress_bar = multi_progress.add_progress(task.rule.name.as_str(), None, None);
                 handle_list.push(task.execute(progress_bar));
@@ -149,14 +140,13 @@ pub fn get_state() -> &'static RwLock<State> {
     if let Some(state) = STATE.try_get() {
         return state;
     }
-    
+
     STATE.set(RwLock::new(State {
         tasks: HashMap::new(),
         graph: graph::Graph::new(),
         sorted: Vec::new(),
         latest_starlark_module: None,
         all_modules: HashSet::new(),
-        io: io::Io::new(),
     }));
     STATE.get()
 }
@@ -230,10 +220,28 @@ impl Task {
         let name = self.rule.name.clone();
         let executor = self.executor.clone();
         let signal = self.signal.clone();
+        let rule = self.rule.clone();
         let deps_signals = self.deps_signals.clone();
 
         std::thread::spawn(move || -> anyhow::Result<Vec<String>> {
             // check inputs/outputs to see if we need to run
+            let mut is_stale;
+            if let Some(inputs) = rule.inputs.as_ref() {
+                let mut state = io::get_state().write().unwrap();
+                is_stale = inputs.len() == 0;
+                for input in inputs {
+                    if state
+                        .io
+                        .update(input.as_str())
+                        .context(format_context!("while updating io"))?
+                        == io::IsUpdated::Yes
+                    {
+                        is_stale = true;
+                    }
+                }
+            } else {
+                is_stale = true;
+            }
 
             // if there are no inputs, always run
 
@@ -254,9 +262,13 @@ impl Task {
             }
             progress.set_message("Running");
 
-            let new_modules = executor
-                .execute(name.as_str(), progress)
-                .context(format_context!("Failed to exec {}", name))?;
+            let new_modules = if is_stale {
+                 executor
+                    .execute(name.as_str(), progress)
+                    .context(format_context!("Failed to exec {}", name))?
+            } else {
+                Vec::new()
+            };
 
             let (lock, cvar) = &*signal;
             let mut done = lock.lock().unwrap();

@@ -1,7 +1,5 @@
 use crate::{executor, info, rules, workspace};
-
 use anyhow::Context;
-
 use anyhow_source_location::{format_context, format_error};
 use starlark::environment::{FrozenModule, GlobalsBuilder, Module};
 use starlark::eval::{Evaluator, ReturnFileLoader};
@@ -75,7 +73,7 @@ pub fn run_starlark_modules(
     phase: rules::Phase,
     target: Option<String>,
 ) -> anyhow::Result<()> {
-    let workspace_path = info::get_workspace_path().context(format_context!(
+    let workspace_path = workspace::get_workspace_path().context(format_context!(
         "Internal Error: Failed to get workspace path"
     ))?;
 
@@ -126,7 +124,6 @@ pub fn run_starlark_modules(
                 .context(format_context!("Failed to sort tasks"))?;
 
             printer.info("Evaluate", &state.tasks)?;
-
         }
         rules::Phase::Checkout => {
             state
@@ -154,6 +151,18 @@ pub fn run_starlark_modules(
                 .context(format_context!("Failed to write workspace file"))?;
         }
         _ => {}
+    }
+
+    let io_path = workspace::get_workspace_io_path().context(format_context!(
+        "Internal Error: Failed to get workspace io path"
+    ))?;
+    
+    {
+        let io_state = rules::io::get_state().read().unwrap();
+        io_state
+            .io
+            .save(io_path.as_str())
+            .context(format_context!("Failed to save io"))?;
     }
 
     Ok(())

@@ -1,4 +1,4 @@
-use crate::{executor, info, rules};
+use crate::{executor, info, rules, workspace};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
@@ -29,7 +29,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for repo"))?;
 
-        let worktree_path = info::get_workspace_path()
+        let worktree_path = workspace::get_workspace_path()
             .context(format_context!("Internal error: workspace path not set"))?;
 
         let mut state = rules::get_state().write().unwrap();

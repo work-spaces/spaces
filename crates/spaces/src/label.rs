@@ -14,3 +14,4 @@ pub fn sanitize_rule(rule_name: &str, starlark_module: Option<&String>) -> Strin
 pub fn is_rule_sanitized(rule_name: &str) -> bool {
     rule_name.contains(':')
 }
+

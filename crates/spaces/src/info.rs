@@ -44,6 +44,7 @@ pub fn set_workspace_path(path: String) -> anyhow::Result<()> {
         .context(format_context!("Failed to create log folder {log_folder}"))?;
     state.env.paths.push(format!("{path}/sysroot/bin"));
     state.new_branch_name = Some(format!("{path}-{}", unique));
+    workspace::set_workspace_path(path).context(format_context!("While setting workspace path"))?;
 
     Ok(())
 }

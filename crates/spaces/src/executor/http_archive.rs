@@ -1,4 +1,4 @@
-use crate::info;
+use crate::workspace;
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
@@ -26,7 +26,7 @@ pub struct HttpArchiveCreateLinks {
 impl HttpArchiveCreateLinks {
     pub fn execute(&self, name: &str, progress: printer::MultiProgressBar) -> anyhow::Result<()> {
         let workspace_directory =
-            info::get_workspace_path().context(format_context!("No workspace directory found"))?;
+            workspace::get_workspace_path().context(format_context!("No workspace directory found"))?;
 
         self.http_archive
             .create_links(progress, workspace_directory.as_str(), name)

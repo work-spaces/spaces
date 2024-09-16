@@ -5,7 +5,7 @@ pub mod exec;
 pub mod git;
 pub mod http_archive;
 
-use crate::{info, workspace};
+use crate::workspace;
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
@@ -49,7 +49,7 @@ impl Task {
         let mut new_modules = Vec::new();
 
         if check_new_modules {
-            let workspace = info::get_workspace_path()
+            let workspace = workspace::get_workspace_path()
                 .context(format_context!("No workspace directory found"))?;
 
             let parts = name.split(':').collect::<Vec<&str>>();

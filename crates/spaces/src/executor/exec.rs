@@ -1,4 +1,4 @@
-use crate::info;
+use crate::{info, workspace};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
@@ -33,7 +33,7 @@ impl Exec {
         }
 
         let workspace_path =
-            info::get_workspace_path().context(format_context!("No workspace directory found"))?;
+            workspace::get_workspace_path().context(format_context!("No workspace directory found"))?;
 
         let mut environment = Vec::new();
         for (key, value) in environment_map {
@@ -50,7 +50,7 @@ impl Exec {
                 .map(|cwd| format!("{}/{}", workspace_path, cwd)),
             is_return_stdout: self.redirect_stdout.is_some(),
             log_file_path: Some(
-                info::get_workspace_log_file(name)
+                workspace::get_workspace_log_file(name)
                     .context(format_context!("Failed to get log file path for {name}"))?,
             ),
             ..Default::default()
