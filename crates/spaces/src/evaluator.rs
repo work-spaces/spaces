@@ -12,8 +12,10 @@ fn evaluate_module(
 ) -> anyhow::Result<FrozenModule> {
     {
         let mut state = rules::get_state().write().unwrap();
-        state.latest_starlark_module = Some(name.to_string());
-        state.all_modules.insert(name.to_string());
+        if name.ends_with(workspace::SPACES_MODULE_NAME) {
+            state.latest_starlark_module = Some(name.to_string());
+            state.all_modules.insert(name.to_string());
+        }
     }
 
     let ast =
@@ -156,7 +158,7 @@ pub fn run_starlark_modules(
     let io_path = workspace::get_workspace_io_path().context(format_context!(
         "Internal Error: Failed to get workspace io path"
     ))?;
-    
+
     {
         let io_state = rules::io::get_state().read().unwrap();
         io_state

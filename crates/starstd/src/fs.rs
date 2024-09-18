@@ -7,7 +7,7 @@ use starlark::values::{Heap, Value};
 // This defines the function that is visible to Starlark
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
-    fn create_file(
+    fn create(
         #[starlark(require = named)] path: &str,
         #[starlark(require = named)] content: &str,
     ) -> anyhow::Result<NoneType> {
@@ -23,7 +23,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(NoneType)
     }
 
-    fn read_file(path: &str) -> anyhow::Result<String> {
+    fn read(path: &str) -> anyhow::Result<String> {
         let content = std::fs::read_to_string(path).context(format_context!(
             "Failed to read file {} all paths must be relative to the workspace root",
             path

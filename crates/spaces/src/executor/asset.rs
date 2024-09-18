@@ -30,9 +30,9 @@ impl UpdateAsset {
         ))?;
         
         let new_value = if dest_path.exists() {
-            let old_value = std::fs::read_to_string(&self.destination).context(format_context!(
+            let old_value = std::fs::read_to_string(dest_path.clone()).context(format_context!(
                 "Failed to read asset file {}",
-                &self.destination
+                dest_path.display()
             ))?;
             let mut old_value: serde_json::Value = serde_json::from_str(&old_value).context(
                 format_context!("Failed to parse asset file {}", &self.destination),

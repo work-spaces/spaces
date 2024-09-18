@@ -107,7 +107,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         state.insert_task(
             rules::Task::new(
                 rule,
-                rules::Phase::PostCheckout,
+                rules::Phase::Checkout,
                 executor::Task::AddAsset(add_asset),
             ),
         ).context(format_context!("Failed to insert task {rule_name}"))?;
