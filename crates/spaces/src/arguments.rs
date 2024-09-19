@@ -1,4 +1,4 @@
-use crate::{evaluator, info, rules};
+use crate::{evaluator, info, rules, workspace};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use clap::{Parser, Subcommand, ValueEnum};
@@ -53,7 +53,7 @@ pub fn execute() -> anyhow::Result<()> {
 
             info::set_workspace_path(format!("{current_working_directory}/{name}"))
                 .context(format_context!("while setting workspace path"))?;
-            
+
             evaluator::run_starlark_file(
                 &mut printer,
                 script.as_str(),
@@ -61,6 +61,27 @@ pub fn execute() -> anyhow::Result<()> {
                 None,
             )
             .context(format_context!("while executing checkout rules"))?;
+        }
+
+        Arguments {
+            commands: Commands::Sync {},
+        } => {
+            if !std::path::Path::new(workspace::WORKSPACE_FILE_NAME).exists() {
+                return Err(anyhow::anyhow!(
+                    "No workspace file found. Run checkout first."
+                ));
+            }
+
+            let current_working_directory = std::env::current_dir()
+                .context(format_context!("while getting current working directory"))?
+                .to_string_lossy()
+                .to_string();
+
+            info::set_workspace_path(current_working_directory)
+                .context(format_context!("while setting workspace path"))?;
+
+            evaluator::run_starlark_workspace(&mut printer, rules::Phase::Checkout, None)
+                .context(format_context!("while executing run rules"))?;
         }
 
         Arguments {
@@ -115,6 +136,8 @@ enum Commands {
         #[arg(long)]
         script: String,
     },
+    /// Synchronizes the workspace with the checkout rules.
+    Sync {},
     /// Executes the Run phase rules.
     Run {
         /// The path to the star file containing checkout rules.

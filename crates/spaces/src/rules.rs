@@ -36,6 +36,7 @@ impl State {
                 *dep = label::sanitize_rule(dep.as_str(), self.latest_starlark_module.as_ref());
             }
         }
+        
         if self.tasks.get(&rule_label).is_none() {
             self.tasks.insert(rule_label, task);
         }

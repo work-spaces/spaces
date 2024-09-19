@@ -4,6 +4,7 @@ use anyhow_source_location::{format_context, format_error};
 use starlark::environment::{FrozenModule, GlobalsBuilder, Module};
 use starlark::eval::{Evaluator, ReturnFileLoader};
 use starlark::syntax::{AstModule, Dialect};
+use std::collections::HashSet;
 
 fn evaluate_module(
     workspace_path: &str,
@@ -81,6 +82,11 @@ pub fn run_starlark_modules(
 
     let mut module_queue = std::collections::VecDeque::new();
     module_queue.extend(modules);
+    let mut known_modules = HashSet::new();
+
+    for (_, content) in module_queue.iter() {
+        known_modules.insert(blake3::hash(content.as_bytes()).to_string());
+    }
 
     while !module_queue.is_empty() {
         while !module_queue.is_empty() {
@@ -104,7 +110,11 @@ pub fn run_starlark_modules(
             for module in new_modules {
                 let content = std::fs::read_to_string(module.as_str())
                     .context(format_context!("Failed to read file {module}"))?;
-                module_queue.push_back((module, content));
+                let hash = blake3::hash(content.as_bytes()).to_string();
+                if !known_modules.contains(&hash) {
+                    known_modules.insert(hash);
+                    module_queue.push_back((module, content));
+                }
             }
         }
     }

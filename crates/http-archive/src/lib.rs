@@ -196,9 +196,7 @@ impl HttpArchive {
         }
 
         std::fs::hard_link(original, target).context(format_context!(
-            "{} -> {}\nIf you get 'Operation Not Permitted' on mac try enabled 'Full Disk Access' for the terminal",
-            target_path,
-            source
+            "If you get 'Operation Not Permitted' on mac try enabling 'Full Disk Access' for the terminal",
         ))?;
 
         Ok(())
