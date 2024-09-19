@@ -258,7 +258,7 @@ impl HttpArchive {
         Ok(join_handle)
     }
 
-    fn save_files_json(&self, files: HashSet<String>) -> anyhow::Result<()> {
+    fn save_files_json(&self, files: Files) -> anyhow::Result<()> {
         let file_path = self.get_path_to_extracted_files_json();
         let contents = serde_json::to_string_pretty(&files)?;
         std::fs::write(file_path, contents)?;
@@ -321,7 +321,7 @@ impl HttpArchive {
             extracted_files.insert(file_name.to_string_lossy().to_string());
             progress_bar
         };
-        self.save_files_json(extracted_files)
+        self.save_files_json(Files{files:extracted_files})
             .context(format_context!("Failed to save json files manifest"))?;
         Ok(next_progress_bar)
     }

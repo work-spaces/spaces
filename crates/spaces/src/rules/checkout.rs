@@ -99,7 +99,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let add_asset: executor::asset::AddAsset =
             serde_json::from_value(asset.to_json_value()?)
-                .context(format_context!("Failed to parse archive arguments"))?;
+                .context(format_context!("Failed to parse asset arguments"))?;
 
         let mut state = rules::get_state().write().unwrap();
         let rule_name = rule.name.clone();
