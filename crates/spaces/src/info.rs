@@ -69,6 +69,20 @@ pub fn get_store_path() -> String {
     format!("{home}/.spaces/store")
 }
 
+pub fn get_checkout_path() -> anyhow::Result<String> {
+    let state = rules::get_state().read().unwrap();
+    if let Some(latest) = state.latest_starlark_module.as_ref() {
+        let path = std::path::Path::new(latest.as_str());
+        let parent = path
+            .parent()
+            .map(|e| e.to_string_lossy().to_string())
+            .unwrap_or(String::new());
+        Ok(parent)
+    } else {
+        Err(format_error!("No starlark module set"))
+    }
+}
+
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
     fn platform_name() -> anyhow::Result<String> {
@@ -97,18 +111,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(NoneType)
     }
 
+
+    fn checkout_path() -> anyhow::Result<String> {
+        get_checkout_path()
+    }
+
     fn current_workspace_path() -> anyhow::Result<String> {
-        let state = rules::get_state().read().unwrap();
-        if let Some(latest) = state.latest_starlark_module.as_ref() {
-            let path = std::path::Path::new(latest.as_str());
-            let parent = path
-                .parent()
-                .map(|e| e.to_string_lossy().to_string())
-                .unwrap_or(String::new());
-            Ok(parent)
-        } else {
-            Err(format_error!("No starlark module set"))
-        }
+        get_checkout_path()
     }
 
     fn get_archive_output(

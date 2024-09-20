@@ -3,6 +3,20 @@ use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use tokio::io::AsyncWriteExt;
+use std::sync::RwLock;
+
+struct State {}
+
+static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
+
+fn get_state() -> &'static RwLock<State> {
+    if let Some(state) = STATE.try_get() {
+        return state;
+    }
+
+    STATE.set(RwLock::new(State {}));
+    STATE.get()
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ArchiveLink {
@@ -167,6 +181,9 @@ impl HttpArchive {
     fn create_hard_link(target_path: String, source: String) -> anyhow::Result<()> {
         let target = std::path::Path::new(target_path.as_str());
         let original = std::path::Path::new(source.as_str());
+
+        // Hold the mutex to ensure operations are atomic
+        let _state = get_state().write().unwrap();
 
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent)

@@ -1,8 +1,25 @@
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
+use std::sync::RwLock;
+use std::collections::HashSet;
 
 use crate::workspace;
+
+struct State {
+    updated_assets: HashSet<String>
+}
+
+static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
+
+fn get_state() -> &'static RwLock<State> {
+    if let Some(state) = STATE.try_get() {
+        return state;
+    }
+
+    STATE.set(RwLock::new(State { updated_assets: HashSet::new() }));
+    STATE.get()
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum AssetFormat {
@@ -24,12 +41,16 @@ pub struct UpdateAsset {
 impl UpdateAsset {
     pub fn execute(&self, _name: &str, _progress: printer::MultiProgressBar) -> anyhow::Result<()> {
         use json_value_merge::Merge;
+
+        // hold the mutex to ensure exclusive access to the output file
+        let mut state = get_state().write().unwrap();
+
         let dest_path = get_destination_path(&self.destination).context(format_context!(
             "Failed to get destination path for asset file {}",
             &self.destination
         ))?;
         
-        let new_value = if dest_path.exists() {
+        let new_value = if state.updated_assets.get(&self.destination).is_some() {
             let old_value = std::fs::read_to_string(dest_path.clone()).context(format_context!(
                 "Failed to read asset file {}",
                 dest_path.display()
@@ -42,6 +63,7 @@ impl UpdateAsset {
 
             old_value
         } else {
+            state.updated_assets.insert(self.destination.clone());
             self.value.clone()
         };
 
