@@ -59,17 +59,6 @@ fn evaluate_module(
     Ok(module.freeze()?)
 }
 
-pub fn run_starlark_file(
-    printer: &mut printer::Printer,
-    path: &str,
-    phase: rules::Phase,
-    target: Option<String>,
-) -> anyhow::Result<()> {
-    let content =
-        std::fs::read_to_string(path).context(format_context!("Failed to read file {}", path))?;
-    run_starlark_modules(printer, vec![(path.to_string(), content)], phase, target)
-}
-
 pub fn run_starlark_modules(
     printer: &mut printer::Printer,
     modules: Vec<(String, String)>,

@@ -113,7 +113,7 @@ impl State {
                 .ok_or(format_error!("Task not found {task_name}"))?;
 
             if task.phase == phase {
-                let progress_bar = multi_progress.add_progress(task.rule.name.as_str(), None, None);
+                let progress_bar = multi_progress.add_progress(task.rule.name.as_str(), Some(200), None);
                 handle_list.push(task.execute(progress_bar));
                 task.phase = Phase::Complete;
 
@@ -286,7 +286,7 @@ impl Task {
                     } else {
                         break;
                     }
-                    progress.increment(1);
+                    progress.increment_with_overflow(1);
                 }
             }
             progress.set_message("Running");
