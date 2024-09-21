@@ -219,7 +219,7 @@ impl HttpArchive {
         Ok(())
     }
 
-    pub fn sync(&self, progress_bar: printer::MultiProgressBar) -> anyhow::Result<()> {
+    pub fn sync(&self, progress_bar: printer::MultiProgressBar) -> anyhow::Result<printer::MultiProgressBar> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .enable_all()
@@ -233,11 +233,11 @@ impl HttpArchive {
             progress_bar
         };
 
-        self.extract(next_progress_bar).context(format_context!(
+        let next_progress_bar = self.extract(next_progress_bar).context(format_context!(
             "extract failed {}",
             self.full_path_to_archive
         ))?;
-        Ok(())
+        Ok(next_progress_bar)
     }
 
     pub fn download(

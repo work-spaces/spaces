@@ -4,7 +4,6 @@ use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
 use starlark::environment::GlobalsBuilder;
 use starlark::values::none::NoneType;
-use std::vec;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PlatformArchive {
@@ -36,16 +35,18 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let checkout = repo.get_checkout();
         let spaces_key = rule.name.clone();
         let rule_name = rule.name.clone();
-        state.insert_task(rules::Task::new(
-            rule,
-            rules::Phase::Checkout,
-            executor::Task::Git(executor::git::Git {
-                url: repo.url,
-                spaces_key,
-                worktree_path,
-                checkout,
-            }),
-        )).context(format_context!("Failed to insert task {rule_name}"))?;
+        state
+            .insert_task(rules::Task::new(
+                rule,
+                rules::Phase::Checkout,
+                executor::Task::Git(executor::git::Git {
+                    url: repo.url,
+                    spaces_key,
+                    worktree_path,
+                    checkout,
+                }),
+            ))
+            .context(format_context!("Failed to insert task {rule_name}"))?;
         Ok(NoneType)
     }
 
@@ -104,13 +105,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let mut state = rules::get_state().write().unwrap();
         let rule_name = rule.name.clone();
 
-        state.insert_task(
-            rules::Task::new(
+        state
+            .insert_task(rules::Task::new(
                 rule,
                 rules::Phase::Checkout,
                 executor::Task::AddAsset(add_asset),
-            ),
-        ).context(format_context!("Failed to insert task {rule_name}"))?;
+            ))
+            .context(format_context!("Failed to insert task {rule_name}"))?;
         Ok(NoneType)
     }
 
@@ -128,13 +129,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let mut state = rules::get_state().write().unwrap();
         let rule_name = rule.name.clone();
 
-        state.insert_task(
-            rules::Task::new(
+        state
+            .insert_task(rules::Task::new(
                 rule,
                 rules::Phase::PostCheckout,
                 executor::Task::UpdateAsset(update_asset),
-            ),
-        ).context(format_context!("Failed to insert task {rule_name}"))?;
+            ))
+            .context(format_context!("Failed to insert task {rule_name}"))?;
 
         Ok(NoneType)
     }
@@ -153,20 +154,20 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let mut state = rules::get_state().write().unwrap();
         let rule_name = rule.name.clone();
 
-        state.insert_task(
-            rules::Task::new(
+        state
+            .insert_task(rules::Task::new(
                 rule,
                 rules::Phase::PostCheckout,
                 executor::Task::UpdateEnv(update_env),
-            ),
-        ).context(format_context!("Failed to insert task {rule_name}"))?;
+            ))
+            .context(format_context!("Failed to insert task {rule_name}"))?;
 
         Ok(NoneType)
     }
 }
 
 fn add_http_archive(
-    mut rule: rules::Rule,
+    rule: rules::Rule,
     archive_option: Option<http_archive::Archive>,
 ) -> anyhow::Result<()> {
     if let Some(archive) = archive_option {
@@ -182,33 +183,16 @@ fn add_http_archive(
                 rule.name
             ))?;
 
-        let mut sync_rule = rule.clone();
-        sync_rule.name = format!("{}_sync", rule.name);
-        if let Some(deps) = rule.deps.as_mut() {
-            deps.push(sync_rule.name.clone());
-        } else {
-            rule.deps = Some(vec![sync_rule.name.clone()]);
-        }
-
-        let sync_rule_name = sync_rule.name.clone();
         let rule_name = rule.name.clone();
-        state.insert_task(rules::Task::new(
-            sync_rule,
-            rules::Phase::Checkout,
-            executor::Task::HttpArchiveSync(executor::http_archive::HttpArchiveSync {
-                http_archive: http_archive.clone(),
-            }),
-        )).context(format_context!("Failed to insert task {sync_rule_name} derived from {rule_name}"))?;
-
-        state.insert_task(rules::Task::new(
-            rule,
-            rules::Phase::PostCheckout,
-            executor::Task::HttpArchiveCreateLinks(
-                executor::http_archive::HttpArchiveCreateLinks {
-                    http_archive: http_archive.clone(),
-                },
-            ),
-        )).context(format_context!("Failed to insert task {rule_name}"))?;
+        state
+            .insert_task(rules::Task::new(
+                rule,
+                rules::Phase::Checkout,
+                executor::Task::HttpArchive(executor::http_archive::HttpArchive {
+                    http_archive: http_archive,
+                }),
+            ))
+            .context(format_context!("Failed to insert task {rule_name}"))?;
     }
     Ok(())
 }

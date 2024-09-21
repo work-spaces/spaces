@@ -5,6 +5,7 @@ pub mod run;
 use crate::{executor, label};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
+use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::RwLock;
@@ -36,7 +37,7 @@ impl State {
                 *dep = label::sanitize_rule(dep.as_str(), self.latest_starlark_module.as_ref());
             }
         }
-        
+
         if self.tasks.get(&rule_label).is_none() {
             self.tasks.insert(rule_label, task);
         }
@@ -78,6 +79,20 @@ impl State {
             .graph
             .get_sorted_tasks(target)
             .context(format_context!("Failed to sort tasks"))?;
+        Ok(())
+    }
+
+    pub fn show_tasks(&self, printer: &mut printer::Printer) -> anyhow::Result<()> {
+        for node_index in self.sorted.iter() {
+            let task_name = self.graph.get_task(*node_index);
+            let task = self
+                .tasks
+                .get(task_name)
+                .ok_or(format_error!("Task not found {task_name}"))?;
+
+            printer.info(task_name, &task)?;
+        }
+
         Ok(())
     }
 
@@ -150,7 +165,7 @@ pub fn get_state() -> &'static RwLock<State> {
     STATE.get()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, ValueEnum)]
 pub enum Phase {
     Checkout,
     PostCheckout,
@@ -262,7 +277,7 @@ impl Task {
             progress.set_message("Running");
 
             let new_modules = if is_stale {
-                 executor
+                executor
                     .execute(name.as_str(), progress)
                     .context(format_context!("Failed to exec {}", name))?
             } else {

@@ -135,7 +135,9 @@ pub fn run_starlark_modules(
                 .sort_tasks(target.clone())
                 .context(format_context!("Failed to sort tasks"))?;
 
-            printer.info("Evaluate", &state.tasks)?;
+            state
+                .show_tasks(printer)
+                .context(format_context!("Failed to show tasks"))?;
         }
         rules::Phase::Checkout => {
             state

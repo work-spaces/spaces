@@ -15,8 +15,7 @@ pub enum Task {
     Exec(exec::Exec),
     Target,
     CreateArchive(archive::Archive),
-    HttpArchiveSync(http_archive::HttpArchiveSync),
-    HttpArchiveCreateLinks(http_archive::HttpArchiveCreateLinks),
+    HttpArchive(http_archive::HttpArchive),
     UpdateAsset(asset::UpdateAsset),
     UpdateEnv(env::UpdateEnv),
     AddAsset(asset::AddAsset),
@@ -31,8 +30,7 @@ impl Task {
     ) -> anyhow::Result<Vec<String>> {
         let mut check_new_modules = false;
         match self {
-            Task::HttpArchiveSync(archive) => archive.execute(name, progress),
-            Task::HttpArchiveCreateLinks(archive) => archive.execute(name, progress),
+            Task::HttpArchive(archive) => archive.execute(name, progress),
             Task::Exec(exec) => exec.execute(name, progress),
             Task::CreateArchive(archive) => archive.execute(name, progress),
             Task::UpdateAsset(asset) => asset.execute(name, progress),

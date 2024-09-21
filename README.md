@@ -1,10 +1,10 @@
 # spaces
 
-`spaces` is a workspace dependency manager and task-runner. It is powered by `starlark` and `rust`.
+`spaces` is a workspace manager and task-runner. It is powered by `starlark` and `rust`.
 
-You create a starlark script that defines what code you need and what commands to run and `spaces` does the rest.
+Create a starlark script with the code and tools you need as well as what commands to run and `spaces` does the rest.
 
-For example, you build spaces using `config/spaces_build.star`:
+For example, you can develop `spaces` using `config/spaces-build.star`:
 
 ```star
 
@@ -46,7 +46,7 @@ run.add_exec(
 # checkout does an efficient clone (bare repo plus worktree)
 spaces checkout config/spaces_build --space=spaces-test
 cd spaces-test
-spaces run build
+spaces run
 ```
 
 ## Using spaces
