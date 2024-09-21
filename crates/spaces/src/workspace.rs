@@ -11,98 +11,92 @@ Spaces Workspace file
 "#;
 
 struct State {
-    workspace_path: Option<String>,
-    workspace_log_folder: Option<String>,
+    absolute_path: String,
+    log_directory: String,
 }
 
 static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
+
+pub fn get_store_path() -> String {
+    let home = std::env::var("HOME")
+        .context(format_context!("Failed to get HOME environment variable"))
+        .unwrap();
+    format!("{home}/.spaces/store")
+}
+
+fn get_unique() -> anyhow::Result<String> {
+    let duration_since_epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .context(format_context!("No system time"))?;
+    let duration_since_epoch_string = format!("{}", duration_since_epoch.as_nanos());
+    let unique_sha256 = sha256::digest(duration_since_epoch_string.as_bytes());
+    Ok(unique_sha256.as_str()[0..4].to_string())
+}
 
 fn get_state() -> &'static RwLock<State> {
     if let Some(state) = STATE.try_get() {
         return state;
     }
     STATE.set(RwLock::new(State {
-        workspace_path: None,
-        workspace_log_folder: None,
+        absolute_path: "".to_string(),
+        log_directory: "spaces_logs".to_string(),
     }));
     STATE.get()
 }
 
-pub fn get_workspace_log_file(rule_name: &str) -> anyhow::Result<String> {
+pub fn get_log_file(rule_name: &str) -> String {
     let state = get_state().read().unwrap();
-    let log_folder = state
-        .workspace_log_folder
-        .as_ref()
-        .ok_or(format_error!("Internal Error: No workspace path"))?;
-
     let rule_name = rule_name.replace('/', "_");
     let rule_name = rule_name.replace(':', "_");
-
-    Ok(format!("{log_folder}/{rule_name}.log"))
+    format!("{}/{rule_name}.log", state.log_directory)
 }
 
-
-pub fn set_workspace_path(path: String) -> anyhow::Result<()> {
-    let mut state = get_state().write().unwrap();
-    let date = chrono::Local::now();
-    let log_folder = format!("{path}/spaces_logs/logs_{}", date.format("%Y%m%d-%H-%M-%S"));
-    std::fs::create_dir_all(log_folder.as_str())
-        .context(format_context!("Failed to create log folder {log_folder}"))?;
-    state.workspace_log_folder = Some(log_folder);
-    state.workspace_path = Some(path);
-
-    Ok(())
+pub fn build_directory() -> &'static str {
+    "build"
 }
 
-
-pub fn get_workspace_path() -> Option<String> {
-    let state = get_state().read().unwrap();
-    state.workspace_path.clone()
+pub fn get_io_path() -> &'static str {
+    "build/io.spaces"
 }
 
-pub fn get_workspace_io_path() -> anyhow::Result<String> {
-    if let Some(workspace_path) = get_workspace_path() {
-        std::fs::create_dir_all(format!("{}/build", workspace_path).as_str())
-            .context(format_context!("Failed to create io.spaces directory"))?;
-        Ok(format!("{}/build/io.spaces", workspace_path))
-    } else {
-        Err(format_error!("Internal Error: No workspace path"))
-    }
-
+pub fn absolute_path() -> String {
+    get_state().read().unwrap().absolute_path.clone()
 }
-
 
 #[derive(Debug)]
 pub struct Workspace {
-    pub absolute_path: String,
     pub modules: Vec<(String, String)>,
 }
 
 impl Workspace {
     fn find_workspace_root(current_working_directory: &str) -> anyhow::Result<String> {
-        let mut current_directory = current_working_directory;
+        let mut current_directory = current_working_directory.to_owned();
         loop {
             let workspace_path = format!("{}/{}", current_directory, WORKSPACE_FILE_NAME);
             if std::path::Path::new(workspace_path.as_str()).exists() {
                 return Ok(current_directory.to_string());
             }
-            let parent_directory = std::path::Path::new(current_directory).parent();
+            let parent_directory = std::path::Path::new(current_directory.as_str()).parent();
             if parent_directory.is_none() {
                 return Err(format_error!(
                     "Failed to find {} in any parent directory",
                     WORKSPACE_FILE_NAME
                 ));
             }
-            current_directory = parent_directory.unwrap().to_str().unwrap();
+            current_directory = parent_directory.unwrap().to_string_lossy().to_string();
         }
     }
 
-    pub fn new(
-        mut progress: printer::MultiProgressBar,
-        current_working_directory: &str,
-    ) -> anyhow::Result<Self> {
+    pub fn new(mut progress: printer::MultiProgressBar) -> anyhow::Result<Self> {
+        let date = chrono::Local::now();
+
+        let current_working_directory = std::env::current_dir()
+            .context(format_context!("Failed to get current working directory"))?
+            .to_string_lossy()
+            .to_string();
+
         // search the current directory and all parent directories for the workspace file
-        let absolute_path = Self::find_workspace_root(current_working_directory)
+        let absolute_path = Self::find_workspace_root(current_working_directory.as_str())
             .context(format_context!("While searching for workspace root"))?;
 
         // walkdir and find all spaces.star files in the workspace
@@ -113,8 +107,9 @@ impl Workspace {
         progress.set_prefix("scanning workspace");
         progress.set_total(walkdir.len() as u64);
 
-        let workspace_content = std::fs::read_to_string(format!("{}/{}", absolute_path, WORKSPACE_FILE_NAME))
-            .context(format_context!("Failed to read workspace file"))?;
+        let workspace_content =
+            std::fs::read_to_string(format!("{}/{}", absolute_path, WORKSPACE_FILE_NAME))
+                .context(format_context!("Failed to read workspace file"))?;
 
         let mut modules = vec![(WORKSPACE_FILE_NAME.to_string(), workspace_content)];
         for entry in walkdir {
@@ -132,9 +127,25 @@ impl Workspace {
             }
         }
 
-        Ok(Self {
-            absolute_path,
-            modules,
-        })
+        std::env::set_current_dir(std::path::Path::new(absolute_path.as_str())).context(
+            format_context!("Failed to set current directory to {absolute_path}"),
+        )?;
+
+        let mut state = get_state().write().unwrap();
+
+        state.log_directory = format!("spaces_logs/logs_{}", date.format("%Y%m%d-%H-%M-%S"));
+
+        std::fs::create_dir_all(state.log_directory.as_str()).context(format_context!(
+            "Failed to create log folder {}",
+            state.log_directory
+        ))?;
+
+        std::fs::create_dir_all(build_directory())
+            .context(format_context!("Failed to create build directory"))?;
+
+        state.absolute_path = absolute_path;
+        let unique = get_unique().context(format_context!("failed to get unique marker"))?;
+
+        Ok(Self { modules })
     }
 }

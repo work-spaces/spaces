@@ -1,9 +1,9 @@
+use crate::workspace;
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use bincode::{Decode, Encode};
 use std::collections::HashMap;
 use std::sync::RwLock;
-use crate::workspace;
 
 #[derive(Debug, Clone, Encode, Decode)]
 pub struct Input {
@@ -15,7 +15,6 @@ pub struct Input {
 pub struct Io {
     inputs: HashMap<String, Input>,
 }
-
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum IsUpdated {
@@ -94,13 +93,11 @@ pub fn get_state() -> &'static RwLock<State> {
         return state;
     }
 
-    let io_path = workspace::get_workspace_io_path()
-        .expect(format_context!("Internal Error: Workspace not initialized").as_str());
+    let io_path = workspace::get_io_path();
 
     STATE.set(RwLock::new(State {
-        io: Io::new(io_path.as_str())
+        io: Io::new(io_path)
             .expect(format_context!("Internal Error: Failed to initialize IO: {io_path}").as_str()),
     }));
     STATE.get()
 }
-

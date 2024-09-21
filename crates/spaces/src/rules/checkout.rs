@@ -1,4 +1,4 @@
-use crate::{executor, info, rules, workspace};
+use crate::{executor, rules, workspace};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
@@ -28,8 +28,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for repo"))?;
 
-        let worktree_path = workspace::get_workspace_path()
-            .context(format_context!("Internal error: workspace path not set"))?;
+        let worktree_path = workspace::absolute_path();
 
         let mut state = rules::get_state().write().unwrap();
         let checkout = repo.get_checkout();
@@ -176,12 +175,15 @@ fn add_http_archive(
         //create a target that waits for all downloads
         //then create links based on all downloads being complete
 
-        let http_archive =
-            http_archive::HttpArchive::new(&info::get_store_path(), rule.name.as_str(), &archive)
-                .context(format_context!(
-                "Failed to create http_archive {}",
-                rule.name
-            ))?;
+        let http_archive = http_archive::HttpArchive::new(
+            &workspace::get_store_path(),
+            rule.name.as_str(),
+            &archive,
+        )
+        .context(format_context!(
+            "Failed to create http_archive {}",
+            rule.name
+        ))?;
 
         let rule_name = rule.name.clone();
         state

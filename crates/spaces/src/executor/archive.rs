@@ -10,8 +10,7 @@ pub struct Archive {
 
 impl Archive {
     pub fn execute(&self, name: &str, progress: printer::MultiProgressBar) -> anyhow::Result<()> {
-        let workspace_directory = workspace::get_workspace_path()
-            .context(format_context!("failed to get workspace directory"))?;
+        let workspace_directory = workspace::absolute_path();
 
         let output_directory = format!("{workspace_directory}/build/{name}");
 

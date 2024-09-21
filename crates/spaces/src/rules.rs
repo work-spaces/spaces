@@ -165,6 +165,21 @@ pub fn get_state() -> &'static RwLock<State> {
     STATE.get()
 }
 
+pub fn get_checkout_path() -> anyhow::Result<String> {
+    let state = get_state().read().unwrap();
+    if let Some(latest) = state.latest_starlark_module.as_ref() {
+        let path = std::path::Path::new(latest.as_str());
+        let parent = path
+            .parent()
+            .map(|e| e.to_string_lossy().to_string())
+            .unwrap_or(String::new());
+        Ok(parent)
+    } else {
+        Err(format_error!("No starlark module set"))
+    }
+}
+
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, ValueEnum)]
 pub enum Phase {
     Checkout,

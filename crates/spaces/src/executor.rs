@@ -47,8 +47,7 @@ impl Task {
         let mut new_modules = Vec::new();
 
         if check_new_modules {
-            let workspace = workspace::get_workspace_path()
-                .context(format_context!("No workspace directory found"))?;
+            let workspace = workspace::absolute_path();
 
             let parts = name.split(':').collect::<Vec<&str>>();
 
@@ -58,7 +57,8 @@ impl Task {
                     .join(*last)
                     .join(workspace::SPACES_MODULE_NAME);
                 if spaces_star_path.exists() {
-                    new_modules.push(spaces_star_path.to_string_lossy().to_string());
+                    let path_within_workspace = format!("{}/{}", *last, workspace::SPACES_MODULE_NAME);
+                    new_modules.push(path_within_workspace);
                 }
             }
         }

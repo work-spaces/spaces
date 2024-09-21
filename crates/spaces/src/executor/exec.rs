@@ -32,8 +32,7 @@ impl Exec {
             environment_map.insert(key, value);
         }
 
-        let workspace_path =
-            workspace::get_workspace_path().context(format_context!("No workspace directory found"))?;
+        let workspace_path = workspace::absolute_path();
 
         let mut environment = Vec::new();
         for (key, value) in environment_map {
@@ -49,10 +48,7 @@ impl Exec {
                 .clone()
                 .map(|cwd| format!("{}/{}", workspace_path, cwd)),
             is_return_stdout: self.redirect_stdout.is_some(),
-            log_file_path: Some(
-                workspace::get_workspace_log_file(name)
-                    .context(format_context!("Failed to get log file path for {name}"))?,
-            ),
+            log_file_path: Some(workspace::get_log_file(name)),
             ..Default::default()
         };
 

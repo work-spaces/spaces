@@ -1,4 +1,4 @@
-use crate::info;
+use crate::workspace;
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
@@ -12,16 +12,14 @@ pub struct Git {
 }
 
 impl Git {
-
     pub fn execute(
         &self,
         _name: &str,
         mut progress: printer::MultiProgressBar,
     ) -> anyhow::Result<()> {
-
         let bare_repo = git::BareRepository::new(
             &mut progress,
-            &info::get_store_path().as_str(),
+            &workspace::get_store_path().as_str(),
             &self.spaces_key,
             &self.url,
         )

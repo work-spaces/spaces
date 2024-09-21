@@ -14,8 +14,7 @@ impl HttpArchive {
             .sync(progress)
             .context(format_context!("Failed to sync http_archive {}", name))?;
 
-        let workspace_directory = workspace::get_workspace_path()
-            .context(format_context!("No workspace directory found"))?;
+        let workspace_directory = workspace::absolute_path();
 
         self.http_archive
             .create_links(next_progress_bar, workspace_directory.as_str(), name)

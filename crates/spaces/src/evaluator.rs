@@ -76,9 +76,7 @@ pub fn run_starlark_modules(
     phase: rules::Phase,
     target: Option<String>,
 ) -> anyhow::Result<()> {
-    let workspace_path = workspace::get_workspace_path().context(format_context!(
-        "Internal Error: Failed to get workspace path"
-    ))?;
+    let workspace_path = workspace::absolute_path();
 
     let mut module_queue = std::collections::VecDeque::new();
     module_queue.extend(modules);
@@ -108,8 +106,9 @@ pub fn run_starlark_modules(
                 .context(format_context!("Failed to execute tasks"))?;
 
             for module in new_modules {
-                let content = std::fs::read_to_string(module.as_str())
-                    .context(format_context!("Failed to read file {module}"))?;
+                let path_to_module = format!("{}/{}", workspace_path, module);
+                let content = std::fs::read_to_string(path_to_module.as_str())
+                    .context(format_context!("Failed to read file {path_to_module}"))?;
                 let hash = blake3::hash(content.as_bytes()).to_string();
                 if !known_modules.contains(&hash) {
                     known_modules.insert(hash);
@@ -167,41 +166,15 @@ pub fn run_starlark_modules(
         _ => {}
     }
 
-    let io_path = workspace::get_workspace_io_path().context(format_context!(
-        "Internal Error: Failed to get workspace io path"
-    ))?;
+    let io_path = workspace::get_io_path();
 
     {
         let io_state = rules::io::get_state().read().unwrap();
         io_state
             .io
-            .save(io_path.as_str())
+            .save(io_path)
             .context(format_context!("Failed to save io"))?;
     }
 
     Ok(())
-}
-
-pub fn run_starlark_workspace(
-    printer: &mut printer::Printer,
-    phase: rules::Phase,
-    target: Option<String>,
-) -> anyhow::Result<()> {
-    let current_working_directory = std::env::current_dir()
-        .context(format_context!("Failed to get current working directory"))?
-        .to_string_lossy()
-        .to_string();
-
-    let workspace = {
-        let mut multi_progress = printer::MultiProgress::new(printer);
-        let progress = multi_progress.add_progress("loading workspace", Some(100), None);
-        workspace::Workspace::new(progress, current_working_directory.as_str())
-            .context(format_context!("while running workspace"))?
-    };
-
-    let (workspace_path, modules) = (workspace.absolute_path, workspace.modules);
-    info::set_workspace_path(workspace_path)
-        .context(format_context!("while setting workspace path"))?;
-
-    run_starlark_modules(printer, modules, phase, target)
 }

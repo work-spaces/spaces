@@ -1,4 +1,4 @@
-use crate::{evaluator, info, rules, workspace};
+use crate::{evaluator, rules, workspace};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use clap::{Parser, Subcommand, ValueEnum};
@@ -33,6 +33,36 @@ pub struct Arguments {
     commands: Commands,
 }
 
+enum RunWorkspace {
+    Target(Option<String>),
+    Script(String),
+}
+
+fn run_starlark_modules_in_workspace(
+    printer: &mut printer::Printer,
+    phase: rules::Phase,
+    run_workspace: RunWorkspace,
+) -> anyhow::Result<()> {
+    let workspace = {
+        let mut multi_progress = printer::MultiProgress::new(printer);
+        let progress = multi_progress.add_progress("loading workspace", Some(100), None);
+        workspace::Workspace::new(progress).context(format_context!("while running workspace"))?
+    };
+
+    match run_workspace {
+        RunWorkspace::Target(target) => {
+            evaluator::run_starlark_modules(printer, workspace.modules, phase, target)
+                .context(format_context!("while executing workspace rules"))?
+        }
+        RunWorkspace::Script(script) => {
+            let modules = vec![("checkout.star".to_string(), script)];
+            evaluator::run_starlark_modules(printer, modules, phase, None)
+                .context(format_context!("while executing checkout rules"))?
+        }
+    }
+    Ok(())
+}
+
 pub fn execute() -> anyhow::Result<()> {
     use crate::ledger;
     let args = Arguments::parse();
@@ -46,19 +76,26 @@ pub fn execute() -> anyhow::Result<()> {
             std::fs::create_dir_all(name.as_str())
                 .context(format_context!("while creating workspace directory {name}"))?;
 
+            let script_contents = std::fs::read_to_string(script.as_str())
+                .context(format_context!("while reading script file {script}"))?;
+
+            std::fs::write(format!("{}/{}", name, workspace::WORKSPACE_FILE_NAME), "")
+                .context(format_context!("while creating spaces_deps.toml file"))?;
+
             let current_working_directory = std::env::current_dir()
-                .context(format_context!("while getting current working directory"))?
-                .to_string_lossy()
-                .to_string();
+                .context(format_context!("Failed to get current working directory"))?;
 
-            info::set_workspace_path(format!("{current_working_directory}/{name}"))
-                .context(format_context!("while setting workspace path"))?;
+            let target_workspace_directory = current_working_directory.join(name.as_str());
 
-            evaluator::run_starlark_file(
+            std::env::set_current_dir(target_workspace_directory.clone()).context(format_context!(
+                "Failed to set current directory to {:?}",
+                target_workspace_directory
+            ))?;
+
+            run_starlark_modules_in_workspace(
                 &mut printer,
-                script.as_str(),
                 rules::Phase::Checkout,
-                None,
+                RunWorkspace::Script(script_contents),
             )
             .context(format_context!("while executing checkout rules"))?;
         }
@@ -66,36 +103,34 @@ pub fn execute() -> anyhow::Result<()> {
         Arguments {
             commands: Commands::Sync {},
         } => {
-            if !std::path::Path::new(workspace::WORKSPACE_FILE_NAME).exists() {
-                return Err(anyhow::anyhow!(
-                    "No workspace file found. Run checkout first."
-                ));
-            }
-
-            let current_working_directory = std::env::current_dir()
-                .context(format_context!("while getting current working directory"))?
-                .to_string_lossy()
-                .to_string();
-
-            info::set_workspace_path(current_working_directory)
-                .context(format_context!("while setting workspace path"))?;
-
-            evaluator::run_starlark_workspace(&mut printer, rules::Phase::Checkout, None)
-                .context(format_context!("while executing run rules"))?;
+            run_starlark_modules_in_workspace(
+                &mut printer,
+                rules::Phase::Checkout,
+                RunWorkspace::Target(None),
+            )
+            .context(format_context!("while executing checkout rules"))?;
         }
 
         Arguments {
             commands: Commands::Run { target },
         } => {
-            evaluator::run_starlark_workspace(&mut printer, rules::Phase::Run, target)
-                .context(format_context!("while executing run rules"))?;
+            run_starlark_modules_in_workspace(
+                &mut printer,
+                rules::Phase::Run,
+                RunWorkspace::Target(target),
+            )
+            .context(format_context!("while executing run rules"))?;
         }
 
         Arguments {
             commands: Commands::Evaluate { target },
         } => {
-            evaluator::run_starlark_workspace(&mut printer, rules::Phase::Evaluate, target)
-                .context(format_context!("while executing run rules"))?;
+            run_starlark_modules_in_workspace(
+                &mut printer,
+                rules::Phase::Evaluate,
+                RunWorkspace::Target(target),
+            )
+            .context(format_context!("while executing run rules"))?;
         }
 
         Arguments {

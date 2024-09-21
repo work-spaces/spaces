@@ -19,8 +19,7 @@ impl UpdateEnv {
 
 pub fn finalize_env() -> anyhow::Result<()> {
     let env = info::get_env();
-    let workspace = workspace::get_workspace_path()
-        .context(format_context!("Internal error: workspace path not set"))?;
+    let workspace = workspace::absolute_path();
     let workspace_path = std::path::Path::new(&workspace);
     let env_path = workspace_path.join("env");
 

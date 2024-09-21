@@ -3,7 +3,7 @@ use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::info;
+use crate::workspace;
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct Manifest {
@@ -34,7 +34,7 @@ pub struct Ledger {
 
 impl Ledger {
     pub fn new() -> anyhow::Result<Self> {
-        let full_path_to_ledger = format!("{}/spaces_ledger.toml", info::get_store_path());
+        let full_path_to_ledger = format!("{}/spaces_ledger.toml", workspace::get_store_path());
         let manifest = Manifest::new(&full_path_to_ledger).ok().unwrap_or_default();
         Ok(Self {
             manifest,

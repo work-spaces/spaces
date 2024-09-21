@@ -61,7 +61,6 @@ impl Graph {
             while let Some(node) = dfs.next(&self.directed_graph) {
                 tasks.push(node);
             }
-            tasks.push(target_node);
             tasks
         } else {
             let mut tasks = petgraph::algo::toposort(&self.directed_graph, None)

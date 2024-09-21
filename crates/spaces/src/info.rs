@@ -1,6 +1,6 @@
 use crate::{executor, rules, workspace};
 use anyhow::Context;
-use anyhow_source_location::{format_context, format_error};
+use anyhow_source_location::format_context;
 use starlark::environment::GlobalsBuilder;
 use starlark::values::none::NoneType;
 use std::sync::RwLock;
@@ -20,35 +20,11 @@ fn get_state() -> &'static RwLock<State> {
         new_branch_name: None,
         env: executor::env::UpdateEnv {
             vars: std::collections::HashMap::new(),
-            paths: Vec::new(),
+            paths: vec![format!("{}/sysroot/bin", workspace::absolute_path())],
         },
     }));
     STATE.get()
 }
-
-fn get_unique() -> anyhow::Result<String> {
-    let duration_since_epoch = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .context(format_context!("No system time"))?;
-    let duration_since_epoch_string = format!("{}", duration_since_epoch.as_nanos());
-    let unique_sha256 = sha256::digest(duration_since_epoch_string.as_bytes());
-    Ok(unique_sha256.as_str()[0..4].to_string())
-}
-
-pub fn set_workspace_path(path: String) -> anyhow::Result<()> {
-    let mut state = get_state().write().unwrap();
-    let unique = get_unique().context(format_context!("failed to get unique marker"))?;
-    let date = chrono::Local::now();
-    let log_folder = format!("{path}/spaces_logs/logs_{}", date.format("%Y%m%d-%H-%M-%S"));
-    std::fs::create_dir_all(log_folder.as_str())
-        .context(format_context!("Failed to create log folder {log_folder}"))?;
-    state.env.paths.push(format!("{path}/sysroot/bin"));
-    state.new_branch_name = Some(format!("{path}-{}", unique));
-    workspace::set_workspace_path(path).context(format_context!("While setting workspace path"))?;
-
-    Ok(())
-}
-
 
 pub fn update_env(env: executor::env::UpdateEnv) -> anyhow::Result<()> {
     let mut state = get_state().write().unwrap();
@@ -62,27 +38,6 @@ pub fn get_env() -> executor::env::UpdateEnv {
     state.env.clone()
 }
 
-pub fn get_store_path() -> String {
-    let home = std::env::var("HOME")
-        .context(format_context!("Failed to get HOME environment variable"))
-        .unwrap();
-    format!("{home}/.spaces/store")
-}
-
-pub fn get_checkout_path() -> anyhow::Result<String> {
-    let state = rules::get_state().read().unwrap();
-    if let Some(latest) = state.latest_starlark_module.as_ref() {
-        let path = std::path::Path::new(latest.as_str());
-        let parent = path
-            .parent()
-            .map(|e| e.to_string_lossy().to_string())
-            .unwrap_or(String::new());
-        Ok(parent)
-    } else {
-        Err(format_error!("No starlark module set"))
-    }
-}
-
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
     fn platform_name() -> anyhow::Result<String> {
@@ -92,11 +47,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     }
 
     fn store_path() -> anyhow::Result<String> {
-        Ok(get_store_path())
+        Ok(workspace::get_store_path())
     }
 
     fn absolute_workspace_path() -> anyhow::Result<String> {
-        workspace::get_workspace_path().ok_or(format_error!("Workspace path not set"))
+        Ok(workspace::absolute_path())
     }
 
     fn set_env(
@@ -111,13 +66,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(NoneType)
     }
 
-
     fn checkout_path() -> anyhow::Result<String> {
-        get_checkout_path()
+        rules::get_checkout_path()
     }
 
     fn current_workspace_path() -> anyhow::Result<String> {
-        get_checkout_path()
+        rules::get_checkout_path()
     }
 
     fn get_archive_output(
@@ -127,8 +81,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             serde_json::from_value(archive.to_json_value()?)
                 .context(format_context!("bad options for archive"))?;
 
-        let workspace_directory =
-            workspace::get_workspace_path().ok_or(format_error!("Workspace not available"))?;
+        let workspace_directory = workspace::absolute_path();
 
         Ok(format!(
             "{workspace_directory}/build/{}",
