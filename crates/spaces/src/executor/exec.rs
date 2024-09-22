@@ -56,6 +56,10 @@ impl Exec {
             .execute_process(&self.command, options)
             .context(format_context!("Failed to execute task {}", name))?;
 
+        println!("\n\nstdout_content: {:?}", stdout_content);
+        println!("\n\nstdout_content: {:?}", stdout_content);
+
+        
         if let (Some(stdout_content), Some(stdout_location)) =
             (stdout_content, self.redirect_stdout.as_ref())
         {

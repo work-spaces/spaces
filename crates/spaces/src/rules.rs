@@ -20,6 +20,10 @@ pub struct State {
 }
 
 impl State {
+    pub fn get_sanitized_rule_name(&self, rule_name: &str) -> String {
+        label::sanitize_rule(rule_name, self.latest_starlark_module.as_ref())
+    }
+
     pub fn insert_task(&mut self, mut task: Task) -> anyhow::Result<()> {
         // update the rule name to have the starlark module name
         let rule_label = label::sanitize_rule(
@@ -177,6 +181,12 @@ pub fn get_checkout_path() -> anyhow::Result<String> {
     } else {
         Err(format_error!("No starlark module set"))
     }
+}
+
+pub fn get_path_to_build_checkout(rule_name: &str) -> anyhow::Result<String> {
+    let state = get_state().read().unwrap();
+    let rule_name = state.get_sanitized_rule_name(rule_name);
+    Ok(format!("build/{}", rule_name))
 }
 
 

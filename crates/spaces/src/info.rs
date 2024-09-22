@@ -40,18 +40,58 @@ pub fn get_env() -> executor::env::UpdateEnv {
 
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
+
+    // remove and replace with get_path_to_store()
+    fn store_path() -> anyhow::Result<String> {
+        Ok(workspace::get_store_path())
+    }
+
+    // remove and replace with get_absolute_path_to_workspace()
+    fn absolute_workspace_path() -> anyhow::Result<String> {
+        Ok(workspace::absolute_path())
+    }
+
+    // remove and replace with get_platform_name()
     fn platform_name() -> anyhow::Result<String> {
         platform::Platform::get_platform()
             .map(|p| p.to_string())
             .ok_or(anyhow::anyhow!("Failed to get platform name"))
     }
 
-    fn store_path() -> anyhow::Result<String> {
-        Ok(workspace::get_store_path())
+    // remove and replace with get_path_to_checkout()
+    fn checkout_path() -> anyhow::Result<String> {
+        rules::get_checkout_path()
     }
 
-    fn absolute_workspace_path() -> anyhow::Result<String> {
-        Ok(workspace::absolute_path())
+    // remove and replace with get_path_to_checkout()
+    fn current_workspace_path() -> anyhow::Result<String> {
+        rules::get_checkout_path()
+    }
+
+    fn get_platform_name() -> anyhow::Result<String> {
+        platform::Platform::get_platform()
+            .map(|p| p.to_string())
+            .ok_or(anyhow::anyhow!("Failed to get platform name"))
+    }
+
+    fn is_platform_windows() -> anyhow::Result<bool>  {
+        Ok(platform::Platform::is_windows())
+    }
+
+    fn is_platform_macos() -> anyhow::Result<bool> {
+        Ok(platform::Platform::is_macos())
+    }
+
+    fn is_platform_linux() -> anyhow::Result<bool> {
+        Ok(platform::Platform::is_linux())
+    }
+
+    fn is_platform_x86_64() -> anyhow::Result<bool> {
+        Ok(platform::Platform::is_x86_64())
+    }
+
+    fn is_platform_aarch64() -> anyhow::Result<bool> {
+        Ok(platform::Platform::is_aarch64())
     }
 
     fn set_env(
@@ -66,26 +106,38 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(NoneType)
     }
 
-    fn checkout_path() -> anyhow::Result<String> {
+
+    fn get_path_to_store() -> anyhow::Result<String> {
+        Ok(workspace::get_store_path())
+    }
+
+    fn get_absolute_path_to_workspace() -> anyhow::Result<String> {
+        Ok(workspace::absolute_path())
+    }
+
+    fn get_path_to_checkout() -> anyhow::Result<String> {
         rules::get_checkout_path()
     }
 
-    fn current_workspace_path() -> anyhow::Result<String> {
-        rules::get_checkout_path()
+    fn get_path_to_build_checkout(#[starlark(require = named)] rule_name: &str) -> anyhow::Result<String> {
+        rules::get_path_to_build_checkout(rule_name)
     }
 
-    fn get_archive_output(
+    fn get_path_to_build_archive(
+        #[starlark(require = named)] rule_name: &str,
         #[starlark(require = named)] archive: starlark::values::Value,
     ) -> anyhow::Result<String> {
         let create_archive: easy_archiver::CreateArchive =
             serde_json::from_value(archive.to_json_value()?)
                 .context(format_context!("bad options for archive"))?;
 
-        let workspace_directory = workspace::absolute_path();
+        let state = rules::get_state().read().unwrap();
 
         Ok(format!(
-            "{workspace_directory}/build/{}",
+            "build/{}/{}",
+            state.get_sanitized_rule_name(rule_name),
             create_archive.get_output_file()
         ))
     }
+
 }
