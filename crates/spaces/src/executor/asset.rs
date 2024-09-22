@@ -97,27 +97,11 @@ impl AddWhichAsset {
         let workspace = workspace::absolute_path();
         let destination = format!("{}/{}", workspace, self.destination);
 
-        // http_archive also creates hard links - so we need to mutex it
-        let _state = http_archive::get_state().write().unwrap();
+        let source = path.to_string_lossy().to_string();
 
-        let destination_path = std::path::Path::new(&destination);
-        if let Some(parent) = destination_path.parent() {
-            std::fs::create_dir_all(parent).context(format_context!(
-                "Failed to create parent directories for asset file {}",
-                destination
-            ))?;
-        }
-
-        if destination_path.exists() {
-            std::fs::remove_file(destination_path).context(format_context!(
-                "Failed to remove existing asset file {}",
-                destination
-            ))?;
-        }
-
-        std::fs::hard_link(path.clone(), destination_path).context(format_context!(
-            "Failed to create hard link from {:?} to {}",
-            path,
+        http_archive::HttpArchive::create_hard_link(destination.clone(), source).context(format_context!(
+            "Failed to create hard link from {} to {}",
+            path.display(),
             destination
         ))?;
 

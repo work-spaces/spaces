@@ -4,11 +4,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use tokio::io::AsyncWriteExt;
 use std::sync::RwLock;
-pub struct State {}
+struct State {}
 
 static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
 
-pub fn get_state() -> &'static RwLock<State> {
+fn get_state() -> &'static RwLock<State> {
     if let Some(state) = STATE.try_get() {
         return state;
     }
@@ -177,7 +177,7 @@ impl HttpArchive {
         Ok(())
     }
 
-    fn create_hard_link(target_path: String, source: String) -> anyhow::Result<()> {
+    pub fn create_hard_link(target_path: String, source: String) -> anyhow::Result<()> {
         let target = std::path::Path::new(target_path.as_str());
         let original = std::path::Path::new(source.as_str());
 
@@ -193,13 +193,13 @@ impl HttpArchive {
 
         //if the source is a symlink, read the symlink and create a symlink
         if original.is_symlink() {
-            let link = std::fs::read_link(original).context(format_context!(
-                "failed to read link {original:?} -> {target_path}"
-            ))?;
+            //let link = std::fs::read_link(original).context(format_context!(
+            //    "failed to read link {original:?} -> {target_path}"
+            //))?;
 
             #[cfg(unix)]
-            std::os::unix::fs::symlink(link.clone(), target).context(format_context!(
-                "failed to create symlink {link:?} -> {target_path}"
+            std::os::unix::fs::symlink(original, target).context(format_context!(
+                "failed to create symlink {original:?} -> {target_path}"
             ))?;
 
             #[cfg(windows)]
