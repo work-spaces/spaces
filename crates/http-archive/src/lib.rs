@@ -4,12 +4,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use tokio::io::AsyncWriteExt;
 use std::sync::RwLock;
-
-struct State {}
+pub struct State {}
 
 static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
 
-fn get_state() -> &'static RwLock<State> {
+pub fn get_state() -> &'static RwLock<State> {
     if let Some(state) = STATE.try_get() {
         return state;
     }

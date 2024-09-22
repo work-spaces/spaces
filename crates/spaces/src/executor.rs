@@ -16,6 +16,7 @@ pub enum Task {
     Target,
     CreateArchive(archive::Archive),
     HttpArchive(http_archive::HttpArchive),
+    AddWhichAsset(asset::AddWhichAsset),
     UpdateAsset(asset::UpdateAsset),
     UpdateEnv(env::UpdateEnv),
     AddAsset(asset::AddAsset),
@@ -34,6 +35,7 @@ impl Task {
             Task::Exec(exec) => exec.execute(name, progress),
             Task::CreateArchive(archive) => archive.execute(name, progress),
             Task::UpdateAsset(asset) => asset.execute(name, progress),
+            Task::AddWhichAsset(asset) => asset.execute(name, progress),
             Task::UpdateEnv(update_env) => update_env.execute(name, progress),
             Task::AddAsset(asset) => asset.execute(name, progress),
             Task::Git(git) => {

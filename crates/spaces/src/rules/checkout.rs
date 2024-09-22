@@ -1,3 +1,4 @@
+use crate::executor::asset;
 use crate::{executor, rules, workspace};
 use anyhow::Context;
 use anyhow_source_location::format_context;
@@ -70,6 +71,29 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         add_http_archive(rule, platform_archive)
             .context(format_context!("Failed to add archive"))?;
+
+        Ok(NoneType)
+    }
+
+    fn add_which_asset(
+        #[starlark(require = named)] rule: starlark::values::Value,
+        #[starlark(require = named)] asset: starlark::values::Value,
+    ) -> anyhow::Result<NoneType> {
+        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+            .context(format_context!("bad options for which asset rule"))?;
+
+        let asset: asset::AddWhichAsset = serde_json::from_value(asset.to_json_value()?)
+            .context(format_context!("Failed to parse which asset arguments"))?;
+
+        let mut state = rules::get_state().write().unwrap();
+        let rule_name = rule.name.clone();
+        state
+            .insert_task(rules::Task::new(
+                rule,
+                rules::Phase::Checkout,
+                executor::Task::AddWhichAsset(asset),
+            ))
+            .context(format_context!("Failed to insert task {rule_name}"))?;
 
         Ok(NoneType)
     }

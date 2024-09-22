@@ -1,13 +1,13 @@
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
-use std::sync::RwLock;
 use std::collections::HashSet;
+use std::sync::RwLock;
 
 use crate::workspace;
 
 struct State {
-    updated_assets: HashSet<String>
+    updated_assets: HashSet<String>,
 }
 
 static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
@@ -17,7 +17,9 @@ fn get_state() -> &'static RwLock<State> {
         return state;
     }
 
-    STATE.set(RwLock::new(State { updated_assets: HashSet::new() }));
+    STATE.set(RwLock::new(State {
+        updated_assets: HashSet::new(),
+    }));
     STATE.get()
 }
 
@@ -49,7 +51,7 @@ impl UpdateAsset {
             "Failed to get destination path for asset file {}",
             &self.destination
         ))?;
-        
+
         let new_value = if state.updated_assets.get(&self.destination).is_some() {
             let old_value = std::fs::read_to_string(dest_path.clone()).context(format_context!(
                 "Failed to read asset file {}",
@@ -79,6 +81,51 @@ impl UpdateAsset {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AddWhichAsset {
+    pub which: String,
+    pub destination: String,
+}
+
+impl AddWhichAsset {
+    pub fn execute(&self, _name: &str, _progress: printer::MultiProgressBar) -> anyhow::Result<()> {
+        let path = which::which(self.which.as_str()).context(format_context!(
+            "Failed to find {} on using `which`. This is required for this workspace",
+            self.which
+        ))?;
+
+        // create the hard link to sysroot
+        let workspace = workspace::absolute_path();
+        let destination = format!("{}/{}", workspace, self.destination);
+
+        // http_archive also creates hard links - so we need to mutex it
+        let _state = http_archive::get_state().write().unwrap();
+
+        let destination_path = std::path::Path::new(&destination);
+        if let Some(parent) = destination_path.parent() {
+            std::fs::create_dir_all(parent).context(format_context!(
+                "Failed to create parent directories for asset file {}",
+                destination
+            ))?;
+        }
+
+        if destination_path.exists() {
+            std::fs::remove_file(destination_path).context(format_context!(
+                "Failed to remove existing asset file {}",
+                destination
+            ))?;
+        }
+
+        std::fs::hard_link(path.clone(), destination_path).context(format_context!(
+            "Failed to create hard link from {:?} to {}",
+            path,
+            destination
+        ))?;
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AddAsset {
     pub destination: String,
     pub content: String,
@@ -86,7 +133,8 @@ pub struct AddAsset {
 
 impl AddAsset {
     pub fn execute(&self, _name: &str, _progress: printer::MultiProgressBar) -> anyhow::Result<()> {
-        save_asset(&self.destination, &self.content).context(format_context!("failed to add asset"))?;
+        save_asset(&self.destination, &self.content)
+            .context(format_context!("failed to add asset"))?;
         Ok(())
     }
 }
