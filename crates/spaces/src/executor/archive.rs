@@ -9,7 +9,7 @@ pub struct Archive {
 }
 
 impl Archive {
-    pub fn execute(&self, name: &str, progress: printer::MultiProgressBar) -> anyhow::Result<()> {
+    pub fn execute(&self, name: &str, mut progress: printer::MultiProgressBar) -> anyhow::Result<()> {
         let workspace_directory = workspace::absolute_path();
 
         let output_directory = format!("{workspace_directory}/build/{name}");
@@ -17,6 +17,8 @@ impl Archive {
         std::fs::create_dir_all(output_directory.as_str()).context(format_context!(
             "failed to create output directory {output_directory}"
         ))?;
+
+        progress.log(printer::Level::Trace, format!("Creating archive {output_directory}").as_str());
 
         self.create_archive
             .create(output_directory.as_str(), progress)

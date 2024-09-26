@@ -117,7 +117,15 @@ impl State {
                 .ok_or(format_error!("Task not found {task_name}"))?;
 
             if task.phase == phase {
-                let progress_bar = multi_progress.add_progress(task.rule.name.as_str(), Some(100), Some("Complete"));
+                let mut progress_bar = multi_progress.add_progress(
+                    task.rule.name.as_str(),
+                    Some(100),
+                    Some("Complete"),
+                );
+                progress_bar.log(
+                    printer::Level::Trace,
+                    format!("Running task {}", task.rule.name).as_str(),
+                );
                 handle_list.push(task.execute(progress_bar));
                 task.phase = Phase::Complete;
 
@@ -130,7 +138,7 @@ impl State {
                     }
 
                     // this can be configured with a another global starlark function
-                    if number_running < 10 {
+                    if number_running < 3 {
                         break;
                     } else {
                         std::thread::sleep(std::time::Duration::from_millis(50));
@@ -262,6 +270,8 @@ impl Task {
         let rule = self.rule.clone();
         let deps_signals = self.deps_signals.clone();
 
+        progress.set_message("Waiting for dependencies");
+
         std::thread::spawn(move || -> anyhow::Result<Vec<String>> {
             // check inputs/outputs to see if we need to run
             let mut is_execute = true;
@@ -271,7 +281,11 @@ impl Task {
                 is_execute = platforms.contains(&current_platform);
             }
 
-            progress.set_message("Waiting for dependencies");
+            progress.log(
+                printer::Level::Trace,
+                format!("Execute {name} after platform check? {}", is_execute).as_str(),
+            );
+
             for deps_signal in deps_signals {
                 loop {
                     let (lock, cvar) = &*deps_signal;
@@ -301,6 +315,14 @@ impl Task {
                         is_execute = true;
                     }
                 }
+                progress.log(
+                    printer::Level::Trace,
+                    format!("Execute {name} after inputs check? {}", is_execute).as_str(),
+                );
+            }
+
+            if !is_execute {
+                progress.log(printer::Level::Info, format!("Skipping {name}").as_str());
             }
 
             progress.set_message(if is_execute { "Running" } else { "Skipping" });

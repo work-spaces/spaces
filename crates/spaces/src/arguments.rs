@@ -29,6 +29,9 @@ impl From<Level> for printer::Level {
 #[derive(Debug, Parser)]
 #[command(version, about, long_about = None)]
 pub struct Arguments {
+    /// The verbosity level of the output.
+    #[arg(short, long, default_value = "warning")]
+    pub verbosity: Level,
     #[command(subcommand)]
     commands: Commands,
 }
@@ -45,7 +48,8 @@ fn run_starlark_modules_in_workspace(
 ) -> anyhow::Result<()> {
     let workspace = {
         let mut multi_progress = printer::MultiProgress::new(printer);
-        let progress = multi_progress.add_progress("loading workspace", Some(100), Some("Complete"));
+        let progress =
+            multi_progress.add_progress("loading workspace", Some(100), Some("Complete"));
         workspace::Workspace::new(progress).context(format_context!("while running workspace"))?
     };
 
@@ -71,8 +75,10 @@ pub fn execute() -> anyhow::Result<()> {
 
     match args {
         Arguments {
+            verbosity,
             commands: Commands::Checkout { name, script },
         } => {
+            printer.level = verbosity.into();
             std::fs::create_dir_all(name.as_str())
                 .context(format_context!("while creating workspace directory {name}"))?;
 
@@ -87,10 +93,12 @@ pub fn execute() -> anyhow::Result<()> {
 
             let target_workspace_directory = current_working_directory.join(name.as_str());
 
-            std::env::set_current_dir(target_workspace_directory.clone()).context(format_context!(
-                "Failed to set current directory to {:?}",
-                target_workspace_directory
-            ))?;
+            std::env::set_current_dir(target_workspace_directory.clone()).context(
+                format_context!(
+                    "Failed to set current directory to {:?}",
+                    target_workspace_directory
+                ),
+            )?;
 
             run_starlark_modules_in_workspace(
                 &mut printer,
@@ -101,8 +109,11 @@ pub fn execute() -> anyhow::Result<()> {
         }
 
         Arguments {
+            verbosity,
             commands: Commands::Sync {},
         } => {
+            printer.level = verbosity.into();
+
             run_starlark_modules_in_workspace(
                 &mut printer,
                 rules::Phase::Checkout,
@@ -112,8 +123,11 @@ pub fn execute() -> anyhow::Result<()> {
         }
 
         Arguments {
+            verbosity,
             commands: Commands::Run { target },
         } => {
+            printer.level = verbosity.into();
+
             run_starlark_modules_in_workspace(
                 &mut printer,
                 rules::Phase::Run,
@@ -123,8 +137,11 @@ pub fn execute() -> anyhow::Result<()> {
         }
 
         Arguments {
+            verbosity,
             commands: Commands::Evaluate { target },
         } => {
+            printer.level = verbosity.into();
+
             run_starlark_modules_in_workspace(
                 &mut printer,
                 rules::Phase::Evaluate,
@@ -134,8 +151,11 @@ pub fn execute() -> anyhow::Result<()> {
         }
 
         Arguments {
+            verbosity,
             commands: Commands::List {},
         } => {
+            printer.level = verbosity.into();
+
             let ledger =
                 ledger::Ledger::new().with_context(|| format_context!("while creating ledger"))?;
             ledger.show_status()?;

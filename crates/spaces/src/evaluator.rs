@@ -1,5 +1,6 @@
 use crate::{executor, info, rules, workspace};
 use anyhow::Context;
+use printer::Level;
 use anyhow_source_location::{format_context, format_error};
 use starlark::environment::{FrozenModule, GlobalsBuilder, Module};
 use starlark::eval::{Evaluator, ReturnFileLoader};
@@ -78,6 +79,7 @@ pub fn run_starlark_modules(
     while !module_queue.is_empty() {
         while !module_queue.is_empty() {
             if let Some((name, content)) = module_queue.pop_front() {
+                printer.log(Level::Trace, format!("Evaluating module {}", name).as_str())?;
                 let _ = evaluate_module(workspace_path.as_str(), name.as_str(), content)
                     .context(format_context!("Failed to evaluate module {}", name))?;
             }
@@ -93,6 +95,9 @@ pub fn run_starlark_modules(
             let new_modules = state
                 .execute(printer, phase)
                 .context(format_context!("Failed to execute tasks"))?;
+            if !new_modules.is_empty(){
+                printer.log(Level::Trace, format!("New Modules:{:?}", new_modules).as_str())?;
+            }
 
             for module in new_modules {
                 let path_to_module = format!("{}/{}", workspace_path, module);
@@ -110,6 +115,8 @@ pub fn run_starlark_modules(
     let mut state = rules::get_state().write().unwrap();
     match phase {
         rules::Phase::Run => {
+
+            printer.log(Level::Trace, "Run Phase")?;
             state
                 .sort_tasks(target.clone())
                 .context(format_context!("Failed to sort tasks"))?;
@@ -119,6 +126,8 @@ pub fn run_starlark_modules(
                 .context(format_context!("Failed to execute tasks"))?;
         }
         rules::Phase::Evaluate => {
+            printer.log(Level::Trace, "Evaluate Phase")?;
+
             state
                 .sort_tasks(target.clone())
                 .context(format_context!("Failed to sort tasks"))?;
@@ -128,6 +137,8 @@ pub fn run_starlark_modules(
                 .context(format_context!("Failed to show tasks"))?;
         }
         rules::Phase::Checkout => {
+            printer.log(Level::Trace, "Checkout Phase")?;
+
             state
                 .sort_tasks(target.clone())
                 .context(format_context!("Failed to sort tasks"))?;
