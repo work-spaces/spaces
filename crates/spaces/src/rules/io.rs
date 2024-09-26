@@ -51,7 +51,37 @@ impl Io {
         Ok(blake3::hash(&contents).to_string())
     }
 
-    pub fn update(&mut self, path: &str) -> anyhow::Result<IsUpdated> {
+    pub fn update_glob(&mut self, progress: &mut printer::MultiProgressBar, glob: &[&str]) -> anyhow::Result<IsUpdated> {
+        let walkdir = globwalk::GlobWalkerBuilder::from_patterns(".", glob)
+            .build()
+            .context(format_context!("Failed to build walker for {glob:?}"))?;
+
+        let items: Vec<_> = walkdir.filter_map(|e| if e.is_ok() { Some(e.unwrap()) } else { None }).collect();
+
+        progress.set_total(items.len() as u64);
+
+        let mut is_updated = IsUpdated::No;
+        progress.set_message("hashing inputs");
+
+        for entry in  items {
+            progress.set_message(entry.path().to_string_lossy().to_string().as_str());
+            if entry.file_type().is_file() {
+                let path = entry.path().to_string_lossy().to_string();
+                if self
+                    .update(path.as_str())
+                    .context(format_context!("Failed to hash {path}"))?
+                    == IsUpdated::Yes
+                {
+                    is_updated = IsUpdated::Yes;
+                }
+            }
+            progress.increment(1);
+        }
+
+        Ok(is_updated)
+    }
+
+    fn update(&mut self, path: &str) -> anyhow::Result<IsUpdated> {
         let metadata = std::fs::metadata(&path)
             .context(format_context!("Failed to get metadata for {path}"))?;
         let timestamp = metadata.modified().unwrap().elapsed().unwrap().as_nanos();
@@ -64,7 +94,7 @@ impl Io {
                 if digest == input.digest {
                     return Ok(IsUpdated::No);
                 }
-
+                input.timestamp = timestamp;
                 input.digest = digest.to_string();
                 return Ok(IsUpdated::Yes);
             }

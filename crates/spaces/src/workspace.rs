@@ -104,7 +104,6 @@ impl Workspace {
             .into_iter()
             .collect();
 
-        progress.set_prefix("scanning workspace");
         progress.set_total(walkdir.len() as u64);
 
         let workspace_content =

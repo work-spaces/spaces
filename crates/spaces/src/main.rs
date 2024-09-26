@@ -10,7 +10,6 @@ mod executor;
 mod workspace;
 mod label;
 
-
 fn main() -> anyhow::Result<()> {
     arguments::execute()
 }

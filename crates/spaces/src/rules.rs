@@ -117,7 +117,7 @@ impl State {
                 .ok_or(format_error!("Task not found {task_name}"))?;
 
             if task.phase == phase {
-                let progress_bar = multi_progress.add_progress(task.rule.name.as_str(), Some(200), None);
+                let progress_bar = multi_progress.add_progress(task.rule.name.as_str(), Some(100), Some("Complete"));
                 handle_list.push(task.execute(progress_bar));
                 task.phase = Phase::Complete;
 
@@ -189,7 +189,6 @@ pub fn get_path_to_build_checkout(rule_name: &str) -> anyhow::Result<String> {
     Ok(format!("build/{}", rule_name))
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, ValueEnum)]
 pub enum Phase {
     Checkout,
@@ -205,6 +204,7 @@ pub struct Rule {
     pub deps: Option<Vec<String>>,
     pub inputs: Option<HashSet<String>>,
     pub outputs: Option<HashSet<String>>,
+    pub platforms: Option<Vec<platform::Platform>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -264,25 +264,12 @@ impl Task {
 
         std::thread::spawn(move || -> anyhow::Result<Vec<String>> {
             // check inputs/outputs to see if we need to run
-            let mut is_stale;
-            if let Some(inputs) = rule.inputs.as_ref() {
-                let mut state = io::get_state().write().unwrap();
-                is_stale = inputs.len() == 0;
-                for input in inputs {
-                    if state
-                        .io
-                        .update(input.as_str())
-                        .context(format_context!("while updating io"))?
-                        == io::IsUpdated::Yes
-                    {
-                        is_stale = true;
-                    }
-                }
-            } else {
-                is_stale = true;
+            let mut is_execute = true;
+            if let (Some(platforms), Some(current_platform)) =
+                (rule.platforms.as_ref(), platform::Platform::get_platform())
+            {
+                is_execute = platforms.contains(&current_platform);
             }
-
-            // if there are no inputs, always run
 
             progress.set_message("Waiting for dependencies");
             for deps_signal in deps_signals {
@@ -299,21 +286,39 @@ impl Task {
                     progress.increment_with_overflow(1);
                 }
             }
-            progress.set_message("Running");
 
-            let new_modules = if is_stale {
+            if is_execute {
+                if let Some(inputs) = rule.inputs.as_ref() {
+                    let mut state = io::get_state().write().unwrap();
+                    is_execute = inputs.len() == 0;
+                    let globs = inputs.iter().map(|e| e.as_str()).collect::<Vec<&str>>();
+                    if state
+                        .io
+                        .update_glob(&mut progress, globs.as_slice())
+                        .context(format_context!("while updating io"))?
+                        == io::IsUpdated::Yes
+                    {
+                        is_execute = true;
+                    }
+                }
+            }
+
+            progress.set_message(if is_execute { "Running" } else { "Skipping" });
+
+            let new_modules = if is_execute {
                 executor
                     .execute(name.as_str(), progress)
-                    .context(format_context!("Failed to exec {}", name))?
+                    .context(format_context!("Failed to exec {}", name))
             } else {
-                Vec::new()
+                Ok(Vec::new())
             };
 
             let (lock, cvar) = &*signal;
             let mut done = lock.lock().unwrap();
             *done = true;
             cvar.notify_all();
-            Ok(new_modules)
+
+            new_modules
         })
     }
 

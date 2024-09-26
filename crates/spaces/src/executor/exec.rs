@@ -1,9 +1,14 @@
 use crate::{info, workspace};
 use anyhow::Context;
-use anyhow_source_location::format_context;
+use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum Expect {
+    Failure,
+    Success
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Exec {
     pub command: String,
@@ -11,6 +16,7 @@ pub struct Exec {
     pub env: Option<HashMap<String, String>>,
     pub working_directory: Option<String>,
     pub redirect_stdout: Option<String>,
+    pub expect: Option<Expect>
 }
 
 impl Exec {
@@ -52,13 +58,26 @@ impl Exec {
             ..Default::default()
         };
 
-        let stdout_content = progress
-            .execute_process(&self.command, options)
-            .context(format_context!("Failed to execute task {}", name))?;
+        let result = progress
+        .execute_process(&self.command, options)
+        .context(format_context!("Failed to execute task {}", name));
 
-        println!("\n\nstdout_content: {:?}", stdout_content);
-        println!("\n\nstdout_content: {:?}", stdout_content);
-
+        let stdout_content = match result {
+            Ok(content) => {
+                if let Some(Expect::Failure) = self.expect.as_ref() {
+                    return Err(format_error!("Expected failure but task succeeded"));
+                } else {
+                    content
+                }
+            }
+            Err(_) => {
+                if let Some(Expect::Success) = self.expect.as_ref() {
+                    return Err(format_error!("Expected success but task failed"));
+                } else {
+                    None
+                }
+            }
+        };
         
         if let (Some(stdout_content), Some(stdout_location)) =
             (stdout_content, self.redirect_stdout.as_ref())
