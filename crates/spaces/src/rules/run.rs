@@ -79,20 +79,21 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             serde_json::from_value(archive.to_json_value()?)
                 .context(format_context!("bad options for repo"))?;
 
-        let mut inputs = HashSet::new();
-        inputs.insert(format!("{}/**", create_archive.input));
-        rule.inputs = Some(inputs);
-
         let mut state = rules::get_state().write().unwrap();
         let rule_name = rule.name.clone();
+        if false {
+            let mut inputs = HashSet::new();
+            inputs.insert(format!("{}/**", create_archive.input));
+            rule.inputs = Some(inputs);
 
-        let mut outputs = HashSet::new();
-        outputs.insert(format!(
-            "build/{}/{}",
-            state.get_sanitized_rule_name(rule_name.as_str()),
-            create_archive.get_output_file()
-        ));
-        rule.outputs = Some(outputs);
+            let mut outputs = HashSet::new();
+            outputs.insert(format!(
+                "build/{}/{}",
+                state.get_sanitized_rule_name(rule_name.as_str()),
+                create_archive.get_output_file()
+            ));
+            rule.outputs = Some(outputs);
+        }
 
         let archive = executor::archive::Archive { create_archive };
 

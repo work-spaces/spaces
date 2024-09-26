@@ -7,7 +7,7 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Expect {
     Failure,
-    Success
+    Success,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Exec {
@@ -16,7 +16,7 @@ pub struct Exec {
     pub env: Option<HashMap<String, String>>,
     pub working_directory: Option<String>,
     pub redirect_stdout: Option<String>,
-    pub expect: Option<Expect>
+    pub expect: Option<Expect>,
 }
 
 impl Exec {
@@ -58,27 +58,40 @@ impl Exec {
             ..Default::default()
         };
 
-        let result = progress
-        .execute_process(&self.command, options)
-        .context(format_context!("Failed to execute task {}", name));
+        progress.log(
+            printer::Level::Trace,
+            format!("exec {name}: {} {options:?}", self.command).as_str(),
+        );
+
+        let result = progress.execute_process(&self.command, options);
 
         let stdout_content = match result {
             Ok(content) => {
+                progress.log(
+                    printer::Level::Trace,
+                    format!("exec {name} succeeded").as_str(),
+                );
                 if let Some(Expect::Failure) = self.expect.as_ref() {
                     return Err(format_error!("Expected failure but task succeeded"));
                 } else {
                     content
                 }
             }
-            Err(_) => {
-                if let Some(Expect::Success) = self.expect.as_ref() {
-                    return Err(format_error!("Expected success but task failed"));
-                } else {
+            Err(exec_error) => {
+                progress.log(
+                    printer::Level::Trace,
+                    format!("exec {name} failed").as_str(),
+                );
+                if let Some(Expect::Failure) = self.expect.as_ref() {
                     None
+                } else {
+                    return Err(format_error!(
+                        "Expected success but task failed because {exec_error}"
+                    ));
                 }
             }
         };
-        
+
         if let (Some(stdout_content), Some(stdout_location)) =
             (stdout_content, self.redirect_stdout.as_ref())
         {
