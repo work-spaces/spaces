@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Task {
     Exec(exec::Exec),
+    ExecIf(exec::ExecIf),
     Target,
     CreateArchive(archive::Archive),
     HttpArchive(http_archive::HttpArchive),
@@ -27,12 +28,13 @@ impl Task {
     pub fn execute(
         &self,
         name: &str,
-        progress: printer::MultiProgressBar,
+        mut progress: printer::MultiProgressBar,
     ) -> anyhow::Result<Vec<String>> {
         let mut check_new_modules = false;
         match self {
             Task::HttpArchive(archive) => archive.execute(name, progress),
-            Task::Exec(exec) => exec.execute(name, progress),
+            Task::Exec(exec) => exec.execute(name, &mut progress),
+            Task::ExecIf(exec_if) => exec_if.execute(name, progress),
             Task::CreateArchive(archive) => archive.execute(name, progress),
             Task::UpdateAsset(asset) => asset.execute(name, progress),
             Task::AddWhichAsset(asset) => asset.execute(name, progress),

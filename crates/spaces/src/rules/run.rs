@@ -56,6 +56,54 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(NoneType)
     }
 
+    fn add_exec_if(
+        #[starlark(require = named)] rule: starlark::values::Value,
+        #[starlark(require = named)] exec_if: starlark::values::Value,
+    ) -> anyhow::Result<NoneType> {
+        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+            .context(format_context!("bad options for repo"))?;
+
+        let mut exec_if: executor::exec::ExecIf = serde_json::from_value(exec_if.to_json_value()?)
+            .context(format_context!("bad options for exec"))?;
+
+        if let Some(redirect_stdout) = exec_if.if_.redirect_stdout.as_mut() {
+            *redirect_stdout = format!(
+                "{}/{}",
+                rules::get_path_to_build_checkout(rule.name.as_str())?,
+                redirect_stdout
+            );
+        }
+
+        if let Some(redirect_stdout) = exec_if.then_.redirect_stdout.as_mut() {
+            *redirect_stdout = format!(
+                "{}/{}",
+                rules::get_path_to_build_checkout(rule.name.as_str())?,
+                redirect_stdout
+            );
+        }
+
+        if let Some(exec_else) = exec_if.else_.as_mut() {
+            if let Some(redirect_stdout) = exec_else.redirect_stdout.as_mut() {
+                *redirect_stdout = format!(
+                    "{}/{}",
+                    rules::get_path_to_build_checkout(rule.name.as_str())?,
+                    redirect_stdout
+                );
+            }
+        }
+
+        let mut state = rules::get_state().write().unwrap();
+        let rule_name = rule.name.clone();
+        state
+            .insert_task(rules::Task::new(
+                rule,
+                rules::Phase::Run,
+                executor::Task::ExecIf(exec_if),
+            ))
+            .context(format_context!("Failed to insert task {rule_name}"))?;
+        Ok(NoneType)
+    }
+
     fn add_archive(
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] archive: starlark::values::Value,

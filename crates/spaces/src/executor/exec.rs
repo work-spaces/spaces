@@ -23,7 +23,7 @@ impl Exec {
     pub fn execute(
         &self,
         name: &str,
-        mut progress: printer::MultiProgressBar,
+        progress: &mut printer::MultiProgressBar,
     ) -> anyhow::Result<()> {
         let arguments = self.args.clone().unwrap_or_default();
         let workspace_env = info::get_env();
@@ -99,6 +99,49 @@ impl Exec {
                 "Failed to write stdout to {}",
                 stdout_location
             ))?;
+        }
+
+        Ok(())
+    }
+}
+
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecIf {
+    #[serde(rename = "if")]
+    pub if_: Exec,
+    #[serde(rename = "then")]
+    pub then_: Exec,
+    #[serde(rename = "else")]
+    pub else_: Option<Exec>,
+}
+
+impl ExecIf {
+    pub fn execute(
+        &self,
+        name: &str,
+        mut progress: printer::MultiProgressBar,
+    ) -> anyhow::Result<()> {
+
+        let condition_result = self.if_.execute(name, &mut progress);
+
+        match condition_result {
+            Ok(_) => {
+                progress.log(
+                    printer::Level::Trace,
+                    format!("exec {name} condition succeeded").as_str(),
+                );
+                self.then_.execute(name, &mut progress)?;
+            }
+            Err(_) => {
+                progress.log(
+                    printer::Level::Trace,
+                    format!("exec {name} condition failed running").as_str(),
+                );
+                if let Some(else_) = self.else_.as_ref() {
+                    else_.execute(name, &mut progress)?;
+                }
+            }
         }
 
         Ok(())
