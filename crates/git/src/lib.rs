@@ -17,10 +17,17 @@ pub enum Checkout {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Clone {
+    Default,
+    Spaces,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Repo {
     pub url: String,
     pub checkout: CheckoutOption,
     pub rev: String,
+    pub clone: Option<Clone>,
 }
 
 impl Repo {

@@ -38,7 +38,7 @@ fn evaluate_module(
         ));
     }
     let modules = loads.iter().map(|(a, b)| (a.as_str(), b)).collect();
-    let mut loader = ReturnFileLoader { modules: &modules };
+    let loader = ReturnFileLoader { modules: &modules };
 
     let globals = GlobalsBuilder::standard()
         .with(starstd::globals)
@@ -51,13 +51,13 @@ fn evaluate_module(
     let module = Module::new();
     {
         let mut eval = Evaluator::new(&module);
-        eval.set_loader(&mut loader);
+        eval.set_loader(&loader);
         eval.eval_module(ast, &globals)
             .map_err(|e| format_error!("{e:?}"))?;
     }
     // After creating a module we freeze it, preventing further mutation.
     // It can now be used as the input for other Starlark modules.
-    Ok(module.freeze()?)
+    module.freeze()
 }
 
 pub fn sort_tasks(target: Option<String>) -> anyhow::Result<()> {
@@ -152,11 +152,11 @@ pub fn run_starlark_modules(
 
             let mut workspace_file_content = String::new();
             workspace_file_content.push_str(workspace::WORKSPACE_FILE_HEADER);
-            workspace_file_content.push_str("\n");
+            workspace_file_content.push('\n');
 
             workspace_file_content.push_str("workspace_env = ");
             workspace_file_content
-                .push_str(format!("{}", serde_json::to_string_pretty(&info::get_env())?).as_str());
+                .push_str(serde_json::to_string_pretty(&info::get_env())?.as_str());
             workspace_file_content.push_str("\n\ninfo.set_env(env = workspace_env) \n");
 
             let workspace_file_path =

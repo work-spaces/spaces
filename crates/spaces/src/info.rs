@@ -6,6 +6,7 @@ use starlark::values::none::NoneType;
 use std::sync::RwLock;
 
 struct State {
+    #[allow(dead_code)]
     new_branch_name: Option<String>,
     env: executor::env::UpdateEnv,
 }

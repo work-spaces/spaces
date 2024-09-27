@@ -52,7 +52,7 @@ impl UpdateAsset {
             &self.destination
         ))?;
 
-        let new_value = if state.updated_assets.get(&self.destination).is_some() {
+        let new_value = if state.updated_assets.contains(&self.destination) {
             let old_value = std::fs::read_to_string(dest_path.clone()).context(format_context!(
                 "Failed to read asset file {}",
                 dest_path.display()

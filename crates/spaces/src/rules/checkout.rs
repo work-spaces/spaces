@@ -31,7 +31,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let worktree_path = workspace::absolute_path();
 
-        let state = rules::get_state().write().unwrap();
+        let state = rules::get_state().read().unwrap();
         let checkout = repo.get_checkout();
         let spaces_key = rule.name.clone();
         let rule_name = rule.name.clone();
@@ -44,6 +44,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                     spaces_key,
                     worktree_path,
                     checkout,
+                    clone: repo.clone.unwrap_or(git::Clone::Default),
                 }),
             ))
             .context(format_context!("Failed to insert task {rule_name}"))?;
@@ -215,7 +216,7 @@ fn add_http_archive(
                 rule,
                 rules::Phase::Checkout,
                 executor::Task::HttpArchive(executor::http_archive::HttpArchive {
-                    http_archive: http_archive,
+                    http_archive,
                 }),
             ))
             .context(format_context!("Failed to insert task {rule_name}"))?;

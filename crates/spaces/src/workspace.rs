@@ -143,6 +143,8 @@ impl Workspace {
             .context(format_context!("Failed to create build directory"))?;
 
         state.absolute_path = absolute_path;
+
+        #[allow(unused)]
         let unique = get_unique().context(format_context!("failed to get unique marker"))?;
 
         Ok(Self { modules })

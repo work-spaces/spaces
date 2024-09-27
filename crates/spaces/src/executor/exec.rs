@@ -55,7 +55,6 @@ impl Exec {
                 .map(|cwd| format!("{}/{}", workspace_path, cwd)),
             is_return_stdout: self.redirect_stdout.is_some(),
             log_file_path: Some(workspace::get_log_file(name)),
-            ..Default::default()
         };
 
         progress.log(

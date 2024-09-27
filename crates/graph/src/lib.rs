@@ -1,17 +1,11 @@
 use anyhow_source_location::format_error;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Graph {
     pub directed_graph: petgraph::graph::DiGraph<String, ()>,
 }
 
 impl Graph {
-    pub fn new() -> Self {
-        Graph {
-            directed_graph: petgraph::graph::DiGraph::new(),
-        }
-    }
-
     pub fn clear(&mut self) {
         self.directed_graph.clear();
     }

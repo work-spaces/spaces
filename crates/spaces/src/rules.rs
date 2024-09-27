@@ -124,8 +124,11 @@ impl State {
             };
 
             if task.phase == phase {
-                let mut progress_bar =
-                    multi_progress.add_progress(task.rule.name.as_str(), Some(100), Some("Complete"));
+                let mut progress_bar = multi_progress.add_progress(
+                    task.rule.name.as_str(),
+                    Some(100),
+                    Some("Complete"),
+                );
 
                 progress_bar.log(
                     printer::Level::Trace,
@@ -183,7 +186,7 @@ pub fn get_state() -> &'static RwLock<State> {
 
     STATE.set(RwLock::new(State {
         tasks: RwLock::new(HashMap::new()),
-        graph: graph::Graph::new(),
+        graph: graph::Graph::default(),
         sorted: Vec::new(),
         latest_starlark_module: None,
         all_modules: HashSet::new(),
@@ -198,7 +201,7 @@ pub fn get_checkout_path() -> anyhow::Result<String> {
         let parent = path
             .parent()
             .map(|e| e.to_string_lossy().to_string())
-            .unwrap_or(String::new());
+            .unwrap_or_default();
         Ok(parent)
     } else {
         Err(format_error!("No starlark module set"))
@@ -413,9 +416,9 @@ impl Task {
                         let task = tasks
                             .get_mut(enabled_target)
                             .ok_or(format_error!("Task not found {enabled_target}"))
-                            .expect(
-                                format!("Internal Error: Task not found {enabled_target}").as_str(),
-                            );
+                            .unwrap_or_else(|_| {
+                                panic!("Internal Error: Task not found {enabled_target}")
+                            });
                         task.rule.type_ = Some(RuleType::Run);
                     }
                 } else {

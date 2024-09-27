@@ -29,7 +29,7 @@ pub fn finalize_env() -> anyhow::Result<()> {
         let line = format!("{}={}\n", key, value);
         content.push_str(&line);
     }
-    content.push_str("\n");
+    content.push('\n');
     content.push_str(format!("PATH={}\n", env.paths.join(":")).as_str());
 
     std::fs::write(env_path.clone(), content)
