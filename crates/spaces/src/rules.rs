@@ -124,14 +124,8 @@ impl State {
             };
 
             if task.phase == phase {
-                let finish_message = if multi_progress.printer.level <= printer::Level::Info {
-                    Some("Complete")
-                } else {
-                    None
-                };
-
                 let mut progress_bar =
-                    multi_progress.add_progress(task.rule.name.as_str(), Some(100), finish_message);
+                    multi_progress.add_progress(task.rule.name.as_str(), Some(100), Some("Complete"));
 
                 progress_bar.log(
                     printer::Level::Trace,

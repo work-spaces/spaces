@@ -48,15 +48,8 @@ fn run_starlark_modules_in_workspace(
 ) -> anyhow::Result<()> {
     let workspace = {
         let mut multi_progress = printer::MultiProgress::new(printer);
-
-        let finish_message = if multi_progress.printer.level <= printer::Level::Info {
-            Some("Complete")
-        } else {
-            None
-        };
-
         let progress =
-            multi_progress.add_progress("loading workspace", Some(100), finish_message);
+            multi_progress.add_progress("loading workspace", Some(100), Some("Complete"));
         workspace::Workspace::new(progress).context(format_context!("while running workspace"))?
     };
 
