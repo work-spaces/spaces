@@ -51,7 +51,7 @@ impl Git {
         name: &str,
         mut progress: printer::MultiProgressBar,
     ) -> anyhow::Result<()> {
-        let mut options = printer::ExecuteOptions {
+        let clone_options = printer::ExecuteOptions {
             arguments: vec![
                 "clone".to_string(),
                 self.url.clone(),
@@ -60,27 +60,43 @@ impl Git {
             ..Default::default()
         };
 
+        progress.log(
+            printer::Level::Trace,
+            format!("git clone {clone_options:?}").as_str(),
+        );
+
         progress
-            .execute_process("git", options.clone())
+            .execute_process("git", clone_options)
             .context(format_context!(
                 "{name} - Failed to clone repository {}",
                 self.spaces_key
             ))?;
 
+        let mut checkout_options = printer::ExecuteOptions {
+            working_directory: Some(self.spaces_key.clone()),
+            ..Default::default()
+        };
+
         match &self.checkout {
             git::Checkout::NewBranch(branch_name) => {
-                options.arguments.push("switch".to_string());
-                options.arguments.push(branch_name.clone());
+                checkout_options.arguments.push("switch".to_string());
+                checkout_options.arguments.push(branch_name.clone());
 
                 // TODO: switch to a new branch
             }
             git::Checkout::Revision(branch_name) => {
-                options.arguments.push(branch_name.clone());
+                checkout_options.arguments.push("checkout".to_string());
+                checkout_options.arguments.push(branch_name.clone());
             }
         }
 
+        progress.log(
+            printer::Level::Trace,
+            format!("git clone {checkout_options:?}").as_str(),
+        );
+
         progress
-            .execute_process("git", options.clone())
+            .execute_process("git", checkout_options)
             .context(format_context!(
                 "{name} - Failed to clone repository {}",
                 self.spaces_key
