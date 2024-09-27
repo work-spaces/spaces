@@ -105,15 +105,14 @@ impl Exec {
     }
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecIf {
     #[serde(rename = "if")]
     pub if_: Exec,
     #[serde(rename = "then")]
-    pub then_: Exec,
+    pub then_: Vec<String>,
     #[serde(rename = "else")]
-    pub else_: Option<Exec>,
+    pub else_: Option<Vec<String>>,
 }
 
 impl ExecIf {
@@ -121,17 +120,16 @@ impl ExecIf {
         &self,
         name: &str,
         mut progress: printer::MultiProgressBar,
-    ) -> anyhow::Result<()> {
-
+    ) -> Vec<String> {
         let condition_result = self.if_.execute(name, &mut progress);
-
+        let mut result = Vec::new();
         match condition_result {
             Ok(_) => {
                 progress.log(
                     printer::Level::Trace,
                     format!("exec {name} condition succeeded").as_str(),
                 );
-                self.then_.execute(name, &mut progress)?;
+                result = self.then_.clone();
             }
             Err(_) => {
                 progress.log(
@@ -139,11 +137,15 @@ impl ExecIf {
                     format!("exec {name} condition failed running").as_str(),
                 );
                 if let Some(else_) = self.else_.as_ref() {
-                    else_.execute(name, &mut progress)?;
+                    result = else_.clone();
                 }
             }
         }
+        progress.log(
+            printer::Level::Trace,
+            format!("exec if {name} enable targets: {result:?}",).as_str(),
+        );
 
-        Ok(())
+        result
     }
 }

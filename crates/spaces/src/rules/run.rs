@@ -14,7 +14,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for repo"))?;
 
-        let mut state = rules::get_state().write().unwrap();
+        let state = rules::get_state().read().unwrap();
         let rule_name = rule.name.clone();
         state
             .insert_task(rules::Task::new(
@@ -44,7 +44,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             );
         }
 
-        let mut state = rules::get_state().write().unwrap();
+        let state = rules::get_state().read().unwrap();
         let rule_name = rule.name.clone();
         state
             .insert_task(rules::Task::new(
@@ -74,25 +74,18 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             );
         }
 
-        if let Some(redirect_stdout) = exec_if.then_.redirect_stdout.as_mut() {
-            *redirect_stdout = format!(
-                "{}/{}",
-                rules::get_path_to_build_checkout(rule.name.as_str())?,
-                redirect_stdout
-            );
-        }
+        let state = rules::get_state().read().unwrap();
 
-        if let Some(exec_else) = exec_if.else_.as_mut() {
-            if let Some(redirect_stdout) = exec_else.redirect_stdout.as_mut() {
-                *redirect_stdout = format!(
-                    "{}/{}",
-                    rules::get_path_to_build_checkout(rule.name.as_str())?,
-                    redirect_stdout
-                );
+        for target in exec_if.then_.iter_mut() {
+            *target = state.get_sanitized_rule_name(target);
+        }
+        
+        if let Some(else_targets) = exec_if.else_.as_mut() {
+            for target in else_targets.iter_mut() {
+                *target = state.get_sanitized_rule_name(target);
             }
         }
 
-        let mut state = rules::get_state().write().unwrap();
         let rule_name = rule.name.clone();
         state
             .insert_task(rules::Task::new(
@@ -127,7 +120,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             serde_json::from_value(archive.to_json_value()?)
                 .context(format_context!("bad options for repo"))?;
 
-        let mut state = rules::get_state().write().unwrap();
+        let state = rules::get_state().read().unwrap();
         let rule_name = rule.name.clone();
         if false {
             let mut inputs = HashSet::new();

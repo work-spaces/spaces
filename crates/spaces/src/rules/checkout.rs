@@ -31,7 +31,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let worktree_path = workspace::absolute_path();
 
-        let mut state = rules::get_state().write().unwrap();
+        let state = rules::get_state().write().unwrap();
         let checkout = repo.get_checkout();
         let spaces_key = rule.name.clone();
         let rule_name = rule.name.clone();
@@ -85,7 +85,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let asset: asset::AddWhichAsset = serde_json::from_value(asset.to_json_value()?)
             .context(format_context!("Failed to parse which asset arguments"))?;
 
-        let mut state = rules::get_state().write().unwrap();
+        let state = rules::get_state().read().unwrap();
         let rule_name = rule.name.clone();
         state
             .insert_task(rules::Task::new(
@@ -125,7 +125,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             serde_json::from_value(asset.to_json_value()?)
                 .context(format_context!("Failed to parse asset arguments"))?;
 
-        let mut state = rules::get_state().write().unwrap();
+        let state = rules::get_state().read().unwrap();
         let rule_name = rule.name.clone();
 
         state
@@ -149,7 +149,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             serde_json::from_value(asset.to_json_value()?)
                 .context(format_context!("Failed to parse archive arguments"))?;
 
-        let mut state = rules::get_state().write().unwrap();
+        let state = rules::get_state().read().unwrap();
         let rule_name = rule.name.clone();
 
         state
@@ -174,7 +174,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let update_env: executor::env::UpdateEnv = serde_json::from_value(env.to_json_value()?)
             .context(format_context!("Failed to parse archive arguments"))?;
 
-        let mut state = rules::get_state().write().unwrap();
+        let state = rules::get_state().read().unwrap();
         let rule_name = rule.name.clone();
 
         state
@@ -194,7 +194,7 @@ fn add_http_archive(
     archive_option: Option<http_archive::Archive>,
 ) -> anyhow::Result<()> {
     if let Some(archive) = archive_option {
-        let mut state = rules::get_state().write().unwrap();
+        let state = rules::get_state().read().unwrap();
 
         //create a target that waits for all downloads
         //then create links based on all downloads being complete

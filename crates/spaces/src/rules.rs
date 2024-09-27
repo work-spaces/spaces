@@ -12,7 +12,7 @@ use std::sync::RwLock;
 use std::sync::{Arc, Condvar, Mutex};
 
 pub struct State {
-    pub tasks: HashMap<String, Task>,
+    pub tasks: RwLock<HashMap<String, Task>>,
     pub graph: graph::Graph,
     pub sorted: Vec<petgraph::prelude::NodeIndex>,
     pub latest_starlark_module: Option<String>,
@@ -24,7 +24,7 @@ impl State {
         label::sanitize_rule(rule_name, self.latest_starlark_module.as_ref())
     }
 
-    pub fn insert_task(&mut self, mut task: Task) -> anyhow::Result<()> {
+    pub fn insert_task(&self, mut task: Task) -> anyhow::Result<()> {
         // update the rule name to have the starlark module name
         let rule_label = label::sanitize_rule(
             task.rule.name.as_str(),
@@ -42,19 +42,22 @@ impl State {
             }
         }
 
-        if self.tasks.get(&rule_label).is_none() {
-            self.tasks.insert(rule_label, task);
+        let mut tasks = self.tasks.write().unwrap();
+        if tasks.get(&rule_label).is_none() {
+            tasks.insert(rule_label, task);
         }
 
         Ok(())
     }
 
     pub fn sort_tasks(&mut self, target: Option<String>) -> anyhow::Result<()> {
-        for task in self.tasks.values() {
+        let mut tasks = self.tasks.write().unwrap();
+
+        for task in tasks.values() {
             self.graph.add_task(task.rule.name.clone());
         }
-        let tasks_copy = self.tasks.clone();
-        for task in self.tasks.values_mut() {
+        let tasks_copy = tasks.clone();
+        for task in tasks.values_mut() {
             // capture implicit dependencies based on inputs/outputs
             for other_task in tasks_copy.values() {
                 if task.rule.name == other_task.rule.name {
@@ -87,10 +90,10 @@ impl State {
     }
 
     pub fn show_tasks(&self, printer: &mut printer::Printer) -> anyhow::Result<()> {
+        let tasks = self.tasks.read().unwrap();
         for node_index in self.sorted.iter() {
             let task_name = self.graph.get_task(*node_index);
-            let task = self
-                .tasks
+            let task = tasks
                 .get(task_name)
                 .ok_or(format_error!("Task not found {task_name}"))?;
 
@@ -101,33 +104,40 @@ impl State {
     }
 
     pub fn execute(
-        &mut self,
+        &self,
         printer: &mut printer::Printer,
         phase: Phase,
-    ) -> anyhow::Result<Vec<String>> {
-        let mut new_modules = Vec::new();
+    ) -> anyhow::Result<executor::TaskResult> {
+        let mut task_result = executor::TaskResult::new();
         let mut multi_progress = printer::MultiProgress::new(printer);
         let mut handle_list = Vec::new();
 
         for node_index in self.sorted.iter() {
             let task_name = self.graph.get_task(*node_index);
-            let task = self
-                .tasks
-                .get_mut(task_name)
-                .ok_or(format_error!("Task not found {task_name}"))?;
+            let task = {
+                let tasks = self.tasks.read().unwrap();
+
+                tasks
+                    .get(task_name)
+                    .ok_or(format_error!("Task not found {task_name}"))?
+                    .clone()
+            };
 
             if task.phase == phase {
-                let mut progress_bar = multi_progress.add_progress(
-                    task.rule.name.as_str(),
-                    Some(100),
-                    Some("Complete"),
-                );
+                let finish_message = if multi_progress.printer.level <= printer::Level::Info {
+                    Some("Complete")
+                } else {
+                    None
+                };
+
+                let mut progress_bar =
+                    multi_progress.add_progress(task.rule.name.as_str(), Some(100), finish_message);
+
                 progress_bar.log(
                     printer::Level::Trace,
                     format!("Running task {}", task.rule.name).as_str(),
                 );
                 handle_list.push(task.execute(progress_bar));
-                task.phase = Phase::Complete;
 
                 loop {
                     let mut number_running = 0;
@@ -138,25 +148,35 @@ impl State {
                     }
 
                     // this can be configured with a another global starlark function
-                    if number_running < 3 {
+                    if number_running < 10 {
                         break;
                     } else {
-                        std::thread::sleep(std::time::Duration::from_millis(50));
+                        std::thread::sleep(std::time::Duration::from_millis(100));
                     }
                 }
             }
         }
 
+        let mut first_error = None;
         for handle in handle_list {
-            new_modules.extend(
-                handle
-                    .join()
-                    .unwrap()
-                    .context(format_context!("task failed"))?,
-            );
+            let handle_result = handle.join().unwrap();
+            match handle_result {
+                Ok(handle_task_result) => {
+                    task_result.extend(handle_task_result);
+                }
+                Err(err) => {
+                    if first_error.is_none() {
+                        first_error = Some(err);
+                    }
+                }
+            }
         }
 
-        Ok(new_modules)
+        if let Some(err) = first_error {
+            return Err(err);
+        }
+
+        Ok(task_result)
     }
 }
 
@@ -168,7 +188,7 @@ pub fn get_state() -> &'static RwLock<State> {
     }
 
     STATE.set(RwLock::new(State {
-        tasks: HashMap::new(),
+        tasks: RwLock::new(HashMap::new()),
         graph: graph::Graph::new(),
         sorted: Vec::new(),
         latest_starlark_module: None,
@@ -204,6 +224,14 @@ pub enum Phase {
     Run,
     Evaluate,
     Complete,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum RuleType {
+    Setup,
+    Run,
+    Optional,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -213,6 +241,14 @@ pub struct Rule {
     pub inputs: Option<HashSet<String>>,
     pub outputs: Option<HashSet<String>>,
     pub platforms: Option<Vec<platform::Platform>>,
+    #[serde(rename = "type")]
+    pub type_: Option<RuleType>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Signal {
+    ready: bool,
+    name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -221,9 +257,9 @@ pub struct Task {
     pub phase: Phase,
     pub rule: Rule,
     #[serde(skip)]
-    signal: Arc<(Mutex<bool>, Condvar)>,
+    signal: Arc<(Mutex<Signal>, Condvar)>,
     #[serde(skip)]
-    deps_signals: Vec<Arc<(Mutex<bool>, Condvar)>>,
+    deps_signals: Vec<Arc<(Mutex<Signal>, Condvar)>>,
 }
 
 impl Task {
@@ -231,7 +267,13 @@ impl Task {
         Task {
             executor,
             phase,
-            signal: Arc::new((Mutex::new(false), Condvar::new())),
+            signal: Arc::new((
+                Mutex::new(Signal {
+                    ready: false,
+                    name: rule.name.clone(),
+                }),
+                Condvar::new(),
+            )),
             deps_signals: Vec::new(),
             rule,
         }
@@ -263,7 +305,7 @@ impl Task {
     pub fn execute(
         &self,
         mut progress: printer::MultiProgressBar,
-    ) -> std::thread::JoinHandle<anyhow::Result<Vec<String>>> {
+    ) -> std::thread::JoinHandle<anyhow::Result<executor::TaskResult>> {
         let name = self.rule.name.clone();
         let executor = self.executor.clone();
         let signal = self.signal.clone();
@@ -272,7 +314,7 @@ impl Task {
 
         progress.set_message("Waiting for dependencies");
 
-        std::thread::spawn(move || -> anyhow::Result<Vec<String>> {
+        std::thread::spawn(move || -> anyhow::Result<executor::TaskResult> {
             // check inputs/outputs to see if we need to run
             let mut is_execute = true;
             if let (Some(platforms), Some(current_platform)) =
@@ -286,61 +328,121 @@ impl Task {
                 format!("Execute {name} after platform check? {}", is_execute).as_str(),
             );
 
+            let total = deps_signals.len();
+
+            progress.log(
+                printer::Level::Trace,
+                format!("{name} has {} dependencies", total).as_str(),
+            );
+
+            let mut count = 1;
             for deps_signal in deps_signals {
+                {
+                    let (lock, _) = &*deps_signal;
+                    let signal_access = lock.lock().unwrap();
+                    progress.log(
+                        printer::Level::Trace,
+                        format!(
+                            "{name} Waiting for dependency {} {count}/{total}",
+                            signal_access.name
+                        )
+                        .as_str(),
+                    );
+                }
                 loop {
                     let (lock, cvar) = &*deps_signal;
-                    let done = lock.lock().unwrap();
-                    if !*done {
+                    let signal_access = lock.lock().unwrap();
+                    if !signal_access.ready {
                         let _ = cvar
-                            .wait_timeout(done, std::time::Duration::from_millis(50))
+                            .wait_timeout(signal_access, std::time::Duration::from_millis(100))
                             .unwrap();
                     } else {
                         break;
                     }
                     progress.increment_with_overflow(1);
                 }
+                count += 1;
             }
 
-            if is_execute {
-                if let Some(inputs) = rule.inputs.as_ref() {
-                    let mut state = io::get_state().write().unwrap();
-                    is_execute = inputs.len() == 0;
-                    let globs = inputs.iter().map(|e| e.as_str()).collect::<Vec<&str>>();
-                    if state
-                        .io
-                        .update_glob(&mut progress, globs.as_slice())
-                        .context(format_context!("while updating io"))?
-                        == io::IsUpdated::Yes
-                    {
-                        is_execute = true;
-                    }
+            progress.log(
+                printer::Level::Trace,
+                format!("{name} All dependencies are done").as_str(),
+            );
+
+            let is_optional_or_cancelled = {
+                let state = get_state().read().unwrap();
+                let tasks = state.tasks.read().unwrap();
+                let task = tasks
+                    .get(&name)
+                    .context(format_context!("Task not found {name}"))?;
+                if task.phase == Phase::Cancelled {
+                    progress.log(
+                        printer::Level::Message,
+                        format!("Skipping {name} because it was cancelled").as_str(),
+                    );
+                    true
+                } else if task.rule.type_ == Some(RuleType::Optional) {
+                    progress.log(
+                        printer::Level::Message,
+                        format!("Skipping {name} because it is optional").as_str(),
+                    );
+                    true
+                } else {
+                    false
                 }
-                progress.log(
-                    printer::Level::Trace,
-                    format!("Execute {name} after inputs check? {}", is_execute).as_str(),
-                );
+            };
+
+            if is_optional_or_cancelled {
+                is_execute = false;
             }
 
             if !is_execute {
-                progress.log(printer::Level::Info, format!("Skipping {name}").as_str());
+                progress.log(printer::Level::Message, format!("Skipping {name}").as_str());
             }
 
             progress.set_message(if is_execute { "Running" } else { "Skipping" });
 
-            let new_modules = if is_execute {
+            let task_result = if is_execute {
                 executor
                     .execute(name.as_str(), progress)
                     .context(format_context!("Failed to exec {}", name))
             } else {
-                Ok(Vec::new())
+                Ok(executor::TaskResult::new())
             };
 
+            // before notifying dependents process the enabled_targets list
+            {
+                let state = get_state().read().unwrap();
+                let mut tasks = state.tasks.write().unwrap();
+                if let Ok(task_result) = &task_result {
+                    for enabled_target in task_result.enabled_targets.iter() {
+                        let task = tasks
+                            .get_mut(enabled_target)
+                            .ok_or(format_error!("Task not found {enabled_target}"))
+                            .expect(
+                                format!("Internal Error: Task not found {enabled_target}").as_str(),
+                            );
+                        task.rule.type_ = Some(RuleType::Run);
+                    }
+                } else {
+                    // Cancel all pending tasks - exit gracefully
+                    for task in tasks.values_mut() {
+                        task.phase = Phase::Cancelled;
+                    }
+                }
+
+                let task = tasks
+                    .get_mut(&name)
+                    .context(format_context!("Task not found {name}"))?;
+                task.phase = Phase::Complete;
+            }
+
             let (lock, cvar) = &*signal;
-            let mut done = lock.lock().unwrap();
-            *done = true;
+            let mut signal_access = lock.lock().unwrap();
+            signal_access.ready = true;
             cvar.notify_all();
 
-            new_modules
+            task_result
         })
     }
 
