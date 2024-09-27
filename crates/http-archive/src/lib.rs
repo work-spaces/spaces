@@ -145,7 +145,7 @@ impl HttpArchive {
         } else {
             format!("{workspace_directory}/{space_directory}")
         };
-        progress_bar.set_prefix("linking");
+
         progress_bar.set_total(files.len() as u64);
 
         for file in files {

@@ -102,7 +102,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] archive: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
         let mut rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for repo"))?;
+            .context(format_context!("bad options for add_archive rule"))?;
 
         if rule.inputs.is_some() {
             return Err(anyhow::anyhow!(
@@ -118,7 +118,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let create_archive: easy_archiver::CreateArchive =
             serde_json::from_value(archive.to_json_value()?)
-                .context(format_context!("bad options for repo"))?;
+                .context(format_context!("bad options for archive"))?;
 
         let state = rules::get_state().read().unwrap();
         let rule_name = rule.name.clone();
