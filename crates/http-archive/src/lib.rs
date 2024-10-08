@@ -1,35 +1,58 @@
-use crate::{context, manifest};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use tokio::io::AsyncWriteExt;
+use std::sync::RwLock;
+struct State {}
+
+static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
+
+fn get_state() -> &'static RwLock<State> {
+    if let Some(state) = STATE.try_get() {
+        return state;
+    }
+
+    STATE.set(RwLock::new(State {}));
+    STATE.get()
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ArchiveLink {
+    None,
+    Hard,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Archive {
+    pub url: String,
+    pub sha256: String,
+    pub link: ArchiveLink,
+    pub includes: Option<Vec<String>>,
+    pub excludes: Option<Vec<String>>,
+    pub strip_prefix: Option<String>,
+    pub add_prefix: Option<String>,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Files {
     files: HashSet<String>,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpArchive {
     pub spaces_key: String,
-    archive: manifest::Archive,
+    archive: Archive,
     archive_driver: Option<easy_archiver::driver::Driver>,
     full_path_to_archive: String,
-    files: HashSet<String>,
-    context: std::sync::Arc<context::Context>,
 }
 
 impl HttpArchive {
-    pub fn new(
-        context: std::sync::Arc<context::Context>,
-        spaces_key: &str,
-        archive: &manifest::Archive,
-    ) -> anyhow::Result<Self> {
+    pub fn new(bare_store_path: &str, spaces_key: &str, archive: &Archive) -> anyhow::Result<Self> {
         let relative_path = Self::url_to_relative_path(archive.url.as_str())
             .context(format_context!("no relative path for {}", archive.url))?;
 
-        let full_path_to_archive = context.get_bare_store_path(relative_path.as_str());
+        let full_path_to_archive = format!("{bare_store_path}/{relative_path}");
 
         let archive_path = std::path::Path::new(full_path_to_archive.as_str());
 
@@ -65,8 +88,6 @@ impl HttpArchive {
             archive_driver,
             full_path_to_archive,
             spaces_key: spaces_key.to_string(),
-            files: HashSet::new(),
-            context,
         })
     }
 
@@ -87,18 +108,16 @@ impl HttpArchive {
     }
 
     pub fn create_links(
-        &mut self,
-        progress_bar: &mut printer::MultiProgressBar,
+        &self,
+        mut progress_bar: printer::MultiProgressBar,
+        workspace_directory: &str,
         space_directory: &str,
     ) -> anyhow::Result<()> {
         //construct a list of files to link
-        if self.files.is_empty() {
-            self.load_files_json()
-                .context(format_context!("failed to load json files manifest"))?;
-        }
-
         let mut files = Vec::new();
-        let all_files = &self.files;
+        let all_files = self
+            .load_files_json()
+            .context(format_context!("failed to load json files manifest"))?;
         for file in all_files.iter() {
             let mut is_match = true;
             if let Some(includes) = self.archive.includes.as_ref() {
@@ -122,11 +141,11 @@ impl HttpArchive {
         }
 
         let target_prefix = if let Some(add_prefix) = self.archive.add_prefix.as_ref() {
-            add_prefix.to_string()
+            format!("{workspace_directory}/{add_prefix}")
         } else {
-            space_directory.to_string()
+            format!("{workspace_directory}/{space_directory}")
         };
-        progress_bar.set_prefix("linking");
+
         progress_bar.set_total(files.len() as u64);
 
         for file in files {
@@ -143,21 +162,13 @@ impl HttpArchive {
             if let Some(relative_target_path) = relative_target_path {
                 let full_target_path = format!("{}/{}", target_prefix, relative_target_path);
 
-                let full_target_path = self
-                    .context
-                    .template_model
-                    .render_template_string(full_target_path.as_str())
-                    .context(format_context!(
-                        "template replacement failed {full_target_path}"
-                    ))?;
-
                 match self.archive.link {
-                    manifest::ArchiveLink::Hard => {
+                    ArchiveLink::Hard => {
                         Self::create_hard_link(full_target_path.clone(), source.clone()).context(
                             format_context!("hard link {full_target_path} -> {source}",),
                         )?;
                     }
-                    manifest::ArchiveLink::None => (),
+                    ArchiveLink::None => (),
                 }
             }
             progress_bar.increment(1);
@@ -166,9 +177,12 @@ impl HttpArchive {
         Ok(())
     }
 
-    fn create_hard_link(target_path: String, source: String) -> anyhow::Result<()> {
+    pub fn create_hard_link(target_path: String, source: String) -> anyhow::Result<()> {
         let target = std::path::Path::new(target_path.as_str());
         let original = std::path::Path::new(source.as_str());
+
+        // Hold the mutex to ensure operations are atomic
+        let _state = get_state().write().unwrap();
 
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent)
@@ -179,13 +193,13 @@ impl HttpArchive {
 
         //if the source is a symlink, read the symlink and create a symlink
         if original.is_symlink() {
-            let link = std::fs::read_link(original).context(format_context!(
-                "failed to read link {original:?} -> {target_path}"
-            ))?;
+            //let link = std::fs::read_link(original).context(format_context!(
+            //    "failed to read link {original:?} -> {target_path}"
+            //))?;
 
             #[cfg(unix)]
-            std::os::unix::fs::symlink(link.clone(), target).context(format_context!(
-                "failed to create symlink {link:?} -> {target_path}"
+            std::os::unix::fs::symlink(original, target).context(format_context!(
+                "failed to create symlink {original:?} -> {target_path}"
             ))?;
 
             #[cfg(windows)]
@@ -198,32 +212,31 @@ impl HttpArchive {
         }
 
         std::fs::hard_link(original, target).context(format_context!(
-            "{} -> {}\nIf you get 'Operation Not Permitted' on mac try enabled 'Full Disk Access' for the terminal",
-            target_path,
-            source
+            "If you get 'Operation Not Permitted' on mac try enabling 'Full Disk Access' for the terminal",
         ))?;
 
         Ok(())
     }
 
-    pub fn sync(
-        &mut self,
-        context: std::sync::Arc<context::Context>,
-        _full_path: &str,
-        progress_bar: printer::MultiProgressBar,
-    ) -> anyhow::Result<()> {
+    pub fn sync(&self, progress_bar: printer::MultiProgressBar) -> anyhow::Result<printer::MultiProgressBar> {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .context(format_context!("Failed to create runtime"))?;
+
         let next_progress_bar = if self.is_download_required() {
-            let join_handle = self.download(&context.async_runtime, progress_bar)?;
-            context.async_runtime.block_on(join_handle)??
+            let join_handle = self.download(&runtime, progress_bar)?;
+            runtime.block_on(join_handle)??
         } else {
             progress_bar
         };
 
-        self.extract(next_progress_bar).context(format_context!(
+        let next_progress_bar = self.extract(next_progress_bar).context(format_context!(
             "extract failed {}",
             self.full_path_to_archive
         ))?;
-        Ok(())
+        Ok(next_progress_bar)
     }
 
     pub fn download(
@@ -261,40 +274,34 @@ impl HttpArchive {
         Ok(join_handle)
     }
 
-    fn save_files_json(&self) -> anyhow::Result<()> {
-        let files = Files {
-            files: self.files.clone(),
-        };
-
+    fn save_files_json(&self, files: Files) -> anyhow::Result<()> {
         let file_path = self.get_path_to_extracted_files_json();
         let contents = serde_json::to_string_pretty(&files)?;
         std::fs::write(file_path, contents)?;
         Ok(())
     }
 
-    fn load_files_json(&mut self) -> anyhow::Result<()> {
+    fn load_files_json(&self) -> anyhow::Result<HashSet<String>> {
         let file_path = self.get_path_to_extracted_files_json();
-        let contents = std::fs::read_to_string(file_path)?;
-        let files: Files = serde_json::from_str(contents.as_str())?;
-        self.files = files.files;
-
-        Ok(())
+        let contents = std::fs::read_to_string(file_path.as_str())
+            .context(format_context!("while reading {file_path}"))?;
+        let files: Files = serde_json::from_str(contents.as_str())
+            .context(format_context!("while parsing {file_path}"))?;
+        Ok(files.files)
     }
 
     fn extract(
-        &mut self,
+        &self,
         progress_bar: printer::MultiProgressBar,
     ) -> anyhow::Result<printer::MultiProgressBar> {
         if !self.is_extract_required() {
-            self.load_files_json().context(format_context!(
-                "Missing {}",
-                self.get_path_to_extracted_files_json()
-            ))?;
             return Ok(progress_bar);
         }
 
         std::fs::create_dir_all(self.get_path_to_extracted_files().as_str())
             .context(format_context!("creating {}", self.full_path_to_archive))?;
+
+        let mut extracted_files = HashSet::new();
 
         let next_progress_bar = if self.archive_driver.is_some() {
             let decoder = easy_archiver::Decoder::new(
@@ -315,31 +322,22 @@ impl HttpArchive {
                 self.get_path_to_extracted_files()
             ))?;
 
-            self.files = extracted.files;
+            extracted_files = extracted.files;
             extracted.progress_bar
         } else {
             let path_to_artifact = std::path::Path::new(self.full_path_to_archive.as_str());
             let file_name = path_to_artifact.file_name().ok_or(format_error!(
                 "No file name found in archive path {path_to_artifact:?}"
             ))?;
-            let path_to_extracted_files = self.get_path_to_extracted_files();
+            //let path_to_extracted_files = self.get_path_to_extracted_files();
 
-            let path_to_files = std::path::Path::new(path_to_extracted_files.as_str());
-            let path_to_destination = path_to_files.join(file_name).to_string_lossy().to_string();
+            //let path_to_files = std::path::Path::new(path_to_extracted_files.as_str());
+            //let path_to_destination = path_to_files.join(file_name).to_string_lossy().to_string();
 
-            Self::create_hard_link(
-                path_to_destination.clone(),
-                path_to_artifact.to_string_lossy().to_string(),
-            )
-            .context(format_context!(
-                "hard link {path_to_destination} -> {path_to_artifact:?}"
-            ))?;
-
-            self.files = HashSet::new();
-            self.files.insert(file_name.to_string_lossy().to_string());
+            extracted_files.insert(file_name.to_string_lossy().to_string());
             progress_bar
         };
-        self.save_files_json()
+        self.save_files_json(Files{files:extracted_files})
             .context(format_context!("Failed to save json files manifest"))?;
         Ok(next_progress_bar)
     }
@@ -354,132 +352,5 @@ impl HttpArchive {
         let scheme = archive_url.scheme();
         let path = archive_url.path();
         Ok(format!("{scheme}/{host}{path}"))
-    }
-}
-
-pub fn create(
-    execution_context: context::ExecutionContext,
-    manifest_path: String,
-    output_directory: String,
-) -> anyhow::Result<()> {
-    let config = manifest::CreateArchive::new(&manifest_path)
-        .context(format_context!("While loading config path {manifest_path}"))?;
-
-    let mut printer = execution_context.printer;
-
-    let input_as_path = std::path::Path::new(config.input.as_str());
-
-    let strip_prefix = if input_as_path.is_dir() {
-        config.input.clone()
-    } else {
-        if let Some(parent) = input_as_path.parent() {
-            parent.to_string_lossy().to_string()
-        } else {
-            "".to_string()
-        }
-    };
-
-    let walk_dir: Vec<_> = walkdir::WalkDir::new(config.input.as_str())
-        .into_iter()
-        .filter_map(|entry| entry.ok())
-        .collect();
-
-    let output_file_name = config.get_output_file();
-
-    std::fs::create_dir_all(output_directory.clone())?;
-
-    let mut multi_progress = printer::MultiProgress::new(&mut printer);
-    let progress_bar = multi_progress.add_progress("Archiving", Some(100), None);
-
-    let output_file_path = format!("{}/{}", output_directory, output_file_name);
-
-    let mut encoder = easy_archiver::Encoder::new(
-        output_directory.as_str(),
-        output_file_name.as_str(),
-        progress_bar,
-    )
-    .context(format_context!("{output_file_path}"))?;
-
-    for item in walk_dir {
-        let archive_path = item
-            .path()
-            .strip_prefix(strip_prefix.as_str())
-            .context(format_context!("{item:?}"))?
-            .to_string_lossy()
-            .to_string();
-
-        let file_path = item.path().to_string_lossy().to_string();
-
-        encoder
-            .add_file(archive_path.as_str(), file_path.as_str())
-            .context(format_context!("{output_directory}"))?;
-    }
-
-    let digestable = encoder
-        .compress()
-        .context(format_context!("{output_directory}"))?;
-
-    let digest = digestable
-        .digest()
-        .context(format_context!("{output_directory}"))?;
-
-    printer.info(output_file_path.as_str(), &digest.sha256)?;
-
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::context;
-
-    #[test]
-    fn test_http_archive() {
-        let context = std::sync::Arc::new(context::Context::new().unwrap());
-
-        let mut printer = context.printer.write().expect("Internal Error: No printer");
-
-        let _archive = manifest::Archive {
-            url: "https://github.com/StratifyLabs/SDK/releases/download/v8.3.1/arm-none-eabi-8-2019-q3-update-macos-x86_64.tar.gz".to_string(),
-            sha256: "930dcd8b837916c82608bdf198d9f34f71deefd432024fe98271449b742a3623".to_string(),
-            link: manifest::ArchiveLink::Hard,
-            includes: None,
-            excludes: None,
-            add_prefix: None,
-            strip_prefix: None
-        };
-
-        let archive = manifest::Archive {
-            url: "https://github.com/StratifyLabs/SDK/releases/download/v8.3.1/stratifyos-arm-none-eabi-libstd-8.3.1.zip".to_string(),
-            sha256: "2b9cbca5867c70bf1f890f1dc25adfbe7ff08ef6ea385784b0e5877a298b7ff1".to_string(),
-            link: manifest::ArchiveLink::Hard,
-            includes: None,
-            excludes: None,
-            add_prefix: None,
-            strip_prefix: None
-        };
-
-        let mut multi_progress = printer::MultiProgress::new(&mut printer);
-        let progress_bar = multi_progress.add_progress("test", Some(100), None);
-
-        let mut http_archive = HttpArchive::new(context.clone(), "toolchain", &archive).unwrap();
-
-        if http_archive.is_download_required() {
-            let download_progress = multi_progress.add_progress("downloading", Some(100), None);
-            let mut wait_progress = multi_progress.add_progress("waiting", None, None);
-            let runtime = &context.async_runtime;
-
-            let handle = http_archive.download(runtime, download_progress).unwrap();
-
-            while !handle.is_finished() {
-                wait_progress.increment(1);
-                std::thread::sleep(std::time::Duration::from_millis(100));
-            }
-        }
-
-        let mut next_progress = http_archive.extract(progress_bar).unwrap();
-        http_archive
-            .create_links(&mut next_progress, "tmp")
-            .unwrap();
     }
 }

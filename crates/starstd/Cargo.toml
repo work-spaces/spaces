@@ -1,0 +1,15 @@
+[package]
+name = "starstd"
+version = "0.6.0-beta.2"
+edition = "2021"
+
+
+[dependencies]
+
+starlark.workspace = true
+anyhow-source-location.workspace = true
+anyhow.workspace = true
+platform.workspace = true
+toml.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
