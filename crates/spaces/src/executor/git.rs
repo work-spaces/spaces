@@ -13,7 +13,7 @@ pub struct Git {
 }
 
 impl Git {
-    fn execute_spaces_clone(
+    fn execute_worktree_clone(
         &self,
         name: &str,
         mut progress: printer::MultiProgressBar,
@@ -107,8 +107,8 @@ impl Git {
 
     pub fn execute(&self, _name: &str, progress: printer::MultiProgressBar) -> anyhow::Result<()> {
         match self.clone {
-            git::Clone::Spaces => {
-                self.execute_spaces_clone(_name, progress)
+            git::Clone::Worktree => {
+                self.execute_worktree_clone(_name, progress)
                     .context(format_context!("spaces clone failed"))?;
             }
             git::Clone::Default => {

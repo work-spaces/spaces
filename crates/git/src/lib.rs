@@ -19,7 +19,7 @@ pub enum Checkout {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Clone {
     Default,
-    Spaces,
+    Worktree,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
