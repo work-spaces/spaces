@@ -16,6 +16,7 @@ pub struct Io {
     inputs: HashMap<String, Input>,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq)]
 pub enum IsUpdated {
     No,
@@ -45,12 +46,14 @@ impl Io {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn get_digest(path: &str) -> anyhow::Result<String> {
         let contents =
             std::fs::read(path).context(format_context!("Failed to read file {path}"))?;
         Ok(blake3::hash(&contents).to_string())
     }
 
+    #[allow(dead_code)]
     pub fn update_glob(
         &mut self,
         progress: &mut printer::MultiProgressBar,
