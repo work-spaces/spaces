@@ -12,7 +12,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Rust
         uses: actions-rs/toolchain@v1
@@ -27,8 +27,8 @@ jobs:
       - name: Create binary artifact
         run: |
           mkdir -p artifacts
-          tar -cJf artifacts/spaces-x86_64-unknown-linux-gnu-${{ github.ref_name }}.tar.xz -C target/release spaces        shell: bash
-
+          zip artifacts/spaces-x86_64-unknown-linux-gnu-${{ github.ref_name }}.zip target/release/spaces
+          
       - name: Publish release with Ubuntu binary
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
