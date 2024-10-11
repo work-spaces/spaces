@@ -76,7 +76,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          winpty gh release upload ${{ github.ref_name }} artifacts/spaces-${{ matrix.os }}-${{ matrix.arch }}-${{ github.ref_name }}.exe --clobber
+          gh.exe release upload ${{ github.ref_name }} artifacts/spaces-${{ matrix.os }}-${{ matrix.arch }}-${{ github.ref_name }}.exe --clobber
 
   build-matrix-macos:
     name: Build and Upload Other OS Binaries
