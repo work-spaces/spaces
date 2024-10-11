@@ -31,16 +31,16 @@ jobs:
       - name: Create binary artifact
         run: |
           mkdir -p artifacts
-          zip artifacts/spaces-x86_64-unknown-linux-gnu-${{ github.ref_name }}.zip target/release/spaces
+          zip artifacts/spaces-linux-gnu-x86_64-${{ github.ref_name }}.zip target/release/spaces
 
       - name: Publish release with Ubuntu binary
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create ${{ github.ref_name }} \
-            artifacts/spaces-x86_64-unknown-linux-gnu-${{ github.ref_name }}.zip --title "${{ github.ref_name }}" --notes "Release ${{ github.ref_name }} (Ubuntu binary packaged as .tar.xz)"
+            artifacts/spaces-linux-gnu-x86_64-${{ github.ref_name }}.zip --title "${{ github.ref_name }}" --notes "Release ${{ github.ref_name }} (Ubuntu binary packaged as .tar.xz)"
             
-  build-matrix:
+  build-matrix-windows:
     name: Build and Upload Other OS Binaries
     needs: build-ubuntu
     runs-on: ${{ matrix.os }}
@@ -50,7 +50,7 @@ jobs:
       repository-projects: write
     strategy:
       matrix:
-        os: [macos-latest, windows-latest]
+        os: [windows-latest]
         arch: [x86_64, aarch64]
     steps:
       - name: Checkout code
@@ -69,7 +69,45 @@ jobs:
       - name: Create binary artifact (zip)
         run: |
           mkdir -p artifacts
-          # Zip the binary
+          cp target/release/spaces.exe artifacts/spaces-${{ matrix.os }}-${{ matrix.arch }}-${{ github.ref_name }}.exe 
+        shell: bash
+
+      - name: Upload binary to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ github.ref_name }} \
+            artifacts/spaces-${{ matrix.os }}-${{ matrix.arch }}-${{ github.ref_name }}.exe --clobber
+
+  build-matrix-macos:
+    name: Build and Upload Other OS Binaries
+    needs: build-ubuntu
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+      pull-requests: write
+      repository-projects: write
+    strategy:
+      matrix:
+        os: [macos-latest]
+        arch: [x86_64, aarch64]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+          components: rustfmt, clippy
+
+      - name: Build for ${{ matrix.os }}
+        run: cargo build --profile=release
+
+      - name: Create binary artifact (zip)
+        run: |
+          mkdir -p artifacts
           zip artifacts/spaces-${{ matrix.os }}-${{ matrix.arch }}-${{ github.ref_name }}.zip target/release/spaces
         shell: bash
 
