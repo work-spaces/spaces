@@ -28,13 +28,13 @@ jobs:
         run: |
           mkdir -p artifacts
           zip artifacts/spaces-x86_64-unknown-linux-gnu-${{ github.ref_name }}.zip target/release/spaces
-          
+
       - name: Publish release with Ubuntu binary
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create ${{ github.ref_name }} \
-            artifacts/spaces-x86_64-unknown-linux-gnu-${{ github.ref_name }}.tar.xz --title "${{ github.ref_name }}" --notes "Release ${{ github.ref_name }} (Ubuntu binary packaged as .tar.xz)"
+            artifacts/spaces-x86_64-unknown-linux-gnu-${{ github.ref_name }}.zip --title "${{ github.ref_name }}" --notes "Release ${{ github.ref_name }} (Ubuntu binary packaged as .tar.xz)"
             
   build-matrix:
     name: Build and Upload Other OS Binaries
@@ -42,9 +42,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [macos-latest, windows-latest]
-        target: [x86_64-apple-darwin, x86_64-pc-windows-msvc]
-
+        os: [macos-latest, windows-latest, ubuntu-latest]
+        target: [x86_64-apple-darwin, aarch64-apple-darwin, x86_64-pc-windows-msvc, aarch64-pc-windows-msvc, aarch64-unknown-linux-gnu]
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -59,10 +58,11 @@ jobs:
       - name: Build for ${{ matrix.os }}
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Create binary artifact
+      - name: Create binary artifact (zip)
         run: |
           mkdir -p artifacts
-          cp target/${{ matrix.target }}/release/your_project_name artifacts/your_project_name-${{ matrix.target }}-${{ github.ref_name }}
+          # Zip the binary
+          zip artifacts/your_project_name-${{ matrix.target }}-${{ github.ref_name }}.zip target/${{ matrix.target }}/release/your_project_name
         shell: bash
 
       - name: Upload binary to release
@@ -70,4 +70,5 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload ${{ github.ref_name }} \
-            artifacts/your_project_name-${{ matrix.target }}-${{ github.ref_name }} --clobber
+            artifacts/your_project_name-${{ matrix.target }}-${{ github.ref_name }}.zip --clobber
+
