@@ -2543,7 +2543,7 @@ dependencies = [
 
 [[package]]
 name = "spaces"
-version = "0.6.0-beta.6"
+version = "0.6.0-beta.7"
 dependencies = [
  "anyhow",
  "anyhow-source-location",
