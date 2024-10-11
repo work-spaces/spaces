@@ -64,7 +64,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Build for ${{ matrix.os }}
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --profile=release
 
       - name: Create binary artifact (zip)
         run: |
