@@ -9,6 +9,10 @@ jobs:
   build-ubuntu:
     name: Build and Publish Ubuntu Binary
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      repository-projects: write
 
     steps:
       - name: Checkout code
@@ -40,6 +44,10 @@ jobs:
     name: Build and Upload Other OS Binaries
     needs: build-ubuntu
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+      pull-requests: write
+      repository-projects: write
     strategy:
       matrix:
         os: [macos-latest, windows-latest, ubuntu-latest]
