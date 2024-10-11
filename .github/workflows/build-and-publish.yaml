@@ -70,7 +70,7 @@ jobs:
         run: |
           mkdir -p artifacts
           # Zip the binary
-          zip artifacts/your_project_name-${{ matrix.target }}-${{ github.ref_name }}.zip target/${{ matrix.target }}/release/your_project_name
+          zip artifacts/spaces-${{ matrix.target }}-${{ github.ref_name }}.zip target/release/spaces
         shell: bash
 
       - name: Upload binary to release
@@ -78,5 +78,5 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload ${{ github.ref_name }} \
-            artifacts/your_project_name-${{ matrix.target }}-${{ github.ref_name }}.zip --clobber
+            artifacts/spaces-${{ matrix.target }}-${{ github.ref_name }}.zip --clobber
 
