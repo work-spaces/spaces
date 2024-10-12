@@ -236,9 +236,9 @@ enum Commands {
         shell: clap_complete::Shell,
     },
     Docs {
-        /// The path to the star file containing checkout rules.
+        /// What documentation do you want to see?
         #[arg(value_enum)]
-        item: docs::DocItem,
+        item: Option<docs::DocItem>,
     },
     /// Lists the workspaces in the spaces store on the local machine.
     List {},

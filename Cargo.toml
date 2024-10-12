@@ -5,8 +5,8 @@ members = ["crates/spaces", "crates/graph", "crates/git", "crates/platform", "cr
 [workspace.dependencies]
 anyhow-source-location = { git = "https://github.com/work-spaces/anyhow-source-location", rev = "019b7804e35a72f945b3b4b3a96520cdbaa77f70" }
 anyhow = "1.0.89"
-printer = { git = "https://github.com/work-spaces/printer-rs", rev = "e3c6ebd6e458efef7418340e263e09eb276a8c92" }
-easy-archiver = { git = "https://github.com/work-spaces/easy-archiver", rev = "5e63c7dc8a1fdd9be33d7545c36c5349421d2fb1", features = [
+printer = { git = "https://github.com/work-spaces/printer-rs", rev = "619cb1a91c3cec39d7f5e54962511f810a389d0c" }
+easy-archiver = { git = "https://github.com/work-spaces/easy-archiver", rev = "630f5b2ecb1fe97fcb10e9fbe3adb26f5f9986cb", features = [
     "printer",
 ] }
 starlark = "0.12.0"
