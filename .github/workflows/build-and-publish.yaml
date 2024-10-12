@@ -64,12 +64,14 @@ jobs:
           components: rustfmt, clippy
 
       - name: Build for ${{ matrix.os }}
-        run: cargo build --profile=release  --target=${{ matrix.arch }}
+        run: |
+          rustup target add ${{ matrix.arch }}
+          cargo build --profile=release  --target=${{ matrix.arch }}
 
       - name: Create binary artifact (zip)
         run: |
           mkdir -p artifacts
-          cp target/release/spaces.exe artifacts/spaces-${{ matrix.os }}-${{ matrix.arch }}-${{ github.ref_name }}.exe 
+          cp target/${{ matrix.arch }}/release/spaces.exe artifacts/spaces-${{ matrix.os }}-${{ matrix.arch }}-${{ github.ref_name }}.exe 
         shell: bash
 
       - name: Upload binary to release
@@ -109,7 +111,7 @@ jobs:
       - name: Create binary artifact (zip)
         run: |
           mkdir -p artifacts
-          zip artifacts/spaces-${{ matrix.os }}-${{ matrix.arch }}-${{ github.ref_name }}.zip target/release/spaces
+          zip artifacts/spaces-${{ matrix.os }}-${{ matrix.arch }}-${{ github.ref_name }}.zip target/${{ matrix.arch }}-apple-darwin/release/spaces
         shell: bash
 
       - name: Upload binary to release
