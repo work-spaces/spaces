@@ -9,6 +9,7 @@ mod info;
 mod executor;
 mod workspace;
 mod label;
+mod docs;
 
 fn main() -> anyhow::Result<()> {
     arguments::execute()

@@ -1,7 +1,7 @@
-use crate::{evaluator, rules, workspace};
+use crate::{evaluator, rules, workspace, docs};
 use anyhow::Context;
 use anyhow_source_location::format_context;
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
 pub enum Level {
@@ -152,6 +152,31 @@ pub fn execute() -> anyhow::Result<()> {
 
         Arguments {
             verbosity,
+            commands: Commands::Completions { shell },
+        } => {
+            let _verbosity = verbosity;
+            clap_complete::generate(
+                shell,
+                &mut Arguments::command(),
+                "spaces",
+                &mut std::io::stdout(),
+            );
+        }
+
+        Arguments {
+            verbosity,
+            commands: Commands::Docs { item },
+        } => {
+            printer.level = verbosity.into();
+            if printer.level > printer::Level::Message {
+                printer.level = printer::Level::Message;
+            }
+
+            docs::show(&mut printer, item)?;
+        }
+
+        Arguments {
+            verbosity,
             commands: Commands::List {},
         } => {
             printer.level = verbosity.into();
@@ -180,6 +205,7 @@ Add a way to format spaces_deps.toml. This opens the door for auto updating spac
 
 */
 
+
 #[derive(Debug, Subcommand)]
 enum Commands {
     /// Executes the Checkout phase rules for the script and its dependencies.
@@ -188,7 +214,7 @@ enum Commands {
         #[arg(long)]
         name: String,
         /// The path to the star file containing checkout rules.
-        #[arg(long)]
+        #[arg(long, value_hint = ValueHint::FilePath)]
         script: String,
     },
     /// Synchronizes the workspace with the checkout rules.
@@ -203,6 +229,16 @@ enum Commands {
         /// The path to the star file containing checkout rules.
         #[arg(long)]
         target: Option<String>,
+    },
+    Completions {
+        /// The shell to generate the completions for
+        #[arg(long, value_enum)]
+        shell: clap_complete::Shell,
+    },
+    Docs {
+        /// The path to the star file containing checkout rules.
+        #[arg(value_enum)]
+        item: docs::DocItem,
     },
     /// Lists the workspaces in the spaces store on the local machine.
     List {},
