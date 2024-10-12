@@ -102,7 +102,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Build for ${{ matrix.os }}
-        run: cargo build --profile=release --target ${{ matrix.target }}-apple-darwin
+        run: cargo build --profile=release --target=${{ matrix.arch }}-apple-darwin
 
       - name: Create binary artifact (zip)
         run: |
