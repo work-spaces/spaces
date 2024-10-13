@@ -2,14 +2,15 @@
 extern crate starlark;
 
 mod arguments;
+mod docs;
+mod evaluator;
+mod executor;
+mod info;
+mod label;
 mod ledger;
 mod rules;
-mod evaluator;
-mod info;
-mod executor;
+mod script;
 mod workspace;
-mod label;
-mod docs;
 
 fn main() -> anyhow::Result<()> {
     arguments::execute()

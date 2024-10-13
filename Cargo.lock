@@ -769,7 +769,7 @@ dependencies = [
 [[package]]
 name = "easy-archiver"
 version = "0.1.0"
-source = "git+https://github.com/work-spaces/easy-archiver?rev=5e63c7dc8a1fdd9be33d7545c36c5349421d2fb1#5e63c7dc8a1fdd9be33d7545c36c5349421d2fb1"
+source = "git+https://github.com/work-spaces/easy-archiver?rev=630f5b2ecb1fe97fcb10e9fbe3adb26f5f9986cb#630f5b2ecb1fe97fcb10e9fbe3adb26f5f9986cb"
 dependencies = [
  "anyhow",
  "anyhow-source-location",
@@ -2002,7 +2002,6 @@ checksum = "925383efa346730478fb4838dbe9137d2a47675ad789c546d150a6e1dd4ab31c"
 [[package]]
 name = "printer"
 version = "0.1.0"
-source = "git+https://github.com/work-spaces/printer-rs?rev=e3c6ebd6e458efef7418340e263e09eb276a8c92#e3c6ebd6e458efef7418340e263e09eb276a8c92"
 dependencies = [
  "anyhow",
  "anyhow-source-location",
@@ -2552,7 +2551,7 @@ dependencies = [
 
 [[package]]
 name = "spaces"
-version = "0.6.0-beta.19"
+version = "0.7.0-beta.0"
 dependencies = [
  "anyhow",
  "anyhow-source-location",
@@ -2694,6 +2693,7 @@ dependencies = [
  "anyhow",
  "anyhow-source-location",
  "platform",
+ "serde",
  "serde_json",
  "serde_yaml",
  "starlark",

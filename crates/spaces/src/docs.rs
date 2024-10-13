@@ -5,6 +5,7 @@ pub enum DocItem {
     Checkout,
     Run,
     Info,
+    StarStd,
     Completions,
     CheckoutAddAsset,
     CheckoutAddWhichAsset,
@@ -15,6 +16,50 @@ pub enum DocItem {
     RunAddExec,
     RunAddExecIf,
     RunAddTarget,
+}
+
+struct Arg {
+    name: &'static str,
+    description: &'static str,
+}
+
+struct Function {
+    name: &'static str,
+    description: &'static str,
+    return_type: &'static str,
+    args: &'static [Arg],
+}
+
+impl Function {
+    fn show(
+        self: &Self,
+        level: u8,
+        markdown: &mut printer::markdown::Markdown,
+    ) -> anyhow::Result<()> {
+        markdown.heading(level, format!("{}()", self.name).as_str())?;
+        markdown.paragraph(
+            format!(
+                "`def {}({}) -> {}`",
+                self.name,
+                self.args
+                    .iter()
+                    .map(|arg| arg.name)
+                    .collect::<Vec<&str>>()
+                    .join(", "),
+                self.return_type
+            )
+            .as_str(),
+        )?;
+
+        for arg in self.args {
+            markdown.list_item(1, format!("`{}`: {}", arg.name, arg.description).as_str())?;
+        }
+
+        markdown.printer.newline()?;
+        markdown.paragraph(self.description)?;
+
+        Ok(())
+    }
 }
 
 fn show_rule(markdown: &mut printer::markdown::Markdown) -> anyhow::Result<()> {
@@ -519,6 +564,13 @@ env -i bash --noprofile --norc
 source env
 ```
 
+When using `zsh`, use:
+
+```sh
+env -i zsh -f
+source env
+```
+
 "#,
     )?;
     markdown.printer.newline()?;
@@ -568,6 +620,213 @@ to the workspace root folder (not under version control)."#,
     Ok(())
 }
 
+fn show_info(level: u8, markdown: &mut printer::markdown::Markdown) -> anyhow::Result<()> {
+    markdown.heading(level, "Info Functions")?;
+
+    markdown.heading(level + 1, "Description")?;
+
+    markdown.paragraph(
+        r#"The `info` functions provide information about the workspace
+during checkout and run. Info functions are executed immediately. They are not rule definitions.
+
+```star
+is_windows = info.is_platform_windows()
+```
+"#,
+    )?;
+
+    const FUNCTIONS: &[Function] = &[
+        Function {
+            name: "get_platform_name",
+            description: "returns the name of the current platform",
+            return_type: "str",
+            args: &[],
+        },
+        Function {
+            name: "is_platform_windows",
+            description: "returns true if platform is Windows",
+            return_type: "bool",
+            args: &[],
+        },
+        Function {
+            name: "is_platform_macos",
+            description: "returns true if platform is macos",
+            return_type: "bool",
+            args: &[],
+        },
+        Function {
+            name: "is_platform_linux",
+            description: "returns true if platform is linux",
+            return_type: "bool",
+            args: &[],
+        },
+        Function {
+            name: "get_path_to_store",
+            description: "returns the path to the spaces store (typically $HOME/.spaces/store)",
+            return_type: "str",
+            args: &[],
+        },
+        Function {
+            name: "get_absolute_path_to_workspace",
+            description: "returns the absolute path to the workspace",
+            return_type: "str",
+            args: &[],
+        },
+        Function {
+            name: "get_path_to_checkout",
+            description: "returns the path where the current script is located in the workspace",
+            return_type: "str",
+            args: &[],
+        },
+        Function {
+            name: "get_path_to_build_checkout",
+            description: "returns the path to the workspace build folder for the current script",
+            return_type: "str",
+            args: &[],
+        },
+        Function {
+            name: "get_path_to_build_archive",
+            description:
+                "returns the path to where run.create_archive() creates the output archive",
+            return_type: "str",
+            args: &[],
+        },
+    ];
+
+    markdown.heading(level + 1, "Functions")?;
+
+    for function in FUNCTIONS {
+        function.show(level + 2, markdown)?;
+    }
+
+    Ok(())
+}
+
+fn show_star_std(level: u8, markdown: &mut printer::markdown::Markdown) -> anyhow::Result<()> {
+    markdown.heading(level, "Spaces Starlark Standard Functions")?;
+
+    markdown.heading(level + 1, "Description")?;
+
+    markdown.paragraph(
+        r#"The spaces starlark standard library includes
+functions for doing things like accessing the filesystem. The functions
+in this library are executed immediately."#,
+    )?;
+
+    markdown.heading(level + 1, "`fs` Functions")?;
+
+    const FS_FUNCTIONS: &[Function] = &[
+        Function {
+            name: "write_string_to_file",
+            description: "Writes a string to a file. Truncates the file if it exists. Creates it if it doesn't.",
+            return_type: "None",
+            args: &[Arg{
+                name : "path",
+                description: "path relative to the workspace root",
+            },
+            Arg{
+                name : "content",
+                description: "contents to write",
+            }],
+        },
+        Function {
+            name: "append_string_to_file",
+            description: "Appends a string to a file. Creates the file if it doesn't exist.",
+            return_type: "None",
+            args: &[Arg{
+                name : "path",
+                description: "path relative to the workspace root",
+            },
+            Arg{
+                name : "content",
+                description: "contents to write",
+            }],        },
+        Function {
+            name: "read_file_to_string",
+            description: "Reads the contents of the file as a string",
+            return_type: "str",
+            args: &[Arg{
+                name : "path",
+                description: "path relative to the workspace root",
+            }]
+        },
+        Function {
+            name: "exists",
+            description: "Checks if the file/directory exists",
+            return_type: "bool",
+            args: &[Arg{
+                name : "path",
+                description: "path relative to the workspace root",
+            }]
+        },
+        Function {
+            name: "read_toml_to_dict",
+            description: "Reads and parses a toml file",
+            return_type: "str",
+            args: &[Arg{
+                name : "path",
+                description: "path relative to the workspace root",
+            }]        },
+        Function {
+            name: "read_yaml_to_dict",
+            description: "Reads and parses a yaml file",
+            return_type: "dict with parsed yaml",
+            args: &[Arg{
+                name : "path",
+                description: "path relative to the workspace root",
+            }]        },
+        Function {
+            name: "read_json_to_dict",
+            description: "Reads and parses a json file",
+            return_type: "dict with parsed json",
+            args: &[Arg{
+                name : "path",
+                description: "path relative to the workspace root",
+            }]        },
+    ];
+
+    for function in FS_FUNCTIONS {
+        function.show(level + 2, markdown)?;
+    }
+
+    markdown.heading(level + 1, "`process` Functions")?;
+    const PROCESS_FUNCTIONS: &[Function] = &[
+        Function {
+            name: "exec",
+            description: "Writes a string to a file. Truncates the file if it exists. Creates it if it doesn't.",
+            return_type: "dict with `status`, `stdout`, and `stderr`",
+            args: &[Arg{
+                name : "exec",
+                description: "dict defining the process to execute. See below for details.",
+            },
+            Arg{
+                name : "content",
+                description: "contents to write",
+            }],
+        },
+    ];
+
+    for function in PROCESS_FUNCTIONS {
+        function.show(level + 2, markdown)?;
+    }
+
+    markdown.heading(level + 2, "`exec` arguments")?;
+    markdown.paragraph("`exec` takes a single dict argument with the following keys:")?;
+    markdown.list_item(1, "`command`: name of the command to execute")?;
+    markdown.list_item(1, "`args`: optional list of arguments")?;
+    markdown.list_item(1, "`env`: optional dict of environment variables")?;
+    markdown.list_item(
+        1,
+        "`working_directory`: optional working directory (default is the workspace)",
+    )?;
+    markdown.list_item(
+        1,
+        "`stdin`: optional string to pipe to the process stdin",
+    )?;
+
+    Ok(())
+}
+
 fn show_doc_item(
     markdown: &mut printer::markdown::Markdown,
     doc_item: DocItem,
@@ -586,55 +845,8 @@ fn show_doc_item(
         DocItem::RunAddExecIf => show_run_add_exec_if(1, markdown)?,
         DocItem::RunAddTarget => show_run_add_target(1, markdown)?,
         DocItem::Info => show_info(1, markdown)?,
+        DocItem::StarStd => show_star_std(1, markdown)?,
     }
-    Ok(())
-}
-
-fn show_info(level: u8, markdown: &mut printer::markdown::Markdown) -> anyhow::Result<()> {
-    markdown.heading(level, "Info Functions")?;
-
-    markdown.paragraph(
-        r#"The `info` functions provide information about the workspace
-during checkout and run. Info functions are executed immediately. They are not rule definitions.
-
-```star
-is_windows = info.is_platform_windows()
-```
-"#,
-    )?;
-
-    markdown.list_item(1, "`fn get_platform_name() -> bool`")?;
-    markdown.list_item(2, "returns the name of the current platform")?;
-    markdown.list_item(1, "`fn is_platform_windows() -> bool`")?;
-    markdown.list_item(2, "returns true if platform is Windows")?;
-    markdown.list_item(1, "`fn is_platform_macos() -> bool`")?;
-    markdown.list_item(2, "returns true if platform is macos")?;
-    markdown.list_item(1, "`fn is_platform_linux() -> bool`")?;
-    markdown.list_item(2, "returns true if platform is linux")?;
-    markdown.list_item(1, "`fn is_platform_x86_64() -> bool`")?;
-    markdown.list_item(2, "returns true if platform is x86_64")?;
-    markdown.list_item(1, "`fn is_platform_aarch64() -> bool`")?;
-    markdown.list_item(2, "returns true if platform is aarch64")?;
-
-    markdown.list_item(1, "`fn get_path_to_store() -> String`")?;
-    markdown.list_item(2, "returns the path to the spaces store (typically $HOME/.spaces/store)")?;
-
-    markdown.list_item(1, "`fn get_absolute_path_to_workspace() -> String`")?;
-    markdown.list_item(2, "returns the absolute path to the workspace")?;
-    
-    markdown.list_item(1, "`fn get_path_to_checkout() -> String`")?;
-    markdown.list_item(2, "returns the path where the current script is located in the workspace")?;
-
-
-    markdown.list_item(1, "`fn get_path_to_build_checkout() -> String`")?;
-    markdown.list_item(2, "returns the path to the workspace build folder for the current script")?;
-
-
-    markdown.list_item(1, "`fn get_path_to_build_archive() -> String`")?;
-    markdown.list_item(2, "returns the path to where run.create_archive() creates the output archive")?;
-
-    markdown.printer.newline()?;
-
     Ok(())
 }
 
@@ -643,6 +855,7 @@ fn show_all(markdown: &mut printer::markdown::Markdown) -> anyhow::Result<()> {
     markdown.printer.newline()?;
 
     show_info(2, markdown)?;
+    show_star_std(2, markdown)?;
     show_checkout(2, markdown)?;
     show_run(2, markdown)?;
 

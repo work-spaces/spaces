@@ -1,4 +1,4 @@
-use crate::{evaluator, rules, workspace, docs};
+use crate::{evaluator, rules, workspace, docs, script};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
@@ -41,6 +41,12 @@ enum RunWorkspace {
     Script(String),
 }
 
+fn run_starlark_script(name: &str, contents: &str) -> anyhow::Result<()> {
+    evaluator::run_starlark_script(name, contents)
+        .context(format_context!("Failed to run evaluate starlark script"))?;
+    Ok(())
+}
+
 fn run_starlark_modules_in_workspace(
     printer: &mut printer::Printer,
     phase: rules::Phase,
@@ -69,6 +75,37 @@ fn run_starlark_modules_in_workspace(
 
 pub fn execute() -> anyhow::Result<()> {
     use crate::ledger;
+
+    if std::env::args().len() == 1 {
+        let mut stdin_contents = String::new();
+        use std::io::Read;
+        std::io::stdin().read_to_string(&mut stdin_contents)?;
+        run_starlark_script("stdin", stdin_contents.as_str())
+            .context(format_context!("Failed to run starlark script"))?;
+        return Ok(());
+    }
+
+    if std::env::args().len() >= 2 {
+        let filename = std::env::args().nth(1).unwrap();
+        let input = std::path::Path::new(filename.as_str());
+        if input.exists() && input.extension().unwrap_or_default() == "star" {
+
+            script::set_args(std::env::args().skip(1).collect());
+
+            let input_contents = std::fs::read_to_string(input).context(format_context!("Failed to read input file {input:?}"))?;
+            run_starlark_script(filename.as_str(), input_contents.as_str())
+                .context(format_context!("Failed to run starlark script {filename}"))?;
+
+            let exit_code = script::get_exit_code();
+            if exit_code != 0 {
+                std::process::exit(exit_code);
+            }
+
+            return Ok(());
+        }
+    }
+
+
     let args = Arguments::parse();
 
     let mut printer = printer::Printer::new_stdout();
@@ -168,9 +205,6 @@ pub fn execute() -> anyhow::Result<()> {
             commands: Commands::Docs { item },
         } => {
             printer.level = verbosity.into();
-            if printer.level > printer::Level::Message {
-                printer.level = printer::Level::Message;
-            }
 
             docs::show(&mut printer, item)?;
         }

@@ -2,6 +2,7 @@
 extern crate starlark;
 
 pub mod fs;
+pub mod process;
 
 use starlark::environment::GlobalsBuilder;
 use starlark::values::none::NoneType;

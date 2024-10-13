@@ -1,4 +1,4 @@
-use crate::{executor, info, rules, workspace};
+use crate::{executor, info, rules, workspace, script};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use printer::Level;
@@ -45,7 +45,9 @@ fn evaluate_module(
         .with_struct("checkout", rules::checkout::globals)
         .with_struct("run", rules::run::globals)
         .with_struct("fs", starstd::fs::globals)
-        .with_struct("info", crate::info::globals)
+        .with_struct("process", starstd::process::globals)
+        .with_struct("script", script::globals)
+        .with_struct("info", info::globals)
         .build();
 
     let module = Module::new();
@@ -179,3 +181,14 @@ pub fn run_starlark_modules(
 
     Ok(())
 }
+
+pub fn run_starlark_script(name: &str, script: &str) -> anyhow::Result<()> {
+    // load SPACES_WORKSPACE from env
+    let workspace = std::env::var("SPACES_WORKSPACE").unwrap_or(".".to_string());
+
+    evaluate_module(workspace.as_str(), name, script.to_string())
+        .context(format_context!("Failed to evaluate module {}", name))?;
+
+    Ok(())
+}
+
