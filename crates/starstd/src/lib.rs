@@ -23,6 +23,18 @@ pub struct Function {
     pub example: Option<&'static str>,
 }
 
+pub const fn get_rule_argument() -> Arg {
+    Arg {
+        name: "rule",
+        description: "dict",
+        dict: &[
+            ("name", "rule name as string"),
+            ("deps", "list of dependencies"),
+            ("type", "Setup|Run (default)|Optional"),
+        ],
+    }
+}
+
 
 // This defines the function that is visible to Starlark
 #[starlark_module]

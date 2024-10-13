@@ -2,8 +2,85 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use starlark::{environment::GlobalsBuilder, values::none::NoneType};
 use std::collections::HashSet;
+use starstd::{Function, Arg, get_rule_argument};
 
 use crate::{executor, rules};
+
+
+pub const FUNCTIONS: &[Function] = &[
+    Function {
+        name: "add_exec",
+        description: "Adds a rule that will execute a process.",
+        return_type: "None",
+        args: &[
+            get_rule_argument(),
+            Arg {
+                name: "exec",
+                description: "dict with",
+                dict: &[
+                    ("command", "name of the command to execute"),
+                    ("args", "optional list of arguments"),
+                    ("env", "optional dict of environment variables"),
+                    ("working_directory", "optional working directory (default is the workspace)"),
+                    ("expect", "Failure: expect non-zero return code|Success: expect zero return code"),
+                ],
+            },
+        ],
+        example: Some(r#"run.add_exec(
+    rule = {"name": name, "type": "Setup", "deps": ["sysroot-python:venv"]},
+    exec = {
+        "command": "pip3",
+        "args": ["install"] + packages,
+    },
+)"#)},
+Function {
+    name: "add_exec_if",
+    description: "Adds a rule to execute if a condition is met.",
+    return_type: "None",
+    args: &[
+        get_rule_argument(),
+        Arg {
+            name: "exec_if",
+            description: "dict with",
+            dict: &[
+                ("if", "this is an `exec` object used with add_exec()"),
+                ("then", "list of optional targets to enable if the command has the expected result"),
+                ("else", "optional list of optional targets to enable if the command has the unexpected result"),
+            ],
+        },
+    ],
+    example: Some(r#"run.add_exec(
+    rule = {"name": create_file, "type": "Optional" },
+    exec = {
+        "command": "touch",
+        "args": ["some_file"],
+    },
+)
+
+run.add_exec_if(
+rule = {"name": check_file, "deps": []},
+exec_if = {
+    "if": {
+        "command": "ls",
+        "args": [
+            "some_file",
+        ],
+        "expect": "Failure",
+    },
+    "then": ["create_file"],
+},
+)"#)},
+Function {
+    name: "add_target",
+    description: "Adds a target. There is no specific action for the target, but this rule can be useful for organizing depedencies.",
+    return_type: "None",
+    args: &[
+        get_rule_argument(),
+    ],
+    example: Some(r#"run.add_target(
+    rule = {"name": "my_rule", "deps": ["my_other_rule"]},
+)"#)}
+];
 
 // This defines the function that is visible to Starlark
 #[starlark_module]

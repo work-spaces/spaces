@@ -8,11 +8,6 @@
 The `info` functions provide information about the workspace
 during checkout and run. Info functions are executed immediately. They are not rule definitions.
 
-```star
-is_windows = info.is_platform_windows()
-```
-
-
 ### Functions
 
 #### get_platform_name()
@@ -246,8 +241,7 @@ checkout.add_repo(
         "clone": "Default",
     }
 )
-```
-### add_archive()
+```### add_archive()
 
 ```python
 def add_archive(rule, archive) -> None
@@ -281,8 +275,7 @@ checkout.add_archive(
         "add_prefix": "llvm-project",
     },
 )
-```
-### add_platform_archive()
+```### add_platform_archive()
 
 ```python
 def add_platform_archive(rule, platforms) -> None
@@ -346,37 +339,7 @@ checkout.add_platform_archive(
         "linux_x86_64": linux_x86_64,
     },
 )
-```
-### add_which_asset()
-
-```python
-def add_which_asset(rule, asset) -> None
-```
-Adds a hardlink to an executable file available on the `PATH` 
-when checking out the workspace. This is useful for building tools that have complex dependencies.
-Avoid using this when creating a workspace for your project. It creates system dependencies
-that break workspace hermicity.
-
-- `rule`: dict
-  - `name`: rule name as string
-  - `deps`: list of dependencies
-  - `type`: Setup|Run (default)|Optional
-- `asset`: dict with
-  - `which`: name of system executable to search for
-  - `destination`: relative path where asset will live in the workspace
-
-
-**Example**
-```python
-checkout.add_which_asset(
-    rule = { "name": "which_pkg_config" },
-    asset = {
-        "which": "pkg-config",
-        "destination": "sysroot/bin/pkg-config"
-    }
-)
-```
-### add_asset()
+```### add_asset()
 
 ```python
 def add_asset(rule, asset) -> None
@@ -410,8 +373,35 @@ checkout.add_asset(
         "content": content,
     },
 )
+```### add_which_asset()
+
+```python
+def add_which_asset(rule, asset) -> None
 ```
-### update_asset()
+Adds a hardlink to an executable file available on the `PATH` 
+when checking out the workspace. This is useful for building tools that have complex dependencies.
+Avoid using this when creating a workspace for your project. It creates system dependencies
+that break workspace hermicity.
+
+- `rule`: dict
+  - `name`: rule name as string
+  - `deps`: list of dependencies
+  - `type`: Setup|Run (default)|Optional
+- `asset`: dict with
+  - `which`: name of system executable to search for
+  - `destination`: relative path where asset will live in the workspace
+
+
+**Example**
+```python
+checkout.add_which_asset(
+    rule = { "name": "which_pkg_config" },
+    asset = {
+        "which": "pkg-config",
+        "destination": "sysroot/bin/pkg-config"
+    }
+)
+```### update_asset()
 
 ```python
 def update_asset(rule, asset) -> None
@@ -472,19 +462,15 @@ checkout.update_asset(
         },
     },
 )
-```
-### update_env()
+```### update_env()
 
 ```python
 def update_env(rule, env) -> None
 ```
 Creates or updates the environment file in the workspace.
 
+Spaces creates two mechanisms for managing the workspace environment.
 
-    markdown.heading(level, "update_asset()")?;
-    markdown.heading(level + 1, "Description")?;
-    markdown.paragraph(
-        r#"Spaces creates two mechanisms for managing the workspace environment.
 1. It generates an `env` file that can be sourced from the command line.
 2. When running `spaces run` it executes rules using the same environment values.
 
@@ -495,14 +481,7 @@ At a minimum, `your-workspace/sysroot/bin` should be added to the path.
 In the workspace, you can start a workspace bash shell using:
 
 ```sh
-env -i bash --noprofile --norc
-source env
-```
-
-When using `zsh`, use:
-
-```sh
-env -i zsh -f
+bash # or the shell of your preference
 source env
 ```
 
@@ -528,8 +507,7 @@ checkout.update_env(
         },
     },
 )
-```
-## Run Rules
+```## Run Rules
 
 You use run rules to execute tasks in the workspace.
 
@@ -561,8 +539,7 @@ run.add_exec(
         "args": ["install"] + packages,
     },
 )
-```
-### add_exec_if()
+```### add_exec_if()
 
 ```python
 def add_exec_if(rule, exec_if) -> None
@@ -590,20 +567,19 @@ run.add_exec(
 )
 
 run.add_exec_if(
-    rule = {"name": check_file, "deps": []},
-    exec_if = {
-        "if": {
-            "command": "ls",
-            "args": [
-                "some_file",
-            ],
-            "expect": "Failure",
-        },
-        "then": ["create_file"],
+rule = {"name": check_file, "deps": []},
+exec_if = {
+    "if": {
+        "command": "ls",
+        "args": [
+            "some_file",
+        ],
+        "expect": "Failure",
     },
+    "then": ["create_file"],
+},
 )
-```
-### add_target()
+```### add_target()
 
 ```python
 def add_target(rule) -> None
@@ -622,4 +598,3 @@ run.add_target(
     rule = {"name": "my_rule", "deps": ["my_other_rule"]},
 )
 ```
-
