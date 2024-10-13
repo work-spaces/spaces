@@ -9,7 +9,6 @@ mod info;
 mod label;
 mod ledger;
 mod rules;
-mod script;
 mod workspace;
 
 fn main() -> anyhow::Result<()> {

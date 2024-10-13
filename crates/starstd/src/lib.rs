@@ -3,9 +3,26 @@ extern crate starlark;
 
 pub mod fs;
 pub mod process;
+pub mod script;
 
 use starlark::environment::GlobalsBuilder;
 use starlark::values::none::NoneType;
+
+
+pub struct Arg {
+    pub name: &'static str,
+    pub description: &'static str,
+    pub dict: &'static [(&'static str, &'static str)],
+}
+
+pub struct Function {
+    pub name: &'static str,
+    pub description: &'static str,
+    pub return_type: &'static str,
+    pub args: &'static [Arg],
+    pub example: Option<&'static str>,
+}
+
 
 // This defines the function that is visible to Starlark
 #[starlark_module]

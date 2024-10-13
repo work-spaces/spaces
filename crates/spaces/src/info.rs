@@ -3,6 +3,7 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use starlark::environment::GlobalsBuilder;
 use starlark::values::none::NoneType;
+use starstd::Function;
 use std::sync::RwLock;
 
 struct State {
@@ -39,9 +40,74 @@ pub fn get_env() -> executor::env::UpdateEnv {
     state.env.clone()
 }
 
+pub const FUNCTIONS: &[Function] = &[
+    Function {
+        name: "get_platform_name",
+        description: "returns the name of the current platform",
+        return_type: "str",
+        args: &[],
+        example: None,
+    },
+    Function {
+        name: "is_platform_windows",
+        description: "returns true if platform is Windows",
+        return_type: "bool",
+        args: &[],
+        example: None,
+    },
+    Function {
+        name: "is_platform_macos",
+        description: "returns true if platform is macos",
+        return_type: "bool",
+        args: &[],
+        example: None,
+    },
+    Function {
+        name: "is_platform_linux",
+        description: "returns true if platform is linux",
+        return_type: "bool",
+        args: &[],
+        example: None,
+    },
+    Function {
+        name: "get_path_to_store",
+        description: "returns the path to the spaces store (typically $HOME/.spaces/store)",
+        return_type: "str",
+        args: &[],
+        example: None,
+    },
+    Function {
+        name: "get_absolute_path_to_workspace",
+        description: "returns the absolute path to the workspace",
+        return_type: "str",
+        args: &[],
+        example: None,
+    },
+    Function {
+        name: "get_path_to_checkout",
+        description: "returns the path where the current script is located in the workspace",
+        return_type: "str",
+        args: &[],
+        example: None,
+    },
+    Function {
+        name: "get_path_to_build_checkout",
+        description: "returns the path to the workspace build folder for the current script",
+        return_type: "str",
+        args: &[],
+        example: None,
+    },
+    Function {
+        name: "get_path_to_build_archive",
+        description: "returns the path to where run.create_archive() creates the output archive",
+        return_type: "str",
+        args: &[],
+        example: None,
+    },
+];
+
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
-
     // remove and replace with get_path_to_store()
     fn store_path() -> anyhow::Result<String> {
         Ok(workspace::get_store_path())
@@ -75,7 +141,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .ok_or(anyhow::anyhow!("Failed to get platform name"))
     }
 
-    fn is_platform_windows() -> anyhow::Result<bool>  {
+    fn is_platform_windows() -> anyhow::Result<bool> {
         Ok(platform::Platform::is_windows())
     }
 
@@ -107,7 +173,6 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(NoneType)
     }
 
-
     fn get_path_to_store() -> anyhow::Result<String> {
         Ok(workspace::get_store_path())
     }
@@ -120,7 +185,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         rules::get_checkout_path()
     }
 
-    fn get_path_to_build_checkout(#[starlark(require = named)] rule_name: &str) -> anyhow::Result<String> {
+    fn get_path_to_build_checkout(
+        #[starlark(require = named)] rule_name: &str,
+    ) -> anyhow::Result<String> {
         rules::get_path_to_build_checkout(rule_name)
     }
 
@@ -140,5 +207,4 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             create_archive.get_output_file()
         ))
     }
-
 }

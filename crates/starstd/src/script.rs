@@ -1,6 +1,7 @@
 use starlark::environment::GlobalsBuilder;
 use starlark::values::none::NoneType;
 use std::sync::RwLock;
+use crate::{Function, Arg};
 
 struct State {
     exit_code: i32,
@@ -30,6 +31,47 @@ pub fn get_exit_code() -> i32 {
     state.exit_code
 }   
 
+
+pub const FUNCTIONS: &[Function] = &[
+        Function {
+            name: "print",
+            description: "Prints a string to the stdout. Only use in a script.",
+            return_type: "None",
+            args: &[Arg {
+                name: "content",
+                description: "str: string content to print.",
+                dict: &[],
+            }],
+            example: None,
+
+        },
+        Function {
+            name: "get_arg",
+            description: "Gets the argument at the specified offset (an empty string is returned if the argument doesn't exist).",
+            return_type: "str",
+            args: &[Arg {
+                name: "offset",
+                description: "int: offset of the argument to get.",
+                dict: &[],
+            }],
+            example: None,
+
+        },
+        Function {
+            name: "set_exit_code",
+            description: r#"Sets the exit code of the script. 
+Use zero for success and non-zero for failure.
+This doesn't exit the script."#,
+            return_type: "none",
+            args: &[Arg {
+                name: "offset",
+                description: "int: offset of the argument to get.",
+                dict: &[],
+            }],
+            example: None,
+
+        },
+    ];
 
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {

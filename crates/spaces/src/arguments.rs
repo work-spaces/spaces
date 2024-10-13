@@ -1,4 +1,4 @@
-use crate::{evaluator, rules, workspace, docs, script};
+use crate::{evaluator, rules, workspace, docs};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
@@ -90,13 +90,13 @@ pub fn execute() -> anyhow::Result<()> {
         let input = std::path::Path::new(filename.as_str());
         if input.exists() && input.extension().unwrap_or_default() == "star" {
 
-            script::set_args(std::env::args().skip(1).collect());
+            starstd::script::set_args(std::env::args().skip(1).collect());
 
             let input_contents = std::fs::read_to_string(input).context(format_context!("Failed to read input file {input:?}"))?;
             run_starlark_script(filename.as_str(), input_contents.as_str())
                 .context(format_context!("Failed to run starlark script {filename}"))?;
 
-            let exit_code = script::get_exit_code();
+            let exit_code = starstd::script::get_exit_code();
             if exit_code != 0 {
                 std::process::exit(exit_code);
             }

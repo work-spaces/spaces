@@ -58,6 +58,8 @@ spaces run
     - Archives (including platform-specific binaries) are downloaded to `$HOME/.spaces/store`. The files are hardlinked to the workspace. Host tools are hardlinked to the workspace under `sysroot`.
 - Run: execute user-defined rules to build, test, run or deploy your project
 
+Read the [API Docs](API.md).
+
 ### Checkout phase
 
 `spaces` creates a folder populated with everything you need for your project. The workspace will look something like:

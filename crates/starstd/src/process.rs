@@ -5,6 +5,7 @@ use starlark::environment::GlobalsBuilder;
 use starlark::values::{Heap, Value};
 use std::collections::HashMap;
 use std::process::Command;
+use crate::{Function, Arg}; 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Exec {
@@ -14,6 +15,31 @@ pub struct Exec {
     pub working_directory: Option<String>,
     pub stdin: Option<String>,
 }
+
+pub const FUNCTIONS: &[Function] = &[Function {
+    name: "exec",
+    description:
+        "Executes a process",
+    return_type: "dict # with members `status`, `stdout`, and `stderr`",
+    args: &[
+        Arg {
+            name: "exec",
+            description: "dict with members",
+            dict: &[("command", "name of the command to execute"),
+                ("args", "optional list of arguments"),
+                ("env", "optional dict of environment variables"),
+                ("working_directory", "optional working directory (default is the workspace)"),
+                ("stdin", "optional string to pipe to the process stdin")],
+        },
+        Arg {
+            name: "content",
+            description: "contents to write",
+            dict: &[],
+        },
+    ],
+    example: None,
+
+}];
 
 // This defines the functions that are visible to Starlark
 #[starlark_module]
