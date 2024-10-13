@@ -596,6 +596,10 @@ to the workspace root folder (not under version control)."#,
     markdown.printer.newline()?;
     show_checkout_add_asset(level + 1, markdown)?;
     markdown.printer.newline()?;
+    show_checkout_update_asset(level + 1, markdown)?;
+    markdown.printer.newline()?;
+    show_checkout_update_env(level + 1, markdown)?;
+    markdown.printer.newline()?;
     Ok(())
 }
 

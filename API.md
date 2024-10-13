@@ -411,6 +411,124 @@ checkout.add_asset(
     },
 )
 ```
+### update_asset()
+
+```python
+def update_asset(rule, asset) -> None
+```
+Creates or updates an existing file containing structured data
+in the workspace. This rules supports json|toml|yaml files. Different rules
+can update the same file and the content will be preserved (as long as the keys are unique).
+
+- `rule`: dict
+  - `name`: rule name as string
+  - `deps`: list of dependencies
+  - `type`: Setup|Run (default)|Optional
+- `asset`: dict with
+  - `destination`: path to the asset in the workspace
+  - `format`: json|toml|yaml
+  - `value`: dict containing the structured data to be added to the asset
+
+
+**Example**
+```python
+cargo_vscode_task = {
+    "type": "cargo",
+    "problemMatcher": ["$rustc"],
+    "group": "build",
+}
+
+# Add some VS code tasks
+checkout.update_asset(
+    rule = {"name": "vscode_tasks"},
+    asset = {
+        "destination": ".vscode/tasks.json",
+        "format": "json",
+        "value": {
+            "tasks": [
+                cargo_vscode_task | {
+                    "command": "build",
+                    "args": ["--manifest-path=spaces/Cargo.toml"],
+                    "label": "build:spaces",
+                },
+                cargo_vscode_task | {
+                    "command": "install",
+                    "args": ["--path=spaces", "--root=${userHome}/.local", "--profile=dev"],
+                    "label": "install_dev:spaces",
+                }
+            ],
+        },
+    }
+)
+
+# tell cargo to use sccache
+checkout.update_asset(
+    rule = {"name": "cargo_config"},
+    asset = {
+        "destination": ".cargo/config.toml",
+        "format": "toml",
+        "value": {
+            "build": {"rustc-wrapper": "sccache"},
+        },
+    },
+)
+```
+### update_env()
+
+```python
+def update_env(rule, env) -> None
+```
+Creates or updates the environment file in the workspace.
+
+
+    markdown.heading(level, "update_asset()")?;
+    markdown.heading(level + 1, "Description")?;
+    markdown.paragraph(
+        r#"Spaces creates two mechanisms for managing the workspace environment.
+1. It generates an `env` file that can be sourced from the command line.
+2. When running `spaces run` it executes rules using the same environment values.
+
+The rules allows you to add variables and paths to the environment.
+
+At a minimum, `your-workspace/sysroot/bin` should be added to the path.
+
+In the workspace, you can start a workspace bash shell using:
+
+```sh
+env -i bash --noprofile --norc
+source env
+```
+
+When using `zsh`, use:
+
+```sh
+env -i zsh -f
+source env
+```
+
+
+
+- `rule`: dict
+  - `name`: rule name as string
+  - `deps`: list of dependencies
+  - `type`: Setup|Run (default)|Optional
+- `env`: dict with
+  - `vars`: dict of variables to add to the environment
+  - `paths`: list of paths required
+
+
+**Example**
+```python
+checkout.update_env(
+    rule = {"name": "update_env"},
+    env = {
+        "paths": ["/usr/bin", "/bin"],
+        "vars": {
+            "PS1": '"(spaces) $PS1"',
+        },
+    },
+)
+```
 ## Run Rules
 
 You use run rules to execute tasks in the workspace.
