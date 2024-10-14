@@ -53,11 +53,15 @@ impl State {
     pub fn sort_tasks(&mut self, target: Option<String>) -> anyhow::Result<()> {
         let mut tasks = self.tasks.write().unwrap();
 
+        // add all tasks to the graph
         for task in tasks.values() {
             self.graph.add_task(task.rule.name.clone());
         }
+
         let tasks_copy = tasks.clone();
+
         for task in tasks.values_mut() {
+
             // capture implicit dependencies based on inputs/outputs
             for other_task in tasks_copy.values() {
                 if task.rule.name == other_task.rule.name {
@@ -66,6 +70,7 @@ impl State {
                 task.update_implicit_dependency(other_task);
             }
 
+            // connect the dependencies
             if let Some(deps) = task.rule.deps.clone() {
                 for dep in deps {
                     let dep_task = tasks_copy
@@ -82,10 +87,28 @@ impl State {
                 }
             }
         }
+
+        let target_is_some = target.is_some();
+
         self.sorted = self
             .graph
             .get_sorted_tasks(target)
             .context(format_context!("Failed to sort tasks"))?;
+
+        if target_is_some {
+            // enable any optional tasks in the graph
+            for node_index in self.sorted.iter() {
+                let task_name = self.graph.get_task(*node_index);
+                let task = tasks
+                    .get_mut(task_name)
+                    .ok_or(format_error!("Task not found {task_name}"))?;
+                if task.rule.type_ == Some(RuleType::Optional) {
+                    task.rule.type_ = Some(RuleType::Run);
+                }
+            }
+        }
+
+
         Ok(())
     }
 
