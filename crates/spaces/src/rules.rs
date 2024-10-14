@@ -147,10 +147,16 @@ impl State {
             };
 
             if task.phase == phase {
+                let message = if task.rule.type_ == Some(RuleType::Optional) {
+                    "Skipped (Optional)"
+                } else {
+                    "Complete"
+                };
+
                 let mut progress_bar = multi_progress.add_progress(
                     task.rule.name.as_str(),
                     Some(100),
-                    Some("Complete"),
+                    Some(message),
                 );
 
                 progress_bar.log(
