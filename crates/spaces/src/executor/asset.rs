@@ -40,8 +40,35 @@ pub struct UpdateAsset {
     pub value: serde_json::Value,
 }
 
+fn parse_value(format: AssetFormat, content: &str) -> anyhow::Result<serde_json::Value> {
+    match format {
+        AssetFormat::Json => serde_json::from_str(content)
+            .context(format_context!("Failed to parse asset file as JSON",)),
+        AssetFormat::Toml => {
+            toml::from_str(content).context(format_context!("Failed to parse asset file as TOML",))
+        }
+        AssetFormat::Yaml => serde_yaml::from_str(content)
+            .context(format_context!("Failed to parse asset file as YAML",)),
+    }
+}
+
+fn format_value(format: AssetFormat, value: &serde_json::Value) -> anyhow::Result<String> {
+    match format {
+        AssetFormat::Json => serde_json::to_string_pretty(value)
+            .context(format_context!("Failed to serialize asset file as JSON",)),
+        AssetFormat::Toml => toml::to_string_pretty(value)
+            .context(format_context!("Failed to serialize asset file as TOML",)),
+        AssetFormat::Yaml => serde_yaml::to_string(value)
+            .context(format_context!("Failed to serialize asset file as YAML",)),
+    }
+}
+
 impl UpdateAsset {
-    pub fn execute(&self, _name: &str, _progress: printer::MultiProgressBar) -> anyhow::Result<()> {
+    pub fn execute(
+        &self,
+        _name: &str,
+        mut progress: printer::MultiProgressBar,
+    ) -> anyhow::Result<()> {
         use json_value_merge::Merge;
 
         // hold the mutex to ensure exclusive access to the output file
@@ -52,22 +79,27 @@ impl UpdateAsset {
             &self.destination
         ))?;
 
-        let new_value = if state.updated_assets.contains(&self.destination) {
-            let old_value = std::fs::read_to_string(dest_path.clone()).context(format_context!(
-                "Failed to read asset file {}",
-                dest_path.display()
-            ))?;
-            let mut old_value: serde_json::Value = serde_json::from_str(&old_value).context(
-                format_context!("Failed to parse asset file {}", &self.destination),
-            )?;
+        let new_value =
+            if state.updated_assets.contains(&self.destination) {
+                let old_value = std::fs::read_to_string(dest_path.clone()).context(
+                    format_context!("Failed to read asset file {}", dest_path.display()),
+                )?;
 
-            old_value.merge(&self.value);
+                progress.log(
+                    printer::Level::Trace,
+                    format!("Parsing asset file `{}` as {:?}", old_value, self.format).as_str(),
+                );
+                let mut old_value = parse_value(self.format, &old_value).context(
+                    format_context!("Failed to parse asset file {}", &self.destination),
+                )?;
 
-            old_value
-        } else {
-            state.updated_assets.insert(self.destination.clone());
-            self.value.clone()
-        };
+                old_value.merge(&self.value);
+
+                old_value
+            } else {
+                state.updated_assets.insert(self.destination.clone());
+                self.value.clone()
+            };
 
         let content = format_value(self.format, &new_value).context(format_context!(
             "Failed to format asset file {}",
@@ -99,11 +131,13 @@ impl AddWhichAsset {
 
         let source = path.to_string_lossy().to_string();
 
-        http_archive::HttpArchive::create_hard_link(destination.clone(), source).context(format_context!(
-            "Failed to create hard link from {} to {}",
-            path.display(),
-            destination
-        ))?;
+        http_archive::HttpArchive::create_hard_link(destination.clone(), source).context(
+            format_context!(
+                "Failed to create hard link from {} to {}",
+                path.display(),
+                destination
+            ),
+        )?;
 
         Ok(())
     }
@@ -143,15 +177,4 @@ fn save_asset(destination: &str, content: &str) -> anyhow::Result<()> {
     ))?;
 
     Ok(())
-}
-
-fn format_value(format: AssetFormat, value: &serde_json::Value) -> anyhow::Result<String> {
-    match format {
-        AssetFormat::Json => serde_json::to_string_pretty(value)
-            .context(format_context!("Failed to serialize asset file as JSON",)),
-        AssetFormat::Toml => toml::to_string_pretty(value)
-            .context(format_context!("Failed to serialize asset file as TOML",)),
-        AssetFormat::Yaml => serde_yaml::to_string(value)
-            .context(format_context!("Failed to serialize asset file as YAML",)),
-    }
 }
