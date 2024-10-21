@@ -31,6 +31,7 @@ pub const fn get_rule_argument() -> Arg {
             ("name", "rule name as string"),
             ("deps", "list of dependencies"),
             ("type", "Setup|Run (default)|Optional"),
+            ("help", "Optional help text show with `spaces evaluate`"),
         ],
     }
 }

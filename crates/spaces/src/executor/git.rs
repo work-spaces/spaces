@@ -60,17 +60,25 @@ impl Git {
             ..Default::default()
         };
 
-        progress.log(
-            printer::Level::Trace,
-            format!("git clone {clone_options:?}").as_str(),
-        );
+        let clone_path = std::path::Path::new(&self.spaces_key);
+        if clone_path.exists() {
+            progress.log(
+                printer::Level::Info,
+                format!("{} already exists", self.spaces_key).as_str(),
+            );
+        } else {
+            progress.log(
+                printer::Level::Trace,
+                format!("git clone {clone_options:?}").as_str(),
+            );
 
-        progress
-            .execute_process("git", clone_options)
-            .context(format_context!(
-                "{name} - Failed to clone repository {}",
-                self.spaces_key
-            ))?;
+            progress
+                .execute_process("git", clone_options)
+                .context(format_context!(
+                    "{name} - Failed to clone repository {}",
+                    self.spaces_key
+                ))?;
+        }
 
         let mut checkout_options = printer::ExecuteOptions {
             working_directory: Some(self.spaces_key.clone()),

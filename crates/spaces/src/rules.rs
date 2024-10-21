@@ -61,7 +61,6 @@ impl State {
         let tasks_copy = tasks.clone();
 
         for task in tasks.values_mut() {
-
             // capture implicit dependencies based on inputs/outputs
             for other_task in tasks_copy.values() {
                 if task.rule.name == other_task.rule.name {
@@ -108,20 +107,31 @@ impl State {
             }
         }
 
-
         Ok(())
     }
 
     pub fn show_tasks(&self, printer: &mut printer::Printer) -> anyhow::Result<()> {
+
         let tasks = self.tasks.read().unwrap();
+        let mut task_info_list = std::collections::HashMap::new();
         for node_index in self.sorted.iter() {
             let task_name = self.graph.get_task(*node_index);
             let task = tasks
                 .get(task_name)
                 .ok_or(format_error!("Task not found {task_name}"))?;
 
-            printer.info(task_name, &task)?;
+            if printer.level == printer::Level::Trace {
+                printer.trace("task", &task)?;
+            } else if printer.level <= printer::Level::Message {
+                task_info_list.insert(task.rule.name.clone(), task.rule.help.clone());
+            } else if task.rule.help.is_some() {
+                task_info_list.insert(task.rule.name.clone(), task.rule.help.clone());
+            }
+
+            printer.trace(task_name, &task)?;
         }
+
+        printer.info("targets", &task_info_list)?;
 
         Ok(())
     }
@@ -153,11 +163,8 @@ impl State {
                     "Complete"
                 };
 
-                let mut progress_bar = multi_progress.add_progress(
-                    task.rule.name.as_str(),
-                    Some(100),
-                    Some(message),
-                );
+                let mut progress_bar =
+                    multi_progress.add_progress(task.rule.name.as_str(), Some(100), Some(message));
 
                 progress_bar.log(
                     printer::Level::Trace,
@@ -264,6 +271,7 @@ pub enum RuleType {
 pub struct Rule {
     pub name: String,
     pub deps: Option<Vec<String>>,
+    pub help: Option<String>,
     pub inputs: Option<HashSet<String>>,
     pub outputs: Option<HashSet<String>>,
     pub platforms: Option<Vec<platform::Platform>>,

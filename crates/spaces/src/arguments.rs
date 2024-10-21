@@ -105,9 +105,7 @@ pub fn execute() -> anyhow::Result<()> {
         }
     }
 
-
     let args = Arguments::parse();
-
     let mut printer = printer::Printer::new_stdout();
 
     match args {
@@ -178,6 +176,9 @@ pub fn execute() -> anyhow::Result<()> {
             commands: Commands::Evaluate { target },
         } => {
             printer.level = verbosity.into();
+            if printer.level > printer::Level::Info {
+                printer.level = printer::Level::Info;
+            }
 
             run_starlark_modules_in_workspace(
                 &mut printer,
@@ -224,22 +225,6 @@ pub fn execute() -> anyhow::Result<()> {
     Ok(())
 }
 
-/*
-
-TODO
-
-Add a sync option to checkout all deps on the branch rather than the rev. This can help testing tip of branch before
-updating the dep rev. Should only apply to deps that are part of development repositories. They are the only
-ones that can be updated.
-
-Add a command to get tip of tree commit hashes for the deps of the development repositories. This can be used to
-update the spaces_deps.toml file.
-
-Add a way to format spaces_deps.toml. This opens the door for auto updating spaces_deps.toml.
-
-*/
-
-
 #[derive(Debug, Subcommand)]
 enum Commands {
     /// Executes the Checkout phase rules for the script and its dependencies.
@@ -255,25 +240,28 @@ enum Commands {
     Sync {},
     /// Executes the Run phase rules.
     Run {
-        /// The path to the star file containing checkout rules.
+        /// The name of the target to run (default is all targets).
         #[arg(long)]
         target: Option<String>,
     },
+    /// List the targets with all details in the workspace.
     Evaluate {
-        /// The path to the star file containing checkout rules.
+        /// The name of the target to evaluate (default is all targets).
         #[arg(long)]
         target: Option<String>,
     },
+    /// Generates shell completions for the spaces command.
     Completions {
         /// The shell to generate the completions for
         #[arg(long, value_enum)]
         shell: clap_complete::Shell,
     },
+    /// Shows the documentation for spaces starlark modules.
     Docs {
         /// What documentation do you want to see?
         #[arg(value_enum)]
         item: Option<docs::DocItem>,
     },
-    /// Lists the workspaces in the spaces store on the local machine.
+    /// Lists the workspaces in the spaces store on the local machine. (experimental)
     List {},
 }
