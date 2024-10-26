@@ -2,7 +2,7 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
 
-use crate::{workspace, info};
+use crate::{info, workspace};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateEnv {
@@ -11,14 +11,17 @@ pub struct UpdateEnv {
 }
 
 impl UpdateEnv {
-    pub fn execute(&self, _name: &str, _progress: printer::MultiProgressBar) -> anyhow::Result<()> {
+    pub fn execute(&self, name: &str, mut progress: printer::MultiProgressBar) -> anyhow::Result<()> {
+        progress.log(
+            printer::Level::Debug,
+            format!("Update env {name}: {:?}", &self).as_str(),
+        );
         info::update_env(self.clone()).context(format_context!("failed to update env"))?;
         Ok(())
     }
 }
 
-pub fn finalize_env() -> anyhow::Result<()> {
-    let env = info::get_env();
+pub fn finalize_env(env: &UpdateEnv) -> anyhow::Result<()> {
     let workspace = workspace::absolute_path();
     let workspace_path = std::path::Path::new(&workspace);
     let env_path = workspace_path.join("env");

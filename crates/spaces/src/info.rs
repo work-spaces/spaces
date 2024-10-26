@@ -22,7 +22,7 @@ fn get_state() -> &'static RwLock<State> {
         new_branch_name: None,
         env: executor::env::UpdateEnv {
             vars: std::collections::HashMap::new(),
-            paths: vec![format!("{}/sysroot/bin", workspace::absolute_path())],
+            paths: Vec::new(),
         },
     }));
     STATE.get()

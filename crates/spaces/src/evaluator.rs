@@ -73,7 +73,10 @@ fn debug_sorted_tasks(printer: &mut printer::Printer, phase: rules::Phase) -> an
         let task_name = state.graph.get_task(*node_index);
         if let Some(task) = state.tasks.read().unwrap().get(task_name) {
             if task.phase == phase {
-                printer.log(printer::Level::Debug, format!("Queued task {task_name}").as_str())?;
+                printer.log(
+                    printer::Level::Debug,
+                    format!("Queued task {task_name}").as_str(),
+                )?;
             }
         }
     }
@@ -107,6 +110,9 @@ pub fn run_starlark_modules(
 
         if phase == rules::Phase::Checkout {
             sort_tasks(None).context(format_context!("Failed to sort tasks"))?;
+            printer.log(Level::Debug, "--Checkout Phase--")?;
+            debug_sorted_tasks(printer, phase)
+                .context(format_context!("Failed to debug sorted tasks"))?;
 
             let state = rules::get_state().read().unwrap();
             let task_result = state
@@ -137,7 +143,8 @@ pub fn run_starlark_modules(
             printer.log(Level::Message, "Run Phase")?;
             sort_tasks(target.clone()).context(format_context!("Failed to sort tasks"))?;
 
-            debug_sorted_tasks(printer, phase).context(format_context!("Failed to debug sorted tasks"))?;
+            debug_sorted_tasks(printer, phase)
+                .context(format_context!("Failed to debug sorted tasks"))?;
 
             let state = rules::get_state().read().unwrap();
             let _new_modules = state
@@ -148,8 +155,8 @@ pub fn run_starlark_modules(
             printer.log(Level::Debug, "Evaluate Phase")?;
             sort_tasks(target.clone()).context(format_context!("Failed to sort tasks"))?;
 
-            debug_sorted_tasks(printer, rules::Phase::Run).context(format_context!("Failed to debug sorted tasks"))?;
-
+            debug_sorted_tasks(printer, rules::Phase::Run)
+                .context(format_context!("Failed to debug sorted tasks"))?;
 
             let state = rules::get_state().read().unwrap();
             state
@@ -157,25 +164,34 @@ pub fn run_starlark_modules(
                 .context(format_context!("Failed to show tasks"))?;
         }
         rules::Phase::Checkout => {
-            printer.log(Level::Debug, "Checkout Phase")?;
-            debug_sorted_tasks(printer, phase).context(format_context!("Failed to debug sorted tasks"))?;
-
+            printer.log(Level::Debug, "Post Checkout Phase")?;
             sort_tasks(target.clone()).context(format_context!("Failed to sort tasks"))?;
+            debug_sorted_tasks(printer, rules::Phase::PostCheckout)
+                .context(format_context!("Failed to debug sorted tasks"))?;
 
             let state = rules::get_state().read().unwrap();
             state
                 .execute(printer, rules::Phase::PostCheckout)
                 .context(format_context!("failed to execute post checkout phase"))?;
 
-            executor::env::finalize_env().context(format_context!("failed to finalize env"))?;
+            // prepend PATH with sysroot/bin if sysroot/bin is not already in the PATH
+            let mut env = info::get_env();
+            let sysroot_bin = format!("{}/sysroot/bin", workspace::absolute_path());
+            if !env.paths.contains(&sysroot_bin) {
+                env.paths.insert(0, sysroot_bin);
+            }
+            
+
+            executor::env::finalize_env(&env).context(format_context!("failed to finalize env"))?;
 
             let mut workspace_file_content = String::new();
             workspace_file_content.push_str(workspace::WORKSPACE_FILE_HEADER);
             workspace_file_content.push('\n');
 
             workspace_file_content.push_str("workspace_env = ");
+
             workspace_file_content
-                .push_str(serde_json::to_string_pretty(&info::get_env())?.as_str());
+                .push_str(serde_json::to_string_pretty(&env)?.as_str());
             workspace_file_content.push_str("\n\ninfo.set_env(env = workspace_env) \n");
 
             let workspace_file_path =

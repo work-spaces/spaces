@@ -59,6 +59,7 @@ impl State {
             .cloned()
             .collect::<Vec<Task>>();
 
+        self.graph.clear();
         // add all tasks to the graph
         for task in tasks.values() {
             self.graph.add_task(task.rule.name.clone());
@@ -170,13 +171,13 @@ impl State {
 
             if task.phase == phase {
                 let message = if task.rule.type_ == Some(RuleType::Optional) {
-                    "Skipped (Optional)"
+                    "Skipped (Optional)".to_string()
                 } else {
-                    "Complete"
+                    format!("Complete ({:?})", task.phase)
                 };
 
                 let mut progress_bar =
-                    multi_progress.add_progress(task.rule.name.as_str(), Some(100), Some(message));
+                    multi_progress.add_progress(task.rule.name.as_str(), Some(100), Some(message.as_str()));
 
                 progress_bar.log(
                     printer::Level::Trace,
@@ -358,7 +359,7 @@ impl Task {
         let rule = self.rule.clone();
         let deps_signals = self.deps_signals.clone();
 
-        progress.set_message("Waiting for dependencies");
+        progress.set_message(format!("Waiting for dependencies ({:?})", self.phase).as_str());
 
         std::thread::spawn(move || -> anyhow::Result<executor::TaskResult> {
             // check inputs/outputs to see if we need to run
