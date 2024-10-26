@@ -31,7 +31,7 @@ jobs:
       - name: Create binary artifact
         run: |
           mkdir -p artifacts
-          tar -czf artifacts/spaces-linux-gnu-x86_64-${{ github.ref_name }}.tar.gz -C target/x86_64-unknown-linux-gnu/release spaces
+          tar -czf artifacts/spaces-linux-gnu-x86_64-${{ github.ref_name }}.tar.gz -C target/release spaces
 
       - name: Publish release with Ubuntu binary
         env:
