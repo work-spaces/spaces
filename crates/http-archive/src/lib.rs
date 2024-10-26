@@ -2,8 +2,10 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use tokio::io::AsyncWriteExt;
 use std::sync::RwLock;
+use tokio::io::AsyncWriteExt;
+use url::Url;
+
 struct State {}
 
 static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
@@ -37,6 +39,49 @@ pub struct Archive {
 #[derive(Debug, Serialize, Deserialize)]
 struct Files {
     files: HashSet<String>,
+}
+
+fn transform_url_to_gh_arguments(url: &str) -> Option<Vec<String>> {
+    // use which to see if gh is installed
+    if which::which("gh").is_err() {
+        return None;
+    }
+
+    // Parse the URL
+    let parsed_url = Url::parse(url).ok()?;
+
+    // Ensure the URL is for GitHub releases
+    if parsed_url.domain()? != "github.com" {
+        return None;
+    }
+
+    // Split the path to extract owner, repo, and tag
+    let mut path_segments = parsed_url.path_segments()?;
+    let owner = path_segments.next()?;
+    let repo = path_segments.next()?;
+    let release_segment = path_segments.next()?;
+
+    // Ensure it's a release download URL
+    if release_segment != "releases" {
+        return None;
+    }
+
+    // Check if it has "download/tag" structure
+    let download_segment = path_segments.next()?;
+    let tag = if download_segment == "download" {
+        path_segments.next()?
+    } else {
+        return None;
+    };
+
+    // Return the GitHub CLI command arguments
+    Some(vec![
+        "release".to_string(),
+        "download".to_string(),
+        tag.to_string(),
+        "--repo".to_string(),
+        format!("{}/{}", owner, repo),
+    ])
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -218,7 +263,10 @@ impl HttpArchive {
         Ok(())
     }
 
-    pub fn sync(&self, progress_bar: printer::MultiProgressBar) -> anyhow::Result<printer::MultiProgressBar> {
+    pub fn sync(
+        &self,
+        mut progress_bar: printer::MultiProgressBar,
+    ) -> anyhow::Result<printer::MultiProgressBar> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .enable_all()
@@ -226,8 +274,20 @@ impl HttpArchive {
             .context(format_context!("Failed to create runtime"))?;
 
         let next_progress_bar = if self.is_download_required() {
-            let join_handle = self.download(&runtime, progress_bar)?;
-            runtime.block_on(join_handle)??
+            if let Some(arguments) = transform_url_to_gh_arguments(self.archive.url.as_str()) {
+                let options = printer::ExecuteOptions {
+                    arguments,
+                    ..Default::default()
+                };
+                progress_bar.execute_process("gh", options).context(format_context!(
+                    "failed to download {} using gh", self.archive.url
+                ))?;
+
+                progress_bar
+            } else {
+                let join_handle = self.download(&runtime, progress_bar)?;
+                runtime.block_on(join_handle)??
+            }
         } else {
             progress_bar
         };
@@ -239,11 +299,14 @@ impl HttpArchive {
         Ok(next_progress_bar)
     }
 
+
     pub fn download(
         &self,
         runtime: &tokio::runtime::Runtime,
         mut progress: printer::MultiProgressBar,
     ) -> anyhow::Result<tokio::task::JoinHandle<anyhow::Result<printer::MultiProgressBar>>> {
+
+
         let url = self.archive.url.clone();
         let full_path_to_archive = self.full_path_to_archive.clone();
         let full_path = std::path::Path::new(&full_path_to_archive);
@@ -337,8 +400,10 @@ impl HttpArchive {
             extracted_files.insert(file_name.to_string_lossy().to_string());
             progress_bar
         };
-        self.save_files_json(Files{files:extracted_files})
-            .context(format_context!("Failed to save json files manifest"))?;
+        self.save_files_json(Files {
+            files: extracted_files,
+        })
+        .context(format_context!("Failed to save json files manifest"))?;
         Ok(next_progress_bar)
     }
 

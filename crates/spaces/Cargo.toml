@@ -1,11 +1,11 @@
 [package]
 name = "spaces"
-version = "0.8.3"
+version = "0.8.4"
 edition = "2021"
 
 [dependencies]
-clap = { version = "4.5.20", features = ["derive"] }
-clap_complete = { version = "4.5.33" }
+clap = { version = "4", features = ["derive"] }
+clap_complete = { version = "4" }
 anyhow.workspace = true
 anyhow-source-location.workspace = true
 
@@ -32,11 +32,11 @@ chrono = "0.4.38"
 blake3 = "1.5.4"
 bincode = { version = "2.0.0-rc.3", features = ["derive"] }
 
-which = "6.0.3"
-json_value_merge = "2.0.0"
-regex = "1.10.6"
-flume = "0.11.0"
-cfg-if = "1.0.0"
-walkdir = "2.5.0"
-globwalk = "0.9.1"
-maplit = "1.0.2"
+which = "6"
+json_value_merge = "2"
+regex = "1"
+flume = "0.11"
+cfg-if = "1"
+walkdir = "2"
+globwalk = "0.9"
+maplit = "1"

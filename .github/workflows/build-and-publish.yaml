@@ -31,7 +31,7 @@ jobs:
       - name: Create binary artifact
         run: |
           mkdir -p artifacts
-          zip artifacts/spaces-linux-gnu-x86_64-${{ github.ref_name }}.zip target/release/spaces
+          tar -czf artifacts/spaces-linux-gnu-x86_64-${{ github.ref_name }}.tar.gz -C target/x86_64-unknown-linux-gnu/release spaces
 
       - name: Publish release with Ubuntu binary
         env:
@@ -68,7 +68,7 @@ jobs:
           rustup target add ${{ matrix.arch }}
           cargo build --profile=release  --target=${{ matrix.arch }}
 
-      - name: Create binary artifact (zip)
+      - name: Create binary executable
         run: |
           mkdir -p artifacts
           cp target/${{ matrix.arch }}/release/spaces.exe artifacts/spaces-${{ matrix.os }}-${{ matrix.arch }}-${{ github.ref_name }}.exe 
@@ -111,7 +111,7 @@ jobs:
       - name: Create binary artifact (zip)
         run: |
           mkdir -p artifacts
-          zip artifacts/spaces-${{ matrix.os }}-${{ matrix.arch }}-${{ github.ref_name }}.zip target/${{ matrix.arch }}-apple-darwin/release/spaces
+          tar -czf artifacts/spaces-${{ matrix.os }}-${{ matrix.arch }}-${{ github.ref_name }}.tar.gz -C target/${{ matrix.arch }}-apple-darwin/release spaces
         shell: bash
 
       - name: Upload binary to release

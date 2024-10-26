@@ -45,6 +45,8 @@ impl Exec {
             environment.push((key, value));
         }
 
+        let log_file_path = workspace::get_log_file(name);
+
         let options = printer::ExecuteOptions {
             label: name.to_string(),
             arguments,
@@ -54,7 +56,7 @@ impl Exec {
                 .clone()
                 .map(|cwd| format!("{}/{}", workspace_path, cwd)),
             is_return_stdout: self.redirect_stdout.is_some(),
-            log_file_path: Some(workspace::get_log_file(name)),
+            log_file_path: Some(log_file_path.clone()),
         };
 
         progress.log(
@@ -64,12 +66,18 @@ impl Exec {
 
         let result = progress.execute_process(&self.command, options);
 
+        progress.log(
+            printer::Level::Message,
+            format!("log file for {name}: {log_file_path}").as_str(),
+        );
+
         let stdout_content = match result {
             Ok(content) => {
                 progress.log(
-                    printer::Level::Trace,
+                    printer::Level::Info,
                     format!("exec {name} succeeded").as_str(),
                 );
+
                 if let Some(Expect::Failure) = self.expect.as_ref() {
                     return Err(format_error!("Expected failure but task succeeded"));
                 } else {
@@ -77,13 +85,19 @@ impl Exec {
                 }
             }
             Err(exec_error) => {
-                progress.log(
-                    printer::Level::Trace,
-                    format!("exec {name} failed").as_str(),
-                );
+                progress.log(printer::Level::Info, format!("exec {name} failed").as_str());
+
                 if let Some(Expect::Failure) = self.expect.as_ref() {
                     None
                 } else {
+                    let log_contents = std::fs::read_to_string(&log_file_path)
+                        .context(format_context!("Failed to read log file {}", log_file_path))?;
+
+                    if log_contents.len() > 8192 {
+                        progress.log(printer::Level::Error, format!("See log file {log_file_path} for details").as_str());  
+                    } else {
+                        progress.log(printer::Level::Error, log_contents.as_str());
+                    }
                     return Err(format_error!(
                         "Expected success but task failed because {exec_error}"
                     ));
@@ -115,11 +129,7 @@ pub struct ExecIf {
 }
 
 impl ExecIf {
-    pub fn execute(
-        &self,
-        name: &str,
-        mut progress: printer::MultiProgressBar,
-    ) -> Vec<String> {
+    pub fn execute(&self, name: &str, mut progress: printer::MultiProgressBar) -> Vec<String> {
         let condition_result = self.if_.execute(name, &mut progress);
         let mut result = Vec::new();
         match condition_result {

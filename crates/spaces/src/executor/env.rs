@@ -26,11 +26,11 @@ pub fn finalize_env() -> anyhow::Result<()> {
     let mut content = String::new();
 
     for (key, value) in env.vars.iter() {
-        let line = format!("{}={}\n", key, value);
+        let line = format!("export {}={}\n", key, value);
         content.push_str(&line);
     }
     content.push('\n');
-    content.push_str(format!("PATH={}\n", env.paths.join(":")).as_str());
+    content.push_str(format!("export PATH={}\n", env.paths.join(":")).as_str());
 
     std::fs::write(env_path.clone(), content)
         .context(format_context!("failed to write env file {env_path:?}"))?;

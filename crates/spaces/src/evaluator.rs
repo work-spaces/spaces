@@ -67,6 +67,19 @@ pub fn sort_tasks(target: Option<String>) -> anyhow::Result<()> {
     state.sort_tasks(target)
 }
 
+fn debug_sorted_tasks(printer: &mut printer::Printer, phase: rules::Phase) -> anyhow::Result<()> {
+    let state: std::sync::RwLockReadGuard<'_, rules::State> = rules::get_state().read().unwrap();
+    for node_index in state.sorted.iter() {
+        let task_name = state.graph.get_task(*node_index);
+        if let Some(task) = state.tasks.read().unwrap().get(task_name) {
+            if task.phase == phase {
+                printer.log(printer::Level::Debug, format!("Queued task {task_name}").as_str())?;
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn run_starlark_modules(
     printer: &mut printer::Printer,
     modules: Vec<(String, String)>,
@@ -121,8 +134,10 @@ pub fn run_starlark_modules(
 
     match phase {
         rules::Phase::Run => {
-            printer.log(Level::Trace, "Run Phase")?;
+            printer.log(Level::Message, "Run Phase")?;
             sort_tasks(target.clone()).context(format_context!("Failed to sort tasks"))?;
+
+            debug_sorted_tasks(printer, phase).context(format_context!("Failed to debug sorted tasks"))?;
 
             let state = rules::get_state().read().unwrap();
             let _new_modules = state
@@ -130,9 +145,11 @@ pub fn run_starlark_modules(
                 .context(format_context!("Failed to execute tasks"))?;
         }
         rules::Phase::Evaluate => {
-            printer.log(Level::Trace, "Evaluate Phase")?;
-
+            printer.log(Level::Debug, "Evaluate Phase")?;
             sort_tasks(target.clone()).context(format_context!("Failed to sort tasks"))?;
+
+            debug_sorted_tasks(printer, rules::Phase::Run).context(format_context!("Failed to debug sorted tasks"))?;
+
 
             let state = rules::get_state().read().unwrap();
             state
@@ -140,10 +157,10 @@ pub fn run_starlark_modules(
                 .context(format_context!("Failed to show tasks"))?;
         }
         rules::Phase::Checkout => {
-            printer.log(Level::Trace, "Checkout Phase")?;
+            printer.log(Level::Debug, "Checkout Phase")?;
+            debug_sorted_tasks(printer, phase).context(format_context!("Failed to debug sorted tasks"))?;
 
-            sort_tasks(target.clone())
-                .context(format_context!("Failed to sort tasks"))?;
+            sort_tasks(target.clone()).context(format_context!("Failed to sort tasks"))?;
 
             let state = rules::get_state().read().unwrap();
             state
@@ -191,4 +208,3 @@ pub fn run_starlark_script(name: &str, script: &str) -> anyhow::Result<()> {
 
     Ok(())
 }
-

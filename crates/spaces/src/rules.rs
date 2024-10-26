@@ -53,6 +53,12 @@ impl State {
     pub fn sort_tasks(&mut self, target: Option<String>) -> anyhow::Result<()> {
         let mut tasks = self.tasks.write().unwrap();
 
+        let setup_tasks = tasks
+            .values()
+            .filter(|task| task.rule.type_ == Some(RuleType::Setup))
+            .cloned()
+            .collect::<Vec<Task>>();
+
         // add all tasks to the graph
         for task in tasks.values() {
             self.graph.add_task(task.rule.name.clone());
@@ -67,6 +73,17 @@ impl State {
                     continue;
                 }
                 task.update_implicit_dependency(other_task);
+            }
+            // all non-setup tasks need to depend on the Setup tasks
+            if task.rule.type_ != Some(RuleType::Setup) {
+                for setup_task in setup_tasks.iter() {
+                    if task.phase == setup_task.phase {
+                        task.rule
+                            .deps
+                            .get_or_insert_with(Vec::new)
+                            .push(setup_task.rule.name.clone());
+                    }
+                }
             }
 
             // connect the dependencies
@@ -111,7 +128,6 @@ impl State {
     }
 
     pub fn show_tasks(&self, printer: &mut printer::Printer) -> anyhow::Result<()> {
-
         let tasks = self.tasks.read().unwrap();
         let mut task_info_list = std::collections::HashMap::new();
         for node_index in self.sorted.iter() {
@@ -121,14 +137,10 @@ impl State {
                 .ok_or(format_error!("Task not found {task_name}"))?;
 
             if printer.level == printer::Level::Trace {
-                printer.trace("task", &task)?;
-            } else if printer.level <= printer::Level::Message {
-                task_info_list.insert(task.rule.name.clone(), task.rule.help.clone());
-            } else if task.rule.help.is_some() {
+                printer.trace(task_name, &task)?;
+            } else if printer.level <= printer::Level::Message || task.rule.help.is_some() {
                 task_info_list.insert(task.rule.name.clone(), task.rule.help.clone());
             }
-
-            printer.trace(task_name, &task)?;
         }
 
         printer.info("targets", &task_info_list)?;
@@ -393,7 +405,7 @@ impl Task {
                     } else {
                         break;
                     }
-                    progress.increment_with_overflow(1);
+                    //progress.increment_with_overflow(1);
                 }
                 count += 1;
             }
