@@ -1,7 +1,7 @@
+use crate::{Arg, Function};
 use starlark::environment::GlobalsBuilder;
 use starlark::values::none::NoneType;
 use std::sync::RwLock;
-use crate::{Function, Arg};
 
 struct State {
     exit_code: i32,
@@ -16,7 +16,7 @@ fn get_state() -> &'static RwLock<State> {
     }
     STATE.set(RwLock::new(State {
         exit_code: 0,
-        args: Vec::new()
+        args: Vec::new(),
     }));
     STATE.get()
 }
@@ -29,8 +29,7 @@ pub fn set_args(script_args: Vec<String>) {
 pub fn get_exit_code() -> i32 {
     let state = get_state().read().unwrap();
     state.exit_code
-}   
-
+}
 
 pub const FUNCTIONS: &[Function] = &[
         Function {
@@ -75,12 +74,11 @@ This doesn't exit the script."#,
 
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
-
     fn print(content: &str) -> anyhow::Result<NoneType> {
         println!("{content}");
         Ok(NoneType)
     }
-    
+
     fn get_arg(offset: i32) -> anyhow::Result<String> {
         let state = get_state().read().unwrap();
         let offset = offset as usize;
@@ -95,5 +93,4 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         state.exit_code = exit_code;
         Ok(NoneType)
     }
-
 }

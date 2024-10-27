@@ -180,7 +180,6 @@ pub fn run_starlark_modules(
             if !env.paths.contains(&sysroot_bin) {
                 env.paths.insert(0, sysroot_bin);
             }
-            
 
             executor::env::finalize_env(&env).context(format_context!("failed to finalize env"))?;
 
@@ -190,8 +189,7 @@ pub fn run_starlark_modules(
 
             workspace_file_content.push_str("workspace_env = ");
 
-            workspace_file_content
-                .push_str(serde_json::to_string_pretty(&env)?.as_str());
+            workspace_file_content.push_str(serde_json::to_string_pretty(&env)?.as_str());
             workspace_file_content.push_str("\n\ninfo.set_env(env = workspace_env) \n");
 
             let workspace_file_path =

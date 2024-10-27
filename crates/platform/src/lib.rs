@@ -41,23 +41,38 @@ impl Platform {
     }
 
     pub fn is_windows() -> bool {
-        matches!(Self::get_platform(), Some(Self::WindowsX86_64) | Some(Self::WindowsAarch64))
+        matches!(
+            Self::get_platform(),
+            Some(Self::WindowsX86_64) | Some(Self::WindowsAarch64)
+        )
     }
 
     pub fn is_macos() -> bool {
-        matches!(Self::get_platform(), Some(Self::MacosAarch64) | Some(Self::MacosX86_64))
+        matches!(
+            Self::get_platform(),
+            Some(Self::MacosAarch64) | Some(Self::MacosX86_64)
+        )
     }
 
     pub fn is_linux() -> bool {
-        matches!(Self::get_platform(), Some(Self::LinuxAarch64) | Some(Self::LinuxX86_64))
+        matches!(
+            Self::get_platform(),
+            Some(Self::LinuxAarch64) | Some(Self::LinuxX86_64)
+        )
     }
 
     pub fn is_x86_64() -> bool {
-        matches!(Self::get_platform(), Some(Self::WindowsX86_64) | Some(Self::LinuxX86_64) | Some(Self::MacosX86_64))
+        matches!(
+            Self::get_platform(),
+            Some(Self::WindowsX86_64) | Some(Self::LinuxX86_64) | Some(Self::MacosX86_64)
+        )
     }
 
     pub fn is_aarch64() -> bool {
-        matches!(Self::get_platform(), Some(Self::MacosAarch64) | Some(Self::WindowsAarch64) | Some(Self::LinuxAarch64))
+        matches!(
+            Self::get_platform(),
+            Some(Self::MacosAarch64) | Some(Self::WindowsAarch64) | Some(Self::LinuxAarch64)
+        )
     }
 }
 

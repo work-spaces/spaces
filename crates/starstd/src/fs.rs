@@ -1,48 +1,54 @@
+use crate::{Arg, Function};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use starlark::environment::GlobalsBuilder;
 use starlark::values::none::NoneType;
 use starlark::values::{Heap, Value};
-use crate::{Function, Arg};
 
 pub const FUNCTIONS: &[Function] = &[
     Function {
         name: "write_string_to_file",
-        description: "Writes a string to a file. Truncates the file if it exists. Creates it if it doesn't.",
+        description:
+            "Writes a string to a file. Truncates the file if it exists. Creates it if it doesn't.",
         return_type: "None",
-        args: &[Arg{
-            name : "path",
-            description: "path relative to the workspace root",
-            dict: &[],
-        },
-        Arg{
-            name : "content",
-            description: "contents to write",
-            dict: &[],
-        }],
+        args: &[
+            Arg {
+                name: "path",
+                description: "path relative to the workspace root",
+                dict: &[],
+            },
+            Arg {
+                name: "content",
+                description: "contents to write",
+                dict: &[],
+            },
+        ],
         example: None,
     },
     Function {
         name: "append_string_to_file",
         description: "Appends a string to a file. Creates the file if it doesn't exist.",
         return_type: "None",
-        args: &[Arg{
-            name : "path",
-            description: "path relative to the workspace root",
-            dict: &[],
-        },
-        Arg{
-            name : "content",
-            description: "contents to write",
-            dict: &[],
-        }],                 example: None,
+        args: &[
+            Arg {
+                name: "path",
+                description: "path relative to the workspace root",
+                dict: &[],
+            },
+            Arg {
+                name: "content",
+                description: "contents to write",
+                dict: &[],
+            },
+        ],
+        example: None,
     },
     Function {
         name: "read_file_to_string",
         description: "Reads the contents of the file as a string",
         return_type: "str",
-        args: &[Arg{
-            name : "path",
+        args: &[Arg {
+            name: "path",
             description: "path relative to the workspace root",
             dict: &[],
         }],
@@ -52,8 +58,8 @@ pub const FUNCTIONS: &[Function] = &[
         name: "exists",
         description: "Checks if the file/directory exists",
         return_type: "bool",
-        args: &[Arg{
-            name : "path",
+        args: &[Arg {
+            name: "path",
             description: "path relative to the workspace root",
             dict: &[],
         }],
@@ -63,31 +69,34 @@ pub const FUNCTIONS: &[Function] = &[
         name: "read_toml_to_dict",
         description: "Reads and parses a toml file",
         return_type: "str",
-        args: &[Arg{
-            name : "path",
+        args: &[Arg {
+            name: "path",
             description: "path relative to the workspace root",
             dict: &[],
-        }] ,                example: None,
+        }],
+        example: None,
     },
     Function {
         name: "read_yaml_to_dict",
         description: "Reads and parses a yaml file",
         return_type: "dict with parsed yaml",
-        args: &[Arg{
-            name : "path",
+        args: &[Arg {
+            name: "path",
             description: "path relative to the workspace root",
             dict: &[],
-        }] ,              example: None,
+        }],
+        example: None,
     },
     Function {
         name: "read_json_to_dict",
         description: "Reads and parses a json file",
         return_type: "dict with parsed json",
-        args: &[Arg{
-            name : "path",
+        args: &[Arg {
+            name: "path",
             description: "path relative to the workspace root",
             dict: &[],
-        }],                example: None,
+        }],
+        example: None,
     },
 ];
 

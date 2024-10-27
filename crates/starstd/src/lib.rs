@@ -8,7 +8,6 @@ pub mod script;
 use starlark::environment::GlobalsBuilder;
 use starlark::values::none::NoneType;
 
-
 pub struct Arg {
     pub name: &'static str,
     pub description: &'static str,
@@ -35,7 +34,6 @@ pub const fn get_rule_argument() -> Arg {
         ],
     }
 }
-
 
 // This defines the function that is visible to Starlark
 #[starlark_module]

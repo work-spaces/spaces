@@ -41,7 +41,15 @@ struct Files {
     files: HashSet<String>,
 }
 
-fn transform_url_to_gh_arguments(url: &str) -> Option<Vec<String>> {
+fn transform_url_to_gh_arguments(
+    allow_gh_for_download: bool,
+    url: &str,
+    full_path_to_archive: &str,
+) -> Option<Vec<String>> {
+    if !allow_gh_for_download {
+        return None;
+    }
+
     // use which to see if gh is installed
     if which::which("gh").is_err() {
         return None;
@@ -73,14 +81,16 @@ fn transform_url_to_gh_arguments(url: &str) -> Option<Vec<String>> {
     } else {
         return None;
     };
+    let pattern = path_segments.next()?;
 
     // Return the GitHub CLI command arguments
     Some(vec![
         "release".to_string(),
         "download".to_string(),
         tag.to_string(),
-        "--repo".to_string(),
-        format!("{}/{}", owner, repo),
+        format!("--repo={}/{}", owner, repo),
+        format!("--pattern={}", pattern),
+        format!("--output={full_path_to_archive}"),
     ])
 }
 
@@ -90,6 +100,7 @@ pub struct HttpArchive {
     archive: Archive,
     archive_driver: Option<easy_archiver::driver::Driver>,
     full_path_to_archive: String,
+    allow_gh_for_download: bool,
 }
 
 impl HttpArchive {
@@ -133,7 +144,12 @@ impl HttpArchive {
             archive_driver,
             full_path_to_archive,
             spaces_key: spaces_key.to_string(),
+            allow_gh_for_download: true,
         })
+    }
+
+    pub fn allow_gh_for_download(&mut self, value: bool) {
+        self.allow_gh_for_download = value;
     }
 
     pub fn get_path_to_extracted_files(&self) -> String {
@@ -274,14 +290,21 @@ impl HttpArchive {
             .context(format_context!("Failed to create runtime"))?;
 
         let next_progress_bar = if self.is_download_required() {
-            if let Some(arguments) = transform_url_to_gh_arguments(self.archive.url.as_str()) {
+            if let Some(arguments) = transform_url_to_gh_arguments(
+                self.allow_gh_for_download,
+                self.archive.url.as_str(),
+                &self.full_path_to_archive,
+            ) {
                 let options = printer::ExecuteOptions {
                     arguments,
                     ..Default::default()
                 };
-                progress_bar.execute_process("gh", options).context(format_context!(
-                    "failed to download {} using gh", self.archive.url
-                ))?;
+                progress_bar
+                    .execute_process("gh", options)
+                    .context(format_context!(
+                        "failed to download {} using gh",
+                        self.archive.url
+                    ))?;
 
                 progress_bar
             } else {
@@ -299,14 +322,11 @@ impl HttpArchive {
         Ok(next_progress_bar)
     }
 
-
     pub fn download(
         &self,
         runtime: &tokio::runtime::Runtime,
         mut progress: printer::MultiProgressBar,
     ) -> anyhow::Result<tokio::task::JoinHandle<anyhow::Result<printer::MultiProgressBar>>> {
-
-
         let url = self.archive.url.clone();
         let full_path_to_archive = self.full_path_to_archive.clone();
         let full_path = std::path::Path::new(&full_path_to_archive);

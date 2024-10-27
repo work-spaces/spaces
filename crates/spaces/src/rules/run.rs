@@ -1,11 +1,10 @@
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use starlark::{environment::GlobalsBuilder, values::none::NoneType};
+use starstd::{get_rule_argument, Arg, Function};
 use std::collections::HashSet;
-use starstd::{Function, Arg, get_rule_argument};
 
 use crate::{executor, rules};
-
 
 pub const FUNCTIONS: &[Function] = &[
     Function {
@@ -156,7 +155,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         for target in exec_if.then_.iter_mut() {
             *target = state.get_sanitized_rule_name(target);
         }
-        
+
         if let Some(else_targets) = exec_if.else_.as_mut() {
             for target in else_targets.iter_mut() {
                 *target = state.get_sanitized_rule_name(target);

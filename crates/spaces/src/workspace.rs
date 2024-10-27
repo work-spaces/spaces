@@ -24,6 +24,14 @@ pub fn get_store_path() -> String {
     format!("{home}/.spaces/store")
 }
 
+pub fn get_spaces_tools_path() -> String {
+    format!("{}/spaces_tools", get_store_path())
+}
+
+pub fn get_cargo_binstall_root() -> String {
+    format!("{}/cargo_binstall_bin_dir", get_spaces_tools_path())
+}
+
 fn get_unique() -> anyhow::Result<String> {
     let duration_since_epoch = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

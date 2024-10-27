@@ -37,6 +37,7 @@ pub enum Task {
     CreateArchive(archive::Archive),
     HttpArchive(http_archive::HttpArchive),
     AddWhichAsset(asset::AddWhichAsset),
+    AddHardLink(asset::AddHardLink),
     UpdateAsset(asset::UpdateAsset),
     UpdateEnv(env::UpdateEnv),
     AddAsset(asset::AddAsset),
@@ -61,6 +62,7 @@ impl Task {
             Task::CreateArchive(archive) => archive.execute(name, progress),
             Task::UpdateAsset(asset) => asset.execute(name, progress),
             Task::AddWhichAsset(asset) => asset.execute(name, progress),
+            Task::AddHardLink(asset) => asset.execute(name, progress),
             Task::UpdateEnv(update_env) => update_env.execute(name, progress),
             Task::AddAsset(asset) => asset.execute(name, progress),
             Task::Git(git) => {
@@ -76,7 +78,6 @@ impl Task {
             enabled_targets,
         };
 
-
         if check_new_modules {
             let workspace = workspace::absolute_path();
 
@@ -88,7 +89,8 @@ impl Task {
                     .join(*last)
                     .join(workspace::SPACES_MODULE_NAME);
                 if spaces_star_path.exists() {
-                    let path_within_workspace = format!("{}/{}", *last, workspace::SPACES_MODULE_NAME);
+                    let path_within_workspace =
+                        format!("{}/{}", *last, workspace::SPACES_MODULE_NAME);
                     result.new_modules.push(path_within_workspace);
                 }
             }

@@ -5,7 +5,7 @@ use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
 use starlark::environment::GlobalsBuilder;
 use starlark::values::none::NoneType;
-use starstd::{Function, Arg, get_rule_argument};
+use starstd::{get_rule_argument, Arg, Function};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PlatformArchive {
@@ -28,7 +28,6 @@ const fn get_archive_dict() -> &'static [(&'static str, &'static str)] {
         ("add_prefix", "optional prefix to add in the workspace (e.g. sysroot/share)"),
     ]
 }
-
 
 pub const FUNCTIONS: &[Function] = &[
     Function {
@@ -57,8 +56,7 @@ pub const FUNCTIONS: &[Function] = &[
         "checkout": "Revision",
         "clone": "Default",
     }
-)"#)
-            
+)"#)        
     },
     Function {
         name: "add_archive",
@@ -150,6 +148,27 @@ checkout.add_platform_archive(
 )"#)
     },
     Function {
+        name: "add_cargo_bin",
+        description: "Adds a binary crate using cargo-binstall. The binaries are installed in the spaces store and hardlinked to the workspace.",
+        return_type: "str",
+        args: &[
+            get_rule_argument(),
+            Arg{
+                name : "repo",
+                description: "dict with",
+                dict: &[
+                    ("crate", "The name of the binary crate"),
+                    ("version", "The crate version to install"),
+                    ("bins", "List of binaries to install"),
+                ]
+            }
+        ],
+        example: Some(r#"checkout.add_cargo_bin(
+    rule = {"name": "probe-rs-tools"},
+    cargo_bin = {"crate": "probe-rs-tools", "version": "0.24.0", "bins": ["probe-rs", "cargo-embed", "cargo-flash"]},
+)"#)        
+    },
+    Function {
         name: "add_asset",
         description: r#"Adds a file to the workspace. This is useful for providing
 a top-level build file that orchestrates the entire workspace. It can also
@@ -206,6 +225,29 @@ that break workspace hermicity."#,
     }
 )"#)
         },
+        Function {
+            name: "add_hard_link_asset",
+            description: r#"Adds a hardlink from anywhere on the system to the workspace"#,
+            return_type: "None",
+            args: &[
+                get_rule_argument(),
+                Arg {
+                    name: "asset",
+                    description: "dict with",
+                    dict: &[
+                        ("source", "the source of the hard link"),
+                        ("destination", "relative path where asset will live in the workspace"),
+                    ],
+                },
+            ],
+            example: Some(r#"checkout.add_hard_link_asset(
+        rule = { "name": "which_pkg_config" },
+        asset = {
+            "source": "<path to asset>",
+            "destination": "sysroot/asset/my_asset"
+        }
+    )"#)
+            },
     Function {
         name: "update_asset",
         description: r#"Creates or updates an existing file containing structured data
@@ -308,6 +350,14 @@ source env
 )"#)}
 ];
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct CargoBin {
+    #[serde(rename = "crate")]
+    crate_: String,
+    bins: Vec<String>,
+    version: String,
+}
+
 // This defines the function that is visible to Starlark
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
@@ -319,7 +369,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .context(format_context!("bad options for repo"))?;
 
         let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for repo"))?;
+            .context(format_context!("bad options for repo rule"))?;
 
         let worktree_path = workspace::absolute_path();
 
@@ -340,6 +390,80 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 }),
             ))
             .context(format_context!("Failed to insert task {rule_name}"))?;
+        Ok(NoneType)
+    }
+
+    fn add_cargo_bin(
+        #[starlark(require = named)] rule: starlark::values::Value,
+        #[starlark(require = named)] cargo_bin: starlark::values::Value,
+    ) -> anyhow::Result<NoneType> {
+        let cargo_bin: CargoBin = serde_json::from_value(cargo_bin.to_json_value()?)
+            .context(format_context!("bad options for cargo_bin"))?;
+
+        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+            .context(format_context!("bad options for cargo_bin rule"))?;
+
+        let cargo_binstall_dir = workspace::get_cargo_binstall_root();
+
+        let output_directory = format!("{}/{}", cargo_binstall_dir, cargo_bin.version);
+
+        std::fs::create_dir_all(output_directory.as_str()).context(format_context!(
+            "Failed to create directory {output_directory}"
+        ))?;
+
+        let hard_link_rule = rule.clone();
+
+        let cargo_binstall_path = format!(
+            "{}/sysroot/bin/cargo-binstall",
+            workspace::get_spaces_tools_path()
+        );
+
+        let exec = executor::exec::Exec {
+            command: cargo_binstall_path,
+            args: Some(vec![
+                format!("--version={}", cargo_bin.version),
+                format!("--root={output_directory}"),
+                "--no-confirm".to_string(),
+                cargo_bin.crate_.clone(),
+            ]),
+            env: None,
+            working_directory: None,
+            redirect_stdout: None,
+            expect: None,
+        };
+
+        let state = rules::get_state().read().unwrap();
+        let rule_name = rule.name.clone();
+        state
+            .insert_task(rules::Task::new(
+                rule,
+                rules::Phase::Checkout,
+                executor::Task::Exec(exec),
+            ))
+            .context(format_context!("Failed to insert task {rule_name}"))?;
+
+        for bin in cargo_bin.bins {
+            let state = rules::get_state().read().unwrap();
+
+            let mut bin_rule = hard_link_rule.clone();
+            bin_rule.name = format!("{}/{}", hard_link_rule.name, bin);
+
+            // cargo install uses the root/bin install directory
+            let output_file = format!("{}/bin/{}", output_directory, bin);
+
+            let rule_name = hard_link_rule.name.clone();
+            state
+                .insert_task(rules::Task::new(
+                    bin_rule,
+                    rules::Phase::PostCheckout,
+                    executor::Task::AddHardLink(asset::AddHardLink {
+                        source: output_file,
+                        destination: format!("sysroot/bin/{}", bin),
+                    }),
+                ))
+                .context(format_context!("Failed to insert task {rule_name}"))?;
+        }
+
         Ok(NoneType)
     }
 
@@ -385,6 +509,29 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 rule,
                 rules::Phase::Checkout,
                 executor::Task::AddWhichAsset(asset),
+            ))
+            .context(format_context!("Failed to insert task {rule_name}"))?;
+
+        Ok(NoneType)
+    }
+
+    fn add_hard_link_asset(
+        #[starlark(require = named)] rule: starlark::values::Value,
+        #[starlark(require = named)] asset: starlark::values::Value,
+    ) -> anyhow::Result<NoneType> {
+        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+            .context(format_context!("bad options for which asset rule"))?;
+
+        let asset: asset::AddHardLink = serde_json::from_value(asset.to_json_value()?)
+            .context(format_context!("Failed to parse which asset arguments"))?;
+
+        let state = rules::get_state().read().unwrap();
+        let rule_name = rule.name.clone();
+        state
+            .insert_task(rules::Task::new(
+                rule,
+                rules::Phase::Checkout,
+                executor::Task::AddHardLink(asset),
             ))
             .context(format_context!("Failed to insert task {rule_name}"))?;
 
@@ -507,9 +654,7 @@ fn add_http_archive(
             .insert_task(rules::Task::new(
                 rule,
                 rules::Phase::Checkout,
-                executor::Task::HttpArchive(executor::http_archive::HttpArchive {
-                    http_archive,
-                }),
+                executor::Task::HttpArchive(executor::http_archive::HttpArchive { http_archive }),
             ))
             .context(format_context!("Failed to insert task {rule_name}"))?;
     }

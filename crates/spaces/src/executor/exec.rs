@@ -94,7 +94,10 @@ impl Exec {
                         .context(format_context!("Failed to read log file {}", log_file_path))?;
 
                     if log_contents.len() > 8192 {
-                        progress.log(printer::Level::Error, format!("See log file {log_file_path} for details").as_str());  
+                        progress.log(
+                            printer::Level::Error,
+                            format!("See log file {log_file_path} for details").as_str(),
+                        );
                     } else {
                         progress.log(printer::Level::Error, log_contents.as_str());
                     }

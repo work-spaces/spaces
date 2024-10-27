@@ -176,8 +176,11 @@ impl State {
                     format!("Complete ({:?})", task.phase)
                 };
 
-                let mut progress_bar =
-                    multi_progress.add_progress(task.rule.name.as_str(), Some(100), Some(message.as_str()));
+                let mut progress_bar = multi_progress.add_progress(
+                    task.rule.name.as_str(),
+                    Some(100),
+                    Some(message.as_str()),
+                );
 
                 progress_bar.log(
                     printer::Level::Trace,

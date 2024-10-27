@@ -144,6 +144,31 @@ impl AddWhichAsset {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AddHardLink {
+    pub source: String,
+    pub destination: String,
+}
+
+impl AddHardLink {
+    pub fn execute(&self, _name: &str, _progress: printer::MultiProgressBar) -> anyhow::Result<()> {
+        // create the hard link to sysroot
+        let workspace = workspace::absolute_path();
+        let destination = format!("{}/{}", workspace, self.destination);
+        let source = self.source.clone();
+
+        http_archive::HttpArchive::create_hard_link(destination.clone(), source.clone()).context(
+            format_context!(
+                "Failed to create hard link from {} to {}",
+                source,
+                destination
+            ),
+        )?;
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AddAsset {
     pub destination: String,
     pub content: String,

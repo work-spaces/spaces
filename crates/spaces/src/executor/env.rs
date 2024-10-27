@@ -11,7 +11,11 @@ pub struct UpdateEnv {
 }
 
 impl UpdateEnv {
-    pub fn execute(&self, name: &str, mut progress: printer::MultiProgressBar) -> anyhow::Result<()> {
+    pub fn execute(
+        &self,
+        name: &str,
+        mut progress: printer::MultiProgressBar,
+    ) -> anyhow::Result<()> {
         progress.log(
             printer::Level::Debug,
             format!("Update env {name}: {:?}", &self).as_str(),

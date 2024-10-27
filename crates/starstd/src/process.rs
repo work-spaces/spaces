@@ -1,3 +1,4 @@
+use crate::{Arg, Function};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
@@ -5,7 +6,6 @@ use starlark::environment::GlobalsBuilder;
 use starlark::values::{Heap, Value};
 use std::collections::HashMap;
 use std::process::Command;
-use crate::{Function, Arg}; 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Exec {
@@ -18,18 +18,22 @@ pub struct Exec {
 
 pub const FUNCTIONS: &[Function] = &[Function {
     name: "exec",
-    description:
-        "Executes a process",
+    description: "Executes a process",
     return_type: "dict # with members `status`, `stdout`, and `stderr`",
     args: &[
         Arg {
             name: "exec",
             description: "dict with members",
-            dict: &[("command", "name of the command to execute"),
+            dict: &[
+                ("command", "name of the command to execute"),
                 ("args", "optional list of arguments"),
                 ("env", "optional dict of environment variables"),
-                ("working_directory", "optional working directory (default is the workspace)"),
-                ("stdin", "optional string to pipe to the process stdin")],
+                (
+                    "working_directory",
+                    "optional working directory (default is the workspace)",
+                ),
+                ("stdin", "optional string to pipe to the process stdin"),
+            ],
         },
         Arg {
             name: "content",
@@ -38,16 +42,12 @@ pub const FUNCTIONS: &[Function] = &[Function {
         },
     ],
     example: None,
-
 }];
 
 // This defines the functions that are visible to Starlark
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
-    fn exec<'v>(
-        exec: starlark::values::Value,
-        heap: &'v Heap,
-    ) -> anyhow::Result<Value<'v>> {
+    fn exec<'v>(exec: starlark::values::Value, heap: &'v Heap) -> anyhow::Result<Value<'v>> {
         let exec: Exec = serde_json::from_value(exec.to_json_value()?)
             .context(format_context!("bad options for exec"))?;
 

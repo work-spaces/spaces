@@ -1,4 +1,4 @@
-use crate::{evaluator, rules, workspace, docs};
+use crate::{docs, evaluator, rules, tools, workspace};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
@@ -89,10 +89,10 @@ pub fn execute() -> anyhow::Result<()> {
         let filename = std::env::args().nth(1).unwrap();
         let input = std::path::Path::new(filename.as_str());
         if input.exists() && input.extension().unwrap_or_default() == "star" {
-
             starstd::script::set_args(std::env::args().skip(1).collect());
 
-            let input_contents = std::fs::read_to_string(input).context(format_context!("Failed to read input file {input:?}"))?;
+            let input_contents = std::fs::read_to_string(input)
+                .context(format_context!("Failed to read input file {input:?}"))?;
             run_starlark_script(filename.as_str(), input_contents.as_str())
                 .context(format_context!("Failed to run starlark script {filename}"))?;
 
@@ -107,6 +107,9 @@ pub fn execute() -> anyhow::Result<()> {
 
     let args = Arguments::parse();
     let mut printer = printer::Printer::new_stdout();
+
+    // install pre-requisites
+    tools::install_tools(&mut printer).context(format_context!("while installing tools"))?;
 
     match args {
         Arguments {

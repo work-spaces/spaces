@@ -10,7 +10,8 @@ pub struct HttpArchive {
 
 impl HttpArchive {
     pub fn execute(&self, name: &str, progress: printer::MultiProgressBar) -> anyhow::Result<()> {
-        let next_progress_bar = self.http_archive
+        let next_progress_bar = self
+            .http_archive
             .sync(progress)
             .context(format_context!("Failed to sync http_archive {}", name))?;
 
@@ -22,8 +23,7 @@ impl HttpArchive {
                 "Failed to create hard links for http_archive {}",
                 name
             ))?;
-            
+
         Ok(())
     }
 }
-
