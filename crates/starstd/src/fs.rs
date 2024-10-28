@@ -98,6 +98,17 @@ pub const FUNCTIONS: &[Function] = &[
         }],
         example: None,
     },
+    Function {
+        name: "read_directory",
+        description: "Reads the entries of a directory",
+        return_type: "[str]",
+        args: &[Arg {
+            name: "path",
+            description: "path relative to the workspace root",
+            dict: &[],
+        }],
+        example: None,
+    },
 ];
 
 // This defines the function that is visible to Starlark
@@ -198,4 +209,23 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let alloc_value = heap.alloc(json_value);
         Ok(alloc_value)
     }
+
+    fn read_directory(path: &str) -> anyhow::Result<Vec<String>> {
+        let entries = std::fs::read_dir(path).context(format_context!(
+            "Failed to read directory {} all paths must be relative to the workspace root",
+            path
+        ))?;
+
+        let mut result = Vec::new();
+        for entry in entries {
+            if let Ok(entry) = entry {
+                let path = entry.path();
+                let path = path.to_str().context(format_context!("Failed to convert path to string"))?;
+                result.push(path.to_string());
+            }
+        }
+
+        Ok(result)
+    }
+
 }

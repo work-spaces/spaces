@@ -69,6 +69,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         command.stdout(std::process::Stdio::piped());
         command.stderr(std::process::Stdio::piped());
+        if let Some(working_directory) = exec.working_directory {
+            command.current_dir(working_directory);
+        }
 
         let child_result = command.spawn();
 

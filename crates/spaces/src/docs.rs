@@ -129,6 +129,12 @@ in this library are executed immediately."#,
         show_function(function, level + 2, markdown)?;
     }
 
+    markdown.heading(level + 1, "`hash` Functions")?;
+
+    for function in starstd::hash::FUNCTIONS {
+        show_function(function, level + 2, markdown)?;
+    }
+
     markdown.heading(level + 1, "`process` Functions")?;
 
     for function in starstd::process::FUNCTIONS {

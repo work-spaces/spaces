@@ -4,6 +4,7 @@ extern crate starlark;
 pub mod fs;
 pub mod process;
 pub mod script;
+pub mod hash;
 
 use starlark::environment::GlobalsBuilder;
 use starlark::values::none::NoneType;

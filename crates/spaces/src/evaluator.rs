@@ -45,6 +45,7 @@ fn evaluate_module(
         .with_struct("checkout", rules::checkout::globals)
         .with_struct("run", rules::run::globals)
         .with_struct("fs", starstd::fs::globals)
+        .with_struct("hash", starstd::hash::globals)
         .with_struct("process", starstd::process::globals)
         .with_struct("script", starstd::script::globals)
         .with_struct("info", info::globals)

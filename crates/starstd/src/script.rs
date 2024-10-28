@@ -1,6 +1,8 @@
 use crate::{Arg, Function};
 use starlark::environment::GlobalsBuilder;
 use starlark::values::none::NoneType;
+use starlark::values::{Heap, Value};
+use std::collections::HashMap;
 use std::sync::RwLock;
 
 struct State {
@@ -57,6 +59,18 @@ pub const FUNCTIONS: &[Function] = &[
 
         },
         Function {
+            name: "get_args",
+            description: "Gets the arguments as a dict with 'ordered' and 'named' keys. `ordered` is a list of arguments that do not contain =, `named` is a map of key value pairs separated by =.",
+            return_type: "dict",
+            args: &[Arg {
+                name: "offset",
+                description: "int: offset of the argument to get.",
+                dict: &[],
+            }],
+            example: None,
+
+        },
+        Function {
             name: "set_exit_code",
             description: r#"Sets the exit code of the script. 
 Use zero for success and non-zero for failure.
@@ -86,6 +100,30 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             return Ok(String::new());
         }
         Ok(state.args[offset].clone())
+    }
+
+    fn get_args<'v>(heap: &'v Heap) -> anyhow::Result<Value<'v>> {
+        let mut result = serde_json::Value::Object(serde_json::Map::new());
+
+        let mut list_args = Vec::new();
+        let mut named_args = HashMap::new();
+
+        let args = get_state().read().unwrap().args.clone();
+
+        for (_, arg) in args.iter().enumerate() {
+            if arg.contains("=") {
+                let parts: Vec<&str> = arg.split("=").collect();
+                named_args.insert(parts[0].to_string(), parts[1].to_string());
+            } else {
+                list_args.push(arg.to_string());
+            }
+        }
+
+        result["ordered"] = serde_json::to_value(list_args).unwrap();
+        result["named"] = serde_json::to_value(named_args).unwrap();
+
+        let alloc_value = heap.alloc(result);
+        Ok(alloc_value)
     }
 
     fn set_exit_code(exit_code: i32) -> anyhow::Result<NoneType> {
