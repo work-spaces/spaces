@@ -31,14 +31,14 @@ jobs:
       - name: Create binary artifact
         run: |
           mkdir -p artifacts
-          tar -czf artifacts/spaces-linux-gnu-x86_64-${{ github.ref_name }}.tar.gz -C target/release spaces
+          (cd target/release; zip ../../artifacts/spaces-linux-x86_64-${{ github.ref_name }}.zip spaces)
 
       - name: Publish release with Ubuntu binary
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create ${{ github.ref_name }} \
-            artifacts/spaces-linux-gnu-x86_64-${{ github.ref_name }}.tar.gz --title "${{ github.ref_name }}" --notes "Release ${{ github.ref_name }} (Ubuntu binary packaged as .tar.xz)"
+            artifacts/spaces-linux-x86_64-${{ github.ref_name }}.zip --title "${{ github.ref_name }}" --notes "Release ${{ github.ref_name }} (Ubuntu binary packaged as .tar.xz)"
             
   build-matrix-windows:
     name: Build and Upload Other OS Binaries
@@ -71,14 +71,14 @@ jobs:
       - name: Create binary executable
         run: |
           mkdir -p artifacts
-          cp target/${{ matrix.arch }}/release/spaces.exe artifacts/spaces-${{ matrix.os }}-${{ matrix.arch }}-${{ github.ref_name }}.exe 
+          (cd target/${{ matrix.arch }}/release; 7z a -tzip ../../../artifacts/spaces-windows-x86_64-${{ github.ref_name }}.zip spaces.exe  
         shell: bash
 
       - name: Upload binary to release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh.exe release upload ${{ github.ref_name }} artifacts/spaces-${{ matrix.os }}-${{ matrix.arch }}-${{ github.ref_name }}.exe --clobber
+          gh.exe release upload ${{ github.ref_name }} artifacts/spaces-windows-x86_64-${{ github.ref_name }}.zip --clobber
 
   build-matrix-macos:
     name: Build and Upload Other OS Binaries
@@ -111,7 +111,7 @@ jobs:
       - name: Create binary artifact (zip)
         run: |
           mkdir -p artifacts
-          tar -czf artifacts/spaces-${{ matrix.os }}-${{ matrix.arch }}-${{ github.ref_name }}.tar.gz -C target/${{ matrix.arch }}-apple-darwin/release spaces
+          (cd target/${{ matrix.arch }}-apple-darwin/release; zip ../../../artifacts/spaces-macos-${{ matrix.arch }}-${{ github.ref_name }}.zip spaces)
         shell: bash
 
       - name: Upload binary to release
@@ -119,5 +119,5 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload ${{ github.ref_name }} \
-            artifacts/spaces-${{ matrix.os }}-${{ matrix.arch }}-${{ github.ref_name }}.tar.gz --clobber
+            artifacts/spaces-macos-${{ matrix.arch }}-${{ github.ref_name }}.zip --clobber
 

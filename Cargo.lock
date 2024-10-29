@@ -769,7 +769,7 @@ dependencies = [
 [[package]]
 name = "easy-archiver"
 version = "0.1.0"
-source = "git+https://github.com/work-spaces/easy-archiver?rev=962cd8b4121144f84e77516f5c057d6f5ba51161#962cd8b4121144f84e77516f5c057d6f5ba51161"
+source = "git+https://github.com/work-spaces/easy-archiver?rev=02334628ec9119d1f8ed7a9d88081486cf64fce6#02334628ec9119d1f8ed7a9d88081486cf64fce6"
 dependencies = [
  "anyhow",
  "anyhow-source-location",
@@ -1200,6 +1200,7 @@ dependencies = [
  "state",
  "tokio",
  "url",
+ "which",
 ]
 
 [[package]]
@@ -2551,7 +2552,7 @@ dependencies = [
 
 [[package]]
 name = "spaces"
-version = "0.7.0-beta.0"
+version = "0.8.10"
 dependencies = [
  "anyhow",
  "anyhow-source-location",
@@ -2696,6 +2697,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "sha256",
  "starlark",
  "state",
  "toml",
