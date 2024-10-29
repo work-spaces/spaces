@@ -71,7 +71,7 @@ jobs:
       - name: Create binary executable
         run: |
           mkdir -p artifacts
-          (cd target/${{ matrix.arch }}/release; 7z a -tzip ../../../artifacts/spaces-windows-x86_64-${{ github.ref_name }}.zip spaces.exe  
+          (cd target/${{ matrix.arch }}/release; 7z a -tzip ../../../artifacts/spaces-windows-x86_64-${{ github.ref_name }}.zip spaces.exe)
         shell: bash
 
       - name: Upload binary to release
