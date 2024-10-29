@@ -4,6 +4,7 @@ use std::sync::RwLock;
 
 pub const WORKSPACE_FILE_NAME: &str = "spaces.workspace.star";
 pub const SPACES_MODULE_NAME: &str = "spaces.star";
+pub const SPACES_RUN_MODULE_NAME: &str = "spaces.run.star";
 pub const WORKSPACE_FILE_HEADER: &str = r#"
 """
 Spaces Workspace file
@@ -122,7 +123,10 @@ impl Workspace {
         for entry in walkdir {
             progress.increment(1);
             if let Ok(entry) = entry.context(format_context!("While walking directory")) {
-                if entry.file_type().is_file() && entry.file_name() == SPACES_MODULE_NAME {
+                if entry.file_type().is_file()
+                    && (entry.file_name() == SPACES_MODULE_NAME
+                        || entry.file_name() == SPACES_RUN_MODULE_NAME)
+                {
                     let path = entry.path().to_string_lossy().to_string();
                     let content = std::fs::read_to_string(path.as_str())
                         .context(format_context!("Failed to read file {}", path))?;

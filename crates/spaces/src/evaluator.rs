@@ -14,7 +14,7 @@ fn evaluate_module(
 ) -> anyhow::Result<FrozenModule> {
     {
         let mut state = rules::get_state().write().unwrap();
-        if name.ends_with(workspace::SPACES_MODULE_NAME) {
+        if name.ends_with(workspace::SPACES_MODULE_NAME) || name.ends_with(workspace::SPACES_RUN_MODULE_NAME) {
             state.latest_starlark_module = Some(name.to_string());
             state.all_modules.insert(name.to_string());
         }
@@ -96,7 +96,7 @@ pub fn run_starlark_modules(
     module_queue.extend(modules);
     let mut known_modules = HashSet::new();
 
-    for (_, content) in module_queue.iter() {
+    for (_name, content) in module_queue.iter() {
         known_modules.insert(blake3::hash(content.as_bytes()).to_string());
     }
 
@@ -104,6 +104,11 @@ pub fn run_starlark_modules(
         while !module_queue.is_empty() {
             if let Some((name, content)) = module_queue.pop_front() {
                 printer.log(Level::Trace, format!("Evaluating module {}", name).as_str())?;
+
+                if phase == rules::Phase::Checkout && name.ends_with(workspace::SPACES_RUN_MODULE_NAME){
+                    continue;
+                }
+
                 let _ = evaluate_module(workspace_path.as_str(), name.as_str(), content)
                     .context(format_context!("Failed to evaluate module {}", name))?;
             }
