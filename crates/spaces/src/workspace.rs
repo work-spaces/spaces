@@ -19,10 +19,13 @@ struct State {
 static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
 
 pub fn get_store_path() -> String {
-    let home = std::env::var("HOME")
-        .context(format_context!("Failed to get HOME environment variable"))
-        .unwrap();
-    format!("{home}/.spaces/store")
+    if let Ok(spaces_home) = std::env::var("SPACES_HOME") {
+        return format!("{}/.spaces/store", spaces_home);
+    }
+    if let Ok(Some(home_path)) = homedir::my_home() {
+        return format!("{}/.spaces/store", home_path.to_string_lossy());
+    }
+    panic!("Failed to get home directory");
 }
 
 pub fn get_spaces_tools_path() -> String {
