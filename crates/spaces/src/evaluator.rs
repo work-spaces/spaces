@@ -7,14 +7,21 @@ use starlark::eval::{Evaluator, ReturnFileLoader};
 use starlark::syntax::{AstModule, Dialect};
 use std::collections::HashSet;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum WithRules {
+    No,
+    Yes,
+}
+
 fn evaluate_module(
     workspace_path: &str,
     name: &str,
     content: String,
+    with_rules: WithRules,
 ) -> anyhow::Result<FrozenModule> {
     {
         let mut state = rules::get_state().write().unwrap();
-        if name.ends_with(workspace::SPACES_MODULE_NAME) || name.ends_with(workspace::SPACES_RUN_MODULE_NAME) {
+        if workspace::is_rules_module(name) {
             state.latest_starlark_module = Some(name.to_string());
             state.all_modules.insert(name.to_string());
         }
@@ -34,22 +41,29 @@ fn evaluate_module(
 
         loads.push((
             load.module_id.to_owned(),
-            evaluate_module(workspace_path, load.module_id, contents)?,
+            evaluate_module(workspace_path, load.module_id, contents, with_rules)?,
         ));
     }
     let modules = loads.iter().map(|(a, b)| (a.as_str(), b)).collect();
     let loader = ReturnFileLoader { modules: &modules };
 
-    let globals = GlobalsBuilder::standard()
+    let globals_builder = GlobalsBuilder::standard()
         .with(starstd::globals)
-        .with_struct("checkout", rules::checkout::globals)
-        .with_struct("run", rules::run::globals)
         .with_struct("fs", starstd::fs::globals)
         .with_struct("hash", starstd::hash::globals)
         .with_struct("process", starstd::process::globals)
         .with_struct("script", starstd::script::globals)
-        .with_struct("info", info::globals)
-        .build();
+        .with_struct("info", info::globals);
+
+    let globals_builder = if with_rules == WithRules::Yes {
+        globals_builder
+            .with_struct("checkout", rules::checkout::globals)
+            .with_struct("run", rules::run::globals)
+    } else {
+        globals_builder
+    };
+
+    let globals = globals_builder.build();
 
     let module = Module::new();
     {
@@ -96,49 +110,86 @@ pub fn run_starlark_modules(
     module_queue.extend(modules);
     let mut known_modules = HashSet::new();
 
-    for (_name, content) in module_queue.iter() {
-        known_modules.insert(blake3::hash(content.as_bytes()).to_string());
+    // all pre-load modules are evaluated first
+    for (name, content) in module_queue.iter() {
+        if workspace::is_preload_module(name) {
+            known_modules.insert(blake3::hash(content.as_bytes()).to_string());
+        }
+    }
+
+    // standard modules evaluated next
+    for (name, content) in module_queue.iter() {
+        if !workspace::is_preload_module(name) {
+            known_modules.insert(blake3::hash(content.as_bytes()).to_string());
+        }
     }
 
     while !module_queue.is_empty() {
         while !module_queue.is_empty() {
             if let Some((name, content)) = module_queue.pop_front() {
                 printer.log(Level::Trace, format!("Evaluating module {}", name).as_str())?;
+                let _ = evaluate_module(
+                    workspace_path.as_str(),
+                    name.as_str(),
+                    content,
+                    WithRules::Yes,
+                )
+                .context(format_context!("Failed to evaluate module {}", name))?;
 
-                if phase == rules::Phase::Checkout && name.ends_with(workspace::SPACES_RUN_MODULE_NAME){
-                    continue;
+                // check for script mode and ensure only allow rules are added
+                if workspace::is_checkout_script(&name) {
+                    // check to see if any rules were added in a script
+                    let state = rules::get_state().read().unwrap();
+                    let tasks = state.tasks.read().unwrap();
+
+                    //checkout rules are OK
+                    for task in tasks.values() {
+                        if task.phase == rules::Phase::Run {
+                            return Err(format_error!("Checkouts Scripts cannot add run rules ({}). Use `checkout.add_asset()` to add spaces.star with run rules to the workspace", task.rule.name));
+                        }
+                    }
+                }
+            }
+
+            if phase == rules::Phase::Checkout {
+                sort_tasks(None).context(format_context!("Failed to sort tasks"))?;
+                printer.log(Level::Debug, "--Checkout Phase--")?;
+                debug_sorted_tasks(printer, phase)
+                    .context(format_context!("Failed to debug sorted tasks"))?;
+
+                let state = rules::get_state().read().unwrap();
+                let task_result = state
+                    .execute(printer, phase)
+                    .context(format_context!("Failed to execute tasks"))?;
+                if !task_result.new_modules.is_empty() {
+                    printer.log(
+                        Level::Trace,
+                        format!("New Modules:{:?}", task_result.new_modules).as_str(),
+                    )?;
                 }
 
-                let _ = evaluate_module(workspace_path.as_str(), name.as_str(), content)
-                    .context(format_context!("Failed to evaluate module {}", name))?;
-            }
-        }
+                let mut preload_modules = Vec::new();
+                let mut new_modules = Vec::new();
+                for module in task_result.new_modules {
+                    let path_to_module = format!("{}/{}", workspace_path, module);
+                    let content = std::fs::read_to_string(path_to_module.as_str())
+                        .context(format_context!("Failed to read file {path_to_module}"))?;
 
-        if phase == rules::Phase::Checkout {
-            sort_tasks(None).context(format_context!("Failed to sort tasks"))?;
-            printer.log(Level::Debug, "--Checkout Phase--")?;
-            debug_sorted_tasks(printer, phase)
-                .context(format_context!("Failed to debug sorted tasks"))?;
+                    if workspace::is_preload_module(&module) {
+                        preload_modules.push((module, content));
+                    } else {
+                        new_modules.push((module, content));
+                    }
+                }
 
-            let state = rules::get_state().read().unwrap();
-            let task_result = state
-                .execute(printer, phase)
-                .context(format_context!("Failed to execute tasks"))?;
-            if !task_result.new_modules.is_empty() {
-                printer.log(
-                    Level::Trace,
-                    format!("New Modules:{:?}", task_result.new_modules).as_str(),
-                )?;
-            }
+                preload_modules.extend(new_modules);
 
-            for module in task_result.new_modules {
-                let path_to_module = format!("{}/{}", workspace_path, module);
-                let content = std::fs::read_to_string(path_to_module.as_str())
-                    .context(format_context!("Failed to read file {path_to_module}"))?;
-                let hash = blake3::hash(content.as_bytes()).to_string();
-                if !known_modules.contains(&hash) {
-                    known_modules.insert(hash);
-                    module_queue.push_back((module, content));
+                for (module, content) in preload_modules {
+                    let hash = blake3::hash(content.as_bytes()).to_string();
+                    if !known_modules.contains(&hash) {
+                        known_modules.insert(hash);
+                        module_queue.push_back((module, content));
+                    }
                 }
             }
         }
@@ -223,7 +274,7 @@ pub fn run_starlark_script(name: &str, script: &str) -> anyhow::Result<()> {
     // load SPACES_WORKSPACE from env
     let workspace = std::env::var("SPACES_WORKSPACE").unwrap_or(".".to_string());
 
-    evaluate_module(workspace.as_str(), name, script.to_string())
+    evaluate_module(workspace.as_str(), name, script.to_string(), WithRules::No)
         .context(format_context!("Failed to evaluate module {}", name))?;
 
     Ok(())

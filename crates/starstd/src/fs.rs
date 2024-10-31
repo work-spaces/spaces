@@ -217,15 +217,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         ))?;
 
         let mut result = Vec::new();
-        for entry in entries {
-            if let Ok(entry) = entry {
-                let path = entry.path();
-                let path = path.to_str().context(format_context!("Failed to convert path to string"))?;
-                result.push(path.to_string());
-            }
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let path = path
+                .to_str()
+                .context(format_context!("Failed to convert path to string"))?;
+            result.push(path.to_string());
         }
 
         Ok(result)
     }
-
 }

@@ -65,7 +65,7 @@ fn run_starlark_modules_in_workspace(
                 .context(format_context!("while executing workspace rules"))?
         }
         RunWorkspace::Script(script) => {
-            let modules = vec![("checkout.star".to_string(), script)];
+            let modules = vec![(workspace::SPACES_CHECKOUT_NAME.to_string(), script)];
             evaluator::run_starlark_modules(printer, modules, phase, None)
                 .context(format_context!("while executing checkout rules"))?
         }
@@ -80,7 +80,7 @@ pub fn execute() -> anyhow::Result<()> {
         let mut stdin_contents = String::new();
         use std::io::Read;
         std::io::stdin().read_to_string(&mut stdin_contents)?;
-        run_starlark_script("stdin", stdin_contents.as_str())
+        run_starlark_script(workspace::SPACES_STDIN_NAME, stdin_contents.as_str())
             .context(format_context!("Failed to run starlark script"))?;
         return Ok(());
     }

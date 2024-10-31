@@ -3,8 +3,10 @@ use anyhow_source_location::{format_context, format_error};
 use std::sync::RwLock;
 
 pub const WORKSPACE_FILE_NAME: &str = "spaces.workspace.star";
+pub const SPACES_PRELOAD_MODULE_NAME: &str = "spaces.preload.star";
 pub const SPACES_MODULE_NAME: &str = "spaces.star";
-pub const SPACES_RUN_MODULE_NAME: &str = "spaces.run.star";
+pub const SPACES_CHECKOUT_NAME: &str = "checkout.star";
+pub const SPACES_STDIN_NAME: &str = "stdin.star";
 pub const WORKSPACE_FILE_HEADER: &str = r#"
 """
 Spaces Workspace file
@@ -17,6 +19,22 @@ struct State {
 }
 
 static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
+
+pub fn is_rules_module(path: &str) -> bool {
+    path.ends_with(SPACES_MODULE_NAME) || path.ends_with(SPACES_PRELOAD_MODULE_NAME)
+}
+
+pub fn is_checkout_script(path: &str) -> bool {
+    path.ends_with(SPACES_CHECKOUT_NAME)
+}   
+
+pub fn get_spaces_module_names() -> &'static [&'static str] {
+    &[SPACES_MODULE_NAME, SPACES_PRELOAD_MODULE_NAME]
+}
+
+pub fn is_preload_module(path: &str) -> bool {
+    path.ends_with(SPACES_PRELOAD_MODULE_NAME)
+}
 
 pub fn get_store_path() -> String {
     if let Ok(spaces_home) = std::env::var("SPACES_HOME") {
@@ -127,8 +145,7 @@ impl Workspace {
             progress.increment(1);
             if let Ok(entry) = entry.context(format_context!("While walking directory")) {
                 if entry.file_type().is_file()
-                    && (entry.file_name() == SPACES_MODULE_NAME
-                        || entry.file_name() == SPACES_RUN_MODULE_NAME)
+                    && is_rules_module(entry.file_name().to_string_lossy().as_ref())
                 {
                     let path = entry.path().to_string_lossy().to_string();
                     let content = std::fs::read_to_string(path.as_str())

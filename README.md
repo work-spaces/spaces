@@ -75,6 +75,10 @@ Read the [API Docs](API.md).
 - assets: files that dependencies will copy to the top-level workspace
   - For example, dependecies can populate `.vscode/settings.json` or create local git hooks.
 
+`checkout.add_repo()` adds a repository to the workspace. If the repository contains `spaces.preload.star` and/or `spaces.star`, those starlark scripts will also be evaluated to add transitive depedencies.
+
+> `spaces.preload.star` is evaulated before `spaces.star`. This allows you to checkout starlark scripts during preload that can be `load()`ed while executing `spaces.star` rules.
+
 ### Run phase
 
 The run rules execute tasks based on the dependency graph. Run rules have:

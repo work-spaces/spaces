@@ -80,18 +80,16 @@ impl Task {
 
         if check_new_modules {
             let workspace = workspace::absolute_path();
-
             let parts = name.split(':').collect::<Vec<&str>>();
-
             if let Some(last) = parts.last() {
                 let workspace_path = std::path::Path::new(workspace.as_str());
-                let spaces_star_path = workspace_path
-                    .join(*last)
-                    .join(workspace::SPACES_MODULE_NAME);
-                if spaces_star_path.exists() {
-                    let path_within_workspace =
-                        format!("{}/{}", *last, workspace::SPACES_MODULE_NAME);
-                    result.new_modules.push(path_within_workspace);
+
+                for module in workspace::get_spaces_module_names() {
+                    let spaces_star_path = workspace_path.join(*last).join(*module);
+                    if spaces_star_path.exists() {
+                        let path_within_workspace = format!("{}/{}", *last, *module);
+                        result.new_modules.push(path_within_workspace);
+                    }
                 }
             }
         }

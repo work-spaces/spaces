@@ -24,7 +24,7 @@ pub const FUNCTIONS: &[Function] = &[
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
     fn compute_sha256_from_file(file_path: &str) -> anyhow::Result<String> {
-        let file_contents = std::fs::read(&file_path).context(format_context!("{file_path}"))?;
+        let file_contents = std::fs::read(file_path).context(format_context!("{file_path}"))?;
         let digest = sha256::digest(file_contents);
         Ok(digest)
     }

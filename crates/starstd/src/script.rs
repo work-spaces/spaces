@@ -110,7 +110,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let args = get_state().read().unwrap().args.clone();
 
-        for (_, arg) in args.iter().enumerate() {
+        for arg in args.iter() {
             if arg.contains("=") {
                 let parts: Vec<&str> = arg.split("=").collect();
                 named_args.insert(parts[0].to_string(), parts[1].to_string());
