@@ -2,9 +2,15 @@
 
 ## Install Spaces
 
+`spaces` is a single statically linked binary which can be downloaded from the releases section.
+
+The script below uses `curl`, `unzip` and `sed` to install spaces.
+
 ```sh
  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/work-spaces/install-spaces/refs/heads/main/install.sh)"
  ```
+
+Use `spaces` in github actions with https://github.com/work-spaces/install-spaces.
 
  ## About Spaces
 
