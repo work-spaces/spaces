@@ -6,17 +6,17 @@ members = ["crates/spaces", "crates/graph", "crates/git", "crates/platform", "cr
 anyhow-source-location = { git = "https://github.com/work-spaces/anyhow-source-location", rev = "019b7804e35a72f945b3b4b3a96520cdbaa77f70" }
 anyhow = "1"
 printer = { git = "https://github.com/work-spaces/printer-rs", rev = "9fdb6c7b673cffd0a024233d4ed8220987a2e41c" }
-easy-archiver = { git = "https://github.com/work-spaces/easy-archiver", rev = "6266d009828ec0fd87245cd45a3a9bf4848e09dd", features = [
+easy-archiver = { git = "https://github.com/work-spaces/easy-archiver", rev = "b9956f228addbf361dc963854d793d894240ac1d", features = [
     "printer",
 ] }
-starlark = "0.12.0"
-serde = { version = "1.0.210", features = ["derive"] }
-serde_json = "1.0.128"
-state = "0.6.0"
-petgraph = "0.6.5"
-glob-match = "0.2.1"
-url = "2.5.2"
-toml = "0.8.19"
+starlark = "0.12"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+state = "0.6"
+petgraph = "0.6"
+glob-match = "0.2"
+url = "2"
+toml = "0.8"
 serde_yaml = "0.9"
 
 

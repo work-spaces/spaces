@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{info, workspace};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UpdateEnv {
     pub vars: std::collections::HashMap<String, String>,
     pub paths: Vec<String>,

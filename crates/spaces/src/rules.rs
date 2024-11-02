@@ -284,6 +284,7 @@ pub enum RuleType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Rule {
     pub name: String,
     pub deps: Option<Vec<String>>,

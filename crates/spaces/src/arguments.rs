@@ -38,7 +38,7 @@ pub struct Arguments {
 
 enum RunWorkspace {
     Target(Option<String>),
-    Script(String),
+    Script(Vec<String>),
 }
 
 fn run_starlark_script(name: &str, contents: &str) -> anyhow::Result<()> {
@@ -64,8 +64,12 @@ fn run_starlark_modules_in_workspace(
             evaluator::run_starlark_modules(printer, workspace.modules, phase, target)
                 .context(format_context!("while executing workspace rules"))?
         }
-        RunWorkspace::Script(script) => {
-            let modules = vec![(workspace::SPACES_CHECKOUT_NAME.to_string(), script)];
+        RunWorkspace::Script(scripts) => {
+            let mut modules = Vec::new();
+            for script in scripts {
+                let module = (workspace::SPACES_CHECKOUT_NAME.to_string(), script);
+                modules.push(module);
+            }
             evaluator::run_starlark_modules(printer, modules, phase, None)
                 .context(format_context!("while executing checkout rules"))?
         }
@@ -120,8 +124,12 @@ pub fn execute() -> anyhow::Result<()> {
             std::fs::create_dir_all(name.as_str())
                 .context(format_context!("while creating workspace directory {name}"))?;
 
-            let script_contents = std::fs::read_to_string(script.as_str())
-                .context(format_context!("while reading script file {script}"))?;
+            let mut script_contents = Vec::new();
+            for one_script in script {
+                let one_script_contents = std::fs::read_to_string(one_script.as_str())
+                    .context(format_context!("while reading script file {one_script}"))?;
+                script_contents.push(one_script_contents);
+            }
 
             std::fs::write(format!("{}/{}", name, workspace::WORKSPACE_FILE_NAME), "")
                 .context(format_context!("while creating spaces_deps.toml file"))?;
@@ -235,9 +243,9 @@ enum Commands {
         /// The name of the workspace
         #[arg(long)]
         name: String,
-        /// The path to the star file containing checkout rules.
+        /// The path(s) to the star file containing checkout rules. Paths are processed in order.
         #[arg(long, value_hint = ValueHint::FilePath)]
-        script: String,
+        script: Vec<String>,
     },
     /// Synchronizes the workspace with the checkout rules.
     Sync {},

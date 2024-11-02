@@ -10,6 +10,7 @@ pub enum Expect {
     Success,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Exec {
     pub command: String,
     pub args: Option<Vec<String>>,
@@ -122,6 +123,7 @@ impl Exec {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExecIf {
     #[serde(rename = "if")]
     pub if_: Exec,

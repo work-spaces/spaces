@@ -34,6 +34,7 @@ pub enum AssetFormat {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UpdateAsset {
     pub destination: String,
     pub format: AssetFormat,
@@ -113,6 +114,7 @@ impl UpdateAsset {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AddWhichAsset {
     pub which: String,
     pub destination: String,
@@ -144,6 +146,7 @@ impl AddWhichAsset {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AddHardLink {
     pub source: String,
     pub destination: String,
@@ -169,6 +172,7 @@ impl AddHardLink {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AddAsset {
     pub destination: String,
     pub content: String,

@@ -4,6 +4,7 @@ use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Archive {
     pub create_archive: easy_archiver::CreateArchive,
 }

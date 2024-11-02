@@ -50,6 +50,7 @@ fn evaluate_module(
     let globals_builder = GlobalsBuilder::standard()
         .with(starstd::globals)
         .with_struct("fs", starstd::fs::globals)
+        .with_struct("json", starstd::json::globals)
         .with_struct("hash", starstd::hash::globals)
         .with_struct("process", starstd::process::globals)
         .with_struct("script", starstd::script::globals)

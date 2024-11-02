@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::process::Command;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Exec {
     pub command: String,
     pub args: Option<Vec<String>>,

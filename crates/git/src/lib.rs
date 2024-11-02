@@ -23,6 +23,7 @@ pub enum Clone {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Repo {
     pub url: String,
     pub checkout: CheckoutOption,

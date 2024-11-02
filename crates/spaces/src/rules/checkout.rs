@@ -1,19 +1,26 @@
 use crate::executor::asset;
 use crate::{executor, rules, workspace};
 use anyhow::Context;
-use anyhow_source_location::format_context;
+use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use starlark::environment::GlobalsBuilder;
 use starlark::values::none::NoneType;
 use starstd::{get_rule_argument, Arg, Function};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct PlatformArchive {
+    #[serde(rename = "macos-x86_64")]
     pub macos_x86_64: Option<http_archive::Archive>,
+    #[serde(rename = "macos-aarch64")]
     pub macos_aarch64: Option<http_archive::Archive>,
+    #[serde(rename = "windows-x86_64")]
     pub windows_aarch64: Option<http_archive::Archive>,
+    #[serde(rename = "windows-aarch64")]
     pub windows_x86_64: Option<http_archive::Archive>,
+    #[serde(rename = "linux-x86_64")]
     pub linux_x86_64: Option<http_archive::Archive>,
+    #[serde(rename = "linux-aarch64")]
     pub linux_aarch64: Option<http_archive::Archive>,
 }
 
@@ -351,6 +358,7 @@ source env
 ];
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 struct CargoBin {
     #[serde(rename = "crate")]
     crate_: String,
@@ -474,6 +482,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for repo"))?;
         //convert platforms to starlark value
+
         let platforms: PlatformArchive = serde_json::from_value(platforms.to_json_value()?)?;
 
         let platform_archive = match platform::Platform::get_platform() {
@@ -486,6 +495,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             _ => None,
         };
 
+        if platform_archive.is_none() {
+            return Err(format_error!(
+                "Platform {} not supported by {}",
+                platform::Platform::get_platform().unwrap(),
+                rule.name
+            ));
+        }
         add_http_archive(rule, platform_archive)
             .context(format_context!("Failed to add archive"))?;
 

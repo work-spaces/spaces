@@ -26,6 +26,7 @@ pub enum ArchiveLink {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Archive {
     pub url: String,
     pub sha256: String,
@@ -95,6 +96,7 @@ fn transform_url_to_gh_arguments(
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HttpArchive {
     pub spaces_key: String,
     archive: Archive,
