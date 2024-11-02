@@ -1,12 +1,20 @@
 # spaces
 
+## Install Spaces
+
+```sh
+ /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/work-spaces/install-spaces/refs/heads/main/install.sh)"
+ ```
+
+ ## About Spaces
+
 `spaces` is a workspace manager and task-runner. It is powered by `starlark` and `rust`.
 
 Create a starlark script that fetches the code and tools you need as well as what commands to run and `spaces` does the rest.
 
 For example, you can develop `spaces` using `config/spaces-build.star`:
 
-```star
+```python
 
 # Checkout the spaces repo
 checkout.add_repo(
@@ -48,7 +56,7 @@ cd spaces-test
 spaces run
 ```
 
-## Using spaces
+## Using Spaces
 
 `spaces` executes `starlark` scripts in two phases:
 
