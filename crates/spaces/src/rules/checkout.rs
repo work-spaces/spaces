@@ -36,25 +36,7 @@ const fn get_archive_dict() -> &'static [(&'static str, &'static str)] {
     ]
 }
 
-pub const FUNCTIONS: &[Function] = &[
-    Function {
-        name: "add_repo",
-        description: "returns the name of the current platform",
-        return_type: "str",
-        args: &[
-            get_rule_argument(),
-            Arg{
-                name : "repo",
-                description: "dict with",
-                dict: &[
-                    ("url", "ssh or https path to repository"),
-                    ("rev", "repository revision as a branch, tag or commit"),
-                    ("checkout", "Revision: checkout detached at commit or branch|NewBranch: create a new branch based at rev"),
-                    ("clone", "Default|Worktree"),
-                ]
-            }
-        ],
-        example: Some(r#"checkout.add_repo(
+const ADD_REPO_EXAMPLE: &str = r#"checkout.add_repo(
     # the rule name is also the path in the workspace where the clone will be
     rule = { "name": "spaces" },
     repo = {
@@ -63,21 +45,9 @@ pub const FUNCTIONS: &[Function] = &[
         "checkout": "Revision",
         "clone": "Default",
     }
-)"#)        
-    },
-    Function {
-        name: "add_archive",
-        description: "Adds an archive to the workspace.",
-        return_type: "None",
-        args: &[
-            get_rule_argument(),
-            Arg {
-                name: "archive",
-                description: "dict value",
-                dict: get_archive_dict(),
-            },
-        ],
-        example: Some(r#"checkout.add_archive(
+)"#;
+
+const ADD_ARCHIVE_EXAMPLE: &str = r#"checkout.add_archive(
     # the rule name is the path in the workspace where the archive will be extracted
     rule = {"name": "llvm-project"},
     archive = {
@@ -87,31 +57,9 @@ pub const FUNCTIONS: &[Function] = &[
         "strip_prefix": "llvm-project-llvmorg-{}".format(version),
         "add_prefix": "llvm-project",
     },
-)"#),
-    },
-    Function {
-        name: "add_platform_archive",
-        description: "Adds an archive to the workspace based on the platform.",
-        return_type: "None",
-        args: &[
-            get_rule_argument(),
-            Arg {
-                name: "platforms",
-                description: "dict with platform keys",
-                dict: &[
-                    (
-                        "macos_aarch64",
-                        "dict with same entries as archive in add_archive()",
-                    ),
-                    ("macos_x86_64", "dict"),
-                    ("windows_aarch64", "dict"),
-                    ("windows_x86_64", "dict"),
-                    ("linux_aarch64", "dict"),
-                    ("linux_x86_64", "dict"),
-                ],
-            },
-        ],
-        example: Some(r#"base = {
+)"#;
+
+const ADD_PLATFORM_ARCHIVE_EXAMPLE: &str = r#"base = {
     "add_prefix": "sysroot/bin",
     "strip_prefix": "target/release",
     "link": "Hard",
@@ -146,53 +94,28 @@ checkout.add_platform_archive(
     # rule name is only the path in the workspace if add_prefix is not set
     rule = {"name": "spaces"},
     platforms = {
-        "macos_x86_64": macos_x86_64,
-        "macos_aarch64": macos_aarch64,
-        "windows_x86_64": windows_x86_64,
-        "windows_aarch64": windows_aarch64,
-        "linux_x86_64": linux_x86_64,
+        "macos-x86_64": macos_x86_64,
+        "macos-aarch64": macos_aarch64,
+        "windows-x86_64": windows_x86_64,
+        "windows-aarch64": windows_aarch64,
+        "linux-x86_64": linux_x86_64,
     },
-)"#)
-    },
-    Function {
-        name: "add_cargo_bin",
-        description: "Adds a binary crate using cargo-binstall. The binaries are installed in the spaces store and hardlinked to the workspace.",
-        return_type: "str",
-        args: &[
-            get_rule_argument(),
-            Arg{
-                name : "cargo_bin",
-                description: "dict with",
-                dict: &[
-                    ("crate", "The name of the binary crate"),
-                    ("version", "The crate version to install"),
-                    ("bins", "List of binaries to install"),
-                ]
-            }
-        ],
-        example: Some(r#"checkout.add_cargo_bin(
+)"#;
+
+const ADD_CARGO_BIN_EXAMPLE: &str = r#"checkout.add_cargo_bin(
     rule = {"name": "probe-rs-tools"},
-    cargo_bin = {"crate": "probe-rs-tools", "version": "0.24.0", "bins": ["probe-rs", "cargo-embed", "cargo-flash"]},
-)"#)        
+    cargo_bin = {
+        "crate": "probe-rs-tools", 
+        "version": "0.24.0", 
+        "bins": ["probe-rs", "cargo-embed", "cargo-flash"]
     },
-    Function {
-        name: "add_asset",
-        description: r#"Adds a file to the workspace. This is useful for providing
+)"#;
+
+const ADD_ASSET_DESCRIPTION: &str = r#"Adds a file to the workspace. This is useful for providing
 a top-level build file that orchestrates the entire workspace. It can also
-be used to create a top-level README how the workflow works."#,
-        return_type: "None",
-        args: &[
-            get_rule_argument(),
-            Arg {
-                name: "asset",
-                description: "dict with",
-                dict: &[
-                    ("content", "file contents as a string"),
-                    ("destination", "relative path where asset will live in the workspace"),
-                ],
-            },
-        ],
-        example: Some(r#"content = """
+be used to create a top-level README how the workflow works."#;
+
+const ADD_ASSET_EXAMPLE: &str = r#"content = """
 # README
 
 This is how to use this workspace.
@@ -205,75 +128,34 @@ checkout.add_asset(
         "destination": "README.md",
         "content": content,
     },
-)"#)},
-    Function {
-        name: "add_which_asset",
-        description: r#"Adds a hardlink to an executable file available on the `PATH` 
+)"#;
+
+const ADD_WHICH_ASSET_DESCRIPTION: &str = r#"Adds a hardlink to an executable file available on the `PATH` 
 when checking out the workspace. This is useful for building tools that have complex dependencies.
 Avoid using this when creating a workspace for your project. It creates system dependencies
-that break workspace hermicity."#,
-        return_type: "None",
-        args: &[
-            get_rule_argument(),
-            Arg {
-                name: "asset",
-                description: "dict with",
-                dict: &[
-                    ("which", "name of system executable to search for"),
-                    ("destination", "relative path where asset will live in the workspace"),
-                ],
-            },
-        ],
-        example: Some(r#"checkout.add_which_asset(
+that break workspace hermicity."#;
+
+const ADD_WHICH_ASSET_EXAMPLE: &str = r#"checkout.add_which_asset(
     rule = { "name": "which_pkg_config" },
     asset = {
         "which": "pkg-config",
         "destination": "sysroot/bin/pkg-config"
     }
-)"#)
-        },
-        Function {
-            name: "add_hard_link_asset",
-            description: r#"Adds a hardlink from anywhere on the system to the workspace"#,
-            return_type: "None",
-            args: &[
-                get_rule_argument(),
-                Arg {
-                    name: "asset",
-                    description: "dict with",
-                    dict: &[
-                        ("source", "the source of the hard link"),
-                        ("destination", "relative path where asset will live in the workspace"),
-                    ],
-                },
-            ],
-            example: Some(r#"checkout.add_hard_link_asset(
-        rule = { "name": "which_pkg_config" },
-        asset = {
-            "source": "<path to asset>",
-            "destination": "sysroot/asset/my_asset"
-        }
-    )"#)
-            },
-    Function {
-        name: "update_asset",
-        description: r#"Creates or updates an existing file containing structured data
+)"#;
+
+const ADD_HARD_LINK_ASSET_EXAMPLE: &str = r#"checkout.add_hard_link_asset(
+    rule = { "name": "which_pkg_config" },
+    asset = {
+        "source": "<path to asset>",
+        "destination": "sysroot/asset/my_asset"
+    }
+)"#;
+
+const UPDATE_ASSET_DESCRIPTION: &str = r#"Creates or updates an existing file containing structured data
 in the workspace. This rules supports json|toml|yaml files. Different rules
-can update the same file and the content will be preserved (as long as the keys are unique)."#,
-        return_type: "None",
-        args: &[
-            starstd::get_rule_argument(),
-            Arg {
-                name: "asset",
-                description: "dict with",
-                dict: &[
-                    ("destination", "path to the asset in the workspace"),
-                    ("format", "json|toml|yaml"),
-                    ("value", "dict containing the structured data to be added to the asset"),
-                ],
-            },
-        ],
-        example: Some(r#"cargo_vscode_task = {
+can update the same file and the content will be preserved (as long as the keys are unique)."#;
+
+const UPDATE_ASSET_EXAMPLE: &str = r#"cargo_vscode_task = {
     "type": "cargo",
     "problemMatcher": ["$rustc"],
     "group": "build",
@@ -312,10 +194,9 @@ checkout.update_asset(
             "build": {"rustc-wrapper": "sccache"},
         },
     },
-)"#)},
-    Function {
-        name: "update_env",
-        description: r#"Creates or updates the environment file in the workspace.
+)"#;
+
+const UPDATE_ENV_DESCRIPTION: &str = r#"Creates or updates the environment file in the workspace.
 
 Spaces creates two mechanisms for managing the workspace environment.
 
@@ -333,7 +214,168 @@ bash # or the shell of your preference
 source env
 ```
 
-"#,
+"#;
+
+const UPDATE_ENV_EXAMPLE: &str = r#"checkout.update_env(
+    rule = {"name": "update_env"},
+    env = {
+        "paths": ["/usr/bin", "/bin"],
+        "vars": {
+            "PS1": '"(spaces) $PS1"',
+        },
+    },
+)"#;
+
+const ADD_TARGET_EXAMPLE: &str = r#"run.add_target(
+    rule = {"name": "my_rule", "deps": ["my_other_rule"]},
+)"#;
+
+pub const FUNCTIONS: &[Function] = &[
+    Function {
+        name: "add_repo",
+        description: "returns the name of the current platform",
+        return_type: "str",
+        args: &[
+            get_rule_argument(),
+            Arg{
+                name : "repo",
+                description: "dict with",
+                dict: &[
+                    ("url", "ssh or https path to repository"),
+                    ("rev", "repository revision as a branch, tag or commit"),
+                    ("checkout", "Revision: checkout detached at commit or branch|NewBranch: create a new branch based at rev"),
+                    ("clone", "Default|Worktree"),
+                ]
+            }
+        ],
+        example: Some(ADD_REPO_EXAMPLE)
+    },
+    Function {
+        name: "add_archive",
+        description: "Adds an archive to the workspace.",
+        return_type: "None",
+        args: &[
+            get_rule_argument(),
+            Arg {
+                name: "archive",
+                description: "dict value",
+                dict: get_archive_dict(),
+            },
+        ],
+        example: Some(ADD_ARCHIVE_EXAMPLE),
+    },
+    Function {
+        name: "add_platform_archive",
+        description: "Adds an archive to the workspace based on the platform.",
+        return_type: "None",
+        args: &[
+            get_rule_argument(),
+            Arg {
+                name: "platforms",
+                description: "dict with platform keys",
+                dict: &[
+                    (
+                        "macos-aarch64",
+                        "dict with same entries as archive in add_archive()",
+                    ),
+                    ("macos-x86_64", "same as macos-aarch64"),
+                    ("windows-aarch64", "same as macos-aarch64"),
+                    ("windows-x86_64", "same as macos-aarch64"),
+                    ("linux-aarch64", "same as macos-aarch64"),
+                    ("linux-x86_64", "same as macos-aarch64"),
+                ],
+            },
+        ],
+        example: Some(ADD_PLATFORM_ARCHIVE_EXAMPLE),
+    },
+    Function {
+        name: "add_cargo_bin",
+        description: "Adds a binary crate using cargo-binstall. The binaries are installed in the spaces store and hardlinked to the workspace.",
+        return_type: "str",
+        args: &[
+            get_rule_argument(),
+            Arg{
+                name : "cargo_bin",
+                description: "dict with",
+                dict: &[
+                    ("crate", "The name of the binary crate"),
+                    ("version", "The crate version to install"),
+                    ("bins", "List of binaries to install"),
+                ]
+            }
+        ],
+        example: Some(ADD_CARGO_BIN_EXAMPLE)
+    },
+    Function {
+        name: "add_asset",
+        description: ADD_ASSET_DESCRIPTION,
+        return_type: "None",
+        args: &[
+            get_rule_argument(),
+            Arg {
+                name: "asset",
+                description: "dict with",
+                dict: &[
+                    ("content", "file contents as a string"),
+                    ("destination", "relative path where asset will live in the workspace"),
+                ],
+            },
+        ],
+        example: Some(ADD_ASSET_EXAMPLE)},
+    Function {
+        name: "add_which_asset",
+        description: ADD_WHICH_ASSET_DESCRIPTION,
+        return_type: "None",
+        args: &[
+            get_rule_argument(),
+            Arg {
+                name: "asset",
+                description: "dict with",
+                dict: &[
+                    ("which", "name of system executable to search for"),
+                    ("destination", "relative path where asset will live in the workspace"),
+                ],
+            },
+        ],
+        example: Some(ADD_WHICH_ASSET_EXAMPLE)
+    },
+    Function {
+            name: "add_hard_link_asset",
+            description: r#"Adds a hardlink from anywhere on the system to the workspace"#,
+            return_type: "None",
+            args: &[
+                get_rule_argument(),
+                Arg {
+                    name: "asset",
+                    description: "dict with",
+                    dict: &[
+                        ("source", "the source of the hard link"),
+                        ("destination", "relative path where asset will live in the workspace"),
+                    ],
+                },
+            ],
+            example: Some(ADD_HARD_LINK_ASSET_EXAMPLE)
+    },
+    Function {
+        name: "update_asset",
+        description: UPDATE_ASSET_DESCRIPTION,
+        return_type: "None",
+        args: &[
+            starstd::get_rule_argument(),
+            Arg {
+                name: "asset",
+                description: "dict with",
+                dict: &[
+                    ("destination", "path to the asset in the workspace"),
+                    ("format", "json|toml|yaml"),
+                    ("value", "dict containing the structured data to be added to the asset"),
+                ],
+            },
+        ],
+        example: Some(UPDATE_ASSET_EXAMPLE)},
+    Function {
+        name: "update_env",
+        description: UPDATE_ENV_DESCRIPTION,
         return_type: "None",
         args: &[
             get_rule_argument(),
@@ -346,15 +388,27 @@ source env
                 ],
             },
         ],
-        example: Some(r#"checkout.update_env(
-    rule = {"name": "update_env"},
-    env = {
-        "paths": ["/usr/bin", "/bin"],
-        "vars": {
-            "PS1": '"(spaces) $PS1"',
-        },
-    },
-)"#)}
+        example: Some(UPDATE_ENV_EXAMPLE)},
+    Function {
+        name: "abort",
+        description: "Abort script evaluation with a message.",
+        return_type: "None",
+        args: &[
+            Arg {
+                name: "message",
+                description: "Abort message to show the user.",
+                dict: &[],
+            },
+        ],
+        example: Some(r#"run.abort("Failed to do something")"#)},
+    Function {
+        name: "add_target",
+        description: "Adds a target. There is no specific action for the target, but this rule can be useful for organizing depedencies.",
+        return_type: "None",
+        args: &[
+            get_rule_argument(),
+        ],
+        example: Some(ADD_TARGET_EXAMPLE)},
 ];
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -369,9 +423,26 @@ struct CargoBin {
 // This defines the function that is visible to Starlark
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
-
     fn abort(message: &str) -> anyhow::Result<NoneType> {
         Err(format_error!("Checkout Aborting: {}", message))
+    }
+
+    fn add_target(
+        #[starlark(require = named)] rule: starlark::values::Value,
+    ) -> anyhow::Result<NoneType> {
+        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+            .context(format_context!("bad options for repo"))?;
+
+        let state = rules::get_state().read().unwrap();
+        let rule_name = rule.name.clone();
+        state
+            .insert_task(rules::Task::new(
+                rule,
+                rules::Phase::Checkout,
+                executor::Task::Target,
+            ))
+            .context(format_context!("Failed to insert task {rule_name}"))?;
+        Ok(NoneType)
     }
 
     fn add_repo(

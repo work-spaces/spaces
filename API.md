@@ -1,209 +1,10 @@
-# Spaces API Documentation
+# Spaces Built-in Functions API Documentation
 
 
-## Info Functions
-
-### Description
-
-The `info` functions provide information about the workspace
-during checkout and run. Info functions are executed immediately. They are not rule definitions.
-
-### Functions
-
-#### get_platform_name()
-
-```python
-def get_platform_name() -> str
-```
-returns the name of the current platform
-
-
-#### is_platform_windows()
-
-```python
-def is_platform_windows() -> bool
-```
-returns true if platform is Windows
-
-
-#### is_platform_macos()
-
-```python
-def is_platform_macos() -> bool
-```
-returns true if platform is macos
-
-
-#### is_platform_linux()
-
-```python
-def is_platform_linux() -> bool
-```
-returns true if platform is linux
-
-
-#### get_path_to_store()
-
-```python
-def get_path_to_store() -> str
-```
-returns the path to the spaces store (typically $HOME/.spaces/store)
-
-
-#### get_absolute_path_to_workspace()
-
-```python
-def get_absolute_path_to_workspace() -> str
-```
-returns the absolute path to the workspace
-
-
-#### get_path_to_checkout()
-
-```python
-def get_path_to_checkout() -> str
-```
-returns the path where the current script is located in the workspace
-
-
-#### get_path_to_build_checkout()
-
-```python
-def get_path_to_build_checkout() -> str
-```
-returns the path to the workspace build folder for the current script
-
-
-#### get_path_to_build_archive()
-
-```python
-def get_path_to_build_archive() -> str
-```
-returns the path to where run.create_archive() creates the output archive
-
-
-## Spaces Starlark Standard Functions
-
-### Description
-
-The spaces starlark standard library includes
-functions for doing things like accessing the filesystem. The functions
-in this library are executed immediately.
-
-### `fs` Functions
-
-#### write_string_to_file()
-
-```python
-def write_string_to_file(path, content) -> None
-```
-Writes a string to a file. Truncates the file if it exists. Creates it if it doesn't.
-
-- `path`: path relative to the workspace root
-- `content`: contents to write
-
-#### append_string_to_file()
-
-```python
-def append_string_to_file(path, content) -> None
-```
-Appends a string to a file. Creates the file if it doesn't exist.
-
-- `path`: path relative to the workspace root
-- `content`: contents to write
-
-#### read_file_to_string()
-
-```python
-def read_file_to_string(path) -> str
-```
-Reads the contents of the file as a string
-
-- `path`: path relative to the workspace root
-
-#### exists()
-
-```python
-def exists(path) -> bool
-```
-Checks if the file/directory exists
-
-- `path`: path relative to the workspace root
-
-#### read_toml_to_dict()
-
-```python
-def read_toml_to_dict(path) -> str
-```
-Reads and parses a toml file
-
-- `path`: path relative to the workspace root
-
-#### read_yaml_to_dict()
-
-```python
-def read_yaml_to_dict(path) -> dict with parsed yaml
-```
-Reads and parses a yaml file
-
-- `path`: path relative to the workspace root
-
-#### read_json_to_dict()
-
-```python
-def read_json_to_dict(path) -> dict with parsed json
-```
-Reads and parses a json file
-
-- `path`: path relative to the workspace root
-
-### `process` Functions
-
-#### exec()
-
-```python
-def exec(exec, content) -> dict # with members `status`, `stdout`, and `stderr`
-```
-Executes a process
-
-- `exec`: dict with members
-  - `command`: name of the command to execute
-  - `args`: optional list of arguments
-  - `env`: optional dict of environment variables
-  - `working_directory`: optional working directory (default is the workspace)
-  - `stdin`: optional string to pipe to the process stdin
-- `content`: contents to write
-
-### `script` Functions
-
-#### print()
-
-```python
-def print(content) -> None
-```
-Prints a string to the stdout. Only use in a script.
-
-- `content`: str: string content to print.
-
-#### get_arg()
-
-```python
-def get_arg(offset) -> str
-```
-Gets the argument at the specified offset (an empty string is returned if the argument doesn't exist).
-
-- `offset`: int: offset of the argument to get.
-
-#### set_exit_code()
-
-```python
-def set_exit_code(offset) -> none
-```
-Sets the exit code of the script. 
-Use zero for success and non-zero for failure.
-This doesn't exit the script.
-
-- `offset`: int: offset of the argument to get.
+- [Checkout Rules](#checkout-rules)
+- [Run Rules](#run-rules)
+- [Info Functions](#info-functions)
+- [Spaces Starlark Standard Functions](#spaces-starlark-standard-functions)
 
 ## Checkout Rules
 
@@ -211,37 +12,21 @@ You use checkout rules to build a workspace.
 You can fetch git repositories and archives. You can also add assets (local files)
 to the workspace root folder (not under version control).
 
-### add_repo()
+#### abort
 
 ```python
-def add_repo(rule, repo) -> str
+def abort(message) -> None
 ```
-returns the name of the current platform
+Abort script evaluation with a message.
 
-- `rule`: dict
-  - `name`: rule name as string
-  - `deps`: list of dependencies
-  - `type`: Setup|Run (default)|Optional
-- `repo`: dict with
-  - `url`: ssh or https path to repository
-  - `rev`: repository revision as a branch, tag or commit
-  - `checkout`: Revision: checkout detached at commit or branch|NewBranch: create a new branch based at rev
-  - `clone`: Default|Worktree
+- `message`: Abort message to show the user.
 
 
 **Example**
 ```python
-checkout.add_repo(
-    # the rule name is also the path in the workspace where the clone will be
-    rule = { "name": "spaces" },
-    repo = {
-        "url": "https://github.com/work-spaces/spaces",
-        "rev": "main",
-        "checkout": "Revision",
-        "clone": "Default",
-    }
-)
-```### add_archive()
+run.abort("Failed to do something")
+```
+#### add_archive
 
 ```python
 def add_archive(rule, archive) -> None
@@ -252,6 +37,7 @@ Adds an archive to the workspace.
   - `name`: rule name as string
   - `deps`: list of dependencies
   - `type`: Setup|Run (default)|Optional
+  - `help`: Optional help text show with `spaces evaluate`
 - `archive`: dict value
   - `url`: url to zip|tar.xz|tar.gz|tar.bz2 file (can also be an uncompressed file with no suffix)
   - `sha256`: hash of the file
@@ -275,7 +61,100 @@ checkout.add_archive(
         "add_prefix": "llvm-project",
     },
 )
-```### add_platform_archive()
+```
+#### add_asset
+
+```python
+def add_asset(rule, asset) -> None
+```
+Adds a file to the workspace. This is useful for providing
+a top-level build file that orchestrates the entire workspace. It can also
+be used to create a top-level README how the workflow works.
+
+- `rule`: dict
+  - `name`: rule name as string
+  - `deps`: list of dependencies
+  - `type`: Setup|Run (default)|Optional
+  - `help`: Optional help text show with `spaces evaluate`
+- `asset`: dict with
+  - `content`: file contents as a string
+  - `destination`: relative path where asset will live in the workspace
+
+
+**Example**
+```python
+content = """
+# README
+
+This is how to use this workspace.
+
+"""
+
+checkout.add_asset(
+    rule = {"name": "README.md"},
+    asset = {
+        "destination": "README.md",
+        "content": content,
+    },
+)
+```
+#### add_cargo_bin
+
+```python
+def add_cargo_bin(rule, cargo_bin) -> str
+```
+Adds a binary crate using cargo-binstall. The binaries are installed in the spaces store and hardlinked to the workspace.
+
+- `rule`: dict
+  - `name`: rule name as string
+  - `deps`: list of dependencies
+  - `type`: Setup|Run (default)|Optional
+  - `help`: Optional help text show with `spaces evaluate`
+- `cargo_bin`: dict with
+  - `crate`: The name of the binary crate
+  - `version`: The crate version to install
+  - `bins`: List of binaries to install
+
+
+**Example**
+```python
+checkout.add_cargo_bin(
+    rule = {"name": "probe-rs-tools"},
+    cargo_bin = {
+        "crate": "probe-rs-tools", 
+        "version": "0.24.0", 
+        "bins": ["probe-rs", "cargo-embed", "cargo-flash"]
+    },
+)
+```
+#### add_hard_link_asset
+
+```python
+def add_hard_link_asset(rule, asset) -> None
+```
+Adds a hardlink from anywhere on the system to the workspace
+
+- `rule`: dict
+  - `name`: rule name as string
+  - `deps`: list of dependencies
+  - `type`: Setup|Run (default)|Optional
+  - `help`: Optional help text show with `spaces evaluate`
+- `asset`: dict with
+  - `source`: the source of the hard link
+  - `destination`: relative path where asset will live in the workspace
+
+
+**Example**
+```python
+checkout.add_hard_link_asset(
+    rule = { "name": "which_pkg_config" },
+    asset = {
+        "source": "<path to asset>",
+        "destination": "sysroot/asset/my_asset"
+    }
+)
+```
+#### add_platform_archive
 
 ```python
 def add_platform_archive(rule, platforms) -> None
@@ -286,13 +165,14 @@ Adds an archive to the workspace based on the platform.
   - `name`: rule name as string
   - `deps`: list of dependencies
   - `type`: Setup|Run (default)|Optional
+  - `help`: Optional help text show with `spaces evaluate`
 - `platforms`: dict with platform keys
-  - `macos_aarch64`: dict with same entries as archive in add_archive()
-  - `macos_x86_64`: dict
-  - `windows_aarch64`: dict
-  - `windows_x86_64`: dict
-  - `linux_aarch64`: dict
-  - `linux_x86_64`: dict
+  - `macos-aarch64`: dict with same entries as archive in add_archive()
+  - `macos-x86_64`: same as macos-aarch64
+  - `windows-aarch64`: same as macos-aarch64
+  - `windows-x86_64`: same as macos-aarch64
+  - `linux-aarch64`: same as macos-aarch64
+  - `linux-x86_64`: same as macos-aarch64
 
 
 **Example**
@@ -332,48 +212,67 @@ checkout.add_platform_archive(
     # rule name is only the path in the workspace if add_prefix is not set
     rule = {"name": "spaces"},
     platforms = {
-        "macos_x86_64": macos_x86_64,
-        "macos_aarch64": macos_aarch64,
-        "windows_x86_64": windows_x86_64,
-        "windows_aarch64": windows_aarch64,
-        "linux_x86_64": linux_x86_64,
+        "macos-x86_64": macos_x86_64,
+        "macos-aarch64": macos_aarch64,
+        "windows-x86_64": windows_x86_64,
+        "windows-aarch64": windows_aarch64,
+        "linux-x86_64": linux_x86_64,
     },
 )
-```### add_asset()
+```
+#### add_repo
 
 ```python
-def add_asset(rule, asset) -> None
+def add_repo(rule, repo) -> str
 ```
-Adds a file to the workspace. This is useful for providing
-a top-level build file that orchestrates the entire workspace. It can also
-be used to create a top-level README how the workflow works.
+returns the name of the current platform
 
 - `rule`: dict
   - `name`: rule name as string
   - `deps`: list of dependencies
   - `type`: Setup|Run (default)|Optional
-- `asset`: dict with
-  - `content`: file contents as a string
-  - `destination`: relative path where asset will live in the workspace
+  - `help`: Optional help text show with `spaces evaluate`
+- `repo`: dict with
+  - `url`: ssh or https path to repository
+  - `rev`: repository revision as a branch, tag or commit
+  - `checkout`: Revision: checkout detached at commit or branch|NewBranch: create a new branch based at rev
+  - `clone`: Default|Worktree
 
 
 **Example**
 ```python
-content = """
-# README
-
-This is how to use this workspace.
-
-"""
-
-checkout.add_asset(
-    rule = {"name": "README.md"},
-    asset = {
-        "destination": "README.md",
-        "content": content,
-    },
+checkout.add_repo(
+    # the rule name is also the path in the workspace where the clone will be
+    rule = { "name": "spaces" },
+    repo = {
+        "url": "https://github.com/work-spaces/spaces",
+        "rev": "main",
+        "checkout": "Revision",
+        "clone": "Default",
+    }
 )
-```### add_which_asset()
+```
+#### add_target
+
+```python
+def add_target(rule) -> None
+```
+Adds a target. There is no specific action for the target, but this rule can be useful for organizing depedencies.
+
+- `rule`: dict
+  - `name`: rule name as string
+  - `deps`: list of dependencies
+  - `type`: Setup|Run (default)|Optional
+  - `help`: Optional help text show with `spaces evaluate`
+
+
+**Example**
+```python
+run.add_target(
+    rule = {"name": "my_rule", "deps": ["my_other_rule"]},
+)
+```
+#### add_which_asset
 
 ```python
 def add_which_asset(rule, asset) -> None
@@ -387,6 +286,7 @@ that break workspace hermicity.
   - `name`: rule name as string
   - `deps`: list of dependencies
   - `type`: Setup|Run (default)|Optional
+  - `help`: Optional help text show with `spaces evaluate`
 - `asset`: dict with
   - `which`: name of system executable to search for
   - `destination`: relative path where asset will live in the workspace
@@ -401,7 +301,8 @@ checkout.add_which_asset(
         "destination": "sysroot/bin/pkg-config"
     }
 )
-```### update_asset()
+```
+#### update_asset
 
 ```python
 def update_asset(rule, asset) -> None
@@ -414,6 +315,7 @@ can update the same file and the content will be preserved (as long as the keys 
   - `name`: rule name as string
   - `deps`: list of dependencies
   - `type`: Setup|Run (default)|Optional
+  - `help`: Optional help text show with `spaces evaluate`
 - `asset`: dict with
   - `destination`: path to the asset in the workspace
   - `format`: json|toml|yaml
@@ -462,7 +364,8 @@ checkout.update_asset(
         },
     },
 )
-```### update_env()
+```
+#### update_env
 
 ```python
 def update_env(rule, env) -> None
@@ -491,6 +394,7 @@ source env
   - `name`: rule name as string
   - `deps`: list of dependencies
   - `type`: Setup|Run (default)|Optional
+  - `help`: Optional help text show with `spaces evaluate`
 - `env`: dict with
   - `vars`: dict of variables to add to the environment
   - `paths`: list of paths required
@@ -507,11 +411,27 @@ checkout.update_env(
         },
     },
 )
-```## Run Rules
+```
+
+## Run Rules
 
 You use run rules to execute tasks in the workspace.
 
-### add_exec()
+#### abort
+
+```python
+def abort(message) -> None
+```
+Abort script evaluation with a message.
+
+- `message`: Abort message to show the user.
+
+
+**Example**
+```python
+run.abort("Failed to do something")
+```
+#### add_exec
 
 ```python
 def add_exec(rule, exec) -> None
@@ -522,6 +442,7 @@ Adds a rule that will execute a process.
   - `name`: rule name as string
   - `deps`: list of dependencies
   - `type`: Setup|Run (default)|Optional
+  - `help`: Optional help text show with `spaces evaluate`
 - `exec`: dict with
   - `command`: name of the command to execute
   - `args`: optional list of arguments
@@ -539,7 +460,8 @@ run.add_exec(
         "args": ["install"] + packages,
     },
 )
-```### add_exec_if()
+```
+#### add_exec_if
 
 ```python
 def add_exec_if(rule, exec_if) -> None
@@ -550,6 +472,7 @@ Adds a rule to execute if a condition is met.
   - `name`: rule name as string
   - `deps`: list of dependencies
   - `type`: Setup|Run (default)|Optional
+  - `help`: Optional help text show with `spaces evaluate`
 - `exec_if`: dict with
   - `if`: this is an `exec` object used with add_exec()
   - `then`: list of optional targets to enable if the command has the expected result
@@ -567,19 +490,20 @@ run.add_exec(
 )
 
 run.add_exec_if(
-rule = {"name": check_file, "deps": []},
-exec_if = {
-    "if": {
-        "command": "ls",
-        "args": [
-            "some_file",
-        ],
-        "expect": "Failure",
-    },
-    "then": ["create_file"],
-},
+    rule = {"name": check_file, "deps": []},
+    exec_if = {
+        "if": {
+            "command": "ls",
+            "args": [
+                "some_file",
+            ],
+            "expect": "Failure",
+        },
+        "then": ["create_file"],
+    }
 )
-```### add_target()
+```
+#### add_target
 
 ```python
 def add_target(rule) -> None
@@ -590,6 +514,7 @@ Adds a target. There is no specific action for the target, but this rule can be 
   - `name`: rule name as string
   - `deps`: list of dependencies
   - `type`: Setup|Run (default)|Optional
+  - `help`: Optional help text show with `spaces evaluate`
 
 
 **Example**
@@ -598,3 +523,269 @@ run.add_target(
     rule = {"name": "my_rule", "deps": ["my_other_rule"]},
 )
 ```
+
+## Info Functions
+
+### Description
+
+The `info` functions provide information about the workspace
+during checkout and run. Info functions are executed immediately. They are not rule definitions.
+
+### Functions
+
+#### get_absolute_path_to_workspace
+
+```python
+def get_absolute_path_to_workspace() -> str
+```
+returns the absolute path to the workspace
+
+
+#### get_path_to_build_archive
+
+```python
+def get_path_to_build_archive() -> str
+```
+returns the path to where run.create_archive() creates the output archive
+
+
+#### get_path_to_build_checkout
+
+```python
+def get_path_to_build_checkout() -> str
+```
+returns the path to the workspace build folder for the current script
+
+
+#### get_path_to_checkout
+
+```python
+def get_path_to_checkout() -> str
+```
+returns the path where the current script is located in the workspace
+
+
+#### get_path_to_store
+
+```python
+def get_path_to_store() -> str
+```
+returns the path to the spaces store (typically $HOME/.spaces/store)
+
+
+#### get_platform_name
+
+```python
+def get_platform_name() -> str
+```
+returns the name of the current platform: macos-aarch64|macos-x86_64|linux-x86_64|linux-aarch64|windows-x86_64|windows-aarch64
+
+
+#### is_platform_linux
+
+```python
+def is_platform_linux() -> bool
+```
+returns true if platform is linux
+
+
+#### is_platform_macos
+
+```python
+def is_platform_macos() -> bool
+```
+returns true if platform is macos
+
+
+#### is_platform_windows
+
+```python
+def is_platform_windows() -> bool
+```
+returns true if platform is Windows
+
+
+
+## Spaces Starlark Standard Functions
+
+### Description
+
+The spaces starlark standard library includes
+functions for doing things like accessing the filesystem. The functions
+in this library are executed immediately.
+
+### `fs` Functions
+
+#### append_string_to_file
+
+```python
+def append_string_to_file(path, content) -> None
+```
+Appends a string to a file. Creates the file if it doesn't exist.
+
+- `path`: path relative to the workspace root
+- `content`: contents to write
+
+#### exists
+
+```python
+def exists(path) -> bool
+```
+Checks if the file/directory exists
+
+- `path`: path relative to the workspace root
+
+#### read_directory
+
+```python
+def read_directory(path) -> [str]
+```
+Reads the entries of a directory
+
+- `path`: path relative to the workspace root
+
+#### read_file_to_string
+
+```python
+def read_file_to_string(path) -> str
+```
+Reads the contents of the file as a string
+
+- `path`: path relative to the workspace root
+
+#### read_json_to_dict
+
+```python
+def read_json_to_dict(path) -> dict with parsed json
+```
+Reads and parses a json file
+
+- `path`: path relative to the workspace root
+
+#### read_toml_to_dict
+
+```python
+def read_toml_to_dict(path) -> str
+```
+Reads and parses a toml file
+
+- `path`: path relative to the workspace root
+
+#### read_yaml_to_dict
+
+```python
+def read_yaml_to_dict(path) -> dict with parsed yaml
+```
+Reads and parses a yaml file
+
+- `path`: path relative to the workspace root
+
+#### write_string_to_file
+
+```python
+def write_string_to_file(path, content) -> None
+```
+Writes a string to a file. Truncates the file if it exists. Creates it if it doesn't.
+
+- `path`: path relative to the workspace root
+- `content`: contents to write
+
+### `hash` Functions
+
+#### compute_sha256_from_file
+
+```python
+def compute_sha256_from_file(file_path) -> String
+```
+Computes the sha256 checksum for the contents of a file and returns the digest as a string.
+
+- `file_path`: path to the file
+
+### `json` Functions
+
+#### string_to_dict
+
+```python
+def string_to_dict(content) -> dict
+```
+Converts a JSON formatted string to a dict.
+
+- `content`: The JSON string to convert
+
+#### to_string
+
+```python
+def to_string(value) -> dict
+```
+Converts a dict to a JSON formatted string.
+
+- `value`: The Starlark value to convert
+
+#### to_string_pretty
+
+```python
+def to_string_pretty(value) -> dict
+```
+Converts a dict to a JSON formatted string (multi-line, idented).
+
+- `value`: The Starlark value to convert
+
+### `process` Functions
+
+#### exec
+
+```python
+def exec(exec, content) -> dict # with members `status`, `stdout`, and `stderr`
+```
+Executes a process
+
+- `exec`: dict with members
+  - `command`: name of the command to execute
+  - `args`: optional list of arguments
+  - `env`: optional dict of environment variables
+  - `working_directory`: optional working directory (default is the workspace)
+  - `stdin`: optional string to pipe to the process stdin
+- `content`: contents to write
+
+### `script` Functions
+
+#### get_arg
+
+```python
+def get_arg(offset) -> str
+```
+Gets the argument at the specified offset (an empty string is returned if the argument doesn't exist).
+
+- `offset`: int: offset of the argument to get.
+
+#### get_args
+
+```python
+def get_args(offset) -> dict
+```
+Gets the arguments as a dict with 'ordered' and 'named' keys. `ordered` is a list of arguments that do not contain =, `named` is a map of key value pairs separated by =.
+
+- `offset`: int: offset of the argument to get.
+
+#### print
+
+```python
+def print(content) -> None
+```
+Prints a string to the stdout. Only use in a script.
+
+- `content`: str: string content to print.
+
+#### set_exit_code
+
+```python
+def set_exit_code(offset) -> none
+```
+Sets the exit code of the script. 
+Use zero for success and non-zero for failure.
+This doesn't exit the script.
+
+- `offset`: int: offset of the argument to get.
+
+
+

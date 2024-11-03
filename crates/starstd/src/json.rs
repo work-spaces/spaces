@@ -4,17 +4,41 @@ use anyhow_source_location::format_context;
 use starlark::environment::GlobalsBuilder;
 use starlark::values::{Heap, Value};
 
-pub const FUNCTIONS: &[Function] = &[Function {
-    name: "string_to_dict",
-    description: "Converts a JSON formatted string to a dict.",
-    return_type: "dict",
-    args: &[Arg {
-        name: "content",
-        description: "The JSON string to convert",
-        dict: &[],
-    }],
-    example: None,
-}];
+pub const FUNCTIONS: &[Function] = &[
+    Function {
+        name: "string_to_dict",
+        description: "Converts a JSON formatted string to a dict.",
+        return_type: "dict",
+        args: &[Arg {
+            name: "content",
+            description: "The JSON string to convert",
+            dict: &[],
+        }],
+        example: None,
+    },
+    Function {
+        name: "to_string",
+        description: "Converts a dict to a JSON formatted string.",
+        return_type: "dict",
+        args: &[Arg {
+            name: "value",
+            description: "The Starlark value to convert",
+            dict: &[],
+        }],
+        example: None,
+    },
+    Function {
+        name: "to_string_pretty",
+        description: "Converts a dict to a JSON formatted string (multi-line, idented).",
+        return_type: "dict",
+        args: &[Arg {
+            name: "value",
+            description: "The Starlark value to convert",
+            dict: &[],
+        }],
+        example: None,
+    },
+];
 
 // This defines the function that is visible to Starlark
 #[starlark_module]

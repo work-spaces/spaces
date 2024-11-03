@@ -25,7 +25,7 @@ pub fn is_rules_module(path: &str) -> bool {
 
 pub fn is_checkout_script(path: &str) -> bool {
     path.ends_with(SPACES_CHECKOUT_NAME)
-}   
+}
 
 pub fn get_store_path() -> String {
     if let Ok(spaces_home) = std::env::var("SPACES_HOME") {
@@ -127,9 +127,8 @@ impl Workspace {
 
         progress.set_total(walkdir.len() as u64);
 
-        let env_content =
-            std::fs::read_to_string(format!("{}/{}", absolute_path, ENV_FILE_NAME))
-                .context(format_context!("Failed to read workspace file"))?;
+        let env_content = std::fs::read_to_string(format!("{}/{}", absolute_path, ENV_FILE_NAME))
+            .context(format_context!("Failed to read workspace file"))?;
 
         let mut modules = vec![(ENV_FILE_NAME.to_string(), env_content)];
         for entry in walkdir {

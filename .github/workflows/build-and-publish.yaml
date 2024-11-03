@@ -38,7 +38,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create ${{ github.ref_name }} \
-            artifacts/spaces-linux-x86_64-${{ github.ref_name }}.zip --title "${{ github.ref_name }}" --notes "Release ${{ github.ref_name }} (Ubuntu binary packaged as .tar.xz)"
+            artifacts/spaces-linux-x86_64-${{ github.ref_name }}.zip --title "${{ github.ref_name }}" --generate-notes
             
   build-matrix-windows:
     name: Build and Upload Other OS Binaries

@@ -2,20 +2,22 @@
 extern crate starlark;
 
 pub mod fs;
-pub mod process;
-pub mod script;
 pub mod hash;
 pub mod json;
+pub mod process;
+pub mod script;
 
 use starlark::environment::GlobalsBuilder;
 use starlark::values::none::NoneType;
 
+#[derive(Debug, Clone)]
 pub struct Arg {
     pub name: &'static str,
     pub description: &'static str,
     pub dict: &'static [(&'static str, &'static str)],
 }
 
+#[derive(Debug, Clone)]
 pub struct Function {
     pub name: &'static str,
     pub description: &'static str,

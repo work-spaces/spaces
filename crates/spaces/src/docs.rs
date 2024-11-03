@@ -19,7 +19,7 @@ fn show_function(
     level: u8,
     markdown: &mut printer::markdown::Markdown,
 ) -> anyhow::Result<()> {
-    markdown.heading(level, format!("{}()", function.name).as_str())?;
+    markdown.heading(level, function.name)?;
 
     markdown.code_block(
         "python",
@@ -55,6 +55,7 @@ fn show_function(
         markdown.bold("Example")?;
         markdown.printer.newline()?;
         markdown.code_block("python", example)?;
+        markdown.printer.newline()?;
     }
 
     Ok(())
@@ -67,12 +68,8 @@ fn show_completions(markdown: &mut printer::markdown::Markdown) -> anyhow::Resul
 
 fn show_run(level: u8, markdown: &mut printer::markdown::Markdown) -> anyhow::Result<()> {
     markdown.heading(level, "Run Rules")?;
-
     markdown.paragraph(r#"You use run rules to execute tasks in the workspace."#)?;
-
-    for function in run::FUNCTIONS {
-        show_function(function, level + 1, markdown)?;
-    }
+    show_sorted_functions(run::FUNCTIONS, level + 2, markdown)?;
 
     Ok(())
 }
@@ -86,10 +83,7 @@ You can fetch git repositories and archives. You can also add assets (local file
 to the workspace root folder (not under version control)."#,
     )?;
 
-    for function in checkout::FUNCTIONS {
-        show_function(function, level + 1, markdown)?;
-    }
-
+    show_sorted_functions(checkout::FUNCTIONS, level + 2, markdown)?;
     Ok(())
 }
 
@@ -104,9 +98,24 @@ during checkout and run. Info functions are executed immediately. They are not r
     )?;
 
     markdown.heading(level + 1, "Functions")?;
+    show_sorted_functions(info::FUNCTIONS, level + 2, markdown)?;
 
-    for function in info::FUNCTIONS {
-        show_function(function, level + 2, markdown)?;
+    Ok(())
+}
+
+fn show_sorted_functions(
+    functions: &[Function],
+    level: u8,
+    markdown: &mut printer::markdown::Markdown,
+) -> anyhow::Result<()> {
+
+    let mut sorted_functions = Vec::new();
+    sorted_functions.extend_from_slice(functions);
+
+    sorted_functions.sort_by(|a, b| a.name.cmp(b.name));
+
+    for function in sorted_functions {
+        show_function(&function, level, markdown)?;
     }
 
     Ok(())
@@ -124,28 +133,19 @@ in this library are executed immediately."#,
     )?;
 
     markdown.heading(level + 1, "`fs` Functions")?;
-
-    for function in starstd::fs::FUNCTIONS {
-        show_function(function, level + 2, markdown)?;
-    }
+    show_sorted_functions(starstd::fs::FUNCTIONS, level + 2, markdown)?;
 
     markdown.heading(level + 1, "`hash` Functions")?;
+    show_sorted_functions(starstd::hash::FUNCTIONS, level + 2, markdown)?;
 
-    for function in starstd::hash::FUNCTIONS {
-        show_function(function, level + 2, markdown)?;
-    }
+    markdown.heading(level + 1, "`json` Functions")?;
+    show_sorted_functions(starstd::json::FUNCTIONS, level + 2, markdown)?;
 
     markdown.heading(level + 1, "`process` Functions")?;
-
-    for function in starstd::process::FUNCTIONS {
-        show_function(function, level + 2, markdown)?;
-    }
+    show_sorted_functions(starstd::process::FUNCTIONS, level + 2, markdown)?;
 
     markdown.heading(level + 1, "`script` Functions")?;
-
-    for function in starstd::script::FUNCTIONS {
-        show_function(function, level + 2, markdown)?;
-    }
+    show_sorted_functions(starstd::script::FUNCTIONS, level + 2, markdown)?;
 
     Ok(())
 }
@@ -165,13 +165,25 @@ fn show_doc_item(
 }
 
 fn show_all(markdown: &mut printer::markdown::Markdown) -> anyhow::Result<()> {
-    markdown.heading(1, "Spaces API Documentation")?;
+    markdown.heading(1, "Spaces Built-in Functions API Documentation")?;
     markdown.printer.newline()?;
 
-    show_info(2, markdown)?;
-    show_star_std(2, markdown)?;
+    markdown.list(vec![
+        "[Checkout Rules](#checkout-rules)",
+        "[Run Rules](#run-rules)",
+        "[Info Functions](#info-functions)",
+        "[Spaces Starlark Standard Functions](#spaces-starlark-standard-functions)",
+    ])?;
+
     show_checkout(2, markdown)?;
+    markdown.printer.newline()?;
     show_run(2, markdown)?;
+    markdown.printer.newline()?;
+    show_info(2, markdown)?;
+    markdown.printer.newline()?;
+    show_star_std(2, markdown)?;
+    markdown.printer.newline()?;
+
 
     Ok(())
 }

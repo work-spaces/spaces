@@ -2,13 +2,40 @@
 
 ## About Spaces
 
-`spaces` is a workspace manager and task-runner. It is powered by `starlark` and `rust`.
+How do you get all the tools and source code at the right version to build, debug, and deploy your project? How do you ensure everyone who checks out your code has all the same tools and dependencies?
 
-Create a starlark script that fetches the code and tools you need as well as what commands to run and `spaces` does the rest.
+Some common options include: 
 
-For example, you can develop `spaces` using `config/spaces-build.star`:
+- Docker. Put all the tools and dependencies in a container and you are set.
+- Monorepos. Commit all source code to one big repo. Use additional tools like `nix` or `dotslash` to manage executables.
+- Give everyone a powerful workstation running the same version of Linux.
+
+These solutions have drawbacks. Docker runs a VM on mac and windows creating a heavyweight solution that creates a second class developer experience. Monorepos can get so large they require specialized tooling to manage (worktrees, partial clones, virtual filesystems). Monorepos can put a heavy cognitive load on developers that just need to work on a small part of the codebase. Linux workstations are a big expense when developers have powerful laptops capable of doing the job.
+
+`spaces` is a lightweight solution to this problem. It is powered by `starlark` and `rust`. You specify your project's direct dependencies in a `spaces` checkout script. You write a `spaces` run script with the build and deploy steps.
+
+- tools are specified with a per-platform hash
+- sources can be a git repo/revision or archive/hash
+
+This allows you to create a precise workspace that has minimal system dependencies. `spaces` downloads artifacts to a common store (`~/.spaces/store`) and creates hardlinks to each workspace. `spaces` checks out dependencies transitely for repos that include `spaces` scripts.
+
+All projects use the same commands:
+
+```sh
+spaces checkout --script=<your checkout script>.checkout.star --name=<your workspace folder>
+cd <your workspace folder>
+spaces run
+
+# you can work the command line in the spaces run environment using
+source env
+```
+
+Here is an example from the spaces [workflows repo](https://github.com/work-spaces/workflows/):
 
 ```python
+
+# load the rust script from the sysroot repository
+load("sysroot-packages/star/rust.star", "add_rust")
 
 # Checkout the spaces repo
 checkout.add_repo(
@@ -20,17 +47,18 @@ checkout.add_repo(
     },
 )
 
+# any files matching *.spaces.star within 
+# checked-out repos are processed in order
+
 # Grab the rust toolchain
-checkout.add_repo(
-    rule = { "name": "tools/sysroot-rust" },
-    repo = {
-        "url": "https://github.com/work-spaces/sysroot-rust",
-        "rev": "main",
-        "checkout": "Revision",
-    },
+add_rust(
+    rule_name = "rust_toolchain",
+    toolchain_version = "1.80",
 )
 
-# Build spaces using cargo
+# Checkout scripts can't have run rules
+# So we generate a run script for the workspace
+run_rules = """
 run.add_exec(
     rule = { "name": "build" },
     exec = {
@@ -42,11 +70,20 @@ run.add_exec(
         ],
     },
 )
+"""
+
+checkout.add_asset(
+    rule = { "name": "build_spaces_star" },
+    asset = {
+        "destination": "build.spaces.star",
+        "content" = run_rules
+    }
+)
 ```
 
 ```sh
-spaces checkout config/spaces_build --space=spaces-test
-cd spaces-test
+spaces checkout --script=preload.checkout.star --script=spaces-develop.checkout.star --name=spaces-build-test
+cd spaces-build-test
 spaces run
 ```
 
@@ -62,6 +99,14 @@ Or run this:
 
 It requires `curl`, `unzip` and `sed`.
 
+Or install from source using `cargo`:
+
+```sh
+git clone https://github.com/work-spaces/spaces
+cd spaces
+cargo install --path=crates/spaces --root=$HOME/.local --profile=release
+```
+
 Use `spaces` in github actions with https://github.com/work-spaces/install-spaces.
 
 ## Using Spaces
@@ -72,8 +117,6 @@ Use `spaces` in github actions with https://github.com/work-spaces/install-space
     - `git` repos are checked out in the workspace (either direct clones or using worktrees)
     - Archives (including platform binaries) are downloaded to `$HOME/.spaces/store`. Contents are hardlinked to the workspace `sysroot`.
 - Run Phase: execute user-defined rules to build, test, run or deploy your project
-
-Read the [API Docs](API.md).
 
 ### More about Checkout
 
@@ -119,6 +162,20 @@ source env
 ```
 
 You will have `sysroot/bin` on your path and limited paths on the host system (as specified by the checkout rules).
+
+## Writing Spaces Starlark Script
+
+`starlark` is a sub-set of python. 
+
+`starlark` has symbols available from three sources:
+
+- The [standard starlark specification](https://github.com/bazelbuild/starlark/blob/master/spec.md)
+- `spaces` built-ins (see the [API](API.md))
+- Other scripts imported using `load()` statements.
+
+The [standard starlark specification](https://github.com/bazelbuild/starlark/blob/master/spec.md) provides native types and associated functions.
+
+`spaces` built-ins are `starlark` functions bound to `rust` implementations. This includes `checkout` and `run` rules which build a dependency graph and immediate-mode functions like reading `json` or `toml` files. See the [API](API.md) documentation.
 
 
 

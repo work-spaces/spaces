@@ -236,8 +236,7 @@ pub fn run_starlark_modules(
             workspace_file_content.push_str(serde_json::to_string_pretty(&env)?.as_str());
             workspace_file_content.push_str("\n\ninfo.set_env(env = workspace_env) \n");
 
-            let workspace_file_path =
-                format!("{workspace_path}/{}", workspace::ENV_FILE_NAME);
+            let workspace_file_path = format!("{workspace_path}/{}", workspace::ENV_FILE_NAME);
             std::fs::write(workspace_file_path.as_str(), workspace_file_content)
                 .context(format_context!("Failed to write workspace file"))?;
         }

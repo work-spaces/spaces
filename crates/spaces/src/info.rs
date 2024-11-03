@@ -43,7 +43,7 @@ pub fn get_env() -> executor::env::UpdateEnv {
 pub const FUNCTIONS: &[Function] = &[
     Function {
         name: "get_platform_name",
-        description: "returns the name of the current platform",
+        description: "returns the name of the current platform: macos-aarch64|macos-x86_64|linux-x86_64|linux-aarch64|windows-x86_64|windows-aarch64",
         return_type: "str",
         args: &[],
         example: None,

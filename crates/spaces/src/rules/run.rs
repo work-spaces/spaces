@@ -6,6 +6,40 @@ use std::collections::HashSet;
 
 use crate::{executor, rules};
 
+const ADD_EXEC_EXAMPLE: &str = r#"run.add_exec(
+    rule = {"name": name, "type": "Setup", "deps": ["sysroot-python:venv"]},
+    exec = {
+        "command": "pip3",
+        "args": ["install"] + packages,
+    },
+)"#;
+
+const ADD_EXEC_IF_EXAMPLE: &str = r#"run.add_exec(
+    rule = {"name": create_file, "type": "Optional" },
+    exec = {
+        "command": "touch",
+        "args": ["some_file"],
+    },
+)
+
+run.add_exec_if(
+    rule = {"name": check_file, "deps": []},
+    exec_if = {
+        "if": {
+            "command": "ls",
+            "args": [
+                "some_file",
+            ],
+            "expect": "Failure",
+        },
+        "then": ["create_file"],
+    }
+)"#;
+
+const ADD_TARGET_EXAMPLE: &str = r#"run.add_target(
+    rule = {"name": "my_rule", "deps": ["my_other_rule"]},
+)"#;
+
 pub const FUNCTIONS: &[Function] = &[
     Function {
         name: "add_exec",
@@ -25,66 +59,49 @@ pub const FUNCTIONS: &[Function] = &[
                 ],
             },
         ],
-        example: Some(r#"run.add_exec(
-    rule = {"name": name, "type": "Setup", "deps": ["sysroot-python:venv"]},
-    exec = {
-        "command": "pip3",
-        "args": ["install"] + packages,
-    },
-)"#)},
-Function {
-    name: "add_exec_if",
-    description: "Adds a rule to execute if a condition is met.",
-    return_type: "None",
-    args: &[
-        get_rule_argument(),
-        Arg {
-            name: "exec_if",
-            description: "dict with",
-            dict: &[
-                ("if", "this is an `exec` object used with add_exec()"),
-                ("then", "list of optional targets to enable if the command has the expected result"),
-                ("else", "optional list of optional targets to enable if the command has the unexpected result"),
-            ],
-        },
-    ],
-    example: Some(r#"run.add_exec(
-    rule = {"name": create_file, "type": "Optional" },
-    exec = {
-        "command": "touch",
-        "args": ["some_file"],
-    },
-)
-
-run.add_exec_if(
-rule = {"name": check_file, "deps": []},
-exec_if = {
-    "if": {
-        "command": "ls",
-        "args": [
-            "some_file",
+        example: Some(ADD_EXEC_EXAMPLE)},
+    Function {
+        name: "add_exec_if",
+        description: "Adds a rule to execute if a condition is met.",
+        return_type: "None",
+        args: &[
+            get_rule_argument(),
+            Arg {
+                name: "exec_if",
+                description: "dict with",
+                dict: &[
+                    ("if", "this is an `exec` object used with add_exec()"),
+                    ("then", "list of optional targets to enable if the command has the expected result"),
+                    ("else", "optional list of optional targets to enable if the command has the unexpected result"),
+                ],
+            },
         ],
-        "expect": "Failure",
-    },
-    "then": ["create_file"],
-},
-)"#)},
-Function {
-    name: "add_target",
-    description: "Adds a target. There is no specific action for the target, but this rule can be useful for organizing depedencies.",
-    return_type: "None",
-    args: &[
-        get_rule_argument(),
-    ],
-    example: Some(r#"run.add_target(
-    rule = {"name": "my_rule", "deps": ["my_other_rule"]},
-)"#)}
+        example: Some(ADD_EXEC_IF_EXAMPLE)},
+    Function {
+        name: "add_target",
+        description: "Adds a target. There is no specific action for the target, but this rule can be useful for organizing depedencies.",
+        return_type: "None",
+        args: &[
+            get_rule_argument(),
+        ],
+        example: Some(ADD_TARGET_EXAMPLE)},
+    Function {
+        name: "abort",
+        description: "Abort script evaluation with a message.",
+        return_type: "None",
+        args: &[
+            Arg {
+                name: "message",
+                description: "Abort message to show the user.",
+                dict: &[],
+            },
+        ],
+        example: Some(r#"run.abort("Failed to do something")"#)}
 ];
 
 // This defines the function that is visible to Starlark
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
-
     fn abort(message: &str) -> anyhow::Result<NoneType> {
         Err(format_error!("Run Aborting: {}", message))
     }
