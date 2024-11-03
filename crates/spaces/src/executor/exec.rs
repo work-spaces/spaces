@@ -91,16 +91,21 @@ impl Exec {
                 if let Some(Expect::Failure) = self.expect.as_ref() {
                     None
                 } else {
-                    let log_contents = std::fs::read_to_string(&log_file_path)
-                        .context(format_context!("Failed to read log file {}", log_file_path))?;
+                    // if the command failed to execute, there won't be a log file
 
-                    if log_contents.len() > 8192 {
-                        progress.log(
-                            printer::Level::Error,
-                            format!("See log file {log_file_path} for details").as_str(),
-                        );
-                    } else {
-                        progress.log(printer::Level::Error, log_contents.as_str());
+                    if std::fs::exists(log_file_path.as_str()).context(format_context!("failed to check if log file exists {}", log_file_path))? {
+                        let log_contents = std::fs::read_to_string(&log_file_path).context(
+                            format_context!("Failed to read log file {}", log_file_path),
+                        )?;
+
+                        if log_contents.len() > 8192 {
+                            progress.log(
+                                printer::Level::Error,
+                                format!("See log file {log_file_path} for details").as_str(),
+                            );
+                        } else {
+                            progress.log(printer::Level::Error, log_contents.as_str());
+                        }
                     }
                     return Err(format_error!(
                         "Expected success but task failed because {exec_error}"

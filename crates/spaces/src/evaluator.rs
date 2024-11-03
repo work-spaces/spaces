@@ -78,9 +78,9 @@ fn evaluate_module(
     module.freeze()
 }
 
-pub fn sort_tasks(target: Option<String>) -> anyhow::Result<()> {
+pub fn sort_tasks(target: Option<String>, phase: rules::Phase) -> anyhow::Result<()> {
     let mut state = rules::get_state().write().unwrap();
-    state.sort_tasks(target)
+    state.sort_tasks(target, phase)
 }
 
 fn debug_sorted_tasks(printer: &mut printer::Printer, phase: rules::Phase) -> anyhow::Result<()> {
@@ -143,7 +143,7 @@ pub fn run_starlark_modules(
             }
 
             if phase == rules::Phase::Checkout {
-                sort_tasks(None).context(format_context!("Failed to sort tasks"))?;
+                sort_tasks(None, phase).context(format_context!("Failed to sort tasks"))?;
                 printer.log(Level::Debug, "--Checkout Phase--")?;
                 debug_sorted_tasks(printer, phase)
                     .context(format_context!("Failed to debug sorted tasks"))?;
@@ -185,7 +185,7 @@ pub fn run_starlark_modules(
     match phase {
         rules::Phase::Run => {
             printer.log(Level::Message, "Run Phase")?;
-            sort_tasks(target.clone()).context(format_context!("Failed to sort tasks"))?;
+            sort_tasks(target.clone(), phase).context(format_context!("Failed to sort tasks"))?;
 
             debug_sorted_tasks(printer, phase)
                 .context(format_context!("Failed to debug sorted tasks"))?;
@@ -197,7 +197,7 @@ pub fn run_starlark_modules(
         }
         rules::Phase::Evaluate => {
             printer.log(Level::Debug, "Evaluate Phase")?;
-            sort_tasks(target.clone()).context(format_context!("Failed to sort tasks"))?;
+            sort_tasks(target.clone(), phase).context(format_context!("Failed to sort tasks"))?;
 
             debug_sorted_tasks(printer, rules::Phase::Run)
                 .context(format_context!("Failed to debug sorted tasks"))?;
@@ -209,7 +209,9 @@ pub fn run_starlark_modules(
         }
         rules::Phase::Checkout => {
             printer.log(Level::Debug, "Post Checkout Phase")?;
-            sort_tasks(target.clone()).context(format_context!("Failed to sort tasks"))?;
+
+            // at this point everything should be preset, sort tasks as if in run phase
+            sort_tasks(target.clone(), rules::Phase::Run).context(format_context!("Failed to sort tasks"))?;
             debug_sorted_tasks(printer, rules::Phase::PostCheckout)
                 .context(format_context!("Failed to debug sorted tasks"))?;
 

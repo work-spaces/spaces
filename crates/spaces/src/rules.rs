@@ -50,7 +50,7 @@ impl State {
         Ok(())
     }
 
-    pub fn sort_tasks(&mut self, target: Option<String>) -> anyhow::Result<()> {
+    pub fn sort_tasks(&mut self, target: Option<String>, phase: Phase) -> anyhow::Result<()> {
         let mut tasks = self.tasks.write().unwrap();
 
         let setup_tasks = tasks
@@ -87,9 +87,15 @@ impl State {
                 }
             }
 
+
+            let task_phase = task.phase;
+            if phase == Phase::Checkout && task_phase != Phase::Checkout {
+                continue;
+            }
+
             // connect the dependencies
             if let Some(deps) = task.rule.deps.clone() {
-                for dep in deps {
+                for dep in deps {                    
                     let dep_task = tasks_copy
                         .get(&dep)
                         .ok_or(format_error!("Task Depedency not found {dep}"))?;

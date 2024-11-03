@@ -72,6 +72,18 @@ fn run_starlark_modules_in_workspace(
     Ok(())
 }
 
+const SPACES_STARLARK_SDK: &str = r#"
+checkout.add_repo(
+    rule = {"name": "spaces-starlark-sdk"},
+    repo = {
+        "url": "https://github.com/work-spaces/spaces-starlark-sdk",
+        "rev": "main",
+        "checkout": "Revision",
+        "clone": "Worktree"
+    }
+)
+"#;
+
 pub fn execute() -> anyhow::Result<()> {
     use crate::ledger;
 
@@ -113,13 +125,22 @@ pub fn execute() -> anyhow::Result<()> {
     match args {
         Arguments {
             verbosity,
-            commands: Commands::Checkout { name, script },
+            commands:
+                Commands::Checkout {
+                    name,
+                    spaces_starlark_sdk,
+                    script,
+                },
         } => {
             printer.level = verbosity.into();
             std::fs::create_dir_all(name.as_str())
                 .context(format_context!("while creating workspace directory {name}"))?;
 
             let mut scripts = Vec::new();
+            if spaces_starlark_sdk {
+                scripts.push(("spaces-starlark-sdk.checkout.star".to_string(), SPACES_STARLARK_SDK.to_string()));
+            }
+
             for one_script in script {
                 let script_path = if one_script.ends_with(".star") {
                     one_script.clone()
@@ -244,6 +265,9 @@ enum Commands {
         /// The name of the workspace
         #[arg(long)]
         name: String,
+        /// Checkout gitub.com/work-spaces/spaces-starlark-sdk to the workspace.
+        #[arg(long)]
+        spaces_starlark_sdk: bool,
         /// The path(s) to the star file containing checkout rules. Paths are processed in order.
         #[arg(long, value_hint = ValueHint::FilePath)]
         script: Vec<String>,
