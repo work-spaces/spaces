@@ -1,5 +1,5 @@
 use anyhow::Context;
-use anyhow_source_location::format_context;
+use anyhow_source_location::{format_context, format_error};
 use starlark::{environment::GlobalsBuilder, values::none::NoneType};
 use starstd::{get_rule_argument, Arg, Function};
 use std::collections::HashSet;
@@ -84,6 +84,11 @@ Function {
 // This defines the function that is visible to Starlark
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
+
+    fn abort(message: &str) -> anyhow::Result<NoneType> {
+        Err(format_error!("Run Aborting: {}", message))
+    }
+
     fn add_target(
         #[starlark(require = named)] rule: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {

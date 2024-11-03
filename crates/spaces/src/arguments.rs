@@ -38,7 +38,7 @@ pub struct Arguments {
 
 enum RunWorkspace {
     Target(Option<String>),
-    Script(Vec<String>),
+    Script(Vec<(String, String)>),
 }
 
 fn run_starlark_script(name: &str, contents: &str) -> anyhow::Result<()> {
@@ -65,12 +65,7 @@ fn run_starlark_modules_in_workspace(
                 .context(format_context!("while executing workspace rules"))?
         }
         RunWorkspace::Script(scripts) => {
-            let mut modules = Vec::new();
-            for script in scripts {
-                let module = (workspace::SPACES_CHECKOUT_NAME.to_string(), script);
-                modules.push(module);
-            }
-            evaluator::run_starlark_modules(printer, modules, phase, None)
+            evaluator::run_starlark_modules(printer, scripts, phase, None)
                 .context(format_context!("while executing checkout rules"))?
         }
     }
@@ -124,14 +119,20 @@ pub fn execute() -> anyhow::Result<()> {
             std::fs::create_dir_all(name.as_str())
                 .context(format_context!("while creating workspace directory {name}"))?;
 
-            let mut script_contents = Vec::new();
+            let mut scripts = Vec::new();
             for one_script in script {
-                let one_script_contents = std::fs::read_to_string(one_script.as_str())
-                    .context(format_context!("while reading script file {one_script}"))?;
-                script_contents.push(one_script_contents);
+                let script_path = if one_script.ends_with(".star") {
+                    one_script.clone()
+                } else {
+                    format!("{one_script}.{}", workspace::SPACES_CHECKOUT_NAME)
+                };
+
+                let one_script_contents = std::fs::read_to_string(script_path.as_str())
+                    .context(format_context!("while reading script file {script_path}"))?;
+                scripts.push((script_path, one_script_contents));
             }
 
-            std::fs::write(format!("{}/{}", name, workspace::WORKSPACE_FILE_NAME), "")
+            std::fs::write(format!("{}/{}", name, workspace::ENV_FILE_NAME), "")
                 .context(format_context!("while creating spaces_deps.toml file"))?;
 
             let current_working_directory = std::env::current_dir()
@@ -149,7 +150,7 @@ pub fn execute() -> anyhow::Result<()> {
             run_starlark_modules_in_workspace(
                 &mut printer,
                 rules::Phase::Checkout,
-                RunWorkspace::Script(script_contents),
+                RunWorkspace::Script(scripts),
             )
             .context(format_context!("while executing checkout rules"))?;
         }

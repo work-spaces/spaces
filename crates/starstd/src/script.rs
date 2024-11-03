@@ -102,6 +102,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(state.args[offset].clone())
     }
 
+    #[allow(clippy::needless_lifetimes)]
     fn get_args<'v>(heap: &'v Heap) -> anyhow::Result<Value<'v>> {
         let mut result = serde_json::Value::Object(serde_json::Map::new());
 

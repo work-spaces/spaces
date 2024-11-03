@@ -111,18 +111,8 @@ pub fn run_starlark_modules(
     module_queue.extend(modules);
     let mut known_modules = HashSet::new();
 
-    // all pre-load modules are evaluated first
-    for (name, content) in module_queue.iter() {
-        if workspace::is_preload_module(name) {
-            known_modules.insert(blake3::hash(content.as_bytes()).to_string());
-        }
-    }
-
-    // standard modules evaluated next
-    for (name, content) in module_queue.iter() {
-        if !workspace::is_preload_module(name) {
-            known_modules.insert(blake3::hash(content.as_bytes()).to_string());
-        }
+    for (_name, content) in module_queue.iter() {
+        known_modules.insert(blake3::hash(content.as_bytes()).to_string());
     }
 
     while !module_queue.is_empty() {
@@ -169,23 +159,19 @@ pub fn run_starlark_modules(
                     )?;
                 }
 
-                let mut preload_modules = Vec::new();
                 let mut new_modules = Vec::new();
                 for module in task_result.new_modules {
                     let path_to_module = format!("{}/{}", workspace_path, module);
                     let content = std::fs::read_to_string(path_to_module.as_str())
                         .context(format_context!("Failed to read file {path_to_module}"))?;
 
-                    if workspace::is_preload_module(&module) {
-                        preload_modules.push((module, content));
-                    } else {
-                        new_modules.push((module, content));
-                    }
+                    new_modules.push((module, content));
                 }
 
-                preload_modules.extend(new_modules);
+                // sort new modules by the first item
+                new_modules.sort_by(|first, second| first.0.cmp(&second.0));
 
-                for (module, content) in preload_modules {
+                for (module, content) in new_modules {
                     let hash = blake3::hash(content.as_bytes()).to_string();
                     if !known_modules.contains(&hash) {
                         known_modules.insert(hash);
@@ -251,7 +237,7 @@ pub fn run_starlark_modules(
             workspace_file_content.push_str("\n\ninfo.set_env(env = workspace_env) \n");
 
             let workspace_file_path =
-                format!("{workspace_path}/{}", workspace::WORKSPACE_FILE_NAME);
+                format!("{workspace_path}/{}", workspace::ENV_FILE_NAME);
             std::fs::write(workspace_file_path.as_str(), workspace_file_content)
                 .context(format_context!("Failed to write workspace file"))?;
         }

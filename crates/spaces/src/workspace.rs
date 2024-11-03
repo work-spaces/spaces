@@ -2,8 +2,7 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use std::sync::RwLock;
 
-pub const WORKSPACE_FILE_NAME: &str = "spaces.workspace.star";
-pub const SPACES_PRELOAD_MODULE_NAME: &str = "spaces.preload.star";
+pub const ENV_FILE_NAME: &str = "env.spaces.star";
 pub const SPACES_MODULE_NAME: &str = "spaces.star";
 pub const SPACES_CHECKOUT_NAME: &str = "checkout.star";
 pub const SPACES_STDIN_NAME: &str = "stdin.star";
@@ -21,20 +20,12 @@ struct State {
 static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
 
 pub fn is_rules_module(path: &str) -> bool {
-    path.ends_with(SPACES_MODULE_NAME) || path.ends_with(SPACES_PRELOAD_MODULE_NAME)
+    path.ends_with(SPACES_MODULE_NAME)
 }
 
 pub fn is_checkout_script(path: &str) -> bool {
     path.ends_with(SPACES_CHECKOUT_NAME)
 }   
-
-pub fn get_spaces_module_names() -> &'static [&'static str] {
-    &[SPACES_MODULE_NAME, SPACES_PRELOAD_MODULE_NAME]
-}
-
-pub fn is_preload_module(path: &str) -> bool {
-    path.ends_with(SPACES_PRELOAD_MODULE_NAME)
-}
 
 pub fn get_store_path() -> String {
     if let Ok(spaces_home) = std::env::var("SPACES_HOME") {
@@ -102,7 +93,7 @@ impl Workspace {
     fn find_workspace_root(current_working_directory: &str) -> anyhow::Result<String> {
         let mut current_directory = current_working_directory.to_owned();
         loop {
-            let workspace_path = format!("{}/{}", current_directory, WORKSPACE_FILE_NAME);
+            let workspace_path = format!("{}/{}", current_directory, ENV_FILE_NAME);
             if std::path::Path::new(workspace_path.as_str()).exists() {
                 return Ok(current_directory.to_string());
             }
@@ -110,7 +101,7 @@ impl Workspace {
             if parent_directory.is_none() {
                 return Err(format_error!(
                     "Failed to find {} in any parent directory",
-                    WORKSPACE_FILE_NAME
+                    ENV_FILE_NAME
                 ));
             }
             current_directory = parent_directory.unwrap().to_string_lossy().to_string();
@@ -136,11 +127,11 @@ impl Workspace {
 
         progress.set_total(walkdir.len() as u64);
 
-        let workspace_content =
-            std::fs::read_to_string(format!("{}/{}", absolute_path, WORKSPACE_FILE_NAME))
+        let env_content =
+            std::fs::read_to_string(format!("{}/{}", absolute_path, ENV_FILE_NAME))
                 .context(format_context!("Failed to read workspace file"))?;
 
-        let mut modules = vec![(WORKSPACE_FILE_NAME.to_string(), workspace_content)];
+        let mut modules = vec![(ENV_FILE_NAME.to_string(), env_content)];
         for entry in walkdir {
             progress.increment(1);
             if let Ok(entry) = entry.context(format_context!("While walking directory")) {

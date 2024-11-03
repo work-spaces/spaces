@@ -161,7 +161,7 @@ checkout.add_platform_archive(
         args: &[
             get_rule_argument(),
             Arg{
-                name : "repo",
+                name : "cargo_bin",
                 description: "dict with",
                 dict: &[
                     ("crate", "The name of the binary crate"),
@@ -369,6 +369,11 @@ struct CargoBin {
 // This defines the function that is visible to Starlark
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
+
+    fn abort(message: &str) -> anyhow::Result<NoneType> {
+        Err(format_error!("Checkout Aborting: {}", message))
+    }
+
     fn add_repo(
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] repo: starlark::values::Value,

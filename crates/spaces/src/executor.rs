@@ -84,11 +84,21 @@ impl Task {
             if let Some(last) = parts.last() {
                 let workspace_path = std::path::Path::new(workspace.as_str());
 
-                for module in workspace::get_spaces_module_names() {
-                    let spaces_star_path = workspace_path.join(*last).join(*module);
-                    if spaces_star_path.exists() {
-                        let path_within_workspace = format!("{}/{}", *last, *module);
-                        result.new_modules.push(path_within_workspace);
+                let new_repo_path = workspace_path.join(last);
+                // add files in the directory that end in spaces.star
+                let modules = std::fs::read_dir(new_repo_path.clone()).context(format_context!(
+                    "Failed to read workspace directory {new_repo_path:?}"
+                ))?;
+
+                for module in modules.flatten() {
+                    let path = module.path();
+                    if path.is_file() {
+                        let path = path.to_string_lossy().to_string();
+                        if workspace::is_rules_module(path.as_str()) {
+                            let relative_workspace_path =
+                                format!("{}/{}", last, module.file_name().to_string_lossy());
+                            result.new_modules.push(relative_workspace_path);
+                        }
                     }
                 }
             }
