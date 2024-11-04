@@ -4,8 +4,8 @@ use std::sync::RwLock;
 
 pub const ENV_FILE_NAME: &str = "env.spaces.star";
 pub const SPACES_MODULE_NAME: &str = "spaces.star";
-pub const SPACES_CHECKOUT_NAME: &str = "checkout.star";
 pub const SPACES_STDIN_NAME: &str = "stdin.star";
+pub const SPACES_LOGS_NAME: &str = "spaces-logs";
 pub const WORKSPACE_FILE_HEADER: &str = r#"
 """
 Spaces Workspace file
@@ -21,10 +21,6 @@ static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
 
 pub fn is_rules_module(path: &str) -> bool {
     path.ends_with(SPACES_MODULE_NAME)
-}
-
-pub fn is_checkout_script(path: &str) -> bool {
-    path.ends_with(SPACES_CHECKOUT_NAME)
 }
 
 pub fn get_store_path() -> String {
@@ -60,7 +56,7 @@ fn get_state() -> &'static RwLock<State> {
     }
     STATE.set(RwLock::new(State {
         absolute_path: "".to_string(),
-        log_directory: "spaces_logs".to_string(),
+        log_directory: SPACES_LOGS_NAME.to_string(),
     }));
     STATE.get()
 }
@@ -154,7 +150,7 @@ impl Workspace {
 
         let mut state = get_state().write().unwrap();
 
-        state.log_directory = format!("spaces_logs/logs_{}", date.format("%Y%m%d-%H-%M-%S"));
+        state.log_directory = format!("{SPACES_LOGS_NAME}/logs_{}", date.format("%Y%m%d-%H-%M-%S"));
 
         std::fs::create_dir_all(state.log_directory.as_str()).context(format_context!(
             "Failed to create log folder {}",

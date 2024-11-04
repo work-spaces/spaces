@@ -104,6 +104,13 @@ pub const FUNCTIONS: &[Function] = &[
         args: &[],
         example: None,
     },
+    Function {
+        name: "get_cpu_count",
+        description: "returns the number of CPUs on the current machine",
+        return_type: "int",
+        args: &[],
+        example: None,
+    },
 ];
 
 #[starlark_module]
@@ -171,6 +178,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .context(format_context!("Failed to parse archive arguments"))?;
 
         Ok(NoneType)
+    }
+
+    fn get_cpu_count() -> anyhow::Result<i64> {
+        Ok(num_cpus::get() as i64)
     }
 
     fn get_path_to_store() -> anyhow::Result<String> {

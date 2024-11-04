@@ -127,19 +127,6 @@ pub fn run_starlark_modules(
                 )
                 .context(format_context!("Failed to evaluate module {}", name))?;
 
-                // check for script mode and ensure only allow rules are added
-                if workspace::is_checkout_script(&name) {
-                    // check to see if any rules were added in a script
-                    let state = rules::get_state().read().unwrap();
-                    let tasks = state.tasks.read().unwrap();
-
-                    //checkout rules are OK
-                    for task in tasks.values() {
-                        if task.phase == rules::Phase::Run {
-                            return Err(format_error!("Checkouts Scripts cannot add run rules ({}). Use `checkout.add_asset()` to add spaces.star with run rules to the workspace", task.rule.name));
-                        }
-                    }
-                }
             }
 
             if phase == rules::Phase::Checkout {

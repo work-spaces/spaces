@@ -93,7 +93,7 @@ impl Exec {
                 } else {
                     // if the command failed to execute, there won't be a log file
 
-                    if std::fs::exists(log_file_path.as_str()).context(format_context!("failed to check if log file exists {}", log_file_path))? {
+                    if std::path::Path::new(log_file_path.as_str()).exists() {
                         let log_contents = std::fs::read_to_string(&log_file_path).context(
                             format_context!("Failed to read log file {}", log_file_path),
                         )?;

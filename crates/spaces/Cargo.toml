@@ -1,6 +1,6 @@
 [package]
 name = "spaces"
-version = "0.9.6"
+version = "0.9.7"
 edition = "2021"
 
 [dependencies]
@@ -26,6 +26,7 @@ url.workspace = true
 serde_yaml.workspace = true
 toml.workspace = true
 
+num_cpus = "1"
 homedir = "0.3"
 home = "0.5"
 sha256 = "1"
@@ -33,7 +34,7 @@ chrono = "0.4"
 blake3 = "1"
 bincode = { version = "2.0.0-rc.3", features = ["derive"] }
 
-which = "6"
+which = "7"
 json_value_merge = "2"
 regex = "1"
 flume = "0.11"

@@ -34,7 +34,7 @@ pub fn finalize_env(env: &UpdateEnv) -> anyhow::Result<()> {
     let mut content = String::new();
 
     for (key, value) in env.vars.iter() {
-        let line = format!("export {}={}\n", key, value);
+        let line = format!("export {}=\"{}\"\n", key, value);
         content.push_str(&line);
     }
     content.push('\n');

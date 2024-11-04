@@ -136,25 +136,50 @@ pub fn execute() -> anyhow::Result<()> {
             std::fs::create_dir_all(name.as_str())
                 .context(format_context!("while creating workspace directory {name}"))?;
 
+            let mut script_count = 0;
+
             let mut scripts = Vec::new();
             if spaces_starlark_sdk {
-                scripts.push(("spaces-starlark-sdk.checkout.star".to_string(), SPACES_STARLARK_SDK.to_string()));
+                scripts.push((
+                    format!("00.spaces-starlark-sdk.{}", workspace::SPACES_MODULE_NAME),
+                    SPACES_STARLARK_SDK.to_string(),
+                ));
+                script_count += 1;
             }
 
             for one_script in script {
-                let script_path = if one_script.ends_with(".star") {
+                let script_path = if one_script.ends_with(workspace::SPACES_MODULE_NAME) {
                     one_script.clone()
                 } else {
-                    format!("{one_script}.{}", workspace::SPACES_CHECKOUT_NAME)
+                    format!("{one_script}.{}", workspace::SPACES_MODULE_NAME)
                 };
+                let script_as_path = std::path::Path::new(script_path.as_str());
+                let file_name = script_as_path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string();
+                let prefix_file_name = format!("{:02}.{}", script_count, file_name);
+
+                script_count += 1;
 
                 let one_script_contents = std::fs::read_to_string(script_path.as_str())
                     .context(format_context!("while reading script file {script_path}"))?;
+
+                std::fs::write(
+                    format!("{}/{}", name, prefix_file_name),
+                    one_script_contents.as_str(),
+                )
+                .context(format_context!(
+                    "while writing script file {script_path} to workspace"
+                ))?;
+
                 scripts.push((script_path, one_script_contents));
             }
 
-            std::fs::write(format!("{}/{}", name, workspace::ENV_FILE_NAME), "")
-                .context(format_context!("while creating spaces_deps.toml file"))?;
+            std::fs::write(format!("{}/{}", name, workspace::ENV_FILE_NAME), "").context(
+                format_context!("while creating {} file", workspace::ENV_FILE_NAME),
+            )?;
 
             let current_working_directory = std::env::current_dir()
                 .context(format_context!("Failed to get current working directory"))?;

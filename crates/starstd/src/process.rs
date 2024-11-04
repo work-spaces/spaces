@@ -35,12 +35,7 @@ pub const FUNCTIONS: &[Function] = &[Function {
                 ),
                 ("stdin", "optional string to pipe to the process stdin"),
             ],
-        },
-        Arg {
-            name: "content",
-            description: "contents to write",
-            dict: &[],
-        },
+        }
     ],
     example: None,
 }];
