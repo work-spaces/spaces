@@ -33,6 +33,8 @@ pub const fn get_rule_argument() -> Arg {
         dict: &[
             ("name", "rule name as string"),
             ("deps", "list of dependencies"),
+            ("platforms", "optional list of platforms to run on. If not provided, rule will run on all platforms. See above for details"),
+            ("type", "Checkout|Optional|Setup|Run: see above for details"),
             ("type", "Setup|Run (default)|Optional"),
             ("help", "Optional help text show with `spaces evaluate`"),
         ],

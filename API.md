@@ -1,11 +1,45 @@
 # Spaces Built-in Functions API Documentation
 
 
+## Table of Contents
+
 - [Checkout Rules](#checkout-rules)
 - [Run Rules](#run-rules)
 - [Info Functions](#info-functions)
 - [Spaces Starlark Standard Functions](#spaces-starlark-standard-functions)
 
+
+## Rule Options
+
+All rules can be run on a list of platforms (default is all). Specify a platform as:
+
+- `macos-aarch64`
+- `macos-x86_64`
+- `linux-aarch64`
+- `linux-x86_64`
+- `windows-aarch64`
+- `windows-x86_64`
+
+
+Rule types are:
+
+- `Checkout`: Assigned by default to all checkout rules
+- `Setup`: Assign to a run rule to make all other run rules depend on it
+- `Run`: Assigned by default to run rules.
+- `Optional`: Assign to run rules that are not required to run. Use `add_exec_if()` to conditionally run the rule.
+
+
+Evaluate run scripts without executin rules:
+
+```sh
+# show rules with a `help` entry
+spaces evaluate
+# show all rules
+spaces --verbosity=message evaluate
+# show all rules with all details
+spaces --verbosity=debug evaluate
+
+```
 ## Checkout Rules
 
 You use checkout rules to build a workspace.
@@ -36,6 +70,8 @@ Adds an archive to the workspace.
 - `rule`: dict
   - `name`: rule name as string
   - `deps`: list of dependencies
+  - `platforms`: optional list of platforms to run on. If not provided, rule will run on all platforms. See above for details
+  - `type`: Checkout|Optional|Setup|Run: see above for details
   - `type`: Setup|Run (default)|Optional
   - `help`: Optional help text show with `spaces evaluate`
 - `archive`: dict value
@@ -74,6 +110,8 @@ be used to create a top-level README how the workflow works.
 - `rule`: dict
   - `name`: rule name as string
   - `deps`: list of dependencies
+  - `platforms`: optional list of platforms to run on. If not provided, rule will run on all platforms. See above for details
+  - `type`: Checkout|Optional|Setup|Run: see above for details
   - `type`: Setup|Run (default)|Optional
   - `help`: Optional help text show with `spaces evaluate`
 - `asset`: dict with
@@ -108,6 +146,8 @@ Adds a binary crate using cargo-binstall. The binaries are installed in the spac
 - `rule`: dict
   - `name`: rule name as string
   - `deps`: list of dependencies
+  - `platforms`: optional list of platforms to run on. If not provided, rule will run on all platforms. See above for details
+  - `type`: Checkout|Optional|Setup|Run: see above for details
   - `type`: Setup|Run (default)|Optional
   - `help`: Optional help text show with `spaces evaluate`
 - `cargo_bin`: dict with
@@ -137,6 +177,8 @@ Adds a hardlink from anywhere on the system to the workspace
 - `rule`: dict
   - `name`: rule name as string
   - `deps`: list of dependencies
+  - `platforms`: optional list of platforms to run on. If not provided, rule will run on all platforms. See above for details
+  - `type`: Checkout|Optional|Setup|Run: see above for details
   - `type`: Setup|Run (default)|Optional
   - `help`: Optional help text show with `spaces evaluate`
 - `asset`: dict with
@@ -164,6 +206,8 @@ Adds an archive to the workspace based on the platform.
 - `rule`: dict
   - `name`: rule name as string
   - `deps`: list of dependencies
+  - `platforms`: optional list of platforms to run on. If not provided, rule will run on all platforms. See above for details
+  - `type`: Checkout|Optional|Setup|Run: see above for details
   - `type`: Setup|Run (default)|Optional
   - `help`: Optional help text show with `spaces evaluate`
 - `platforms`: dict with platform keys
@@ -230,6 +274,8 @@ returns the name of the current platform
 - `rule`: dict
   - `name`: rule name as string
   - `deps`: list of dependencies
+  - `platforms`: optional list of platforms to run on. If not provided, rule will run on all platforms. See above for details
+  - `type`: Checkout|Optional|Setup|Run: see above for details
   - `type`: Setup|Run (default)|Optional
   - `help`: Optional help text show with `spaces evaluate`
 - `repo`: dict with
@@ -262,6 +308,8 @@ Adds a target. There is no specific action for the target, but this rule can be 
 - `rule`: dict
   - `name`: rule name as string
   - `deps`: list of dependencies
+  - `platforms`: optional list of platforms to run on. If not provided, rule will run on all platforms. See above for details
+  - `type`: Checkout|Optional|Setup|Run: see above for details
   - `type`: Setup|Run (default)|Optional
   - `help`: Optional help text show with `spaces evaluate`
 
@@ -285,6 +333,8 @@ that break workspace hermicity.
 - `rule`: dict
   - `name`: rule name as string
   - `deps`: list of dependencies
+  - `platforms`: optional list of platforms to run on. If not provided, rule will run on all platforms. See above for details
+  - `type`: Checkout|Optional|Setup|Run: see above for details
   - `type`: Setup|Run (default)|Optional
   - `help`: Optional help text show with `spaces evaluate`
 - `asset`: dict with
@@ -314,6 +364,8 @@ can update the same file and the content will be preserved (as long as the keys 
 - `rule`: dict
   - `name`: rule name as string
   - `deps`: list of dependencies
+  - `platforms`: optional list of platforms to run on. If not provided, rule will run on all platforms. See above for details
+  - `type`: Checkout|Optional|Setup|Run: see above for details
   - `type`: Setup|Run (default)|Optional
   - `help`: Optional help text show with `spaces evaluate`
 - `asset`: dict with
@@ -393,6 +445,8 @@ source env
 - `rule`: dict
   - `name`: rule name as string
   - `deps`: list of dependencies
+  - `platforms`: optional list of platforms to run on. If not provided, rule will run on all platforms. See above for details
+  - `type`: Checkout|Optional|Setup|Run: see above for details
   - `type`: Setup|Run (default)|Optional
   - `help`: Optional help text show with `spaces evaluate`
 - `env`: dict with
@@ -441,6 +495,8 @@ Adds a rule that will execute a process.
 - `rule`: dict
   - `name`: rule name as string
   - `deps`: list of dependencies
+  - `platforms`: optional list of platforms to run on. If not provided, rule will run on all platforms. See above for details
+  - `type`: Checkout|Optional|Setup|Run: see above for details
   - `type`: Setup|Run (default)|Optional
   - `help`: Optional help text show with `spaces evaluate`
 - `exec`: dict with
@@ -471,6 +527,8 @@ Adds a rule to execute if a condition is met.
 - `rule`: dict
   - `name`: rule name as string
   - `deps`: list of dependencies
+  - `platforms`: optional list of platforms to run on. If not provided, rule will run on all platforms. See above for details
+  - `type`: Checkout|Optional|Setup|Run: see above for details
   - `type`: Setup|Run (default)|Optional
   - `help`: Optional help text show with `spaces evaluate`
 - `exec_if`: dict with
@@ -513,6 +571,8 @@ Adds a target. There is no specific action for the target, but this rule can be 
 - `rule`: dict
   - `name`: rule name as string
   - `deps`: list of dependencies
+  - `platforms`: optional list of platforms to run on. If not provided, rule will run on all platforms. See above for details
+  - `type`: Checkout|Optional|Setup|Run: see above for details
   - `type`: Setup|Run (default)|Optional
   - `help`: Optional help text show with `spaces evaluate`
 

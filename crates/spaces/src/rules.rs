@@ -143,8 +143,8 @@ impl State {
                 .get(task_name)
                 .ok_or(format_error!("Task not found {task_name}"))?;
 
-            if printer.level == printer::Level::Trace {
-                printer.trace(task_name, &task)?;
+            if printer.level == printer::Level::Debug {
+                printer.debug(task_name, &task)?;
             } else if printer.level <= printer::Level::Message || task.rule.help.is_some() {
                 task_info_list.insert(task.rule.name.clone(), task.rule.help.clone());
             }

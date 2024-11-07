@@ -108,7 +108,6 @@ fn show_sorted_functions(
     level: u8,
     markdown: &mut printer::markdown::Markdown,
 ) -> anyhow::Result<()> {
-
     let mut sorted_functions = Vec::new();
     sorted_functions.extend_from_slice(functions);
 
@@ -167,6 +166,7 @@ fn show_doc_item(
 fn show_all(markdown: &mut printer::markdown::Markdown) -> anyhow::Result<()> {
     markdown.heading(1, "Spaces Built-in Functions API Documentation")?;
     markdown.printer.newline()?;
+    markdown.heading(2, "Table of Contents")?;
 
     markdown.list(vec![
         "[Checkout Rules](#checkout-rules)",
@@ -174,6 +174,47 @@ fn show_all(markdown: &mut printer::markdown::Markdown) -> anyhow::Result<()> {
         "[Info Functions](#info-functions)",
         "[Spaces Starlark Standard Functions](#spaces-starlark-standard-functions)",
     ])?;
+
+    markdown.printer.newline()?;
+
+    markdown.heading(2, "Rule Options")?;
+
+    markdown.paragraph(
+        r#"All rules can be run on a list of platforms (default is all). Specify a platform as:"#,
+    )?;
+
+    markdown.list(vec![
+        "`macos-aarch64`",
+        "`macos-x86_64`",
+        "`linux-aarch64`",
+        "`linux-x86_64`",
+        "`windows-aarch64`",
+        "`windows-x86_64`",
+    ])?;
+    markdown.printer.newline()?;
+
+    markdown.paragraph("Rule types are:")?;
+
+    markdown.list(vec![
+        "`Checkout`: Assigned by default to all checkout rules",
+        "`Setup`: Assign to a run rule to make all other run rules depend on it",
+        "`Run`: Assigned by default to run rules.",
+        "`Optional`: Assign to run rules that are not required to run. Use `add_exec_if()` to conditionally run the rule.",
+    ])?;
+
+    markdown.printer.newline()?;
+
+    markdown.paragraph("Evaluate run scripts without executin rules:")?;
+
+    markdown.code_block("sh", r#"# show rules with a `help` entry
+spaces evaluate
+# show all rules
+spaces --verbosity=message evaluate
+# show all rules with all details
+spaces --verbosity=debug evaluate
+"#)?;
+
+    markdown.printer.newline()?;
 
     show_checkout(2, markdown)?;
     markdown.printer.newline()?;
@@ -183,7 +224,6 @@ fn show_all(markdown: &mut printer::markdown::Markdown) -> anyhow::Result<()> {
     markdown.printer.newline()?;
     show_star_std(2, markdown)?;
     markdown.printer.newline()?;
-
 
     Ok(())
 }
