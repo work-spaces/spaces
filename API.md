@@ -541,6 +541,14 @@ def get_absolute_path_to_workspace() -> str
 returns the absolute path to the workspace
 
 
+#### get_cpu_count
+
+```python
+def get_cpu_count() -> int
+```
+returns the number of CPUs on the current machine
+
+
 #### get_path_to_build_archive
 
 ```python
@@ -603,6 +611,14 @@ returns true if platform is macos
 def is_platform_windows() -> bool
 ```
 returns true if platform is Windows
+
+
+#### set_minimum_version
+
+```python
+def set_minimum_version() -> int
+```
+sets the minimum version of spaces required to run the script
 
 
 
@@ -735,7 +751,7 @@ Converts a dict to a JSON formatted string (multi-line, idented).
 #### exec
 
 ```python
-def exec(exec, content) -> dict # with members `status`, `stdout`, and `stderr`
+def exec(exec) -> dict # with members `status`, `stdout`, and `stderr`
 ```
 Executes a process
 
@@ -745,7 +761,6 @@ Executes a process
   - `env`: optional dict of environment variables
   - `working_directory`: optional working directory (default is the workspace)
   - `stdin`: optional string to pipe to the process stdin
-- `content`: contents to write
 
 ### `script` Functions
 

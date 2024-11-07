@@ -111,6 +111,13 @@ pub const FUNCTIONS: &[Function] = &[
         args: &[],
         example: None,
     },
+    Function {
+        name: "set_minimum_version",
+        description: "sets the minimum version of spaces required to run the script",
+        return_type: "int",
+        args: &[],
+        example: None,
+    },
 ];
 
 #[starlark_module]
@@ -218,4 +225,17 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             create_archive.get_output_file()
         ))
     }
+
+    fn set_minimum_version(version: &str) -> anyhow::Result<NoneType> {
+        let current_version = env!("CARGO_PKG_VERSION");
+        let version = version.parse::<semver::Version>().context(format_context!("bad version format"))?;
+        if version > current_version.parse::<semver::Version>().unwrap() {
+            return Err(anyhow::anyhow!(
+                "Minimum required `spaces` version is {}. `spaces` version is {current_version}",
+                version.to_string(),
+            ));
+        }
+        Ok(NoneType)
+    }
+
 }
