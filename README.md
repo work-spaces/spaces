@@ -2,14 +2,17 @@
 
 ## Try it Now
 
+Quickly create a `python3.12` virtual environment usinv `uv`.
+
 ```sh
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/work-spaces/install-spaces/refs/heads/main/install.sh)"
 export PATH=$HOME/.local/bin:$PATH
 git clone https://github.com/work-spaces/workflows/
-spaces checkout --spaces-starlark-sdk --script=workflows/llvm-sdk --name=llvm-quick-test
-cd llvm-quick-test
+spaces checkout --spaces-starlark-sdk --script=workflows/python-sdk --name=python-quick-test
+cd python-quick-test
 spaces run
-./build/hello
+source env
+python -c "print('hello')"
 ```
 
 ## About Spaces
