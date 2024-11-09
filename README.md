@@ -1,5 +1,17 @@
 # spaces
 
+## Try it Now
+
+```sh
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/work-spaces/install-spaces/refs/heads/main/install.sh)"
+export PATH=$HOME/.local/bin:$PATH
+git clone https://github.com/work-spaces/workflows/
+spaces checkout --spaces-starlark-sdk --script=workflows/llvm-sdk --name=llvm-quick-test
+cd llvm-quick-test
+spaces run
+./build/hello
+```
+
 ## About Spaces
 
 How do you get all the tools and source code at the right version to build, debug, and deploy your project? How do you ensure everyone who checks out your code has all the same tools and dependencies?
@@ -12,7 +24,7 @@ Some common options include:
 
 These solutions have drawbacks. Docker runs a VM on mac and windows creating a heavyweight solution that creates a second class developer experience. Monorepos can get so large they require specialized tooling to manage (worktrees, partial clones, virtual filesystems). Monorepos can put a heavy cognitive load on developers that just need to work on a small part of the codebase. Linux workstations are a big expense when developers have powerful laptops capable of doing the job.
 
-`spaces` is a lightweight solution to this problem. It is powered by `starlark` and `rust`. You specify your project's direct dependencies in a `spaces` checkout script. You write a `spaces` run script with the build and deploy steps.
+`spaces` is a lightweight solution to this problem suitable to simple workflows. It is powered by `starlark` and `rust`. You specify your project's direct dependencies in a `spaces` checkout script. You write a `spaces` run script with the build and deploy steps.
 
 - tools are specified with a per-platform hash
 - sources can be a git repo/revision or archive/hash
