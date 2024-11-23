@@ -256,10 +256,6 @@ impl HttpArchive {
 
         //if the source is a symlink, read the symlink and create a symlink
         if original.is_symlink() {
-            //let link = std::fs::read_link(original).context(format_context!(
-            //    "failed to read link {original:?} -> {target_path}"
-            //))?;
-
             #[cfg(unix)]
             std::os::unix::fs::symlink(original, target).context(format_context!(
                 "failed to create symlink {original:?} -> {target_path}"
@@ -414,10 +410,15 @@ impl HttpArchive {
             let file_name = path_to_artifact.file_name().ok_or(format_error!(
                 "No file name found in archive path {path_to_artifact:?}"
             ))?;
-            //let path_to_extracted_files = self.get_path_to_extracted_files();
 
-            //let path_to_files = std::path::Path::new(path_to_extracted_files.as_str());
-            //let path_to_destination = path_to_files.join(file_name).to_string_lossy().to_string();
+            // the file needs to be moved to the extracted files directory
+            // that is where the create links function will look for it
+            let target = std::path::Path::new(self.get_path_to_extracted_files().as_str())
+                .join(file_name);
+
+             std::fs::rename(path_to_artifact, target.clone()).context(format_context!(
+                "copy {path_to_artifact:?} -> {target:?}"
+             ))?;
 
             extracted_files.insert(file_name.to_string_lossy().to_string());
             progress_bar
