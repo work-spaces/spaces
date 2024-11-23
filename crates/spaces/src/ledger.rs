@@ -49,7 +49,7 @@ impl Ledger {
         workspace: String,
     ) -> anyhow::Result<()> {
         if let Some(entry) = self.manifest.workspaces.get_mut(full_path_to_workspace) {
-            *entry = workspace.clone();
+            entry.clone_from(&workspace);
         } else {
             self.manifest
                 .workspaces

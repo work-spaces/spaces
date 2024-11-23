@@ -245,6 +245,7 @@ impl HttpArchive {
         let original = std::path::Path::new(source.as_str());
 
         // Hold the mutex to ensure operations are atomic
+        #[allow(clippy::readonly_write_lock)]
         let _state = get_state().write().unwrap();
 
         if let Some(parent) = target.parent() {

@@ -30,7 +30,7 @@ impl State {
             task.rule.name.as_str(),
             self.latest_starlark_module.as_ref(),
         );
-        task.rule.name = rule_label.clone();
+        task.rule.name.clone_from(&rule_label);
 
         // update deps that refer to rules in the same starlark module
         if let Some(deps) = task.rule.deps.as_mut() {
@@ -87,7 +87,6 @@ impl State {
                 }
             }
 
-
             let task_phase = task.phase;
             if phase == Phase::Checkout && task_phase != Phase::Checkout {
                 continue;
@@ -95,7 +94,7 @@ impl State {
 
             // connect the dependencies
             if let Some(deps) = task.rule.deps.clone() {
-                for dep in deps {                    
+                for dep in deps {
                     let dep_task = tasks_copy
                         .get(&dep)
                         .ok_or(format_error!("Task Depedency not found {dep}"))?;
@@ -167,7 +166,7 @@ impl State {
         for node_index in self.sorted.iter() {
             let task_name = self.graph.get_task(*node_index);
             let task = {
-                let tasks = self.tasks.read().unwrap();
+                let tasks = self.tasks.read().expect("Failed to get read lock on tasks");
 
                 tasks
                     .get(task_name)
@@ -202,8 +201,8 @@ impl State {
                         }
                     }
 
-                    // this can be configured with a another global starlark function
-                    if number_running < 10 {
+                    // this could be configured with a another global starlark function
+                    if number_running < 50 {
                         break;
                     } else {
                         std::thread::sleep(std::time::Duration::from_millis(100));

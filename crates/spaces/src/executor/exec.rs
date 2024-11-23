@@ -148,7 +148,7 @@ impl ExecIf {
                     printer::Level::Trace,
                     format!("exec {name} condition succeeded").as_str(),
                 );
-                result = self.then_.clone();
+                result.clone_from(&self.then_);
             }
             Err(_) => {
                 progress.log(
@@ -156,7 +156,7 @@ impl ExecIf {
                     format!("exec {name} condition failed running").as_str(),
                 );
                 if let Some(else_) = self.else_.as_ref() {
-                    result = else_.clone();
+                    result.clone_from(else_);
                 }
             }
         }

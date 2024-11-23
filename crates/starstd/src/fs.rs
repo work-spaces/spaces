@@ -169,7 +169,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let toml_value: toml::Value = toml::from_str(&content)
             .context(format_context!("Failed to parse TOML file {}", path))?;
 
-        let json_value = serde_json::to_value(&toml_value)
+        let json_value = serde_json::to_value(toml_value)
             .context(format_context!("Failed to convert TOML to JSON {}", path))?;
 
         // Convert the JSON value to a Starlark value

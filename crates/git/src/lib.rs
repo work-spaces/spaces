@@ -99,6 +99,7 @@ fn execute_git_command(
     let mut options = options.clone();
 
     options.log_file_path = log_file_path;
+    options.environment.push(("GIT_TERMINAL_PROMPT".to_string(), "0".to_string()));
 
     let full_command = options.get_full_command_in_working_directory("git");
     progress_bar

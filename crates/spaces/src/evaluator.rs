@@ -171,7 +171,7 @@ pub fn run_starlark_modules(
 
     match phase {
         rules::Phase::Run => {
-            printer.log(Level::Message, "Run Phase")?;
+            printer.log(Level::Message, "--Run Phase--")?;
             sort_tasks(target.clone(), phase).context(format_context!("Failed to sort tasks"))?;
 
             debug_sorted_tasks(printer, phase)
@@ -183,7 +183,7 @@ pub fn run_starlark_modules(
                 .context(format_context!("Failed to execute tasks"))?;
         }
         rules::Phase::Evaluate => {
-            printer.log(Level::Debug, "Evaluate Phase")?;
+            printer.log(Level::Debug, "--Evaluate Phase--")?;
             sort_tasks(target.clone(), phase).context(format_context!("Failed to sort tasks"))?;
 
             debug_sorted_tasks(printer, rules::Phase::Run)
@@ -195,7 +195,7 @@ pub fn run_starlark_modules(
                 .context(format_context!("Failed to show tasks"))?;
         }
         rules::Phase::Checkout => {
-            printer.log(Level::Debug, "Post Checkout Phase")?;
+            printer.log(Level::Debug, "--Post Checkout Phase--")?;
 
             // at this point everything should be preset, sort tasks as if in run phase
             sort_tasks(target.clone(), rules::Phase::Run).context(format_context!("Failed to sort tasks"))?;
