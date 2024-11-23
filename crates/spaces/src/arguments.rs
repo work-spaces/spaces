@@ -136,15 +136,17 @@ pub fn execute() -> anyhow::Result<()> {
             std::fs::create_dir_all(name.as_str())
                 .context(format_context!("while creating workspace directory {name}"))?;
 
-            let mut script_count = 0;
-
+            let mut load_order = workspace::SyncLoadOrder::default();
             let mut scripts = Vec::new();
             if spaces_starlark_sdk {
-                scripts.push((
-                    format!("00.spaces-starlark-sdk.{}", workspace::SPACES_MODULE_NAME),
-                    SPACES_STARLARK_SDK.to_string(),
-                ));
-                script_count += 1;
+                let script_name = format!("spaces-starlark-sdk.{}", workspace::SPACES_MODULE_NAME);
+                let script_path = format!("{name}/{script_name}");
+                load_order.push(script_name.as_str());
+                scripts.push((script_name, SPACES_STARLARK_SDK.to_string()));
+
+                std::fs::write(script_path.as_str(), SPACES_STARLARK_SDK).context(format_context!(
+                    "while writing script file {script_path} to workspace"
+                ))?;
             }
 
             for one_script in script {
@@ -153,21 +155,20 @@ pub fn execute() -> anyhow::Result<()> {
                 } else {
                     format!("{one_script}.{}", workspace::SPACES_MODULE_NAME)
                 };
+
                 let script_as_path = std::path::Path::new(script_path.as_str());
                 let file_name = script_as_path
                     .file_name()
                     .unwrap()
                     .to_string_lossy()
                     .to_string();
-                let prefix_file_name = format!("{:02}.{}", script_count, file_name);
-
-                script_count += 1;
+                load_order.push(file_name.as_str());
 
                 let one_script_contents = std::fs::read_to_string(script_path.as_str())
                     .context(format_context!("while reading script file {script_path}"))?;
 
                 std::fs::write(
-                    format!("{}/{}", name, prefix_file_name),
+                    format!("{}/{}", name, file_name),
                     one_script_contents.as_str(),
                 )
                 .context(format_context!(
@@ -176,6 +177,10 @@ pub fn execute() -> anyhow::Result<()> {
 
                 scripts.push((script_path, one_script_contents));
             }
+
+            load_order
+                .save(name.as_str())
+                .context(format_context!("while saving load order in {name}"))?;
 
             std::fs::write(format!("{}/{}", name, workspace::ENV_FILE_NAME), "").context(
                 format_context!("while creating {} file", workspace::ENV_FILE_NAME),

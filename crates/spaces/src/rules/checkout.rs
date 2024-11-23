@@ -226,7 +226,7 @@ const UPDATE_ENV_EXAMPLE: &str = r#"checkout.update_env(
     },
 )"#;
 
-const ADD_TARGET_EXAMPLE: &str = r#"run.add_target(
+const ADD_TARGET_EXAMPLE: &str = r#"checkout.add_target(
     rule = {"name": "my_rule", "deps": ["my_other_rule"]},
 )"#;
 
@@ -400,7 +400,7 @@ pub const FUNCTIONS: &[Function] = &[
                 dict: &[],
             },
         ],
-        example: Some(r#"run.abort("Failed to do something")"#)},
+        example: Some(r#"checkout.abort("Failed to do something")"#)},
     Function {
         name: "add_target",
         description: "Adds a target. There is no specific action for the target, but this rule can be useful for organizing depedencies.",

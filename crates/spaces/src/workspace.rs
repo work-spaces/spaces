@@ -1,16 +1,50 @@
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
-use std::sync::RwLock;
+use serde::{Deserialize, Serialize};
+use std::{collections::HashSet, sync::RwLock};
 
 pub const ENV_FILE_NAME: &str = "env.spaces.star";
 pub const SPACES_MODULE_NAME: &str = "spaces.star";
 pub const SPACES_STDIN_NAME: &str = "stdin.star";
 pub const SPACES_LOGS_NAME: &str = "spaces-logs";
+const SPACES_SYNC_ORDER_NAME: &str = "sync.spaces.json";
 pub const WORKSPACE_FILE_HEADER: &str = r#"
 """
 Spaces Workspace file
 """
 "#;
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct SyncLoadOrder {
+    order: Vec<String>,
+}
+
+impl SyncLoadOrder {
+    pub fn load(path: &str) -> anyhow::Result<Self> {
+        let load_path = format!("{path}/{SPACES_SYNC_ORDER_NAME}");
+        let content = std::fs::read_to_string(load_path.as_str()).context(format_context!(
+            "Failed to read load order file {load_path}"
+        ))?;
+        let order: SyncLoadOrder = serde_json::from_str(content.as_str()).context(
+            format_context!("Failed to parse load order file {load_path}"),
+        )?;
+        Ok(order)
+    }
+
+    pub fn push(&mut self, module: &str) {
+        self.order.push(module.to_string());
+    }
+
+    pub fn save(&self, workspace_path: &str) -> anyhow::Result<()> {
+        let path = format!("{workspace_path}/{SPACES_SYNC_ORDER_NAME}");
+        let content = serde_json::to_string_pretty(&self)
+            .context(format_context!("Failed to serialize load order"))?;
+        std::fs::write(path.as_str(), content.as_str())
+            .context(format_context!("Failed to write load order file {path}"))?;
+
+        Ok(())
+    }
+}
 
 struct State {
     absolute_path: String,
@@ -126,7 +160,35 @@ impl Workspace {
         let env_content = std::fs::read_to_string(format!("{}/{}", absolute_path, ENV_FILE_NAME))
             .context(format_context!("Failed to read workspace file"))?;
 
+        let mut loaded_modules = HashSet::new();
         let mut modules = vec![(ENV_FILE_NAME.to_string(), env_content)];
+
+        SyncLoadOrder::load(absolute_path.as_str())?;
+        if let Ok(load_order) = SyncLoadOrder::load(absolute_path.as_str()) {
+            progress.log(printer::Level::Trace, "Loading modules from sync order");
+            for module in load_order.order {
+                if is_rules_module(module.as_str()) {
+                    progress.increment(1);
+                    progress.log(
+                        printer::Level::Trace,
+                        format!("Loading module from sync order: {}", module).as_str(),
+                    );
+                    let path = format!("{}/{}", absolute_path, module);
+                    let content = std::fs::read_to_string(path.as_str())
+                        .context(format_context!("Failed to read file {}", path))?;
+                    if !loaded_modules.contains(&path) {
+                        loaded_modules.insert(path.clone());
+                        modules.push((module, content));
+                    }
+                }
+            }
+        } else {
+            progress.log(
+                printer::Level::Trace,
+                format!("No sync order found at {absolute_path}").as_str(),
+            );
+        }
+
         for entry in walkdir {
             progress.increment(1);
             if let Ok(entry) = entry.context(format_context!("While walking directory")) {
@@ -138,7 +200,11 @@ impl Workspace {
                         .context(format_context!("Failed to read file {}", path))?;
 
                     if let Some(path) = path.strip_prefix(format!("{}/", absolute_path).as_str()) {
-                        modules.push((path.to_owned(), content));
+                        let path = path.to_string();
+                        if !loaded_modules.contains(&path) {
+                            loaded_modules.insert(path.clone());
+                            modules.push((path, content));
+                        }
                     }
                 }
             }

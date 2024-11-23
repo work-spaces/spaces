@@ -775,7 +775,7 @@ dependencies = [
 [[package]]
 name = "easy-archiver"
 version = "0.1.0"
-source = "git+https://github.com/work-spaces/easy-archiver?rev=6266d009828ec0fd87245cd45a3a9bf4848e09dd#6266d009828ec0fd87245cd45a3a9bf4848e09dd"
+source = "git+https://github.com/work-spaces/easy-archiver?rev=e44b017897f7f71f59dd254603db305972ee7c6a#e44b017897f7f71f59dd254603db305972ee7c6a"
 dependencies = [
  "anyhow",
  "anyhow-source-location",
@@ -1053,7 +1053,7 @@ checksum = "4271d37baee1b8c7e4b708028c57d816cf9d2434acb33a549475f78c181f6253"
 
 [[package]]
 name = "git"
-version = "0.6.0-beta.2"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "anyhow-source-location",
@@ -1096,7 +1096,7 @@ dependencies = [
 
 [[package]]
 name = "graph"
-version = "0.6.0-beta.2"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "anyhow-source-location",
@@ -1205,7 +1205,7 @@ dependencies = [
 
 [[package]]
 name = "http-archive"
-version = "0.6.0-beta.2"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "anyhow-source-location",
@@ -1218,7 +1218,7 @@ dependencies = [
  "state",
  "tokio",
  "url",
- "which",
+ "which 6.0.3",
 ]
 
 [[package]]
@@ -2582,7 +2582,7 @@ dependencies = [
 
 [[package]]
 name = "spaces"
-version = "0.8.14"
+version = "0.10.4"
 dependencies = [
  "anyhow",
  "anyhow-source-location",
@@ -2603,10 +2603,12 @@ dependencies = [
  "http-archive",
  "json_value_merge",
  "maplit",
+ "num_cpus",
  "petgraph",
  "platform",
  "printer",
  "regex",
+ "semver",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -2617,7 +2619,7 @@ dependencies = [
  "toml",
  "url",
  "walkdir",
- "which",
+ "which 7.0.0",
 ]
 
 [[package]]
@@ -2720,7 +2722,7 @@ dependencies = [
 
 [[package]]
 name = "starstd"
-version = "0.6.0-beta.2"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "anyhow-source-location",
@@ -3360,6 +3362,18 @@ name = "which"
 version = "6.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4ee928febd44d98f2f459a4a79bd4d928591333a494a10a868418ac1b39cf1f"
+dependencies = [
+ "either",
+ "home",
+ "rustix",
+ "winsafe",
+]
+
+[[package]]
+name = "which"
+version = "7.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9cad3279ade7346b96e38731a641d7343dd6a53d55083dd54eadfa5a1b38c6b"
 dependencies = [
  "either",
  "home",
