@@ -10,6 +10,7 @@ struct State {
     #[allow(dead_code)]
     new_branch_name: Option<String>,
     env: executor::env::UpdateEnv,
+    is_ci: bool
 }
 
 static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
@@ -24,8 +25,14 @@ fn get_state() -> &'static RwLock<State> {
             vars: std::collections::HashMap::new(),
             paths: Vec::new(),
         },
+        is_ci: false,
     }));
     STATE.get()
+}
+
+pub fn set_ci_true() {
+    let mut state = get_state().write().unwrap();
+    state.is_ci = true;
 }
 
 pub fn update_env(env: executor::env::UpdateEnv) -> anyhow::Result<()> {
@@ -119,6 +126,13 @@ pub const FUNCTIONS: &[Function] = &[
         example: None,
     },
     Function {
+        name: "is_ci",
+        description: "returns true if `--ci` is passed on the command line",
+        return_type: "int",
+        args: &[],
+        example: None,
+    },
+    Function {
         name: "set_minimum_version",
         description: "sets the minimum version of spaces required to run the script",
         return_type: "int",
@@ -166,6 +180,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(platform::Platform::get_supported_platforms().into_iter()
             .map(|p| p.to_string())
             .collect())
+    }
+
+    fn is_ci() -> anyhow::Result<bool> {
+        Ok(get_state().read().unwrap().is_ci)
     }
 
     fn is_platform_windows() -> anyhow::Result<bool> {

@@ -1,4 +1,4 @@
-use crate::{docs, evaluator, rules, tools, workspace};
+use crate::{docs, evaluator, rules, tools, workspace, info};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
@@ -32,6 +32,9 @@ pub struct Arguments {
     /// The verbosity level of the output.
     #[arg(short, long, default_value = "warning")]
     pub verbosity: Level,
+    /// If this is passed, info.is_ci() returns true in scripts.
+    #[arg(long)]
+    ci: bool,
     #[command(subcommand)]
     commands: Commands,
 }
@@ -125,6 +128,7 @@ pub fn execute() -> anyhow::Result<()> {
     match args {
         Arguments {
             verbosity,
+            ci,
             commands:
                 Commands::Checkout {
                     name,
@@ -132,6 +136,11 @@ pub fn execute() -> anyhow::Result<()> {
                     script,
                 },
         } => {
+
+            if ci {
+                info::set_ci_true();
+            }
+
             printer.level = verbosity.into();
             std::fs::create_dir_all(name.as_str())
                 .context(format_context!("while creating workspace directory {name}"))?;
@@ -208,9 +217,14 @@ pub fn execute() -> anyhow::Result<()> {
 
         Arguments {
             verbosity,
+            ci,
             commands: Commands::Sync {},
         } => {
             printer.level = verbosity.into();
+
+            if ci {
+                info::set_ci_true();
+            }
 
             run_starlark_modules_in_workspace(
                 &mut printer,
@@ -222,9 +236,14 @@ pub fn execute() -> anyhow::Result<()> {
 
         Arguments {
             verbosity,
+            ci,
             commands: Commands::Run { target },
         } => {
             printer.level = verbosity.into();
+
+            if ci {
+                info::set_ci_true();
+            }
 
             run_starlark_modules_in_workspace(
                 &mut printer,
@@ -236,11 +255,16 @@ pub fn execute() -> anyhow::Result<()> {
 
         Arguments {
             verbosity,
+            ci,
             commands: Commands::Evaluate { target },
         } => {
             printer.level = verbosity.into();
             if printer.level > printer::Level::Info {
                 printer.level = printer::Level::Info;
+            }
+
+            if ci {
+                info::set_ci_true();
             }
 
             run_starlark_modules_in_workspace(
@@ -253,8 +277,13 @@ pub fn execute() -> anyhow::Result<()> {
 
         Arguments {
             verbosity,
+            ci,
             commands: Commands::Completions { shell },
         } => {
+            if ci {
+                info::set_ci_true();
+            }
+
             let _verbosity = verbosity;
             clap_complete::generate(
                 shell,
@@ -266,19 +295,27 @@ pub fn execute() -> anyhow::Result<()> {
 
         Arguments {
             verbosity,
+            ci,
             commands: Commands::Docs { item },
         } => {
             printer.level = verbosity.into();
+            
+            if ci {
+                info::set_ci_true();
+            }
 
             docs::show(&mut printer, item)?;
         }
 
         Arguments {
             verbosity,
+            ci,
             commands: Commands::List {},
         } => {
             printer.level = verbosity.into();
-
+            if ci {
+                info::set_ci_true();
+            }
             let ledger =
                 ledger::Ledger::new().with_context(|| format_context!("while creating ledger"))?;
             ledger.show_status()?;
