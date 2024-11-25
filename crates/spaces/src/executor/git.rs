@@ -1,6 +1,6 @@
 use crate::workspace;
 use anyhow::Context;
-use anyhow_source_location::format_context;
+use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,6 +114,59 @@ impl Git {
         Ok(())
     }
 
+    fn execute_shallow_clone(
+        &self,
+        name: &str,
+        mut progress: printer::MultiProgressBar,
+    ) -> anyhow::Result<()> {
+        let branch = match &self.checkout {
+            git::Checkout::NewBranch(branch_name) => {
+                return Err(format_error!(
+                    "Cannot create a new branch {branch_name} with a shallow clone"
+                ));
+            }
+            git::Checkout::Revision(branch_name) => {
+                branch_name.clone()
+            }
+        };
+
+        let clone_options = printer::ExecuteOptions {
+            arguments: vec![
+                "clone".to_string(),
+                "--depth".to_string(),
+                "1".to_string(),
+                self.url.clone(),
+                self.spaces_key.clone(),
+                "--branch".to_string(),
+                branch,
+                "--single-branch".to_string(),
+            ],
+            ..Default::default()
+        };
+
+        let clone_path = std::path::Path::new(&self.spaces_key);
+        if clone_path.exists() {
+            progress.log(
+                printer::Level::Info,
+                format!("{} already exists", self.spaces_key).as_str(),
+            );
+        } else {
+            progress.log(
+                printer::Level::Trace,
+                format!("git clone {clone_options:?}").as_str(),
+            );
+
+            progress
+                .execute_process("git", clone_options)
+                .context(format_context!(
+                    "{name} - Failed to clone repository {}",
+                    self.spaces_key
+                ))?;
+        }
+
+        Ok(())
+    }
+
     pub fn execute(&self, _name: &str, progress: printer::MultiProgressBar) -> anyhow::Result<()> {
         match self.clone {
             git::Clone::Worktree => {
@@ -122,6 +175,10 @@ impl Git {
             }
             git::Clone::Default => {
                 self.execute_default_clone(_name, progress)
+                    .context(format_context!("default clone failed"))?;
+            }
+            git::Clone::Shallow => {
+                self.execute_shallow_clone(_name, progress)
                     .context(format_context!("default clone failed"))?;
             }
         }

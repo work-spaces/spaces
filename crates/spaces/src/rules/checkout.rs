@@ -244,7 +244,7 @@ pub const FUNCTIONS: &[Function] = &[
                     ("url", "ssh or https path to repository"),
                     ("rev", "repository revision as a branch, tag or commit"),
                     ("checkout", "Revision: checkout detached at commit or branch|NewBranch: create a new branch based at rev"),
-                    ("clone", "Default|Worktree"),
+                    ("clone", "Default|Worktree|Shallow"),
                 ]
             }
         ],

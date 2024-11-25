@@ -16,10 +16,11 @@ pub enum Checkout {
     NewBranch(String),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Copy)]
 pub enum Clone {
     Default,
     Worktree,
+    Shallow,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
