@@ -57,6 +57,19 @@ pub fn is_rules_module(path: &str) -> bool {
     path.ends_with(SPACES_MODULE_NAME)
 }
 
+pub fn get_workspace_path(workspace_path: &str, current_path: &str, target_path: &str) -> String {
+    if target_path.starts_with("//") {
+        format!("{workspace_path}/{target_path}")
+    } else {
+        let name_path = std::path::Path::new(current_path);
+        if let Some(parent) = name_path.parent() {
+            format!("{}/{}", parent.to_string_lossy(), target_path)
+        } else {
+            target_path.to_owned()
+        }
+    }
+}
+
 pub fn get_store_path() -> String {
     if let Ok(spaces_home) = std::env::var("SPACES_HOME") {
         return format!("{}/.spaces/store", spaces_home);

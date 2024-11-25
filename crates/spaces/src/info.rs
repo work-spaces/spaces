@@ -105,6 +105,13 @@ pub const FUNCTIONS: &[Function] = &[
         example: None,
     },
     Function {
+        name: "get_supported_platforms",
+        description: "returns a list of the supported platforms",
+        return_type: "list[str]",
+        args: &[],
+        example: None,
+    },
+    Function {
         name: "get_cpu_count",
         description: "returns the number of CPUs on the current machine",
         return_type: "int",
@@ -153,6 +160,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         platform::Platform::get_platform()
             .map(|p| p.to_string())
             .ok_or(anyhow::anyhow!("Failed to get platform name"))
+    }
+
+    fn get_supported_platforms() -> anyhow::Result<Vec<String>> {
+        Ok(platform::Platform::get_supported_platforms().into_iter()
+            .map(|p| p.to_string())
+            .collect())
     }
 
     fn is_platform_windows() -> anyhow::Result<bool> {

@@ -298,6 +298,12 @@ impl HttpArchive {
                     arguments,
                     ..Default::default()
                 };
+
+                progress_bar.log(
+                    printer::Level::Trace,
+                    format!("Downloading using gh {options:?}").as_str(),
+                );
+
                 progress_bar
                     .execute_process("gh", options)
                     .context(format_context!(
@@ -332,6 +338,11 @@ impl HttpArchive {
         if let Some(parent) = full_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
+
+        progress.log(
+            printer::Level::Trace,
+            format!("Downloading using reqwest {url:?} -> {full_path:?}").as_str(),
+        );
 
         let join_handle = runtime.spawn(async move {
             let client = reqwest::ClientBuilder::new()
@@ -414,12 +425,11 @@ impl HttpArchive {
 
             // the file needs to be moved to the extracted files directory
             // that is where the create links function will look for it
-            let target = std::path::Path::new(self.get_path_to_extracted_files().as_str())
-                .join(file_name);
+            let target =
+                std::path::Path::new(self.get_path_to_extracted_files().as_str()).join(file_name);
 
-             std::fs::rename(path_to_artifact, target.clone()).context(format_context!(
-                "copy {path_to_artifact:?} -> {target:?}"
-             ))?;
+            std::fs::rename(path_to_artifact, target.clone())
+                .context(format_context!("copy {path_to_artifact:?} -> {target:?}"))?;
 
             extracted_files.insert(file_name.to_string_lossy().to_string());
             progress_bar

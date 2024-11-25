@@ -178,7 +178,12 @@ impl State {
                 let message = if task.rule.type_ == Some(RuleType::Optional) {
                     "Skipped (Optional)".to_string()
                 } else {
-                    format!("Complete ({:?})", task.phase)
+                    let message = if let Some(rule_type) = task.rule.type_ {
+                        format!("{:?}", rule_type)
+                    } else {
+                        format!("{:?}", phase)
+                    };
+                    format!("Complete ({message})")
                 };
 
                 let mut progress_bar = multi_progress.add_progress(

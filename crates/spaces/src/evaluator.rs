@@ -34,14 +34,13 @@ fn evaluate_module(
     // And ultimately produce a `loader` capable of giving those modules to Starlark.
     let mut loads = Vec::new();
     for load in ast.loads() {
-        // load the module using module_id
-        let module_path = format!("{workspace_path}/{}", load.module_id);
-        let contents = std::fs::read_to_string(module_path.as_str())
-            .context(format_context!("Failed to read file {}", module_path))?;
+        let module_load_path = workspace::get_workspace_path(workspace_path, name, load.module_id);
+        let contents = std::fs::read_to_string(module_load_path.as_str())
+            .context(format_context!("Failed to read file {}", module_load_path))?;
 
         loads.push((
             load.module_id.to_owned(),
-            evaluate_module(workspace_path, load.module_id, contents, with_rules)?,
+            evaluate_module(workspace_path, module_load_path.as_str(), contents, with_rules)?,
         ));
     }
     let modules = loads.iter().map(|(a, b)| (a.as_str(), b)).collect();
@@ -126,7 +125,6 @@ pub fn run_starlark_modules(
                     WithRules::Yes,
                 )
                 .context(format_context!("Failed to evaluate module {}", name))?;
-
             }
 
             if phase == rules::Phase::Checkout {
@@ -198,7 +196,8 @@ pub fn run_starlark_modules(
             printer.log(Level::Debug, "--Post Checkout Phase--")?;
 
             // at this point everything should be preset, sort tasks as if in run phase
-            sort_tasks(target.clone(), rules::Phase::Run).context(format_context!("Failed to sort tasks"))?;
+            sort_tasks(target.clone(), rules::Phase::Run)
+                .context(format_context!("Failed to sort tasks"))?;
             debug_sorted_tasks(printer, rules::Phase::PostCheckout)
                 .context(format_context!("Failed to debug sorted tasks"))?;
 

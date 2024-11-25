@@ -40,6 +40,17 @@ impl Platform {
         None
     }
 
+    pub fn get_supported_platforms() -> Vec<Platform> {
+        vec![
+            Self::MacosX86_64,
+            Self::MacosAarch64,
+            Self::WindowsX86_64,
+            Self::WindowsAarch64,
+            Self::LinuxX86_64,
+            Self::LinuxAarch64,
+        ]
+    }
+
     pub fn is_windows() -> bool {
         matches!(
             Self::get_platform(),
