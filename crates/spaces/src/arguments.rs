@@ -87,6 +87,15 @@ checkout.add_repo(
 )
 "#;
 
+fn handle_verbosity(printer: &mut printer::Printer, verbosity: printer::Level, is_ci: bool){
+    if is_ci {
+        info::set_ci_true();
+        printer.level = printer::Level::ContinuousIntegration;
+    } else {
+        printer.level = verbosity.into();
+    }
+}
+
 pub fn execute() -> anyhow::Result<()> {
     use crate::ledger;
 
@@ -122,9 +131,6 @@ pub fn execute() -> anyhow::Result<()> {
     let args = Arguments::parse();
     let mut printer = printer::Printer::new_stdout();
 
-    // install pre-requisites
-    tools::install_tools(&mut printer).context(format_context!("while installing tools"))?;
-
     match args {
         Arguments {
             verbosity,
@@ -137,11 +143,10 @@ pub fn execute() -> anyhow::Result<()> {
                 },
         } => {
 
-            if ci {
-                info::set_ci_true();
-            }
+            handle_verbosity(&mut printer, verbosity.into(), ci);
 
-            printer.level = verbosity.into();
+            tools::install_tools(&mut printer).context(format_context!("while installing tools"))?;
+
             std::fs::create_dir_all(name.as_str())
                 .context(format_context!("while creating workspace directory {name}"))?;
 
@@ -220,12 +225,7 @@ pub fn execute() -> anyhow::Result<()> {
             ci,
             commands: Commands::Sync {},
         } => {
-            printer.level = verbosity.into();
-
-            if ci {
-                info::set_ci_true();
-            }
-
+            handle_verbosity(&mut printer, verbosity.into(), ci);
             run_starlark_modules_in_workspace(
                 &mut printer,
                 rules::Phase::Checkout,
@@ -239,11 +239,7 @@ pub fn execute() -> anyhow::Result<()> {
             ci,
             commands: Commands::Run { target },
         } => {
-            printer.level = verbosity.into();
-
-            if ci {
-                info::set_ci_true();
-            }
+            handle_verbosity(&mut printer, verbosity.into(), ci);
 
             run_starlark_modules_in_workspace(
                 &mut printer,
