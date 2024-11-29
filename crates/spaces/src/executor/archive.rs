@@ -24,7 +24,7 @@ impl Archive {
         ))?;
 
         progress.log(
-            printer::Level::Trace,
+            printer::Level::Debug,
             format!("Creating archive {output_directory}").as_str(),
         );
 

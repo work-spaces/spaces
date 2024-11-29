@@ -1,4 +1,4 @@
-use crate::{docs, evaluator, rules, tools, workspace, info};
+use crate::{docs, evaluator, info, rules, tools, workspace};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
@@ -87,12 +87,12 @@ checkout.add_repo(
 )
 "#;
 
-fn handle_verbosity(printer: &mut printer::Printer, verbosity: printer::Level, is_ci: bool){
+fn handle_verbosity(printer: &mut printer::Printer, verbosity: printer::Level, is_ci: bool) {
     if is_ci {
         info::set_ci_true();
         printer.level = printer::Level::ContinuousIntegration;
     } else {
-        printer.level = verbosity.into();
+        printer.level = verbosity;
     }
 }
 
@@ -142,10 +142,10 @@ pub fn execute() -> anyhow::Result<()> {
                     script,
                 },
         } => {
-
             handle_verbosity(&mut printer, verbosity.into(), ci);
 
-            tools::install_tools(&mut printer).context(format_context!("while installing tools"))?;
+            tools::install_tools(&mut printer)
+                .context(format_context!("while installing tools"))?;
 
             std::fs::create_dir_all(name.as_str())
                 .context(format_context!("while creating workspace directory {name}"))?;
@@ -158,9 +158,9 @@ pub fn execute() -> anyhow::Result<()> {
                 load_order.push(script_name.as_str());
                 scripts.push((script_name, SPACES_STARLARK_SDK.to_string()));
 
-                std::fs::write(script_path.as_str(), SPACES_STARLARK_SDK).context(format_context!(
-                    "while writing script file {script_path} to workspace"
-                ))?;
+                std::fs::write(script_path.as_str(), SPACES_STARLARK_SDK).context(
+                    format_context!("while writing script file {script_path} to workspace"),
+                )?;
             }
 
             for one_script in script {
@@ -295,7 +295,7 @@ pub fn execute() -> anyhow::Result<()> {
             commands: Commands::Docs { item },
         } => {
             printer.level = verbosity.into();
-            
+
             if ci {
                 info::set_ci_true();
             }
@@ -317,6 +317,7 @@ pub fn execute() -> anyhow::Result<()> {
             ledger.show_status()?;
         }
     }
+
 
     Ok(())
 }

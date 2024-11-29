@@ -1,8 +1,8 @@
 pub mod checkout;
-pub mod io;
+pub mod inputs;
 pub mod run;
 
-use crate::{executor, label};
+use crate::{executor, label, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::ValueEnum;
@@ -231,6 +231,9 @@ impl State {
             }
         }
 
+        inputs::save().context(format_context!("Failed to save inputs"))?;
+        workspace::save_changes().context(format_context!("while saving changes"))?;
+
         if let Some(err) = first_error {
             return Err(err);
         }
@@ -377,16 +380,19 @@ impl Task {
 
         std::thread::spawn(move || -> anyhow::Result<executor::TaskResult> {
             // check inputs/outputs to see if we need to run
-            let mut is_execute = true;
+            let mut skip_execute_message = None;
             if let (Some(platforms), Some(current_platform)) =
                 (rule.platforms.as_ref(), platform::Platform::get_platform())
             {
-                is_execute = platforms.contains(&current_platform);
+                if !platforms.contains(&current_platform) {
+                    skip_execute_message = Some(format!("Skipping {name}: platform not enabled"));
+                }
             }
 
             progress.log(
                 printer::Level::Trace,
-                format!("Execute {name} after platform check? {}", is_execute).as_str(),
+                format!("Skip execute message after platform check? {skip_execute_message:?}")
+                    .as_str(),
             );
 
             let total = deps_signals.len();
@@ -426,11 +432,15 @@ impl Task {
             }
 
             progress.log(
-                printer::Level::Trace,
+                printer::Level::Debug,
                 format!("{name} All dependencies are done").as_str(),
             );
 
-            let is_optional_or_cancelled = {
+            {
+                progress.log(
+                    printer::Level::Trace,
+                    format!("{name} check for skipping/cancelation").as_str(),
+                );
                 let state = get_state().read().unwrap();
                 let tasks = state.tasks.read().unwrap();
                 let task = tasks
@@ -438,38 +448,76 @@ impl Task {
                     .context(format_context!("Task not found {name}"))?;
                 if task.phase == Phase::Cancelled {
                     progress.log(
-                        printer::Level::Message,
-                        format!("Skipping {name} because it was cancelled").as_str(),
+                        printer::Level::Debug,
+                        format!("Skipping {name}: cancelled").as_str(),
                     );
-                    true
+                    skip_execute_message =
+                        Some(format!("Skipping {name} because it was cancelled"));
                 } else if task.rule.type_ == Some(RuleType::Optional) {
                     progress.log(
-                        printer::Level::Message,
+                        printer::Level::Debug,
                         format!("Skipping {name} because it is optional").as_str(),
                     );
-                    true
-                } else {
-                    false
+                    skip_execute_message = Some(format!("Skipping {name}: optional"));
                 }
+                progress.log(
+                    printer::Level::Trace,
+                    format!("{name} done checking skip cancellation").as_str(),
+                );
+            }
+
+            let rule_name = rule.name.clone();
+
+            let updated_digest = if let Some(inputs) = &rule.inputs {
+                progress.log(
+                    printer::Level::Trace,
+                    format!("{name} update workspace changes").as_str(),
+                );
+
+                workspace::update_changes(&mut progress, inputs)
+                    .context(format_context!("Failed to update workspace changes"))?;
+
+                progress.log(
+                    printer::Level::Trace,
+                    format!("{name} check for new digest").as_str(),
+                );
+
+                let seed = serde_json::to_string(&executor).context(format_context!("Failed to serialize"))?;
+                let digest = inputs::is_rule_inputs_changed(&mut progress, &rule_name, seed.as_str(), inputs)
+                    .context(format_context!("Failed to check inputs for {rule_name}"))?;
+                if digest.is_none() {
+                    // the digest has not changed - not need to execute
+                    skip_execute_message = Some(format!("Skipping {name}: same inputs"));
+                }
+                progress.log(
+                    printer::Level::Debug,
+                    format!("New digest for {rule_name}={digest:?}").as_str(),
+                );
+                digest
+            } else {
+                None
             };
 
-            if is_optional_or_cancelled {
-                is_execute = false;
+            if let Some(skip_message) = skip_execute_message.as_ref() {
+                progress.log(printer::Level::Info, skip_message.as_str());
+                progress.set_message(skip_message);
+            } else {
+                progress.set_message("Running");
             }
 
-            if !is_execute {
-                progress.log(printer::Level::Message, format!("Skipping {name}").as_str());
-            }
-
-            progress.set_message(if is_execute { "Running" } else { "Skipping" });
-
-            let task_result = if is_execute {
+            let task_result = if skip_execute_message.is_none() {
                 executor
                     .execute(name.as_str(), progress)
                     .context(format_context!("Failed to exec {}", name))
             } else {
                 Ok(executor::TaskResult::new())
             };
+
+            if task_result.is_ok() {
+                if let Some(digest) = updated_digest {
+                    inputs::update_rule_digest(&rule_name, digest);
+                }
+            }
 
             // before notifying dependents process the enabled_targets list
             {

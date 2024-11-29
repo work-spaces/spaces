@@ -231,16 +231,6 @@ pub fn run_starlark_modules(
         _ => {}
     }
 
-    let io_path = workspace::get_io_path();
-
-    {
-        let io_state = rules::io::get_state().read().unwrap();
-        io_state
-            .io
-            .save(io_path)
-            .context(format_context!("Failed to save io"))?;
-    }
-
     Ok(())
 }
 

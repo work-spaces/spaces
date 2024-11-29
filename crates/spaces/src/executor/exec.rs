@@ -46,7 +46,11 @@ impl Exec {
             environment.push((key, value));
         }
 
-        let log_file_path = workspace::get_log_file(name);
+        let log_file_path = if info::get_is_ci() {
+            None
+        } else {
+            Some(workspace::get_log_file(name))
+        };
 
         let options = printer::ExecuteOptions {
             label: name.to_string(),
@@ -57,11 +61,11 @@ impl Exec {
                 .clone()
                 .map(|cwd| format!("{}/{}", workspace_path, cwd)),
             is_return_stdout: self.redirect_stdout.is_some(),
-            log_file_path: Some(log_file_path.clone()),
+            log_file_path: log_file_path.clone(),
         };
 
         progress.log(
-            printer::Level::Trace,
+            printer::Level::Debug,
             format!("exec {name}: {} {options:?}", self.command).as_str(),
         );
 
@@ -69,7 +73,7 @@ impl Exec {
 
         progress.log(
             printer::Level::Message,
-            format!("log file for {name}: {log_file_path}").as_str(),
+            format!("log file for {name}: {log_file_path:?}").as_str(),
         );
 
         let stdout_content = match result {
@@ -87,25 +91,29 @@ impl Exec {
             }
             Err(exec_error) => {
                 progress.log(printer::Level::Info, format!("exec {name} failed").as_str());
-
                 if let Some(Expect::Failure) = self.expect.as_ref() {
                     None
                 } else {
                     // if the command failed to execute, there won't be a log file
-
-                    if std::path::Path::new(log_file_path.as_str()).exists() {
-                        let log_contents = std::fs::read_to_string(&log_file_path).context(
-                            format_context!("Failed to read log file {}", log_file_path),
-                        )?;
-
-                        if log_contents.len() > 8192 {
-                            progress.log(
-                                printer::Level::Error,
-                                format!("See log file {log_file_path} for details").as_str(),
-                            );
-                        } else {
-                            progress.log(printer::Level::Error, log_contents.as_str());
+                    if let Some(log_file_path) = log_file_path {
+                        if std::path::Path::new(log_file_path.as_str()).exists() {
+                            let log_contents = std::fs::read_to_string(&log_file_path).context(
+                                format_context!("Failed to read log file {}", log_file_path),
+                            )?;
+                            if log_contents.len() > 8192 {
+                                progress.log(
+                                    printer::Level::Error,
+                                    format!("See log file {log_file_path} for details").as_str(),
+                                );
+                            } else {
+                                progress.log(printer::Level::Error, log_contents.as_str());
+                            }
                         }
+                    } else {
+                        progress.log(
+                            printer::Level::Error,
+                            "No log file is available (log files disabled with the --ci option)",
+                        );
                     }
                     return Err(format_error!(
                         "Expected success but task failed because {exec_error}"

@@ -49,6 +49,7 @@ impl SyncLoadOrder {
 struct State {
     absolute_path: String,
     log_directory: String,
+    changes: Option<changes::Changes>,
 }
 
 static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
@@ -70,6 +71,29 @@ pub fn get_workspace_path(workspace_path: &str, current_path: &str, target_path:
     }
 }
 
+pub fn update_changes(
+    progress: &mut printer::MultiProgressBar,
+    inputs: &HashSet<String>,
+) -> anyhow::Result<()> {
+    let mut state = get_state().write().unwrap();
+    if let Some(changes) = state.changes.as_mut() {
+        changes
+            .update_from_inputs(progress, inputs)
+            .context(format_context!("Failed to update workspace changes"))?;
+    }
+    Ok(())
+}
+
+pub fn save_changes() -> anyhow::Result<()> {
+    let changes_path = get_changes_path();
+    let state = get_state().read().unwrap();
+    let changes = state.changes.as_ref().unwrap();
+    changes
+        .save(changes_path)
+        .context(format_context!("Failed to save changes file"))?;
+    Ok(())
+}
+
 pub fn get_store_path() -> String {
     if let Ok(spaces_home) = std::env::var("SPACES_HOME") {
         return format!("{}/.spaces/store", spaces_home);
@@ -88,6 +112,16 @@ pub fn get_cargo_binstall_root() -> String {
     format!("{}/cargo_binstall_bin_dir", get_spaces_tools_path())
 }
 
+pub fn get_rule_inputs_digest(
+    progress: &mut printer::MultiProgressBar,
+    seed: &str,
+    globs: &HashSet<String>,
+) -> anyhow::Result<String> {
+    let state = get_state().read().unwrap();
+    let changes = state.changes.as_ref().unwrap();
+    changes.get_digest(progress, seed, globs)
+}
+
 fn get_unique() -> anyhow::Result<String> {
     let duration_since_epoch = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -104,6 +138,7 @@ fn get_state() -> &'static RwLock<State> {
     STATE.set(RwLock::new(State {
         absolute_path: "".to_string(),
         log_directory: SPACES_LOGS_NAME.to_string(),
+        changes: None,
     }));
     STATE.get()
 }
@@ -119,8 +154,12 @@ pub fn build_directory() -> &'static str {
     "build"
 }
 
-pub fn get_io_path() -> &'static str {
-    "build/io.spaces"
+pub fn get_inputs_path() -> &'static str {
+    "build/workspace.inputs.spaces"
+}
+
+pub fn get_changes_path() -> &'static str {
+    "build/workspace.changes.spaces"
 }
 
 pub fn absolute_path() -> String {
@@ -239,7 +278,12 @@ impl Workspace {
         std::fs::create_dir_all(build_directory())
             .context(format_context!("Failed to create build directory"))?;
 
+        let changes_path = get_changes_path();
+        let skip_folders = vec![SPACES_LOGS_NAME.to_string()];
+        let changes = changes::Changes::new(changes_path, skip_folders);
+
         state.absolute_path = absolute_path;
+        state.changes = Some(changes);
 
         #[allow(unused)]
         let unique = get_unique().context(format_context!("failed to get unique marker"))?;

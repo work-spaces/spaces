@@ -35,6 +35,11 @@ pub fn set_ci_true() {
     state.is_ci = true;
 }
 
+pub fn get_is_ci() -> bool {
+    let state = get_state().read().unwrap();
+    state.is_ci
+}
+
 pub fn update_env(env: executor::env::UpdateEnv) -> anyhow::Result<()> {
     let mut state = get_state().write().unwrap();
     state.env.vars.extend(env.vars);
