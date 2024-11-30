@@ -1,16 +1,17 @@
 use crate::{executor, rules, workspace};
 use anyhow::Context;
-use anyhow_source_location::format_context;
+use anyhow_source_location::{format_context, format_error};
 use starlark::environment::GlobalsBuilder;
 use starlark::values::none::NoneType;
-use starstd::Function;
+use starstd::{Function, Arg};
 use std::sync::RwLock;
 
 struct State {
     #[allow(dead_code)]
     new_branch_name: Option<String>,
     env: executor::env::UpdateEnv,
-    is_ci: bool
+    is_ci: bool,
+    max_queue_count: i64,
 }
 
 static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
@@ -19,15 +20,41 @@ fn get_state() -> &'static RwLock<State> {
     if let Some(state) = STATE.try_get() {
         return state;
     }
+
+    let mut env = executor::env::UpdateEnv {
+        vars: std::collections::HashMap::new(),
+        paths: Vec::new(),
+        system_paths: None,
+    };
+
+    env.vars.insert(
+        workspace::SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE.to_owned(),
+        "true".to_string(),
+    );
+
     STATE.set(RwLock::new(State {
         new_branch_name: None,
-        env: executor::env::UpdateEnv {
-            vars: std::collections::HashMap::new(),
-            paths: Vec::new(),
-        },
+        env,
         is_ci: false,
+        max_queue_count: 8,
     }));
     STATE.get()
+}
+
+pub fn set_is_reproducible(value: bool) {
+    let mut state = get_state().write().unwrap();
+    state.env.vars.insert(
+        workspace::SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE.to_owned(),
+        value.to_string(),
+    );
+}
+
+pub fn is_reproducible() -> bool {
+    let state = get_state().read().unwrap();
+    if let Some(value) = state.env.vars.get(workspace::SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE) {
+        return value == "true";
+    }
+    false
 }
 
 pub fn set_ci_true() {
@@ -50,6 +77,16 @@ pub fn update_env(env: executor::env::UpdateEnv) -> anyhow::Result<()> {
 pub fn get_env() -> executor::env::UpdateEnv {
     let state = get_state().read().unwrap();
     state.env.clone()
+}
+
+pub fn get_max_queue_count() -> i64 {
+    let state = get_state().read().unwrap();
+    state.max_queue_count
+}
+
+fn set_max_queue_count(count: i64) {
+    let mut state = get_state().write().unwrap();
+    state.max_queue_count = count;
 }
 
 pub const FUNCTIONS: &[Function] = &[
@@ -103,6 +140,19 @@ pub const FUNCTIONS: &[Function] = &[
         example: None,
     },
     Function {
+        name: "get_env_var",
+        description: "returns the path where the current script is located in the workspace",
+        return_type: "str",
+        args: &[
+            Arg {
+                name: "var",
+                description: "The name of the environment variable",
+                dict: &[],
+            },
+        ],
+        example: None,
+    },
+    Function {
         name: "get_path_to_build_checkout",
         description: "returns the path to the workspace build folder for the current script",
         return_type: "str",
@@ -141,7 +191,26 @@ pub const FUNCTIONS: &[Function] = &[
         name: "set_minimum_version",
         description: "sets the minimum version of spaces required to run the script",
         return_type: "int",
-        args: &[],
+        args: &[
+            Arg {
+                name: "version",
+                description: "the minimum version of spaces required to run the script",
+                dict: &[],
+            },
+        ],
+        example: None,
+    },
+    Function {
+        name: "set_max_queue_count",
+        description: "sets the maxiumum number of items to queue at one time",
+        return_type: "int",
+        args: &[
+            Arg {
+                name: "count",
+                description: "the maximum number of items to queue at one time",
+                dict: &[],
+            },
+        ],
         example: None,
     },
 ];
@@ -182,9 +251,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     }
 
     fn get_supported_platforms() -> anyhow::Result<Vec<String>> {
-        Ok(platform::Platform::get_supported_platforms().into_iter()
+        Ok(platform::Platform::get_supported_platforms()
+            .into_iter()
             .map(|p| p.to_string())
             .collect())
+    }
+
+    fn is_workspace_reproducible() -> anyhow::Result<bool> {
+        Ok(is_reproducible())
     }
 
     fn is_ci() -> anyhow::Result<bool> {
@@ -211,12 +285,24 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(platform::Platform::is_aarch64())
     }
 
+    fn get_env_var(var_name: &str) -> anyhow::Result<String> {
+        let state = get_state().read().unwrap();
+        if var_name == "PATH" {
+            return Ok(state.env.get_path());
+        }
+
+        if let Some(value) = state.env.vars.get(var_name) {
+            return Ok(value.clone());
+        }
+
+        Err(format_error!("{var_name} is not set in the workspace environment"))
+    }
+
     fn set_env(
         #[starlark(require = named)] env: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
         let mut state = get_state().write().unwrap();
 
-        // support JSON, yaml, and toml
         state.env = serde_json::from_value(env.to_json_value()?)
             .context(format_context!("Failed to parse archive arguments"))?;
 
@@ -264,13 +350,26 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
     fn set_minimum_version(version: &str) -> anyhow::Result<NoneType> {
         let current_version = env!("CARGO_PKG_VERSION");
-        let version = version.parse::<semver::Version>().context(format_context!("bad version format"))?;
+        let version = version
+            .parse::<semver::Version>()
+            .context(format_context!("bad version format"))?;
         if version > current_version.parse::<semver::Version>().unwrap() {
             return Err(anyhow::anyhow!(
                 "Minimum required `spaces` version is {}. `spaces` version is {current_version}",
                 version.to_string(),
             ));
         }
+        Ok(NoneType)
+    }
+
+    fn set_max_queue_count(count: i64) -> anyhow::Result<NoneType> {
+        if count < 1 {
+            return Err(anyhow::anyhow!("max_queue_count must be greater than 0"));
+        }
+        if count > 64 {
+            return Err(anyhow::anyhow!("max_queue_count must be less than 65"));
+        }
+        set_max_queue_count(count);
         Ok(NoneType)
     }
 

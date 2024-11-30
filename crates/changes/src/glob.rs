@@ -14,14 +14,14 @@ pub fn is_glob_include(glob: &str) -> Option<String> {
 }
 
 pub fn match_globs(globs: &HashSet<String>, input: &str) -> bool {
-    let includes = globs.iter().filter(|g| g.starts_with("+"));
-    let excludes = globs.iter().filter(|g| g.starts_with("-"));
+    let includes = globs.iter().filter(|g| g.starts_with('+'));
+    let excludes = globs.iter().filter(|g| g.starts_with('-'));
 
     for include in includes {
-        let include_pattern = include.strip_prefix("+").unwrap_or(include.as_str());
+        let include_pattern = include.strip_prefix('+').unwrap_or(include.as_str());
         if glob_match::glob_match(include_pattern, input) {
             for exclude in excludes {
-                let exclude_pattern = exclude.strip_prefix("-").unwrap_or(exclude.as_str());
+                let exclude_pattern = exclude.strip_prefix('-').unwrap_or(exclude.as_str());
                 if glob_match::glob_match(exclude_pattern, input) {
                     return false;
                 }

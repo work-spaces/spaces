@@ -40,7 +40,12 @@ fn evaluate_module(
 
         loads.push((
             load.module_id.to_owned(),
-            evaluate_module(workspace_path, module_load_path.as_str(), contents, with_rules)?,
+            evaluate_module(
+                workspace_path,
+                module_load_path.as_str(),
+                contents,
+                with_rules,
+            )?,
         ));
     }
     let modules = loads.iter().map(|(a, b)| (a.as_str(), b)).collect();
@@ -105,15 +110,24 @@ pub fn run_starlark_modules(
     target: Option<String>,
 ) -> anyhow::Result<()> {
     let workspace_path = workspace::absolute_path();
+    let mut known_modules = HashSet::new();
+
+    let workspace_digest = {
+        let mut workspace_hasher = blake3::Hasher::new();
+        for (_name, content) in modules.iter() {
+            workspace_hasher.update(content.as_bytes());
+            known_modules.insert(blake3::hash(content.as_bytes()).to_string());
+        }
+        workspace_hasher.finalize().to_string()
+    };
 
     let mut module_queue = std::collections::VecDeque::new();
     module_queue.extend(modules);
-    let mut known_modules = HashSet::new();
 
-    for (_name, content) in module_queue.iter() {
-        known_modules.insert(blake3::hash(content.as_bytes()).to_string());
-    }
-
+    // All modules are evaulated in this loop
+    // During checkout additional modules may be added to the queue
+    // For Run mode, the env module is processed first and available
+    // to subsequent modules
     while !module_queue.is_empty() {
         while !module_queue.is_empty() {
             if let Some((name, content)) = module_queue.pop_front() {
@@ -127,6 +141,8 @@ pub fn run_starlark_modules(
                 .context(format_context!("Failed to evaluate module {}", name))?;
             }
 
+            // During checkout phase, additional modules may be added to the queue
+            // if the repo contains more spaces.star files
             if phase == rules::Phase::Checkout {
                 sort_tasks(None, phase).context(format_context!("Failed to sort tasks"))?;
                 printer.log(Level::Debug, "--Checkout Phase--")?;
@@ -170,6 +186,17 @@ pub fn run_starlark_modules(
     match phase {
         rules::Phase::Run => {
             printer.log(Level::Message, "--Run Phase--")?;
+
+            let is_reproducible = info::is_reproducible();
+            printer.log(
+                if is_reproducible {
+                    Level::Message
+                } else {
+                    Level::Info
+                },
+                format!("Is Workspace reproducible: {is_reproducible}").as_str(),
+            )?;
+
             sort_tasks(target.clone(), phase).context(format_context!("Failed to sort tasks"))?;
 
             debug_sorted_tasks(printer, phase)
@@ -211,6 +238,13 @@ pub fn run_starlark_modules(
             let sysroot_bin = format!("{}/sysroot/bin", workspace::absolute_path());
             if !env.paths.contains(&sysroot_bin) {
                 env.paths.insert(0, sysroot_bin);
+            }
+
+            if info::is_reproducible() {
+                env.vars.insert(
+                    workspace::SPACES_ENV_WORKSPACE_DIGEST.to_string(),
+                    workspace_digest,
+                );
             }
 
             executor::env::finalize_env(&env).context(format_context!("failed to finalize env"))?;

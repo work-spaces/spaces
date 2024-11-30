@@ -1,4 +1,4 @@
-use crate::workspace;
+use crate::{info, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -17,10 +17,10 @@ impl Git {
     fn execute_worktree_clone(
         &self,
         name: &str,
-        mut progress: printer::MultiProgressBar,
+        progress: &mut printer::MultiProgressBar,
     ) -> anyhow::Result<()> {
         let bare_repo = git::BareRepository::new(
-            &mut progress,
+            progress,
             workspace::get_store_path().as_str(),
             &self.spaces_key,
             &self.url,
@@ -28,18 +28,18 @@ impl Git {
         .context(format_context!("Failed to create bare repository"))?;
 
         let worktree = bare_repo
-            .add_worktree(&mut progress, &self.worktree_path)
+            .add_worktree(progress, &self.worktree_path)
             .context(format_context!("{name} - Failed to add worktree"))?;
 
         match &self.checkout {
             git::Checkout::NewBranch(branch_name) => {
                 worktree
-                    .switch_new_branch(&mut progress, branch_name, &self.checkout)
+                    .switch_new_branch(progress, branch_name, &self.checkout)
                     .context(format_context!("{name} - Failed to checkout new branch"))?;
             }
             _ => {
                 worktree
-                    .checkout(&mut progress, &self.checkout)
+                    .checkout(progress, &self.checkout)
                     .context(format_context!("{name} - Failed to switch branch"))?;
             }
         }
@@ -50,7 +50,7 @@ impl Git {
     fn execute_default_clone(
         &self,
         name: &str,
-        mut progress: printer::MultiProgressBar,
+        progress: &mut printer::MultiProgressBar,
     ) -> anyhow::Result<()> {
         let clone_options = printer::ExecuteOptions {
             arguments: vec![
@@ -117,7 +117,7 @@ impl Git {
     fn execute_shallow_clone(
         &self,
         name: &str,
-        mut progress: printer::MultiProgressBar,
+        progress: &mut printer::MultiProgressBar,
     ) -> anyhow::Result<()> {
         let branch = match &self.checkout {
             git::Checkout::NewBranch(branch_name) => {
@@ -125,9 +125,7 @@ impl Git {
                     "Cannot create a new branch {branch_name} with a shallow clone"
                 ));
             }
-            git::Checkout::Revision(branch_name) => {
-                branch_name.clone()
-            }
+            git::Checkout::Revision(branch_name) => branch_name.clone(),
         };
 
         let clone_options = printer::ExecuteOptions {
@@ -138,7 +136,7 @@ impl Git {
                 self.url.clone(),
                 self.spaces_key.clone(),
                 "--branch".to_string(),
-                branch,
+                branch.clone(),
                 "--single-branch".to_string(),
             ],
             ..Default::default()
@@ -167,21 +165,59 @@ impl Git {
         Ok(())
     }
 
-    pub fn execute(&self, _name: &str, progress: printer::MultiProgressBar) -> anyhow::Result<()> {
+    pub fn execute(
+        &self,
+        name: &str,
+        mut progress: printer::MultiProgressBar,
+    ) -> anyhow::Result<()> {
         match self.clone {
             git::Clone::Worktree => {
-                self.execute_worktree_clone(_name, progress)
-                    .context(format_context!("spaces clone failed"))?;
+                self.execute_worktree_clone(name, &mut progress)
+                    .context(format_context!("spaces clone failed"))?
             }
             git::Clone::Default => {
-                self.execute_default_clone(_name, progress)
-                    .context(format_context!("default clone failed"))?;
+                self.execute_default_clone(name, &mut progress)
+                    .context(format_context!("default clone failed"))?
             }
             git::Clone::Shallow => {
-                self.execute_shallow_clone(_name, progress)
-                    .context(format_context!("default clone failed"))?;
+                self.execute_shallow_clone(name, &mut progress)
+                    .context(format_context!("default clone failed"))?
             }
         }
+
+        let ref_name = match &self.checkout {
+            git::Checkout::NewBranch(branch_name) => {
+                branch_name.clone()
+            }
+            git::Checkout::Revision(branch_name) => branch_name.clone(),
+        };
+
+        // check if checkout is on a branch or commit
+        let options = printer::ExecuteOptions {
+            working_directory: Some(self.spaces_key.clone()),
+            arguments: vec![
+                "show-ref".to_string(),
+                "--verify".to_string(),
+                "--quiet".to_string(),
+                format!("refs/heads/{}", ref_name).to_string(),
+            ],
+            ..Default::default()
+        };
+
+        progress.log(
+            printer::Level::Debug,
+            format!("{}: git show-ref {options:?}", self.spaces_key).as_str(),
+        );
+
+        let is_branch = git::execute_git_command(&self.url, &mut progress, options).is_ok();
+        if is_branch {
+            progress.log(
+                printer::Level::Info,
+                format!("{} is a branch - workspace is not reproducible", self.spaces_key).as_str(),
+            );
+            info::set_is_reproducible(false);
+        }
+
         Ok(())
     }
 }

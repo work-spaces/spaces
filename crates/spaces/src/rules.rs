@@ -2,7 +2,7 @@ pub mod checkout;
 pub mod inputs;
 pub mod run;
 
-use crate::{executor, label, workspace};
+use crate::{executor, info, label, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::ValueEnum;
@@ -207,7 +207,7 @@ impl State {
                     }
 
                     // this could be configured with a another global starlark function
-                    if number_running < 50 {
+                    if number_running < info::get_max_queue_count() {
                         break;
                     } else {
                         std::thread::sleep(std::time::Duration::from_millis(100));

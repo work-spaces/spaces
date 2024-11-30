@@ -230,7 +230,7 @@ impl Changes {
     ) -> anyhow::Result<String> {
         let mut inputs = Vec::new();
         for path in self.entries.keys() {
-            let sane_path = Self::sanitize_path(&path);
+            let sane_path = Self::sanitize_path(path);
             if glob::match_globs(globs, sane_path) {
                 inputs.push(path);
             }

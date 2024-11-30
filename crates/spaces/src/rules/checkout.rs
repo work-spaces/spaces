@@ -219,7 +219,8 @@ source env
 const UPDATE_ENV_EXAMPLE: &str = r#"checkout.update_env(
     rule = {"name": "update_env"},
     env = {
-        "paths": ["/usr/bin", "/bin"],
+        "paths": [],
+        "system_paths": ["/usr/bin", "/bin"],
         "vars": {
             "PS1": '"(spaces) $PS1"',
         },

@@ -31,7 +31,7 @@ impl Exec {
 
         let mut environment_map = HashMap::new();
 
-        environment_map.insert("PATH".to_string(), workspace_env.paths.join(":"));
+        environment_map.insert("PATH".to_string(), workspace_env.get_path());
         for (key, value) in workspace_env.vars {
             environment_map.insert(key, value);
         }

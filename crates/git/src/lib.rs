@@ -59,7 +59,7 @@ fn get_state() -> &'static RwLock<State> {
     STATE.get()
 }
 
-fn execute_git_command(
+pub fn execute_git_command(
     url: &str,
     progress_bar: &mut printer::MultiProgressBar,
     options: printer::ExecuteOptions,

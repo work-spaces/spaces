@@ -8,9 +8,11 @@ pub const SPACES_MODULE_NAME: &str = "spaces.star";
 pub const SPACES_STDIN_NAME: &str = "stdin.star";
 pub const SPACES_LOGS_NAME: &str = "spaces-logs";
 const SPACES_SYNC_ORDER_NAME: &str = "sync.spaces.json";
+pub const SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE: &str = "SPACES_IS_WORKSPACE_REPRODUCIBLE";
+pub const SPACES_ENV_WORKSPACE_DIGEST: &str = "SPACES_WORKSPACE_DIGEST";
 pub const WORKSPACE_FILE_HEADER: &str = r#"
 """
-Spaces Workspace file
+Spaces Environment Workspace file
 """
 "#;
 
@@ -49,6 +51,7 @@ impl SyncLoadOrder {
 struct State {
     absolute_path: String,
     log_directory: String,
+    digest: String,
     changes: Option<changes::Changes>,
 }
 
@@ -137,6 +140,7 @@ fn get_state() -> &'static RwLock<State> {
     }
     STATE.set(RwLock::new(State {
         absolute_path: "".to_string(),
+        digest: "".to_string(),
         log_directory: SPACES_LOGS_NAME.to_string(),
         changes: None,
     }));
@@ -215,7 +219,6 @@ impl Workspace {
         let mut loaded_modules = HashSet::new();
         let mut modules = vec![(ENV_FILE_NAME.to_string(), env_content)];
 
-        SyncLoadOrder::load(absolute_path.as_str())?;
         if let Ok(load_order) = SyncLoadOrder::load(absolute_path.as_str()) {
             progress.log(printer::Level::Trace, "Loading modules from sync order");
             for module in load_order.order {
@@ -241,6 +244,8 @@ impl Workspace {
             );
         }
 
+        let mut unordered_modules = vec![];
+
         for entry in walkdir {
             progress.increment(1);
             if let Ok(entry) = entry.context(format_context!("While walking directory")) {
@@ -255,12 +260,15 @@ impl Workspace {
                         let path = path.to_string();
                         if !loaded_modules.contains(&path) {
                             loaded_modules.insert(path.clone());
-                            modules.push((path, content));
+                            unordered_modules.push((path, content));
                         }
                     }
                 }
             }
         }
+
+        unordered_modules.sort_by(|a, b| a.0.cmp(&b.0));
+        modules.extend(unordered_modules);
 
         std::env::set_current_dir(std::path::Path::new(absolute_path.as_str())).context(
             format_context!("Failed to set current directory to {absolute_path}"),
@@ -282,6 +290,12 @@ impl Workspace {
         let skip_folders = vec![SPACES_LOGS_NAME.to_string()];
         let changes = changes::Changes::new(changes_path, skip_folders);
 
+        let mut hasher = blake3::Hasher::new();
+        for (_, content) in modules.iter() {
+            hasher.update(content.as_bytes());
+        }
+
+        state.digest = hasher.finalize().to_string();
         state.absolute_path = absolute_path;
         state.changes = Some(changes);
 
