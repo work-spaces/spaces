@@ -124,6 +124,33 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(NoneType)
     }
 
+    /*
+     * Add a reference to a workflow.
+     * The workflow is a spaces workflow.
+     * It must use semantic versioning.
+     * - spaces will need to resolve duplicates using the semver rules (MVS)
+     *   - configure args would need to be captured in the workflow name like gmp-static-4.3.2
+     * - MVS: https://research.swtch.com/vgo-mvs
+     * It must support at least one of the following:
+     * - Build and Install to the spaces store at a unique hashed location
+     *   - The workspaces can references the store location 
+     * - Install (COPY) runtime artifacts to the workspace
+     * - Download pre-built binaries: this will be used if it is available
+     *   - Not all workflows will be re-locatable. So some must be built locally and installed to the store
+     * 
+     * To pass informatin to the workflow, this rule will create a add_workflow.spaces.star
+     * file and place it in the sub-workspace.
+     * 
+     * The caller will need to know:
+     * - Where are the workflow artifacts installed?
+     * - Are the workflow artifacts relocatable?
+     * 
+     * The workflow can create a JSON file in the sub-workspace that contains all
+     * the information needed. The JSON file will be created during the checkout phase.
+     * 
+     */
+    //fn add_workflow()
+
     fn add_exec(
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] exec: starlark::values::Value,

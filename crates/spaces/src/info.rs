@@ -3,7 +3,7 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use starlark::environment::GlobalsBuilder;
 use starlark::values::none::NoneType;
-use starstd::{Function, Arg};
+use starstd::{Arg, Function};
 use std::sync::RwLock;
 
 struct State {
@@ -51,7 +51,11 @@ pub fn set_is_reproducible(value: bool) {
 
 pub fn is_reproducible() -> bool {
     let state = get_state().read().unwrap();
-    if let Some(value) = state.env.vars.get(workspace::SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE) {
+    if let Some(value) = state
+        .env
+        .vars
+        .get(workspace::SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE)
+    {
         return value == "true";
     }
     false
@@ -71,6 +75,13 @@ pub fn update_env(env: executor::env::UpdateEnv) -> anyhow::Result<()> {
     let mut state = get_state().write().unwrap();
     state.env.vars.extend(env.vars);
     state.env.paths.extend(env.paths);
+    if let Some(system_paths) = env.system_paths {
+        if let Some(existing_system_paths) = state.env.system_paths.as_mut() {
+            existing_system_paths.extend(system_paths.clone());
+        } else {
+            state.env.system_paths = Some(system_paths);
+        }
+    }
     Ok(())
 }
 
@@ -295,7 +306,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             return Ok(value.clone());
         }
 
-        Err(format_error!("{var_name} is not set in the workspace environment"))
+        Err(format_error!(
+            "{var_name} is not set in the workspace environment"
+        ))
     }
 
     fn set_env(
@@ -372,5 +385,4 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         set_max_queue_count(count);
         Ok(NoneType)
     }
-
 }

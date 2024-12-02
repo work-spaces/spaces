@@ -32,6 +32,9 @@ pub struct Arguments {
     /// The verbosity level of the output.
     #[arg(short, long, default_value = "warning")]
     pub verbosity: Level,
+    #[arg(long)]
+    /// Dont show progress bars
+    pub hide_progress_bars: bool,
     /// If this is passed, info.is_ci() returns true in scripts.
     #[arg(long)]
     ci: bool,
@@ -87,12 +90,19 @@ checkout.add_repo(
 )
 "#;
 
-fn handle_verbosity(printer: &mut printer::Printer, verbosity: printer::Level, is_ci: bool) {
+fn handle_verbosity(
+    printer: &mut printer::Printer,
+    verbosity: printer::Level,
+    is_ci: bool,
+    is_hide_progress_bars: bool,
+) {
     if is_ci {
         info::set_ci_true();
-        printer.level = printer::Level::ContinuousIntegration;
+        printer.verbosity.level = printer::Level::Trace;
+        printer.verbosity.is_show_progress_bars = false;
     } else {
-        printer.level = verbosity;
+        printer.verbosity.level = verbosity;
+        printer.verbosity.is_show_progress_bars = !is_hide_progress_bars;
     }
 }
 
@@ -134,6 +144,7 @@ pub fn execute() -> anyhow::Result<()> {
     match args {
         Arguments {
             verbosity,
+            hide_progress_bars,
             ci,
             commands:
                 Commands::Checkout {
@@ -142,7 +153,7 @@ pub fn execute() -> anyhow::Result<()> {
                     script,
                 },
         } => {
-            handle_verbosity(&mut printer, verbosity.into(), ci);
+            handle_verbosity(&mut printer, verbosity.into(), ci, hide_progress_bars);
 
             tools::install_tools(&mut printer)
                 .context(format_context!("while installing tools"))?;
@@ -192,6 +203,7 @@ pub fn execute() -> anyhow::Result<()> {
                 scripts.push((script_path, one_script_contents));
             }
 
+            load_order.store_path = workspace::get_checkout_store_path();
             load_order
                 .save(name.as_str())
                 .context(format_context!("while saving load order in {name}"))?;
@@ -222,10 +234,11 @@ pub fn execute() -> anyhow::Result<()> {
 
         Arguments {
             verbosity,
+            hide_progress_bars,
             ci,
             commands: Commands::Sync {},
         } => {
-            handle_verbosity(&mut printer, verbosity.into(), ci);
+            handle_verbosity(&mut printer, verbosity.into(), ci, hide_progress_bars);
             run_starlark_modules_in_workspace(
                 &mut printer,
                 rules::Phase::Checkout,
@@ -236,10 +249,11 @@ pub fn execute() -> anyhow::Result<()> {
 
         Arguments {
             verbosity,
+            hide_progress_bars,
             ci,
             commands: Commands::Run { target },
         } => {
-            handle_verbosity(&mut printer, verbosity.into(), ci);
+            handle_verbosity(&mut printer, verbosity.into(), ci, hide_progress_bars);
 
             run_starlark_modules_in_workspace(
                 &mut printer,
@@ -251,16 +265,14 @@ pub fn execute() -> anyhow::Result<()> {
 
         Arguments {
             verbosity,
+            hide_progress_bars,
             ci,
             commands: Commands::Evaluate { target },
         } => {
-            printer.level = verbosity.into();
-            if printer.level > printer::Level::Info {
-                printer.level = printer::Level::Info;
-            }
+            handle_verbosity(&mut printer, verbosity.into(), ci, hide_progress_bars);
 
-            if ci {
-                info::set_ci_true();
+            if printer.verbosity.level > printer::Level::Info {
+                printer.verbosity.level = printer::Level::Info;
             }
 
             run_starlark_modules_in_workspace(
@@ -273,14 +285,12 @@ pub fn execute() -> anyhow::Result<()> {
 
         Arguments {
             verbosity,
+            hide_progress_bars,
             ci,
             commands: Commands::Completions { shell },
         } => {
-            if ci {
-                info::set_ci_true();
-            }
+            handle_verbosity(&mut printer, verbosity.into(), ci, hide_progress_bars);
 
-            let _verbosity = verbosity;
             clap_complete::generate(
                 shell,
                 &mut Arguments::command(),
@@ -291,33 +301,28 @@ pub fn execute() -> anyhow::Result<()> {
 
         Arguments {
             verbosity,
+            hide_progress_bars,
             ci,
             commands: Commands::Docs { item },
         } => {
-            printer.level = verbosity.into();
-
-            if ci {
-                info::set_ci_true();
-            }
+            handle_verbosity(&mut printer, verbosity.into(), ci, hide_progress_bars);
 
             docs::show(&mut printer, item)?;
         }
 
         Arguments {
             verbosity,
+            hide_progress_bars,
             ci,
             commands: Commands::List {},
         } => {
-            printer.level = verbosity.into();
-            if ci {
-                info::set_ci_true();
-            }
+            handle_verbosity(&mut printer, verbosity.into(), ci, hide_progress_bars);
+
             let ledger =
                 ledger::Ledger::new().with_context(|| format_context!("while creating ledger"))?;
             ledger.show_status()?;
         }
     }
-
 
     Ok(())
 }

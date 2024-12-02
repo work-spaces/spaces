@@ -4,6 +4,7 @@ pub mod env;
 pub mod exec;
 pub mod git;
 pub mod http_archive;
+pub mod capsule;
 
 use crate::workspace;
 use anyhow::Context;
@@ -41,6 +42,8 @@ pub enum Task {
     UpdateAsset(asset::UpdateAsset),
     UpdateEnv(env::UpdateEnv),
     AddAsset(asset::AddAsset),
+    Capsule(capsule::Capsule),
+    CapsuleRun(capsule::CapsuleRun),
     Git(git::Git),
 }
 

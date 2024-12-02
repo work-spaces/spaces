@@ -6,8 +6,9 @@ use std::{collections::HashSet, sync::RwLock};
 pub const ENV_FILE_NAME: &str = "env.spaces.star";
 pub const SPACES_MODULE_NAME: &str = "spaces.star";
 pub const SPACES_STDIN_NAME: &str = "stdin.star";
-pub const SPACES_LOGS_NAME: &str = "spaces-logs";
+pub const SPACES_LOGS_NAME: &str = "@logs";
 const SPACES_SYNC_ORDER_NAME: &str = "sync.spaces.json";
+const SPACES_HOME_ENV_VAR: &str = "SPACES_HOME";
 pub const SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE: &str = "SPACES_IS_WORKSPACE_REPRODUCIBLE";
 pub const SPACES_ENV_WORKSPACE_DIGEST: &str = "SPACES_WORKSPACE_DIGEST";
 pub const WORKSPACE_FILE_HEADER: &str = r#"
@@ -18,6 +19,7 @@ Spaces Environment Workspace file
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct SyncLoadOrder {
+    pub store_path: String,
     order: Vec<String>,
 }
 
@@ -52,6 +54,7 @@ struct State {
     absolute_path: String,
     log_directory: String,
     digest: String,
+    store_path: String,
     changes: Option<changes::Changes>,
 }
 
@@ -97,14 +100,19 @@ pub fn save_changes() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn get_store_path() -> String {
-    if let Ok(spaces_home) = std::env::var("SPACES_HOME") {
+pub fn get_checkout_store_path() -> String {
+    if let Ok(spaces_home) = std::env::var(SPACES_HOME_ENV_VAR) {
         return format!("{}/.spaces/store", spaces_home);
     }
     if let Ok(Some(home_path)) = homedir::my_home() {
         return format!("{}/.spaces/store", home_path.to_string_lossy());
     }
     panic!("Failed to get home directory");
+}
+
+pub fn get_store_path() -> String {
+    let state = get_state().read().unwrap();
+    state.store_path.clone()
 }
 
 pub fn get_spaces_tools_path() -> String {
@@ -143,6 +151,7 @@ fn get_state() -> &'static RwLock<State> {
         digest: "".to_string(),
         log_directory: SPACES_LOGS_NAME.to_string(),
         changes: None,
+        store_path: get_checkout_store_path()
     }));
     STATE.get()
 }
@@ -219,8 +228,10 @@ impl Workspace {
         let mut loaded_modules = HashSet::new();
         let mut modules = vec![(ENV_FILE_NAME.to_string(), env_content)];
 
+        let mut store_path = None;
         if let Ok(load_order) = SyncLoadOrder::load(absolute_path.as_str()) {
             progress.log(printer::Level::Trace, "Loading modules from sync order");
+            store_path = Some(load_order.store_path);
             for module in load_order.order {
                 if is_rules_module(module.as_str()) {
                     progress.increment(1);
@@ -298,6 +309,9 @@ impl Workspace {
         state.digest = hasher.finalize().to_string();
         state.absolute_path = absolute_path;
         state.changes = Some(changes);
+        if let Some(store_path) = store_path {
+            state.store_path = store_path;
+        }
 
         #[allow(unused)]
         let unique = get_unique().context(format_context!("failed to get unique marker"))?;

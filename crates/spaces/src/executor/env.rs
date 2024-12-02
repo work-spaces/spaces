@@ -28,7 +28,7 @@ impl UpdateEnv {
     }
 
     pub fn get_path(&self) -> String {
-        self.paths.join(":")
+        self.get_path_with_system_paths()
     }
 
     pub fn get_path_with_system_paths(&self) -> String {

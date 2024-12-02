@@ -671,6 +671,31 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(NoneType)
     }
 
+    fn add_capsule(
+        #[starlark(require = named)] rule: starlark::values::Value,
+        #[starlark(require = named)] capsule: starlark::values::Value,
+    ) -> anyhow::Result<NoneType> {
+        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+            .context(format_context!("bad options for repo"))?;
+
+        let capsule: executor::capsule::Capsule =
+            serde_json::from_value(capsule.to_json_value()?)
+                .context(format_context!("Failed to parse capsule arguments"))?;
+
+        let state = rules::get_state().read().unwrap();
+        let rule_name = rule.name.clone();
+
+        state
+            .insert_task(rules::Task::new(
+                rule,
+                rules::Phase::Checkout,
+                executor::Task::Capsule(capsule),
+            ))
+            .context(format_context!("Failed to insert task {rule_name}"))?;
+
+        Ok(NoneType)
+    }
+
     fn update_asset(
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] asset: starlark::values::Value,

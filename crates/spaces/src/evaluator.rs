@@ -1,7 +1,6 @@
 use crate::{executor, info, rules, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
-use printer::Level;
 use starlark::environment::{FrozenModule, GlobalsBuilder, Module};
 use starlark::eval::{Evaluator, ReturnFileLoader};
 use starlark::syntax::{AstModule, Dialect};
@@ -129,55 +128,56 @@ pub fn run_starlark_modules(
     // For Run mode, the env module is processed first and available
     // to subsequent modules
     while !module_queue.is_empty() {
-        while !module_queue.is_empty() {
-            if let Some((name, content)) = module_queue.pop_front() {
-                printer.log(Level::Trace, format!("Evaluating module {}", name).as_str())?;
-                let _ = evaluate_module(
-                    workspace_path.as_str(),
-                    name.as_str(),
-                    content,
-                    WithRules::Yes,
-                )
-                .context(format_context!("Failed to evaluate module {}", name))?;
+        if let Some((name, content)) = module_queue.pop_front() {
+            printer.log(
+                printer::Level::Trace,
+                format!("Evaluating module {}", name).as_str(),
+            )?;
+            let _ = evaluate_module(
+                workspace_path.as_str(),
+                name.as_str(),
+                content,
+                WithRules::Yes,
+            )
+            .context(format_context!("Failed to evaluate module {}", name))?;
+        }
+
+        // During checkout phase, additional modules may be added to the queue
+        // if the repo contains more spaces.star files
+        if phase == rules::Phase::Checkout {
+            sort_tasks(None, phase).context(format_context!("Failed to sort tasks"))?;
+            printer.log(printer::Level::Debug, "--Checkout Phase--")?;
+            debug_sorted_tasks(printer, phase)
+                .context(format_context!("Failed to debug sorted tasks"))?;
+
+            let state = rules::get_state().read().unwrap();
+            let task_result = state
+                .execute(printer, phase)
+                .context(format_context!("Failed to execute tasks"))?;
+            if !task_result.new_modules.is_empty() {
+                printer.log(
+                    printer::Level::Trace,
+                    format!("New Modules:{:?}", task_result.new_modules).as_str(),
+                )?;
             }
 
-            // During checkout phase, additional modules may be added to the queue
-            // if the repo contains more spaces.star files
-            if phase == rules::Phase::Checkout {
-                sort_tasks(None, phase).context(format_context!("Failed to sort tasks"))?;
-                printer.log(Level::Debug, "--Checkout Phase--")?;
-                debug_sorted_tasks(printer, phase)
-                    .context(format_context!("Failed to debug sorted tasks"))?;
+            let mut new_modules = Vec::new();
+            for module in task_result.new_modules {
+                let path_to_module = format!("{}/{}", workspace_path, module);
+                let content = std::fs::read_to_string(path_to_module.as_str())
+                    .context(format_context!("Failed to read file {path_to_module}"))?;
 
-                let state = rules::get_state().read().unwrap();
-                let task_result = state
-                    .execute(printer, phase)
-                    .context(format_context!("Failed to execute tasks"))?;
-                if !task_result.new_modules.is_empty() {
-                    printer.log(
-                        Level::Trace,
-                        format!("New Modules:{:?}", task_result.new_modules).as_str(),
-                    )?;
-                }
+                new_modules.push((module, content));
+            }
 
-                let mut new_modules = Vec::new();
-                for module in task_result.new_modules {
-                    let path_to_module = format!("{}/{}", workspace_path, module);
-                    let content = std::fs::read_to_string(path_to_module.as_str())
-                        .context(format_context!("Failed to read file {path_to_module}"))?;
+            // sort new modules by the first item
+            new_modules.sort_by(|first, second| first.0.cmp(&second.0));
 
-                    new_modules.push((module, content));
-                }
-
-                // sort new modules by the first item
-                new_modules.sort_by(|first, second| first.0.cmp(&second.0));
-
-                for (module, content) in new_modules {
-                    let hash = blake3::hash(content.as_bytes()).to_string();
-                    if !known_modules.contains(&hash) {
-                        known_modules.insert(hash);
-                        module_queue.push_back((module, content));
-                    }
+            for (module, content) in new_modules {
+                let hash = blake3::hash(content.as_bytes()).to_string();
+                if !known_modules.contains(&hash) {
+                    known_modules.insert(hash);
+                    module_queue.push_front((module, content));
                 }
             }
         }
@@ -185,14 +185,14 @@ pub fn run_starlark_modules(
 
     match phase {
         rules::Phase::Run => {
-            printer.log(Level::Message, "--Run Phase--")?;
+            printer.log(printer::Level::Message, "--Run Phase--")?;
 
             let is_reproducible = info::is_reproducible();
             printer.log(
                 if is_reproducible {
-                    Level::Message
+                    printer::Level::Message
                 } else {
-                    Level::Info
+                    printer::Level::Info
                 },
                 format!("Is Workspace reproducible: {is_reproducible}").as_str(),
             )?;
@@ -208,7 +208,7 @@ pub fn run_starlark_modules(
                 .context(format_context!("Failed to execute tasks"))?;
         }
         rules::Phase::Evaluate => {
-            printer.log(Level::Debug, "--Evaluate Phase--")?;
+            printer.log(printer::Level::Debug, "--Evaluate Phase--")?;
             sort_tasks(target.clone(), phase).context(format_context!("Failed to sort tasks"))?;
 
             debug_sorted_tasks(printer, rules::Phase::Run)
@@ -220,7 +220,7 @@ pub fn run_starlark_modules(
                 .context(format_context!("Failed to show tasks"))?;
         }
         rules::Phase::Checkout => {
-            printer.log(Level::Debug, "--Post Checkout Phase--")?;
+            printer.log(printer::Level::Debug, "--Post Checkout Phase--")?;
 
             // at this point everything should be preset, sort tasks as if in run phase
             sort_tasks(target.clone(), rules::Phase::Run)
