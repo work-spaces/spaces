@@ -218,15 +218,20 @@ impl State {
 
         let mut first_error = None;
         for handle in handle_list {
-            let handle_result = handle.join().unwrap();
-            match handle_result {
-                Ok(handle_task_result) => {
-                    task_result.extend(handle_task_result);
+            let handle_join_result = handle.join();
+            match handle_join_result {
+                Ok(handle_result) => {
+                    match handle_result {
+                        Ok(handle_task_result) => {
+                            task_result.extend(handle_task_result);
+                        }
+                        Err(err) => {
+                            first_error = Some(format_error!("Task failed: {:?}", err));
+                        }
+                    }
                 }
                 Err(err) => {
-                    if first_error.is_none() {
-                        first_error = Some(err);
-                    }
+                    first_error = Some(format_error!("Failed to join thread: {:?}", err));
                 }
             }
         }

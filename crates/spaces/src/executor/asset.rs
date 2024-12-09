@@ -186,6 +186,71 @@ impl AddAsset {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AddSoftLink {
+    pub source: String,
+    pub destination: String,
+}
+
+impl AddSoftLink {
+    pub fn execute(&self, _name: &str, _progress: printer::MultiProgressBar) -> anyhow::Result<()> {
+        // create the hard link to sysroot
+        let workspace = workspace::absolute_path();
+        let destination = format!("{}/{}", workspace, self.destination);
+        let source = self.source.clone();
+
+        let desination_path = std::path::Path::new(&destination);
+        if let Some(parent) = desination_path.parent() {
+            std::fs::create_dir_all(parent).context(format_context!(
+                "Failed to create parent directories for soft link {}",
+                destination
+            ))?;
+        }
+
+        if desination_path.exists() {
+            std::fs::remove_file(destination.clone()).context(format_context!(
+                "Failed to remove existing symlink {}",
+                destination
+            ))?;
+        }
+
+        // create a soft link
+        #[cfg(windows)]
+        {
+            let source_path = std::path::Path::new(&source);
+            if source_path.is_dir() {
+                std::os::windows::fs::symlink_dir(source.clone(), destination.clone()).context(
+                    format_context!(
+                        "Failed to create soft link from {} to {}",
+                        source,
+                        destination
+                    ),
+                )?;
+            } else {
+                std::os::windows::fs::symlink_file(source.clone(), destination.clone()).context(
+                    format_context!(
+                        "Failed to create soft link from {} to {}",
+                        source,
+                        destination
+                    ),
+                )?;
+            }
+        }
+
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(source.clone(), destination.clone()).context(
+            format_context!(
+                "Failed to create soft link from {} to {}",
+                source,
+                destination
+            ),
+        )?;
+
+        Ok(())
+    }
+}
+
 fn get_destination_path(destination: &str) -> anyhow::Result<std::path::PathBuf> {
     let workspace_path = workspace::absolute_path();
     Ok(std::path::Path::new(&workspace_path).join(destination))

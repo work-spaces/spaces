@@ -34,6 +34,9 @@ fn evaluate_module(
     let mut loads = Vec::new();
     for load in ast.loads() {
         let module_load_path = workspace::get_workspace_path(workspace_path, name, load.module_id);
+        if module_load_path.ends_with(workspace::SPACES_MODULE_NAME) {
+            return Err(format_error!("Error: Attempting to load module ending with `spaces.star` module. This is a reserved module name."));
+        }
         let contents = std::fs::read_to_string(module_load_path.as_str())
             .context(format_context!("Failed to read file {}", module_load_path))?;
 
@@ -111,17 +114,10 @@ pub fn run_starlark_modules(
     let workspace_path = workspace::absolute_path();
     let mut known_modules = HashSet::new();
 
-    let workspace_digest = {
-        let mut workspace_hasher = blake3::Hasher::new();
-        for (_name, content) in modules.iter() {
-            workspace_hasher.update(content.as_bytes());
-            known_modules.insert(blake3::hash(content.as_bytes()).to_string());
-        }
-        workspace_hasher.finalize().to_string()
-    };
-
     let mut module_queue = std::collections::VecDeque::new();
     module_queue.extend(modules);
+
+    info::set_phase(phase);
 
     // All modules are evaulated in this loop
     // During checkout additional modules may be added to the queue
@@ -243,7 +239,7 @@ pub fn run_starlark_modules(
             if info::is_reproducible() {
                 env.vars.insert(
                     workspace::SPACES_ENV_WORKSPACE_DIGEST.to_string(),
-                    workspace_digest,
+                    workspace::get_digest(),
                 );
             }
 

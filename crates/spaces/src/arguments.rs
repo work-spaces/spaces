@@ -71,6 +71,7 @@ fn run_starlark_modules_in_workspace(
                 .context(format_context!("while executing workspace rules"))?
         }
         RunWorkspace::Script(scripts) => {
+            workspace::set_digest(workspace::calculate_digest(&scripts));
             evaluator::run_starlark_modules(printer, scripts, phase, None)
                 .context(format_context!("while executing checkout rules"))?
         }
@@ -200,7 +201,7 @@ pub fn execute() -> anyhow::Result<()> {
                     "while writing script file {script_path} to workspace"
                 ))?;
 
-                scripts.push((script_path, one_script_contents));
+                scripts.push((file_name, one_script_contents));
             }
 
             load_order.store_path = workspace::get_checkout_store_path();

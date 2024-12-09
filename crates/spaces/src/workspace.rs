@@ -7,8 +7,11 @@ pub const ENV_FILE_NAME: &str = "env.spaces.star";
 pub const SPACES_MODULE_NAME: &str = "spaces.star";
 pub const SPACES_STDIN_NAME: &str = "stdin.star";
 pub const SPACES_LOGS_NAME: &str = "@logs";
+pub const SPACES_CAPSULES_NAME: &str = "@capsules";
+pub const SPACES_CAPSULES_INFO_NAME: &str = "capsules.spaces.json";
 const SPACES_SYNC_ORDER_NAME: &str = "sync.spaces.json";
 const SPACES_HOME_ENV_VAR: &str = "SPACES_HOME";
+pub const SPACES_PROCESS_GROUP_ENV_VAR: &str = "SPACES_PROCESS_GROUP";
 pub const SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE: &str = "SPACES_IS_WORKSPACE_REPRODUCIBLE";
 pub const SPACES_ENV_WORKSPACE_DIGEST: &str = "SPACES_WORKSPACE_DIGEST";
 pub const WORKSPACE_FILE_HEADER: &str = r#"
@@ -59,6 +62,32 @@ struct State {
 }
 
 static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
+
+pub fn calculate_digest(modules: &Vec<(String, String)>) -> String {
+    let mut hasher = blake3::Hasher::new();
+    for (_, content) in modules {
+        hasher.update(content.as_bytes());
+    }
+    hasher.finalize().to_string()
+}
+
+pub fn set_digest(digest: String) {
+    let mut state = get_state().write().unwrap();
+    state.digest = digest.to_string();
+}
+
+pub fn get_digest() -> String {
+    let state = get_state().read().unwrap();
+    state.digest.clone()
+}
+
+pub fn get_current_working_directory() -> anyhow::Result<String> {
+    let current_working_directory = std::env::current_dir()
+        .context(format_context!("Failed to get current working directory - something might be wrong with your environment where CWD is not set"))?
+        .to_string_lossy()
+        .to_string();
+    Ok(current_working_directory)
+}
 
 pub fn is_rules_module(path: &str) -> bool {
     path.ends_with(SPACES_MODULE_NAME)
@@ -151,7 +180,7 @@ fn get_state() -> &'static RwLock<State> {
         digest: "".to_string(),
         log_directory: SPACES_LOGS_NAME.to_string(),
         changes: None,
-        store_path: get_checkout_store_path()
+        store_path: get_checkout_store_path(),
     }));
     STATE.get()
 }
@@ -203,13 +232,19 @@ impl Workspace {
         }
     }
 
+    fn filter_predicate(entry: &walkdir::DirEntry) -> bool {
+        if entry.file_name() == SPACES_CAPSULES_NAME {
+            return false;
+        }
+        true
+    }
+
     pub fn new(mut progress: printer::MultiProgressBar) -> anyhow::Result<Self> {
         let date = chrono::Local::now();
 
-        let current_working_directory = std::env::current_dir()
-            .context(format_context!("Failed to get current working directory"))?
-            .to_string_lossy()
-            .to_string();
+        let current_working_directory = get_current_working_directory().context(
+            format_context!("Failed to get current working directory in new workspace"),
+        )?;
 
         // search the current directory and all parent directories for the workspace file
         let absolute_path = Self::find_workspace_root(current_working_directory.as_str())
@@ -218,6 +253,7 @@ impl Workspace {
         // walkdir and find all spaces.star files in the workspace
         let walkdir: Vec<_> = walkdir::WalkDir::new(absolute_path.as_str())
             .into_iter()
+            .filter_entry(Self::filter_predicate)
             .collect();
 
         progress.set_total(walkdir.len() as u64);
@@ -227,6 +263,8 @@ impl Workspace {
 
         let mut loaded_modules = HashSet::new();
         let mut modules = vec![(ENV_FILE_NAME.to_string(), env_content)];
+
+        let mut original_modules = vec![];
 
         let mut store_path = None;
         if let Ok(load_order) = SyncLoadOrder::load(absolute_path.as_str()) {
@@ -244,7 +282,7 @@ impl Workspace {
                         .context(format_context!("Failed to read file {}", path))?;
                     if !loaded_modules.contains(&path) {
                         loaded_modules.insert(path.clone());
-                        modules.push((module, content));
+                        original_modules.push((module, content));
                     }
                 }
             }
@@ -254,6 +292,9 @@ impl Workspace {
                 format!("No sync order found at {absolute_path}").as_str(),
             );
         }
+
+        let workspace_digest = calculate_digest(&original_modules);
+        modules.extend(original_modules);
 
         let mut unordered_modules = vec![];
 
@@ -281,6 +322,11 @@ impl Workspace {
         unordered_modules.sort_by(|a, b| a.0.cmp(&b.0));
         modules.extend(unordered_modules);
 
+        progress.log(
+            printer::Level::Info,
+            format!("Workspace working directory: {absolute_path}").as_str(),
+        );
+
         std::env::set_current_dir(std::path::Path::new(absolute_path.as_str())).context(
             format_context!("Failed to set current directory to {absolute_path}"),
         )?;
@@ -301,12 +347,7 @@ impl Workspace {
         let skip_folders = vec![SPACES_LOGS_NAME.to_string()];
         let changes = changes::Changes::new(changes_path, skip_folders);
 
-        let mut hasher = blake3::Hasher::new();
-        for (_, content) in modules.iter() {
-            hasher.update(content.as_bytes());
-        }
-
-        state.digest = hasher.finalize().to_string();
+        state.digest = workspace_digest;
         state.absolute_path = absolute_path;
         state.changes = Some(changes);
         if let Some(store_path) = store_path {

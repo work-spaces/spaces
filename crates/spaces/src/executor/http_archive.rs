@@ -4,7 +4,6 @@ use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct HttpArchive {
     pub http_archive: http_archive::HttpArchive,
 }

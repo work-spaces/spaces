@@ -49,6 +49,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let exec_stdin = exec.stdin;
 
+        let invoke_command = exec.command.clone();
+
         let mut command = Command::new(exec.command);
         for arg in exec.args.unwrap_or_default() {
             command.arg(arg);
@@ -109,7 +111,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             );
             Ok(heap.alloc(serde_json::Value::Object(result_map)))
         } else {
-            Err(child_result.unwrap_err()).context("Failed to spawn child process")
+            Err(child_result.unwrap_err()).context(format_context!("Failed to spawn child process {invoke_command}"))
         }
     }
 }

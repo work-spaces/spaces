@@ -185,10 +185,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         ))?;
 
         let yaml_value: serde_yaml::Value = serde_yaml::from_str(&content)
-            .context(format_context!("Failed to parse TOML file {}", path))?;
+            .context(format_context!("Failed to parse YAML file {}", path))?;
 
         let json_value = serde_json::to_value(&yaml_value)
-            .context(format_context!("Failed to convert TOML to JSON {}", path))?;
+            .context(format_context!("Failed to convert YAML to JSON {}", path))?;
 
         // Convert the JSON value to a Starlark value
         let alloc_value = heap.alloc(json_value);

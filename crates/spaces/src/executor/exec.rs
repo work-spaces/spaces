@@ -116,7 +116,7 @@ impl Exec {
                         );
                     }
                     return Err(format_error!(
-                        "Expected success but task failed because {exec_error}"
+                        "Expected success but task failed because:\n {exec_error:?}"
                     ));
                 }
             }

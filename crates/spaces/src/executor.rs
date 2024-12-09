@@ -1,10 +1,10 @@
 pub mod archive;
 pub mod asset;
+pub mod capsule;
 pub mod env;
 pub mod exec;
 pub mod git;
 pub mod http_archive;
-pub mod capsule;
 
 use crate::workspace;
 use anyhow::Context;
@@ -39,11 +39,11 @@ pub enum Task {
     HttpArchive(http_archive::HttpArchive),
     AddWhichAsset(asset::AddWhichAsset),
     AddHardLink(asset::AddHardLink),
+    AddSoftLink(asset::AddSoftLink),
     UpdateAsset(asset::UpdateAsset),
     UpdateEnv(env::UpdateEnv),
     AddAsset(asset::AddAsset),
     Capsule(capsule::Capsule),
-    CapsuleRun(capsule::CapsuleRun),
     Git(git::Git),
 }
 
@@ -66,10 +66,12 @@ impl Task {
             Task::UpdateAsset(asset) => asset.execute(name, progress),
             Task::AddWhichAsset(asset) => asset.execute(name, progress),
             Task::AddHardLink(asset) => asset.execute(name, progress),
+            Task::AddSoftLink(asset) => asset.execute(name, progress),
             Task::UpdateEnv(update_env) => update_env.execute(name, progress),
             Task::AddAsset(asset) => asset.execute(name, progress),
+            Task::Capsule(capsule) => capsule.execute(name, &mut progress),
             Task::Git(git) => {
-                check_new_modules = true;
+                check_new_modules = git.is_evaluate_spaces_modules;
                 git.execute(name, progress)
             }
             Task::Target => Ok(()),
@@ -85,22 +87,23 @@ impl Task {
             let workspace = workspace::absolute_path();
             let parts = name.split(':').collect::<Vec<&str>>();
             if let Some(last) = parts.last() {
-                let workspace_path = std::path::Path::new(workspace.as_str());
+                if !last.starts_with(workspace::SPACES_CAPSULES_NAME) {
+                    let workspace_path = std::path::Path::new(workspace.as_str());
+                    let new_repo_path = workspace_path.join(last);
+                    // add files in the directory that end in spaces.star
+                    let modules = std::fs::read_dir(new_repo_path.clone()).context(
+                        format_context!("Failed to read workspace directory {new_repo_path:?}"),
+                    )?;
 
-                let new_repo_path = workspace_path.join(last);
-                // add files in the directory that end in spaces.star
-                let modules = std::fs::read_dir(new_repo_path.clone()).context(format_context!(
-                    "Failed to read workspace directory {new_repo_path:?}"
-                ))?;
-
-                for module in modules.flatten() {
-                    let path = module.path();
-                    if path.is_file() {
-                        let path = path.to_string_lossy().to_string();
-                        if workspace::is_rules_module(path.as_str()) {
-                            let relative_workspace_path =
-                                format!("{}/{}", last, module.file_name().to_string_lossy());
-                            result.new_modules.push(relative_workspace_path);
+                    for module in modules.flatten() {
+                        let path = module.path();
+                        if path.is_file() {
+                            let path = path.to_string_lossy().to_string();
+                            if workspace::is_rules_module(path.as_str()) {
+                                let relative_workspace_path =
+                                    format!("{}/{}", last, module.file_name().to_string_lossy());
+                                result.new_modules.push(relative_workspace_path);
+                            }
                         }
                     }
                 }

@@ -11,6 +11,7 @@ pub struct Git {
     pub worktree_path: String,
     pub checkout: git::Checkout,
     pub clone: git::Clone,
+    pub is_evaluate_spaces_modules: bool,
 }
 
 impl Git {
@@ -50,14 +51,19 @@ impl Git {
     fn execute_default_clone(
         &self,
         name: &str,
+        filter: Option<String>,
         progress: &mut printer::MultiProgressBar,
     ) -> anyhow::Result<()> {
+        let mut clone_arguments = vec!["clone".to_string()];
+        if let Some(filter) = filter {
+            clone_arguments.push(format!("--filter={}", filter));
+        }
+
+        clone_arguments.push(self.url.clone());
+        clone_arguments.push(self.spaces_key.clone());
+
         let clone_options = printer::ExecuteOptions {
-            arguments: vec![
-                "clone".to_string(),
-                self.url.clone(),
-                self.spaces_key.clone(),
-            ],
+            arguments: clone_arguments,
             ..Default::default()
         };
 
@@ -171,24 +177,22 @@ impl Git {
         mut progress: printer::MultiProgressBar,
     ) -> anyhow::Result<()> {
         match self.clone {
-            git::Clone::Worktree => {
-                self.execute_worktree_clone(name, &mut progress)
-                    .context(format_context!("spaces clone failed"))?
-            }
-            git::Clone::Default => {
-                self.execute_default_clone(name, &mut progress)
-                    .context(format_context!("default clone failed"))?
-            }
-            git::Clone::Shallow => {
-                self.execute_shallow_clone(name, &mut progress)
-                    .context(format_context!("default clone failed"))?
-            }
+            git::Clone::Worktree => self
+                .execute_worktree_clone(name, &mut progress)
+                .context(format_context!("spaces clone failed"))?,
+            git::Clone::Default => self
+                .execute_default_clone(name, None, &mut progress)
+                .context(format_context!("default clone failed"))?,
+            git::Clone::Blobless => self
+                .execute_default_clone(name, Some("blob:none".to_string()), &mut progress)
+                .context(format_context!("default clone failed"))?,
+            git::Clone::Shallow => self
+                .execute_shallow_clone(name, &mut progress)
+                .context(format_context!("default clone failed"))?,
         }
 
         let ref_name = match &self.checkout {
-            git::Checkout::NewBranch(branch_name) => {
-                branch_name.clone()
-            }
+            git::Checkout::NewBranch(branch_name) => branch_name.clone(),
             git::Checkout::Revision(branch_name) => branch_name.clone(),
         };
 
@@ -213,7 +217,11 @@ impl Git {
         if is_branch {
             progress.log(
                 printer::Level::Info,
-                format!("{} is a branch - workspace is not reproducible", self.spaces_key).as_str(),
+                format!(
+                    "{} is a branch - workspace is not reproducible",
+                    self.spaces_key
+                )
+                .as_str(),
             );
             info::set_is_reproducible(false);
         }

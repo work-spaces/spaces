@@ -95,8 +95,54 @@ fn transform_url_to_gh_arguments(
     ])
 }
 
+pub fn download(
+    url: &str,
+    destination: &str,
+    runtime: &tokio::runtime::Runtime,
+    mut progress: printer::MultiProgressBar,
+) -> anyhow::Result<tokio::task::JoinHandle<anyhow::Result<printer::MultiProgressBar>>> {
+    progress.log(
+        printer::Level::Trace,
+        format!("Downloading using reqwest {url} -> {destination}").as_str(),
+    );
+
+    let destination = destination.to_string();
+    let url = url.to_string();
+
+    let join_handle = runtime.spawn(async move {
+        let client = reqwest::ClientBuilder::new()
+            .redirect(reqwest::redirect::Policy::limited(16))
+            .build()?;
+
+        let mut response = client.get(&url).send().await?;
+        let total_size = response.content_length().unwrap_or(0);
+        progress.set_total(total_size);
+        progress.set_message(url.as_str());
+
+        let mut output_file = tokio::fs::File::create(destination).await?;
+
+        while let Some(chunk) = response.chunk().await? {
+            progress.increment(chunk.len() as u64);
+            output_file.write_all(&chunk).await?;
+        }
+
+        Ok(progress)
+    });
+
+    Ok(join_handle)
+}
+
+// TODO Add a version of this that uses GH
+pub fn download_string(url: &str) -> anyhow::Result<String> {
+    let response =
+        reqwest::blocking::get(url).context(format_context!("Failed to download {url}"))?;
+    let content = response
+        .text()
+        .context(format_context!("Failed to read response from {url}"))?;
+    Ok(content)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct HttpArchive {
     pub spaces_key: String,
     archive: Archive,
@@ -127,6 +173,20 @@ impl HttpArchive {
                 format_context!("Failed to get driver for {archive_file_name}"),
             );
 
+        let effective_sha256 = if archive.sha256.starts_with("http") {
+            let sha256 = download_string(archive.sha256.as_str())
+                .context(format_context!("Failed to download {}", archive.sha256))?;
+            if sha256.len() != 64 {
+                return Err(format_error!(
+                    "Invalid sha256 checksum {sha256} for {}",
+                    archive.url
+                ));
+            }
+            sha256
+        } else {
+            archive.sha256.clone()
+        };
+
         let mut archive_driver = None;
         let full_path_to_archive = match archive_driver_result {
             Ok(driver) => {
@@ -134,15 +194,18 @@ impl HttpArchive {
                 format!(
                     "{}/{}.{}",
                     full_path_to_archive,
-                    archive.sha256,
+                    effective_sha256,
                     driver.extension()
                 )
             }
             Err(_) => format!("{full_path_to_archive}/{archive_file_name}"),
         };
 
+        let mut archive = archive.clone();
+        archive.sha256 = effective_sha256;
+
         Ok(Self {
-            archive: archive.clone(),
+            archive,
             archive_driver,
             full_path_to_archive,
             spaces_key: spaces_key.to_string(),
@@ -204,7 +267,13 @@ impl HttpArchive {
         }
 
         let target_prefix = if let Some(add_prefix) = self.archive.add_prefix.as_ref() {
-            format!("{workspace_directory}/{add_prefix}")
+            if add_prefix.starts_with("//") {
+                format!("{workspace_directory}/{add_prefix}")
+            } else if add_prefix.starts_with("/") {
+                add_prefix.to_owned()
+            } else {
+                format!("{workspace_directory}/{add_prefix}")
+            }
         } else {
             format!("{workspace_directory}/{space_directory}")
         };
@@ -313,7 +382,9 @@ impl HttpArchive {
 
                 progress_bar
             } else {
-                let join_handle = self.download(&runtime, progress_bar)?;
+                let join_handle = self
+                    .download(&runtime, progress_bar)
+                    .context(format_context!("Failed to download using reqwest"))?;
                 runtime.block_on(join_handle)??
             }
         } else {
@@ -330,41 +401,20 @@ impl HttpArchive {
     pub fn download(
         &self,
         runtime: &tokio::runtime::Runtime,
-        mut progress: printer::MultiProgressBar,
+        progress: printer::MultiProgressBar,
     ) -> anyhow::Result<tokio::task::JoinHandle<anyhow::Result<printer::MultiProgressBar>>> {
-        let url = self.archive.url.clone();
         let full_path_to_archive = self.full_path_to_archive.clone();
         let full_path = std::path::Path::new(&full_path_to_archive);
         if let Some(parent) = full_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
 
-        progress.log(
-            printer::Level::Trace,
-            format!("Downloading using reqwest {url:?} -> {full_path:?}").as_str(),
-        );
-
-        let join_handle = runtime.spawn(async move {
-            let client = reqwest::ClientBuilder::new()
-                .redirect(reqwest::redirect::Policy::limited(16))
-                .build()?;
-
-            let mut response = client.get(&url).send().await?;
-            let total_size = response.content_length().unwrap_or(0);
-            progress.set_total(total_size);
-            progress.set_message(url.as_str());
-
-            let mut output_file = tokio::fs::File::create(full_path_to_archive.as_str()).await?;
-
-            while let Some(chunk) = response.chunk().await? {
-                progress.increment(chunk.len() as u64);
-                output_file.write_all(&chunk).await?;
-            }
-
-            Ok(progress)
-        });
-
-        Ok(join_handle)
+        download(
+            self.archive.url.as_str(),
+            full_path_to_archive.as_str(),
+            runtime,
+            progress,
+        )
     }
 
     fn save_files_json(&self, files: Files) -> anyhow::Result<()> {

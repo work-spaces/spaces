@@ -44,6 +44,7 @@ const ADD_REPO_EXAMPLE: &str = r#"checkout.add_repo(
         "rev": "main",
         "checkout": "Revision",
         "clone": "Default",
+        "is_evaluate_spaces_modules": True
     }
 )"#;
 
@@ -246,6 +247,7 @@ pub const FUNCTIONS: &[Function] = &[
                     ("rev", "repository revision as a branch, tag or commit"),
                     ("checkout", "Revision: checkout detached at commit or branch|NewBranch: create a new branch based at rev"),
                     ("clone", "Default|Worktree|Shallow"),
+                    ("is_evaluate_spaces_modules", "True|False to check the repo for spaces.star files to evaluate"),
                 ]
             }
         ],
@@ -356,6 +358,23 @@ pub const FUNCTIONS: &[Function] = &[
                 },
             ],
             example: Some(ADD_HARD_LINK_ASSET_EXAMPLE)
+    },
+    Function {
+        name: "add_soft_link_asset",
+        description: r#"Adds a softlink from anywhere on the system to the workspace"#,
+        return_type: "None",
+        args: &[
+            get_rule_argument(),
+            Arg {
+                name: "asset",
+                description: "dict with",
+                dict: &[
+                    ("source", "the source of the software link"),
+                    ("destination", "relative path where asset will live in the workspace"),
+                ],
+            },
+        ],
+        example: Some(ADD_HARD_LINK_ASSET_EXAMPLE)
     },
     Function {
         name: "update_asset",
@@ -472,6 +491,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                     worktree_path,
                     checkout,
                     clone: repo.clone.unwrap_or(git::Clone::Default),
+                    is_evaluate_spaces_modules: repo.is_evaluate_spaces_modules.unwrap_or(true),
                 }),
             ))
             .context(format_context!("Failed to insert task {rule_name}"))?;
@@ -631,6 +651,29 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(NoneType)
     }
 
+    fn add_soft_link_asset(
+        #[starlark(require = named)] rule: starlark::values::Value,
+        #[starlark(require = named)] asset: starlark::values::Value,
+    ) -> anyhow::Result<NoneType> {
+        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+            .context(format_context!("bad options for which asset rule"))?;
+
+        let asset: asset::AddSoftLink = serde_json::from_value(asset.to_json_value()?)
+            .context(format_context!("Failed to parse which asset arguments"))?;
+
+        let state = rules::get_state().read().unwrap();
+        let rule_name = rule.name.clone();
+        state
+            .insert_task(rules::Task::new(
+                rule,
+                rules::Phase::Checkout,
+                executor::Task::AddSoftLink(asset),
+            ))
+            .context(format_context!("Failed to insert task {rule_name}"))?;
+
+        Ok(NoneType)
+    }
+
     fn add_archive(
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] archive: starlark::values::Value,
@@ -678,9 +721,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for repo"))?;
 
-        let capsule: executor::capsule::Capsule =
-            serde_json::from_value(capsule.to_json_value()?)
-                .context(format_context!("Failed to parse capsule arguments"))?;
+        let capsule: executor::capsule::Capsule = serde_json::from_value(capsule.to_json_value()?)
+            .context(format_context!("Failed to parse capsule arguments"))?;
 
         let state = rules::get_state().read().unwrap();
         let rule_name = rule.name.clone();
@@ -692,6 +734,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 executor::Task::Capsule(capsule),
             ))
             .context(format_context!("Failed to insert task {rule_name}"))?;
+
+        // insert a Run rule also
 
         Ok(NoneType)
     }

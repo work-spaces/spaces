@@ -21,6 +21,7 @@ pub enum Clone {
     Default,
     Worktree,
     Shallow,
+    Blobless,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,6 +31,7 @@ pub struct Repo {
     pub checkout: CheckoutOption,
     pub rev: String,
     pub clone: Option<Clone>,
+    pub is_evaluate_spaces_modules: Option<bool>,
 }
 
 impl Repo {
