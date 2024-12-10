@@ -114,11 +114,22 @@ pub fn run_starlark_modules(
     let workspace_path = workspace::absolute_path();
     let mut known_modules = HashSet::new();
 
+    for (_, content) in modules.iter() {
+        let hash = blake3::hash(content.as_bytes()).to_string();
+        if !known_modules.contains(&hash) {
+            known_modules.insert(hash);
+        }
+    }
+
     let mut module_queue = std::collections::VecDeque::new();
     module_queue.extend(modules);
 
     info::set_phase(phase);
 
+    printer.log(
+        printer::Level::Trace,
+        format!("Input module queue:{module_queue:?}").as_str(),
+    )?;
     // All modules are evaulated in this loop
     // During checkout additional modules may be added to the queue
     // For Run mode, the env module is processed first and available

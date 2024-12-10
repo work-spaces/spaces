@@ -43,7 +43,10 @@ impl State {
         }
 
         let mut tasks = self.tasks.write().unwrap();
-        if tasks.get(&rule_label).is_none() {
+
+        if let Some(task) = tasks.get(&rule_label){
+            return Err(format_error!("Rule already exists {rule_label} with {task:?}"));
+        } else {
             tasks.insert(rule_label, task);
         }
 
@@ -70,11 +73,13 @@ impl State {
         for task in tasks.values_mut() {
             // capture implicit dependencies based on inputs/outputs
             for other_task in tasks_copy.values() {
+                // can't create a dependency on itself
                 if task.rule.name == other_task.rule.name {
                     continue;
                 }
                 task.update_implicit_dependency(other_task);
             }
+
             // all non-setup tasks need to depend on the Setup tasks
             if task.rule.type_ != Some(RuleType::Setup) {
                 for setup_task in setup_tasks.iter() {
@@ -89,6 +94,7 @@ impl State {
 
             let task_phase = task.phase;
             if phase == Phase::Checkout && task_phase != Phase::Checkout {
+                // skip evaluating non-checkout tasks during checkout
                 continue;
             }
 
@@ -98,6 +104,25 @@ impl State {
                     let dep_task = tasks_copy
                         .get(&dep)
                         .ok_or(format_error!("Task Depedency not found {dep}"))?;
+
+                    match task_phase {
+                        Phase::Run => {
+                            if dep_task.phase != Phase::Run {
+                                return Err(format_error!(
+                                    "Run task {} cannot depend on non-run task {}", task.rule.name, dep_task.rule.name
+                                ));
+                            }
+                        }
+                        Phase::Checkout => {
+                            if dep_task.phase != Phase::Checkout {
+                                return Err(format_error!(
+                                    "Checkout task {} cannot depend on non-checkout task {}", task.rule.name, dep_task.rule.name
+                                ));
+                            }
+                        }
+                        _ => {}
+                    }
+                    
 
                     task.add_signal_dependency(dep_task);
                     self.graph
@@ -193,8 +218,8 @@ impl State {
                 );
 
                 progress_bar.log(
-                    printer::Level::Trace,
-                    format!("Running task {}", task.rule.name).as_str(),
+                    printer::Level::Debug,
+                    format!("Staging task {}", task.rule.name).as_str(),
                 );
                 handle_list.push(task.execute(progress_bar));
 
@@ -413,7 +438,7 @@ impl Task {
                     let (lock, _) = &*deps_signal;
                     let signal_access = lock.lock().unwrap();
                     progress.log(
-                        printer::Level::Trace,
+                        printer::Level::Debug,
                         format!(
                             "{name} Waiting for dependency {} {count}/{total}",
                             signal_access.name

@@ -262,6 +262,7 @@ impl Workspace {
             .context(format_context!("Failed to read workspace file"))?;
 
         let mut loaded_modules = HashSet::new();
+        loaded_modules.insert(ENV_FILE_NAME.to_string());
         let mut modules = vec![(ENV_FILE_NAME.to_string(), env_content)];
 
         let mut original_modules = vec![];
@@ -273,15 +274,15 @@ impl Workspace {
             for module in load_order.order {
                 if is_rules_module(module.as_str()) {
                     progress.increment(1);
-                    progress.log(
-                        printer::Level::Trace,
-                        format!("Loading module from sync order: {}", module).as_str(),
-                    );
                     let path = format!("{}/{}", absolute_path, module);
                     let content = std::fs::read_to_string(path.as_str())
                         .context(format_context!("Failed to read file {}", path))?;
-                    if !loaded_modules.contains(&path) {
-                        loaded_modules.insert(path.clone());
+                    if !loaded_modules.contains(&module) {
+                        progress.log(
+                            printer::Level::Trace,
+                            format!("Loading module from sync order: {}", module).as_str(),
+                        );
+                        loaded_modules.insert(module.clone());
                         original_modules.push((module, content));
                     }
                 }
@@ -311,6 +312,10 @@ impl Workspace {
                     if let Some(path) = path.strip_prefix(format!("{}/", absolute_path).as_str()) {
                         let path = path.to_string();
                         if !loaded_modules.contains(&path) {
+                            progress.log(
+                                printer::Level::Trace,
+                                format!("Loading module from directory: {}", path).as_str(),
+                            );
                             loaded_modules.insert(path.clone());
                             unordered_modules.push((path, content));
                         }
