@@ -112,6 +112,11 @@ impl State {
                                     "Run task {} cannot depend on non-run task {}", task.rule.name, dep_task.rule.name
                                 ));
                             }
+                            if task.rule.type_ == Some(RuleType::Setup) && dep_task.rule.type_ != Some(RuleType::Setup) {
+                                return Err(format_error!(
+                                    "Setup task {} cannot depend on non-setup task {}", task.rule.name, dep_task.rule.name
+                                ));
+                            }
                         }
                         Phase::Checkout => {
                             if dep_task.phase != Phase::Checkout {

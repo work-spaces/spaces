@@ -296,19 +296,6 @@ fn load_file_info(capsule_workspace_path: &str) -> anyhow::Result<InfoFile> {
     Ok(info)
 }
 
-fn save_file_info(capsule_workspace_path: &str, info: InfoFile) -> anyhow::Result<()> {
-    let file_path = format!(
-        "{}/{}",
-        capsule_workspace_path,
-        workspace::SPACES_CAPSULES_INFO_NAME
-    );
-    let file = std::fs::File::create(file_path.as_str())
-        .context(format_context!("Failed to create {file_path}"))?;
-    serde_json::to_writer_pretty(file, &info)
-        .context(format_context!("Failed to write {file_path}"))?;
-    Ok(())
-}
-
 fn get_spaces_command() -> anyhow::Result<String> {
     let spaces_exec = which::which("spaces").context("Failed to find spaces executable")?;
     Ok(spaces_exec.to_string_lossy().to_string())
@@ -554,7 +541,7 @@ impl Capsule {
         let capsule_info = {
             let mut state = get_state().write().unwrap();
 
-            let mut capsule_info = load_file_info(&workspace_path)
+            let capsule_info = load_file_info(&workspace_path)
                 .context(format_context!("Failed to load capsules.spaces.json"))?;
 
             state.info_file = capsule_info.clone();
