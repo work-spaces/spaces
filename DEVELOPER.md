@@ -14,7 +14,7 @@ Use `spaces` to develop with `printer` and `easy-archiver` in the same workspace
 
 ```sh
 git clone https://github.com/work-spaces/workflows
-spaces checkout --script=workflows/spaces-develop.star --name=spaces-updates
+spaces checkout --script=workflows/preload --script=workflows/spaces-develop --name=spaces-updates
 cd spaces
 source env
 cargo build
