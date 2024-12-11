@@ -56,6 +56,7 @@ pub fn install_tools(printer: &mut printer::Printer) -> anyhow::Result<()> {
             excludes: None,
             strip_prefix: Some("gh_2.53.0_macOS_arm64".to_string()),
             add_prefix: gh_prefix.clone(),
+            filename: None,
         }),
         macos_x86_64: Some(http_archive::Archive {
             url: "https://github.com/cli/cli/releases/download/v2.53.0/gh_2.53.0_macOS_amd64.zip"
@@ -66,6 +67,7 @@ pub fn install_tools(printer: &mut printer::Printer) -> anyhow::Result<()> {
             excludes: None,
             strip_prefix: Some("gh_2.53.0_macOS_amd64".to_string()),
             add_prefix: gh_prefix.clone(),
+            filename: None, 
         }),
         linux_aarch64: Some(http_archive::Archive {
             url:
@@ -77,6 +79,7 @@ pub fn install_tools(printer: &mut printer::Printer) -> anyhow::Result<()> {
             excludes: None,
             strip_prefix: Some("gh_2.53.0_linux_arm64".to_string()),
             add_prefix: gh_prefix.clone(),
+            filename: None, 
         }),
         linux_x86_64: Some(http_archive::Archive {
             url:
@@ -88,6 +91,7 @@ pub fn install_tools(printer: &mut printer::Printer) -> anyhow::Result<()> {
             excludes: None,
             strip_prefix: Some("gh_2.53.0_linux_amd64".to_string()),
             add_prefix: gh_prefix.clone(),
+            filename: None, 
         }),
         windows_x86_64: Some(http_archive::Archive {
             url: "https://github.com/cli/cli/releases/download/v2.53.0/gh_2.53.0_windows_amd64.zip"
@@ -98,6 +102,7 @@ pub fn install_tools(printer: &mut printer::Printer) -> anyhow::Result<()> {
             excludes: None,
             strip_prefix: Some("gh_2.53.0_windows_amd64".to_string()),
             add_prefix: gh_prefix.clone(),
+            filename: None, 
         }),
         windows_aarch64: Some(http_archive::Archive {
             url: "https://github.com/cli/cli/releases/download/v2.53.0/gh_2.53.0_windows_arm64.zip"
@@ -108,6 +113,7 @@ pub fn install_tools(printer: &mut printer::Printer) -> anyhow::Result<()> {
             excludes: None,
             strip_prefix: Some("gh_2.53.0_windows_arm64".to_string()),
             add_prefix: gh_prefix.clone(),
+            filename: None, 
         }),
     };
 
@@ -128,6 +134,7 @@ pub fn install_tools(printer: &mut printer::Printer) -> anyhow::Result<()> {
             excludes: None,
             strip_prefix: None,
             add_prefix: cargo_binstall_prefix.clone(),
+            filename: None, 
         }),
         macos_x86_64: Some(http_archive::Archive {
             url: "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.10.9/cargo-binstall-x86_64-apple-darwin.zip"
@@ -138,6 +145,7 @@ pub fn install_tools(printer: &mut printer::Printer) -> anyhow::Result<()> {
             excludes: None,
             strip_prefix: None,
             add_prefix: cargo_binstall_prefix.clone(),
+            filename: None, 
         }),
         linux_aarch64: Some(http_archive::Archive {
             url: "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.10.9/cargo-binstall-aarch64-unknown-linux-gnu.tgz".to_string(),
@@ -147,6 +155,7 @@ pub fn install_tools(printer: &mut printer::Printer) -> anyhow::Result<()> {
             excludes: None,
             strip_prefix: None,
             add_prefix: cargo_binstall_prefix.clone(),
+            filename: None, 
         }),
         linux_x86_64: Some(http_archive::Archive {
             url: "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.10.9/cargo-binstall-x86_64-unknown-linux-gnu.tgz".to_string(),
@@ -156,6 +165,7 @@ pub fn install_tools(printer: &mut printer::Printer) -> anyhow::Result<()> {
             excludes: None,
             strip_prefix: None,
             add_prefix: cargo_binstall_prefix.clone(),
+            filename: None, 
         }),
         windows_aarch64: Some(http_archive::Archive {
             url: "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.10.9/cargo-binstall-aarch64-pc-windows-msvc.zip".to_string(),
@@ -165,6 +175,7 @@ pub fn install_tools(printer: &mut printer::Printer) -> anyhow::Result<()> {
             excludes: None,
             strip_prefix: None,
             add_prefix: cargo_binstall_prefix.clone(),
+            filename: None, 
         }),
         windows_x86_64: Some(http_archive::Archive {
             url: "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.10.9/cargo-binstall-x86_64-pc-windows-msvc.zip".to_string(),
@@ -174,6 +185,7 @@ pub fn install_tools(printer: &mut printer::Printer) -> anyhow::Result<()> {
             excludes: None,
             strip_prefix: None,
             add_prefix: cargo_binstall_prefix.clone(),
+            filename: None, 
         }),
     };
 

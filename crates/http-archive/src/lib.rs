@@ -35,6 +35,7 @@ pub struct Archive {
     pub excludes: Option<Vec<String>>,
     pub strip_prefix: Option<String>,
     pub add_prefix: Option<String>,
+    pub filename: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -111,10 +112,32 @@ pub fn download(
 
     let join_handle = runtime.spawn(async move {
         let client = reqwest::ClientBuilder::new()
-            .redirect(reqwest::redirect::Policy::limited(16))
+            .redirect(reqwest::redirect::Policy::limited(20))
             .build()?;
 
-        let mut response = client.get(&url).send().await?;
+        let request = client
+            .get(&url)
+            .header(reqwest::header::USER_AGENT, "wget")
+            .header(reqwest::header::ACCEPT, "*/*");
+
+        progress.log(
+            printer::Level::Debug,
+            format!("Reqwest request: {request:?}").as_str(),
+        );
+
+        let mut response = request
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            return Err(format_error!("Failed to download {url}. got response {response:?}"));
+        }
+
+        progress.log(
+            printer::Level::Debug,
+            format!("Response: {response:?}").as_str(),
+        );
+
         let total_size = response.content_length().unwrap_or(0);
         progress.set_total(total_size);
         progress.set_message(url.as_str());
@@ -153,7 +176,7 @@ pub struct HttpArchive {
 
 impl HttpArchive {
     pub fn new(bare_store_path: &str, spaces_key: &str, archive: &Archive) -> anyhow::Result<Self> {
-        let relative_path = Self::url_to_relative_path(archive.url.as_str())
+        let relative_path = Self::url_to_relative_path(archive.url.as_str(), &archive.filename)
             .context(format_context!("no relative path for {}", archive.url))?;
 
         let full_path_to_archive = format!("{bare_store_path}/{relative_path}");
@@ -491,7 +514,7 @@ impl HttpArchive {
         Ok(next_progress_bar)
     }
 
-    fn url_to_relative_path(url: &str) -> anyhow::Result<String> {
+    fn url_to_relative_path(url: &str, filename: &Option<String>) -> anyhow::Result<String> {
         let archive_url = url::Url::parse(url)
             .context(format_context!("Failed to parse bare store url {url}"))?;
 
@@ -500,6 +523,10 @@ impl HttpArchive {
             .ok_or(format_error!("No host found in url {}", url))?;
         let scheme = archive_url.scheme();
         let path = archive_url.path();
-        Ok(format!("{scheme}/{host}{path}"))
+        let mut relative_path = format!("{scheme}/{host}{path}");
+        if let Some(filename) = filename {
+            relative_path = format!("{}/{}", relative_path, filename);
+        }
+        Ok(relative_path)
     }
 }

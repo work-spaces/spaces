@@ -8,7 +8,7 @@ Quickly create a `python3.12` virtual environment usinv `uv`.
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/work-spaces/install-spaces/refs/heads/main/install.sh)"
 export PATH=$HOME/.local/bin:$PATH
 git clone https://github.com/work-spaces/workflows/
-spaces checkout --spaces-starlark-sdk --script=workflows/python-sdk --name=python-quick-test
+spaces checkout --script=workflows/preload --script=workflows/python-sdk --name=python-quick-test
 cd python-quick-test
 spaces run
 source env
