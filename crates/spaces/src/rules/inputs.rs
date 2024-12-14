@@ -1,10 +1,9 @@
-use crate::workspace;
+use crate::{workspace, state_lock};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use bincode::{Decode, Encode};
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::sync::RwLock;
 
 pub fn validate_input_globs(globs: &Option<HashSet<String>>) -> anyhow::Result<()> {
     if let Some(globs) = globs.as_ref() {
@@ -25,17 +24,17 @@ pub fn is_rule_inputs_changed(
     seed: &str,
     inputs: &HashSet<String>,
 ) -> anyhow::Result<Option<String>> {
-    let state = get_state().read().unwrap();
+    let state = get_state().read();
     state.inputs.is_changed(progress, rule_name, seed, inputs)
 }
 
 pub fn update_rule_digest(rule: &str, digest: String) {
-    let mut state = get_state().write().unwrap();
+    let mut state = get_state().write();
     state.inputs.save_digest(rule, digest);
 }
 
 pub fn save() -> anyhow::Result<()> {
-    let state = get_state().read().unwrap();
+    let state = get_state().read();
     let inputs_path = workspace::get_inputs_path();
     state.inputs.save(inputs_path)
 }
@@ -97,20 +96,21 @@ impl Inputs {
     }
 }
 
+#[derive(Debug)]
 struct State {
     pub inputs: Inputs,
 }
 
-static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
+static STATE: state::InitCell<state_lock::StateLock<State>> = state::InitCell::new();
 
-fn get_state() -> &'static RwLock<State> {
+fn get_state() -> &'static state_lock::StateLock<State> {
     if let Some(state) = STATE.try_get() {
         return state;
     }
 
     let inputs_path = workspace::get_inputs_path();
 
-    STATE.set(RwLock::new(State {
+    STATE.set(state_lock::StateLock::new(State {
         inputs: Inputs::new(inputs_path),
     }));
     STATE.get()

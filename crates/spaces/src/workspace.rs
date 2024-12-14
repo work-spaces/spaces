@@ -1,8 +1,8 @@
-use crate::environment;
+use crate::{environment, state_lock};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
-use std::{collections::{HashSet, HashMap}, sync::RwLock};
+use std::collections::{HashSet, HashMap};
 
 pub const ENV_FILE_NAME: &str = "env.spaces.star";
 pub const LOCK_FILE_NAME: &str = "lock.spaces.star";
@@ -61,6 +61,7 @@ impl Settings {
     }
 }
 
+#[derive(Debug)]
 struct State {
     absolute_path: String,
     log_directory: String,
@@ -76,7 +77,7 @@ struct State {
     max_queue_count: i64,
 }
 
-static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
+static STATE: state::InitCell<state_lock::StateLock<State>> = state::InitCell::new();
 
 pub fn calculate_digest(modules: &Vec<(String, String)>) -> String {
     let mut hasher = blake3::Hasher::new();
@@ -93,7 +94,7 @@ pub fn save_env_file(env: &str) -> anyhow::Result<()> {
     workspace_file_content.push_str("workspace_env = ");
     workspace_file_content.push_str(env);
     workspace_file_content.push_str("\n\ninfo.set_env(env = workspace_env) \n");
-    let state = get_state().read().unwrap();
+    let state = get_state().read();
     let workspace_file_path = format!("{}/{}", state.absolute_path, ENV_FILE_NAME);
     std::fs::write(workspace_file_path.as_str(), workspace_file_content)
         .context(format_context!("Failed to write workspace file"))?;
@@ -102,17 +103,17 @@ pub fn save_env_file(env: &str) -> anyhow::Result<()> {
 }
 
 pub fn is_create_lock_file() -> bool {
-    let state = get_state().read().unwrap();
+    let state = get_state().read();
     state.is_create_lock_file
 }
 
 pub fn set_create_lock_file(is_create_lock_file: bool) {
-    let mut state = get_state().write().unwrap();
+    let mut state = get_state().write();
     state.is_create_lock_file = is_create_lock_file;
 }
 
 pub fn save_lock_file() -> anyhow::Result<()> {
-    let state = get_state().read().unwrap();
+    let state = get_state().read();
     if !state.is_create_lock_file {
         return Ok(());
     }
@@ -132,22 +133,22 @@ pub fn save_lock_file() -> anyhow::Result<()> {
 }
 
 pub fn set_digest(digest: String) {
-    let mut state = get_state().write().unwrap();
+    let mut state = get_state().write();
     state.digest = digest.to_string();
 }
 
 pub fn get_digest() -> String {
-    let state = get_state().read().unwrap();
+    let state = get_state().read();
     state.digest.clone()
 }
 
 pub fn get_git_commit_lock(rule_name: &str) -> Option<String> {
-    let state = get_state().read().unwrap();
+    let state = get_state().read();
     state.locks.get(rule_name).cloned()
 }
 
 pub fn set_locks(locks: HashMap<String, String>) {
-    let mut state = get_state().write().unwrap();
+    let mut state = get_state().write();
     state.locks = locks;
 }
 
@@ -180,7 +181,7 @@ pub fn update_changes(
     progress: &mut printer::MultiProgressBar,
     inputs: &HashSet<String>,
 ) -> anyhow::Result<()> {
-    let mut state = get_state().write().unwrap();
+    let mut state = get_state().write();
     if let Some(changes) = state.changes.as_mut() {
         changes
             .update_from_inputs(progress, inputs)
@@ -191,8 +192,8 @@ pub fn update_changes(
 
 pub fn save_changes() -> anyhow::Result<()> {
     let changes_path = get_changes_path();
-    let state = get_state().read().unwrap();
-    let changes = state.changes.as_ref().unwrap();
+    let state = get_state().read();
+    let changes = state.changes.as_ref().ok_or(format_error!("No changes available"))?;
     changes
         .save(changes_path)
         .context(format_context!("Failed to save changes file"))?;
@@ -210,7 +211,7 @@ pub fn get_checkout_store_path() -> String {
 }
 
 pub fn get_store_path() -> String {
-    let state = get_state().read().unwrap();
+    let state = get_state().read();
     state.store_path.clone()
 }
 
@@ -223,7 +224,7 @@ pub fn get_cargo_binstall_root() -> String {
 }
 
 pub fn add_git_commit_lock(rule_name: &str, commit: String) {
-    let mut state = get_state().write().unwrap();
+    let mut state = get_state().write();
     state.locks.insert(rule_name.to_string(), commit);
 }
 
@@ -232,27 +233,27 @@ pub fn get_rule_inputs_digest(
     seed: &str,
     globs: &HashSet<String>,
 ) -> anyhow::Result<String> {
-    let state = get_state().read().unwrap();
-    let changes = state.changes.as_ref().unwrap();
+    let state = get_state().read();
+    let changes = state.changes.as_ref().ok_or(format_error!("No changes available"))?;
     changes.get_digest(progress, seed, globs)
 }
 pub fn set_ci_true() {
-    let mut state = get_state().write().unwrap();
+    let mut state = get_state().write();
     state.is_ci = true;
 }
 
 pub fn get_is_ci() -> bool {
-    let state = get_state().read().unwrap();
+    let state = get_state().read();
     state.is_ci
 }
 
 pub fn set_env(env: environment::Environment) {
-    let mut state = get_state().write().unwrap();
+    let mut state = get_state().write();
     state.env = env;
 }
 
 pub fn update_env(env: environment::Environment) -> anyhow::Result<()> {
-    let mut state = get_state().write().unwrap();
+    let mut state = get_state().write();
     state.env.vars.extend(env.vars);
     state.env.paths.extend(env.paths);
     if let Some(system_paths) = env.system_paths {
@@ -266,22 +267,22 @@ pub fn update_env(env: environment::Environment) -> anyhow::Result<()> {
 }
 
 pub fn get_env() -> environment::Environment {
-    let state = get_state().read().unwrap();
+    let state = get_state().read();
     state.env.clone()
 }
 
 pub fn get_max_queue_count() -> i64 {
-    let state = get_state().read().unwrap();
+    let state = get_state().read();
     state.max_queue_count
 }
 
 pub fn set_max_queue_count(count: i64) {
-    let mut state = get_state().write().unwrap();
+    let mut state = get_state().write();
     state.max_queue_count = count;
 }
 
 pub fn set_is_reproducible(value: bool) {
-    let mut state = get_state().write().unwrap();
+    let mut state = get_state().write();
     state.env.vars.insert(
         SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE.to_owned(),
         value.to_string(),
@@ -289,7 +290,7 @@ pub fn set_is_reproducible(value: bool) {
 }
 
 pub fn is_reproducible() -> bool {
-    let state = get_state().read().unwrap();
+    let state = get_state().read();
     if let Some(value) = state
         .env
         .vars
@@ -310,7 +311,7 @@ fn get_unique() -> anyhow::Result<String> {
     Ok(unique_sha256.as_str()[0..4].to_string())
 }
 
-fn get_state() -> &'static RwLock<State> {
+fn get_state() -> &'static state_lock::StateLock<State> {
     if let Some(state) = STATE.try_get() {
         return state;
     }
@@ -322,7 +323,7 @@ fn get_state() -> &'static RwLock<State> {
         "true".to_string(),
     );
 
-    STATE.set(RwLock::new(State {
+    STATE.set(state_lock::StateLock::new(State {
         absolute_path: "".to_string(),
         digest: "".to_string(),
         log_directory: SPACES_LOGS_NAME.to_string(),
@@ -333,13 +334,13 @@ fn get_state() -> &'static RwLock<State> {
         new_branch_name: None,
         env,
         is_ci: false,
-        max_queue_count: 0,
+        max_queue_count: 8,
     }));
     STATE.get()
 }
 
 pub fn get_log_file(rule_name: &str) -> String {
-    let state = get_state().read().unwrap();
+    let state = get_state().read();
     let rule_name = rule_name.replace('/', "_");
     let rule_name = rule_name.replace(':', "_");
     format!("{}/{rule_name}.log", state.log_directory)
@@ -358,7 +359,7 @@ pub fn get_changes_path() -> &'static str {
 }
 
 pub fn absolute_path() -> String {
-    get_state().read().unwrap().absolute_path.clone()
+    get_state().read().absolute_path.clone()
 }
 
 #[derive(Debug)]
@@ -496,7 +497,7 @@ impl Workspace {
             format_context!("Failed to set current directory to {absolute_path}"),
         )?;
 
-        let mut state = get_state().write().unwrap();
+        let mut state = get_state().write();
 
         state.log_directory = format!("{SPACES_LOGS_NAME}/logs_{}", date.format("%Y%m%d-%H-%M-%S"));
 

@@ -237,15 +237,11 @@ pub fn get_branch_log(
             let line = line.trim_matches('"');
             let parts: Vec<&str> = line.split(';').collect();
             if parts.len() == 3 {
-                let tag = if let Some(tag) = parts[1].strip_prefix("tag: ") {
-                    Some(tag.to_string())
-                } else {
-                    None
-                };
+                let tag = parts[1].strip_prefix("tag: ").map(|tag| tag.to_string());
 
                 log_entries.push(LogEntry {
                     commit: parts[0].to_string(),
-                    tag: tag,
+                    tag,
                     description: parts[2].to_string(),
                 });
             }
@@ -463,7 +459,11 @@ impl Worktree {
             working_directory: Some(self.full_path.clone()),
             ..Default::default()
         };
-        options.arguments = vec!["fetch".to_string(), "origin".to_string(), revision.to_owned()];
+        options.arguments = vec![
+            "fetch".to_string(),
+            "origin".to_string(),
+            revision.to_owned(),
+        ];
 
         execute_git_command(&self.url, progress_bar, options.clone())
             .context(format_context!("while fetching existing bare repository"))?;

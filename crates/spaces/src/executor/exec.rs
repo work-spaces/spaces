@@ -8,6 +8,7 @@ use std::collections::HashMap;
 pub enum Expect {
     Failure,
     Success,
+    Any,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -87,6 +88,8 @@ impl Exec {
             Err(exec_error) => {
                 progress.log(printer::Level::Info, format!("exec {name} failed").as_str());
                 if let Some(Expect::Failure) = self.expect.as_ref() {
+                    None
+                } else if let Some(Expect::Any) = self.expect.as_ref() {
                     None
                 } else {
                     // if the command failed to execute, there won't be a log file

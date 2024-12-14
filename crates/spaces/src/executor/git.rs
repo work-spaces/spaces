@@ -21,7 +21,7 @@ impl Git {
         progress: &mut printer::MultiProgressBar,
     ) -> anyhow::Result<String> {
         let mut result = revision.to_string();
-        let parts = revision.split(":").collect::<Vec<&str>>();
+        let parts = revision.split(':').collect::<Vec<&str>>();
         if parts.len() == 2 {
             let branch = parts[0];
             let semver = parts[1];

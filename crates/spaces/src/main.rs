@@ -10,6 +10,7 @@ mod builtins;
 mod label;
 mod ledger;
 mod rules;
+mod state_lock;
 mod tools;
 mod workspace;
 

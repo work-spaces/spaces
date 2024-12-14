@@ -1,5 +1,5 @@
 use crate::executor::asset;
-use crate::{executor, rules, workspace};
+use crate::{executor, rules, workspace, environment};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -225,6 +225,7 @@ const UPDATE_ENV_EXAMPLE: &str = r#"checkout.update_env(
         "vars": {
             "PS1": '"(spaces) $PS1"',
         },
+        "inherited_vars": ["HOME", "SHELL", "USER"],
     },
 )"#;
 
@@ -750,8 +751,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .context(format_context!("bad options for repo"))?;
 
         // support JSON, yaml, and toml
-        let update_env: executor::env::UpdateEnv = serde_json::from_value(env.to_json_value()?)
+        let environment: environment::Environment = serde_json::from_value(env.to_json_value()?)
             .context(format_context!("Failed to parse archive arguments"))?;
+
+        let update_env = executor::env::UpdateEnv { environment };
 
         let rule_name = rule.name.clone();
         rules::insert_task(rules::Task::new(

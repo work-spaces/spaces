@@ -2,22 +2,22 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::sync::RwLock;
 
-use crate::workspace;
+use crate::{workspace, state_lock};
 
+#[derive(Debug)]
 struct State {
     updated_assets: HashSet<String>,
 }
 
-static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
+static STATE: state::InitCell<state_lock::StateLock<State>> = state::InitCell::new();
 
-fn get_state() -> &'static RwLock<State> {
+fn get_state() -> &'static state_lock::StateLock<State> {
     if let Some(state) = STATE.try_get() {
         return state;
     }
 
-    STATE.set(RwLock::new(State {
+    STATE.set(state_lock::StateLock::new(State {
         updated_assets: HashSet::new(),
     }));
     STATE.get()
@@ -73,7 +73,7 @@ impl UpdateAsset {
         use json_value_merge::Merge;
 
         // hold the mutex to ensure exclusive access to the output file
-        let mut state = get_state().write().unwrap();
+        let mut state = get_state().write();
 
         let dest_path = get_destination_path(&self.destination).context(format_context!(
             "Failed to get destination path for asset file {}",

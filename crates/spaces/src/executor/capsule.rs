@@ -1,12 +1,9 @@
-use crate::{executor, workspace};
+use crate::{executor, workspace, state_lock};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use printer::MultiProgressBar;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::{HashMap, HashSet},
-    sync::RwLock,
-};
+use std::collections::{HashMap, HashSet};
 
 fn get_semver_version(version: &str) -> anyhow::Result<semver::Version> {
     let mut sane_version = version.to_owned();
@@ -89,7 +86,7 @@ pub struct Dependency {
 
 impl Dependency {
     pub fn resolve(&self) -> anyhow::Result<ResolvedDependency> {
-        let state = get_state().read().unwrap();
+        let state = get_state().read();
         let mut current_version = None;
         let mut current_entry = None;
         for entry in state.info_file.iter() {
@@ -243,13 +240,14 @@ impl CapsuleRunInfo {
     }
 }
 
+#[derive(Debug)]
 struct State {
     info_file: InfoFile,
 }
 
-static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
+static STATE: state::InitCell<state_lock::StateLock<State>> = state::InitCell::new();
 
-fn get_state() -> &'static RwLock<State> {
+fn get_state() -> &'static state_lock::StateLock<State> {
     if let Some(state) = STATE.try_get() {
         return state;
     }
@@ -266,7 +264,7 @@ fn get_state() -> &'static RwLock<State> {
         Vec::new()
     };
 
-    STATE.set(RwLock::new(State { info_file }));
+    STATE.set(state_lock::StateLock::new(State { info_file }));
     STATE.get()
 }
 
@@ -539,7 +537,7 @@ impl Capsule {
 
         // check capsules.spaces.json for a valid CapsuleCheckoutInfo struct
         let capsule_info = {
-            let mut state = get_state().write().unwrap();
+            let mut state = get_state().write();
 
             let capsule_info = load_file_info(&workspace_path)
                 .context(format_context!("Failed to load capsules.spaces.json"))?;
@@ -562,7 +560,6 @@ impl Capsule {
             self.run_capsule(name, spaces_command, workspace_path, progress)
                 .context(format_context!("Failed to run capsule {name}"))?;
 
-
             progress.log(
                 printer::Level::Info,
                 format!("Unlocking capsule {}", capsule_run_info.digest).as_str(),
@@ -575,13 +572,11 @@ impl Capsule {
             let capsule_info_json = serde_json::to_string_pretty(&capsule_complete_info)
                 .context(format_context!("Failed to serialize capsule info"))?;
 
-            for entry in capsule_info.iter(){
+            for entry in capsule_info.iter() {
                 let file_path = format!("{}/{}.json", entry.prefix, capsule_run_info.digest);
-                std::fs::write(
-                    file_path
-                        .as_str(),
-                    capsule_info_json.as_str(),
-                ).context(format_context!("Failed to write capsule info to {file_path}"))?;
+                std::fs::write(file_path.as_str(), capsule_info_json.as_str()).context(
+                    format_context!("Failed to write capsule info to {file_path}"),
+                )?;
             }
 
             capsule_run_info

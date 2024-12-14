@@ -1,12 +1,11 @@
 pub mod inputs;
 
-use crate::{executor, label, workspace};
+use crate::{executor, label, workspace, state_lock};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::sync::RwLock;
 use std::sync::{Arc, Condvar, Mutex};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, ValueEnum)]
@@ -187,8 +186,8 @@ impl Task {
                     printer::Level::Trace,
                     format!("{name} check for skipping/cancelation").as_str(),
                 );
-                let state = get_state().read().unwrap();
-                let tasks = state.tasks.read().unwrap();
+                let state = get_state().read();
+                let tasks = state.tasks.read();
                 let task = tasks
                     .get(&name)
                     .context(format_context!("Task not found {name}"))?;
@@ -273,8 +272,8 @@ impl Task {
 
             // before notifying dependents process the enabled_targets list
             {
-                let state = get_state().read().unwrap();
-                let mut tasks = state.tasks.write().unwrap();
+                let state = get_state().read();
+                let mut tasks = state.tasks.write();
                 if let Ok(task_result) = &task_result {
                     for enabled_target in task_result.enabled_targets.iter() {
                         let task = tasks
@@ -311,41 +310,41 @@ impl Task {
 
 
 pub fn get_sanitized_rule_name(rule_name: &str) -> String {
-    let state = get_state().read().unwrap();
+    let state = get_state().read();
     state.get_sanitized_rule_name(rule_name)
 }
 
 pub fn insert_task(task: Task) -> anyhow::Result<()> {
-    let state = get_state().read().unwrap();
+    let state = get_state().read();
     state.insert_task(task)
 }
 
 pub fn set_latest_starlark_module(name: &str) {
-    let mut state = get_state().write().unwrap();
+    let mut state = get_state().write();
     state.latest_starlark_module = Some(name.to_string());
     state.all_modules.insert(name.to_string());
 }   
 
 pub fn show_tasks(printer: &mut printer::Printer) -> anyhow::Result<()> {
-    let state = get_state().read().unwrap();
+    let state = get_state().read();
     state.show_tasks(printer)
 }
 
 pub fn sort_tasks(target: Option<String>, phase: Phase) -> anyhow::Result<()> {
-    let mut state = get_state().write().unwrap();
+    let mut state = get_state().write();
     state.sort_tasks(target, phase)
 }
 
 pub fn execute(printer: &mut printer::Printer, phase: Phase) -> anyhow::Result<executor::TaskResult> {
-    let state = get_state().read().unwrap();
+    let state = get_state().read();
     state.execute(printer, phase)
 }
 
 pub fn debug_sorted_tasks(printer: &mut printer::Printer, phase: Phase) -> anyhow::Result<()> {
-    let state = get_state().read().unwrap();
+    let state = get_state().read();
     for node_index in state.sorted.iter() {
         let task_name = state.graph.get_task(*node_index);
-        if let Some(task) = state.tasks.read().unwrap().get(task_name) {
+        if let Some(task) = state.tasks.read().get(task_name) {
             if task.phase == phase {
                 printer.log(
                     printer::Level::Debug,
@@ -357,8 +356,9 @@ pub fn debug_sorted_tasks(printer: &mut printer::Printer, phase: Phase) -> anyho
     Ok(())
 }
 
+#[derive(Debug)]
 pub struct State {
-    pub tasks: RwLock<HashMap<String, Task>>,
+    pub tasks: state_lock::StateLock<HashMap<String, Task>>,
     pub graph: graph::Graph,
     pub sorted: Vec<petgraph::prelude::NodeIndex>,
     pub latest_starlark_module: Option<String>,
@@ -388,7 +388,7 @@ impl State {
             }
         }
 
-        let mut tasks = self.tasks.write().unwrap();
+        let mut tasks = self.tasks.write();
 
         if let Some(task) = tasks.get(&rule_label) {
             return Err(format_error!(
@@ -402,7 +402,7 @@ impl State {
     }
 
     pub fn sort_tasks(&mut self, target: Option<String>, phase: Phase) -> anyhow::Result<()> {
-        let mut tasks = self.tasks.write().unwrap();
+        let mut tasks = self.tasks.write();
 
         let setup_tasks = tasks
             .values()
@@ -519,7 +519,7 @@ impl State {
     }
 
     pub fn show_tasks(&self, printer: &mut printer::Printer) -> anyhow::Result<()> {
-        let tasks = self.tasks.read().unwrap();
+        let tasks = self.tasks.read();
         let mut task_info_list = std::collections::HashMap::new();
         for node_index in self.sorted.iter() {
             let task_name = self.graph.get_task(*node_index);
@@ -552,7 +552,7 @@ impl State {
         for node_index in self.sorted.iter() {
             let task_name = self.graph.get_task(*node_index);
             let task = {
-                let tasks = self.tasks.read().expect("Failed to get read lock on tasks");
+                let tasks = self.tasks.read();
                 tasks
                     .get(task_name)
                     .ok_or(format_error!("Task not found {task_name}"))?
@@ -630,15 +630,15 @@ impl State {
     }
 }
 
-static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
+static STATE: state::InitCell<state_lock::StateLock<State>> = state::InitCell::new();
 
-fn get_state() -> &'static RwLock<State> {
+fn get_state() -> &'static state_lock::StateLock<State> {
     if let Some(state) = STATE.try_get() {
         return state;
     }
 
-    STATE.set(RwLock::new(State {
-        tasks: RwLock::new(HashMap::new()),
+    STATE.set(state_lock::StateLock::new(State {
+        tasks: state_lock::StateLock::new(HashMap::new()),
         graph: graph::Graph::default(),
         sorted: Vec::new(),
         latest_starlark_module: None,
@@ -648,7 +648,7 @@ fn get_state() -> &'static RwLock<State> {
 }
 
 pub fn get_checkout_path() -> anyhow::Result<String> {
-    let state = get_state().read().unwrap();
+    let state = get_state().read();
     if let Some(latest) = state.latest_starlark_module.as_ref() {
         let path = std::path::Path::new(latest.as_str());
         let parent = path
@@ -662,7 +662,7 @@ pub fn get_checkout_path() -> anyhow::Result<String> {
 }
 
 pub fn get_path_to_build_checkout(rule_name: &str) -> anyhow::Result<String> {
-    let state = get_state().read().unwrap();
+    let state = get_state().read();
     let rule_name = state.get_sanitized_rule_name(rule_name);
     Ok(format!("build/{}", rule_name))
 }

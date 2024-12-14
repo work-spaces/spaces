@@ -1,4 +1,4 @@
-use crate::{rules, workspace, executor};
+use crate::{executor, rules, state_lock, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use starlark::environment::GlobalsBuilder;
@@ -6,35 +6,34 @@ use starlark::values::none::NoneType;
 use starlark::values::{Heap, Value};
 use starstd::{Arg, Function};
 use std::collections::HashMap;
-use std::sync::RwLock;
 
+#[derive(Debug)]
 struct State {
     phase: rules::Phase,
 }
 
-static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
+static STATE: state::InitCell<state_lock::StateLock<State>> = state::InitCell::new();
 
-fn get_state() -> &'static RwLock<State> {
+fn get_state() -> &'static state_lock::StateLock<State> {
     if let Some(state) = STATE.try_get() {
         return state;
     }
 
-    STATE.set(RwLock::new(State {
+    STATE.set(state_lock::StateLock::new(State {
         phase: rules::Phase::Cancelled,
     }));
     STATE.get()
 }
 
 pub fn set_phase(phase: rules::Phase) {
-    let mut state = get_state().write().unwrap();
+    let mut state = get_state().write();
     state.phase = phase;
 }
 
 fn get_phase() -> rules::Phase {
-    let state = get_state().read().unwrap();
+    let state = get_state().read();
     state.phase
 }
-
 
 pub const FUNCTIONS: &[Function] = &[
     Function {
@@ -323,7 +322,6 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     fn set_env(
         #[starlark(require = named)] env: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
-
         let env = serde_json::from_value(env.to_json_value()?)
             .context(format_context!("Failed to parse archive arguments"))?;
 
@@ -426,7 +424,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let version = version
             .parse::<semver::Version>()
             .context(format_context!("bad version format"))?;
-        if version > current_version.parse::<semver::Version>().unwrap() {
+        if version
+            > current_version
+                .parse::<semver::Version>()
+                .context(format_context!(
+                    "Internal Error: Failed to parse current version {current_version}"
+                ))?
+        {
             return Err(anyhow::anyhow!(
                 "Minimum required `spaces` version is {}. `spaces` version is {current_version}",
                 version.to_string(),

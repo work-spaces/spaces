@@ -30,11 +30,12 @@ git push origin tag v$VERSION
 
 # Todo
 
-- Create a `--create-lock-file` command line argument for checkout. This will record hashes for all git rules that use a branch rather than a tag
-- Create a `--lock-file` command line argument for checkout. This will override any git rules that use a branch with the commit in the lock file.
 - When running `spaces run` with a capsule, queue up a single job?
-- The capsule script hashing needs to be narrowed to things that will affect the build.
-  - Only items loaded (not the entire scripts)
 - Upload capsules using oras to ghcr.io
   - oras can be another checkout rule like archive and git
   - uploading to oras will happen through starlark exec run rules
+- add a run rule to send a signal to another running process (by rule)
+- Instead of running spaces recursively for capsules, can it be run in the same process?
+  - starlark scripts need some way to track state
+  - or instead of using stdout, pipe all the stdout to a shared printer?
+  - or have a printer server running to work with IO
