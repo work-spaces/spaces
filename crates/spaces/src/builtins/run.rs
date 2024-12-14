@@ -62,6 +62,23 @@ pub const FUNCTIONS: &[Function] = &[
         ],
         example: Some(ADD_EXEC_EXAMPLE)},
     Function {
+        name: "add_kill_exec",
+        description: "Adds a rule that will kill the execution of another rule.",
+        return_type: "None",
+        args: &[
+            get_rule_argument(),
+            Arg {
+                name: "kill",
+                description: "dict with",
+                dict: &[
+                    ("signal", "Hup|Int|Quit|Abort|Kill|Alarm|Terminate|User1|User2"),
+                    ("target", "the name of the rule to kill"),
+                    ("expect", "Failure: expect non-zero return code|Success: expect zero return code|Any: don't check the return code"),
+                ],
+            },
+        ],
+        example: Some(ADD_EXEC_EXAMPLE)},
+    Function {
         name: "add_exec_if",
         description: "Adds a rule to execute if a condition is met.",
         return_type: "None",
@@ -123,39 +140,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(NoneType)
     }
 
-    /*
-     * Add a reference to a workflow.
-     * The workflow is a spaces workflow.
-     * It must use semantic versioning.
-     * - spaces will need to resolve duplicates using the semver rules (MVS)
-     *   - configure args would need to be captured in the workflow name like gmp-static-4.3.2
-     * - MVS: https://research.swtch.com/vgo-mvs
-     * It must support at least one of the following:
-     * - Build and Install to the spaces store at a unique hashed location
-     *   - The workspaces can references the store location
-     * - Install (COPY) runtime artifacts to the workspace
-     * - Download pre-built binaries: this will be used if it is available
-     *   - Not all workflows will be re-locatable. So some must be built locally and installed to the store
-     *
-     * To pass informatin to the workflow, this rule will create a add_workflow.spaces.star
-     * file and place it in the sub-workspace.
-     *
-     * The caller will need to know:
-     * - Where are the workflow artifacts installed?
-     * - Are the workflow artifacts relocatable?
-     *
-     * The workflow can create a JSON file in the sub-workspace that contains all
-     * the information needed. The JSON file will be created during the checkout phase.
-     *
-     */
-    //fn add_workflow()
-
     fn add_exec(
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] exec: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
         let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for repo"))?;
+            .context(format_context!("bad options for exec rule"))?;
 
         rules::inputs::validate_input_globs(&rule.inputs)
             .context(format_context!("invalid inputs globs with {}", rule.name))?;
@@ -181,12 +171,36 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(NoneType)
     }
 
+    fn add_kill_exec(
+        #[starlark(require = named)] rule: starlark::values::Value,
+        #[starlark(require = named)] exec: starlark::values::Value,
+    ) -> anyhow::Result<NoneType> {
+        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+            .context(format_context!("bad options for kill rule"))?;
+
+        rules::inputs::validate_input_globs(&rule.inputs)
+            .context(format_context!("invalid inputs globs with {}", rule.name))?;
+
+        let mut kill_exec: executor::exec::Kill = serde_json::from_value(exec.to_json_value()?)
+            .context(format_context!("bad options for kill"))?;
+        kill_exec.target = rules::get_sanitized_rule_name(&kill_exec.target);
+
+        let rule_name = rule.name.clone();
+        rules::insert_task(rules::Task::new(
+            rule,
+            rules::Phase::Run,
+            executor::Task::Kill(kill_exec),
+        ))
+        .context(format_context!("Failed to insert task {rule_name}"))?;
+        Ok(NoneType)
+    }
+
     fn add_exec_if(
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] exec_if: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
         let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for repo"))?;
+            .context(format_context!("bad options for exec_if rule"))?;
 
         rules::inputs::validate_input_globs(&rule.inputs)
             .context(format_context!("invalid inputs globs with {}", rule.name))?;
@@ -261,11 +275,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let archive = executor::archive::Archive { create_archive };
 
         rules::insert_task(rules::Task::new(
-                rule,
-                rules::Phase::Run,
-                executor::Task::CreateArchive(archive),
-            ))
-            .context(format_context!("Failed to insert task {rule_name}"))?;
+            rule,
+            rules::Phase::Run,
+            executor::Task::CreateArchive(archive),
+        ))
+        .context(format_context!("Failed to insert task {rule_name}"))?;
         Ok(NoneType)
     }
 }

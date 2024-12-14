@@ -1,8 +1,38 @@
-use crate::workspace;
+use crate::{state_lock, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+#[derive(Debug, Clone, Default)]
+struct State {
+    processes: HashMap<String, u32>,
+}
+
+static STATE: state::InitCell<state_lock::StateLock<State>> = state::InitCell::new();
+
+fn get_state() -> &'static state_lock::StateLock<State> {
+    if let Some(state) = STATE.try_get() {
+        return state;
+    }
+    STATE.set(state_lock::StateLock::new(State::default()));
+    STATE.get()
+}
+
+fn handle_process_started(rule: &str, process_id: u32) {
+    let mut state = get_state().write();
+    state.processes.insert(rule.to_string(), process_id);
+}
+
+fn handle_process_ended(rule: &str) {
+    let mut state = get_state().write();
+    state.processes.remove(rule);
+}
+
+fn get_process_id(rule: &str) -> Option<u32> {
+    let state = get_state().read();
+    state.processes.get(rule).copied()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Expect {
@@ -58,6 +88,7 @@ impl Exec {
             is_return_stdout: self.redirect_stdout.is_some(),
             log_file_path: log_file_path.clone(),
             clear_environment: true,
+            process_started_with_id: Some(handle_process_started),
         };
 
         progress.log(
@@ -66,6 +97,8 @@ impl Exec {
         );
 
         let result = progress.execute_process(&self.command, options);
+
+        handle_process_ended(name);
 
         progress.log(
             printer::Level::Message,
@@ -127,6 +160,84 @@ impl Exec {
                 "Failed to write stdout to {}",
                 stdout_location
             ))?;
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum Signal {
+    Hup,
+    Int,
+    Quit,
+    Abort,
+    Kill,
+    Alarm,
+    Terminate,
+    User1,
+    User2,
+}
+
+impl Signal {
+    fn to_kill_arg(&self) -> &str {
+        match self {
+            Signal::Hup => "HUP",
+            Signal::Int => "INT",
+            Signal::Quit => "QUIT",
+            Signal::Abort => "ABRT",
+            Signal::Kill => "KILL",
+            Signal::Alarm => "ALRM",
+            Signal::Terminate => "TERM",
+            Signal::User1 => "USR1",
+            Signal::User2 => "USR2",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Kill {
+    pub signal: Signal,
+    pub target: String,
+    pub expect: Option<Expect>,
+}
+
+impl Kill {
+    pub fn execute(
+        &self,
+        name: &str,
+        progress: &mut printer::MultiProgressBar,
+    ) -> anyhow::Result<()> {
+        if let Some(process_id) = get_process_id(self.target.as_str()) {
+            let options = printer::ExecuteOptions {
+                label: name.to_string(),
+                arguments: vec![
+                    "-s".to_string(),
+                    self.signal.to_kill_arg().to_string(),
+                    format!("{}", process_id),
+                ],
+                ..Default::default()
+            };
+
+            let result = progress.execute_process("kill", options);
+            match self.expect.as_ref() {
+                Some(Expect::Success) => {
+                    if result.is_err() {
+                        return Err(format_error!("Expected success but kill failed {self:?}"));
+                    }
+                }
+                Some(Expect::Failure) => {
+                    if result.is_ok() {
+                        return Err(format_error!(
+                            "Expected failure but kill succeeded {self:?}"
+                        ));
+                    }
+                }
+                _ => {}
+            }
+        } else {
+            return Err(format_error!("No process found for {name}"));
         }
 
         Ok(())

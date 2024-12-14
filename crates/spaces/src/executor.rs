@@ -34,6 +34,7 @@ impl TaskResult {
 pub enum Task {
     Exec(exec::Exec),
     ExecIf(exec::ExecIf),
+    Kill(exec::Kill),
     Target,
     CreateArchive(archive::Archive),
     HttpArchive(http_archive::HttpArchive),
@@ -62,6 +63,7 @@ impl Task {
                 enabled_targets = exec_if.execute(name, progress);
                 Ok(())
             }
+            Task::Kill(kill) => kill.execute(name, &mut progress),
             Task::CreateArchive(archive) => archive.execute(name, progress),
             Task::UpdateAsset(asset) => asset.execute(name, progress),
             Task::AddWhichAsset(asset) => asset.execute(name, progress),
