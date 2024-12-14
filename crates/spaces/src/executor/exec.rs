@@ -237,7 +237,12 @@ impl Kill {
                 _ => {}
             }
         } else {
-            return Err(format_error!("No process found for {name}"));
+            match self.expect.as_ref() {
+                Some(Expect::Success) => {
+                    return Err(format_error!("No process found for {name}"));
+                }
+                _ => {}
+            }
         }
 
         Ok(())

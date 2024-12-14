@@ -140,11 +140,12 @@ pub fn execute() -> anyhow::Result<()> {
                     name,
                     script,
                     create_lock_file,
+                    force_install_tools,
                 },
         } => {
             handle_verbosity(&mut printer, verbosity.into(), ci, hide_progress_bars);
 
-            tools::install_tools(&mut printer)
+            tools::install_tools(&mut printer, force_install_tools)
                 .context(format_context!("while installing tools"))?;
 
             std::fs::create_dir_all(name.as_str())
@@ -209,9 +210,11 @@ pub fn execute() -> anyhow::Result<()> {
             )
             .context(format_context!("while executing checkout rules"))?;
 
-            settings.save(&workspace::absolute_path()).context(format_context!("while saving settings"))?;
-            workspace::save_lock_file().context(format_context!("Failed to save workspace lock file"))?;
-            
+            settings
+                .save(&workspace::absolute_path())
+                .context(format_context!("while saving settings"))?;
+            workspace::save_lock_file()
+                .context(format_context!("Failed to save workspace lock file"))?;
         }
 
         Arguments {
@@ -322,6 +325,9 @@ enum Commands {
         /// Create a lock file for the workspace. This file can be passed on the next checkout as a script to re-create the exact workspace.
         #[arg(long)]
         create_lock_file: bool,
+        /// Force install the tools spaces needs to run.
+        #[arg(long)]
+        force_install_tools: bool,
     },
     /// Synchronizes the workspace with the checkout rules.
     Sync {},

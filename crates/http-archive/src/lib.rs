@@ -125,12 +125,12 @@ pub fn download(
             format!("Reqwest request: {request:?}").as_str(),
         );
 
-        let mut response = request
-            .send()
-            .await?;
+        let mut response = request.send().await?;
 
         if !response.status().is_success() {
-            return Err(format_error!("Failed to download {url}. got response {response:?}"));
+            return Err(format_error!(
+                "Failed to download {url}. got response {response:?}"
+            ));
         }
 
         progress.log(
@@ -319,12 +319,21 @@ impl HttpArchive {
 
                 match self.archive.link {
                     ArchiveLink::Hard => {
+                        progress_bar.log(
+                            printer::Level::Trace,
+                            format!("Creating hard link {full_target_path} -> {source}").as_str(),
+                        );
                         Self::create_hard_link(full_target_path.clone(), source.clone()).context(
                             format_context!("hard link {full_target_path} -> {source}",),
                         )?;
                     }
                     ArchiveLink::None => (),
                 }
+            } else {
+                progress_bar.log(
+                    printer::Level::Warning,
+                    format!("Failed to strip prefix {:?} from {file}", self.archive.strip_prefix).as_str(),
+                );
             }
             progress_bar.increment(1);
         }
@@ -380,7 +389,7 @@ impl HttpArchive {
             .build()
             .context(format_context!("Failed to create runtime"))?;
 
-        let next_progress_bar = if self.is_download_required() {
+        let mut next_progress_bar = if self.is_download_required() {
             if let Some(arguments) = transform_url_to_gh_arguments(
                 self.allow_gh_for_download,
                 self.archive.url.as_str(),
@@ -393,7 +402,7 @@ impl HttpArchive {
 
                 progress_bar.log(
                     printer::Level::Trace,
-                    format!("Downloading using gh {options:?}").as_str(),
+                    format!("{} Downloading using gh {options:?}", self.archive.url).as_str(),
                 );
 
                 progress_bar
@@ -405,14 +414,28 @@ impl HttpArchive {
 
                 progress_bar
             } else {
+                progress_bar.log(
+                    printer::Level::Trace,
+                    format!("{} Downloading using reqwest", self.archive.url).as_str(),
+                );
+
                 let join_handle = self
                     .download(&runtime, progress_bar)
                     .context(format_context!("Failed to download using reqwest"))?;
                 runtime.block_on(join_handle)??
             }
         } else {
+            progress_bar.log(
+                printer::Level::Trace,
+                format!("{} download not required", self.archive.url).as_str(),
+            );
             progress_bar
         };
+
+        next_progress_bar.log(
+            printer::Level::Trace,
+            format!("{} Extracting", self.archive.url).as_str(),
+        );
 
         let next_progress_bar = self.extract(next_progress_bar).context(format_context!(
             "extract failed {}",
@@ -458,9 +481,13 @@ impl HttpArchive {
 
     fn extract(
         &self,
-        progress_bar: printer::MultiProgressBar,
+        mut progress_bar: printer::MultiProgressBar,
     ) -> anyhow::Result<printer::MultiProgressBar> {
         if !self.is_extract_required() {
+            progress_bar.log(
+                printer::Level::Debug,
+                format!("{} Extract not required", self.archive.url).as_str(),
+            );
             return Ok(progress_bar);
         }
 

@@ -173,7 +173,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
     fn add_kill_exec(
         #[starlark(require = named)] rule: starlark::values::Value,
-        #[starlark(require = named)] exec: starlark::values::Value,
+        #[starlark(require = named)] kill: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
         let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for kill rule"))?;
@@ -181,7 +181,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         rules::inputs::validate_input_globs(&rule.inputs)
             .context(format_context!("invalid inputs globs with {}", rule.name))?;
 
-        let mut kill_exec: executor::exec::Kill = serde_json::from_value(exec.to_json_value()?)
+        let mut kill_exec: executor::exec::Kill = serde_json::from_value(kill.to_json_value()?)
             .context(format_context!("bad options for kill"))?;
         kill_exec.target = rules::get_sanitized_rule_name(&kill_exec.target);
 

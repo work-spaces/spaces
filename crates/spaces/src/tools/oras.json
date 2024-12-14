@@ -1,0 +1,32 @@
+{
+    "linux-aarch64": {
+        "add_prefix": "sysroot/bin",
+        "link": "Hard",
+        "sha256": "65f9197e9eacda769b1f2f447e2c4004a8f3f772855c2c987d5111e8302cbbed",
+        "url": "https://github.com/oras-project/oras/releases/download/v1.2.1/oras_1.2.1_linux_arm64.tar.gz"
+    },
+    "linux-x86_64": {
+        "add_prefix": "sysroot/bin",
+        "link": "Hard",
+        "sha256": "4180b940409ab801ada54cdb793dd7372be2a5cb25b6522490409d5d4b0e3dde",
+        "url": "https://github.com/oras-project/oras/releases/download/v1.2.1/oras_1.2.1_linux_amd64.tar.gz"
+    },
+    "macos-aarch64": {
+        "add_prefix": "sysroot/bin",
+        "link": "Hard",
+        "sha256": "e3489c1946cb98c21992e09f2ec37974ad3856bb88b798682975fce7960f08fe",
+        "url": "https://github.com/oras-project/oras/releases/download/v1.2.1/oras_1.2.1_darwin_arm64.tar.gz"
+    },
+    "macos-x86_64": {
+        "add_prefix": "sysroot/bin",
+        "link": "Hard",
+        "sha256": "54095db9a4cb0f37bf7ac5afbed0ff167215195ad07b6d9318b69c5a8944b19d",
+        "url": "https://github.com/oras-project/oras/releases/download/v1.2.1/oras_1.2.1_darwin_amd64.tar.gz"
+    },
+    "windows-x86_64": {
+        "add_prefix": "sysroot/bin",
+        "link": "Hard",
+        "sha256": "e072dac29eb4a4b62520b52193e028420c159e5ec192f28bfebfb11f81c7d6d8",
+        "url": "https://github.com/oras-project/oras/releases/download/v1.2.1/oras_1.2.1_windows_amd64.zip"
+    }
+}
