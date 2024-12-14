@@ -1,4 +1,4 @@
-use crate::{executor, builtins, builtins::info, rules, workspace};
+use crate::{builtins, rules, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use starlark::environment::{FrozenModule, GlobalsBuilder, Module};
@@ -56,7 +56,7 @@ fn evaluate_module(
         .with_struct("hash", starstd::hash::globals)
         .with_struct("process", starstd::process::globals)
         .with_struct("script", starstd::script::globals)
-        .with_struct("info", info::globals);
+        .with_struct("info", builtins::info::globals);
 
     let globals_builder = if with_rules == WithRules::Yes {
         globals_builder
@@ -99,7 +99,7 @@ pub fn run_starlark_modules(
     let mut module_queue = std::collections::VecDeque::new();
     module_queue.extend(modules);
 
-    info::set_phase(phase);
+    builtins::info::set_phase(phase);
 
     printer.log(
         printer::Level::Trace,
@@ -167,7 +167,7 @@ pub fn run_starlark_modules(
         rules::Phase::Run => {
             printer.log(printer::Level::Message, "--Run Phase--")?;
 
-            let is_reproducible = info::is_reproducible();
+            let is_reproducible = workspace::is_reproducible();
             printer.log(
                 if is_reproducible {
                     printer::Level::Message
@@ -209,26 +209,28 @@ pub fn run_starlark_modules(
                 .context(format_context!("failed to execute post checkout phase"))?;
 
             // prepend PATH with sysroot/bin if sysroot/bin is not already in the PATH
-            let mut env = info::get_env();
+            let mut env = workspace::get_env();
             let sysroot_bin = format!("{}/sysroot/bin", workspace::absolute_path());
             if !env.paths.contains(&sysroot_bin) {
                 env.paths.insert(0, sysroot_bin);
             }
 
-            if info::is_reproducible() {
+            if workspace::is_reproducible() {
                 env.vars.insert(
                     workspace::SPACES_ENV_WORKSPACE_DIGEST.to_string(),
                     workspace::get_digest(),
                 );
             }
 
-            executor::env::finalize_env(&env).context(format_context!("failed to finalize env"))?;
+            let workspace = workspace::absolute_path();
+            let workspace_path = std::path::Path::new(&workspace);
+            let env_path = workspace_path.join("env");
+            env.create_shell_env(env_path)
+                .context(format_context!("failed to finalize env"))?;
             let env_str = serde_json::to_string_pretty(&env)?;
 
             workspace::save_env_file(env_str.as_str())
                 .context(format_context!("Failed to save env file"))?;
-
-            //workspace::save_lock_file().context(format_context!("Failed to save workspace lock file"))?;
         }
         _ => {}
     }

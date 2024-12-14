@@ -1,4 +1,4 @@
-use crate::{builtins::info, workspace};
+use crate::workspace;
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -27,26 +27,20 @@ impl Exec {
         progress: &mut printer::MultiProgressBar,
     ) -> anyhow::Result<()> {
         let arguments = self.args.clone().unwrap_or_default();
-        let workspace_env = info::get_env();
+        let workspace_env = workspace::get_env();
 
-        let mut environment_map = HashMap::new();
+        let mut environment_map = workspace_env
+            .get_vars()
+            .context(format_context!("Failed to get env vars"))?;
 
-        environment_map.insert("PATH".to_string(), workspace_env.get_path());
-        for (key, value) in workspace_env.vars {
-            environment_map.insert(key, value);
-        }
         for (key, value) in self.env.clone().unwrap_or_default() {
             environment_map.insert(key, value);
         }
 
         let workspace_path = workspace::absolute_path();
+        let environment = environment_map.into_iter().collect::<Vec<_>>();
 
-        let mut environment = Vec::new();
-        for (key, value) in environment_map {
-            environment.push((key, value));
-        }
-
-        let log_file_path = if info::get_is_ci() {
+        let log_file_path = if workspace::get_is_ci() {
             None
         } else {
             Some(workspace::get_log_file(name))
@@ -62,6 +56,7 @@ impl Exec {
                 .map(|cwd| format!("{}/{}", workspace_path, cwd)),
             is_return_stdout: self.redirect_stdout.is_some(),
             log_file_path: log_file_path.clone(),
+            clear_environment: true,
         };
 
         progress.log(

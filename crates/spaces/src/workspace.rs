@@ -1,3 +1,4 @@
+use crate::environment;
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -67,7 +68,12 @@ struct State {
     store_path: String,
     changes: Option<changes::Changes>,
     locks: HashMap<String, String>,
-    is_create_lock_file: bool
+    is_create_lock_file: bool,
+    #[allow(dead_code)]
+    new_branch_name: Option<String>,
+    env: environment::Environment,
+    is_ci: bool,
+    max_queue_count: i64,
 }
 
 static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
@@ -230,6 +236,70 @@ pub fn get_rule_inputs_digest(
     let changes = state.changes.as_ref().unwrap();
     changes.get_digest(progress, seed, globs)
 }
+pub fn set_ci_true() {
+    let mut state = get_state().write().unwrap();
+    state.is_ci = true;
+}
+
+pub fn get_is_ci() -> bool {
+    let state = get_state().read().unwrap();
+    state.is_ci
+}
+
+pub fn set_env(env: environment::Environment) {
+    let mut state = get_state().write().unwrap();
+    state.env = env;
+}
+
+pub fn update_env(env: environment::Environment) -> anyhow::Result<()> {
+    let mut state = get_state().write().unwrap();
+    state.env.vars.extend(env.vars);
+    state.env.paths.extend(env.paths);
+    if let Some(system_paths) = env.system_paths {
+        if let Some(existing_system_paths) = state.env.system_paths.as_mut() {
+            existing_system_paths.extend(system_paths.clone());
+        } else {
+            state.env.system_paths = Some(system_paths);
+        }
+    }
+    Ok(())
+}
+
+pub fn get_env() -> environment::Environment {
+    let state = get_state().read().unwrap();
+    state.env.clone()
+}
+
+pub fn get_max_queue_count() -> i64 {
+    let state = get_state().read().unwrap();
+    state.max_queue_count
+}
+
+pub fn set_max_queue_count(count: i64) {
+    let mut state = get_state().write().unwrap();
+    state.max_queue_count = count;
+}
+
+pub fn set_is_reproducible(value: bool) {
+    let mut state = get_state().write().unwrap();
+    state.env.vars.insert(
+        SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE.to_owned(),
+        value.to_string(),
+    );
+}
+
+pub fn is_reproducible() -> bool {
+    let state = get_state().read().unwrap();
+    if let Some(value) = state
+        .env
+        .vars
+        .get(SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE)
+    {
+        return value == "true";
+    }
+    false
+}
+
 
 fn get_unique() -> anyhow::Result<String> {
     let duration_since_epoch = std::time::SystemTime::now()
@@ -244,6 +314,14 @@ fn get_state() -> &'static RwLock<State> {
     if let Some(state) = STATE.try_get() {
         return state;
     }
+
+    let mut env = environment::Environment::default();
+
+    env.vars.insert(
+        SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE.to_owned(),
+        "true".to_string(),
+    );
+
     STATE.set(RwLock::new(State {
         absolute_path: "".to_string(),
         digest: "".to_string(),
@@ -252,6 +330,10 @@ fn get_state() -> &'static RwLock<State> {
         store_path: get_checkout_store_path(),
         locks: HashMap::new(),
         is_create_lock_file: false,
+        new_branch_name: None,
+        env,
+        is_ci: false,
+        max_queue_count: 0,
     }));
     STATE.get()
 }

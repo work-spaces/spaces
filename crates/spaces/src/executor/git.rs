@@ -1,4 +1,4 @@
-use crate::{builtins::info, workspace};
+use crate::workspace;
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -326,7 +326,7 @@ impl Git {
                     )
                     .as_str(),
                 );
-                info::set_is_reproducible(false);
+                workspace::set_is_reproducible(false);
             }
         }
 

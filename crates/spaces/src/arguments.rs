@@ -1,4 +1,4 @@
-use crate::{builtins::info, docs, evaluator, rules, tools, workspace};
+use crate::{docs, evaluator, rules, tools, workspace};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
@@ -86,7 +86,7 @@ fn handle_verbosity(
     is_hide_progress_bars: bool,
 ) {
     if is_ci {
-        info::set_ci_true();
+        workspace::set_ci_true();
         printer.verbosity.level = printer::Level::Trace;
         printer.verbosity.is_show_progress_bars = false;
     } else {
