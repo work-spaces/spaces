@@ -43,6 +43,12 @@ impl Repo {
     }
 }
 
+pub struct LogEntry {
+    pub commit: String,
+    pub tag: Option<String>,
+    pub description: String,
+}
+
 struct State {
     active_repos: HashSet<String>,
     log_directory: Option<String>,
@@ -150,22 +156,20 @@ pub fn get_commit_hash(
         ..Default::default()
     };
 
-    progress_bar.log(
-        printer::Level::Debug,
-        format!("{directory}: git {options:?}").as_str(),
-    );
+    let commit_hash = execute_git_command(url, progress_bar, options).context(format_context!(
+        "Failed to get commit hash from {directory}"
+    ))?;
 
-    let commit_hash = execute_git_command(url, progress_bar, options).context(
-        format_context!("Failed to get commit hash from {directory}"),
-    )?;
-
+    let commit_hash = commit_hash.map(|e| e.trim().to_string());
     Ok(commit_hash)
 }
 
-pub fn is_branch(url: &str,
+pub fn is_branch(
+    url: &str,
     directory: &str,
-    ref_name: &str, 
-    progress_bar: &mut printer::MultiProgressBar,) -> bool {
+    ref_name: &str,
+    progress_bar: &mut printer::MultiProgressBar,
+) -> bool {
     let options = printer::ExecuteOptions {
         working_directory: Some(directory.to_string()),
         arguments: vec![
@@ -177,6 +181,79 @@ pub fn is_branch(url: &str,
         ..Default::default()
     };
     execute_git_command(url, progress_bar, options).is_ok()
+}
+
+pub fn get_commit_tag(
+    url: &str,
+    directory: &str,
+    progress_bar: &mut printer::MultiProgressBar,
+) -> Option<String> {
+    let options = printer::ExecuteOptions {
+        working_directory: Some(directory.to_string()),
+        arguments: vec![
+            "describe".to_string(),
+            "--exact-match".to_string(),
+            "HEAD".to_string(),
+        ],
+        is_return_stdout: true,
+        ..Default::default()
+    };
+
+    if let Ok(Some(stdout)) = execute_git_command(url, progress_bar, options) {
+        let stdout_trimmed = stdout.trim();
+        Some(stdout_trimmed.to_string())
+    } else {
+        None
+    }
+}
+
+pub fn get_branch_log(
+    url: &str,
+    directory: &str,
+    branch: &str,
+    progress_bar: &mut printer::MultiProgressBar,
+) -> anyhow::Result<Vec<LogEntry>> {
+    let options = printer::ExecuteOptions {
+        working_directory: Some(directory.to_string()),
+        arguments: vec![
+            "log".to_string(),
+            "--oneline".to_string(),
+            "--decorate=short".to_string(),
+            "--no-color".to_string(),
+            "--reverse".to_string(),
+            "--pretty=format:\"%H;%D;%s\"".to_string(),
+            branch.to_string(),
+        ],
+        is_return_stdout: true,
+        ..Default::default()
+    };
+
+    let stdout_option = execute_git_command(url, progress_bar, options)
+        .context(format_context!("Failed to get branch log from {directory}"))?;
+
+    if let Some(stdout) = stdout_option {
+        let mut log_entries = Vec::new();
+        for line in stdout.lines() {
+            let line = line.trim_matches('"');
+            let parts: Vec<&str> = line.split(';').collect();
+            if parts.len() == 3 {
+                let tag = if let Some(tag) = parts[1].strip_prefix("tag: ") {
+                    Some(tag.to_string())
+                } else {
+                    None
+                };
+
+                log_entries.push(LogEntry {
+                    commit: parts[0].to_string(),
+                    tag: tag,
+                    description: parts[2].to_string(),
+                });
+            }
+        }
+        Ok(log_entries)
+    } else {
+        Ok(Vec::new())
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -380,38 +457,25 @@ impl Worktree {
     pub fn checkout(
         &self,
         progress_bar: &mut printer::MultiProgressBar,
-        checkout: &Checkout,
+        revision: &str,
     ) -> anyhow::Result<()> {
         let mut options = printer::ExecuteOptions {
             working_directory: Some(self.full_path.clone()),
             ..Default::default()
         };
+        options.arguments = vec!["fetch".to_string(), "origin".to_string(), revision.to_owned()];
 
-        match checkout {
-            Checkout::Revision(value) => {
-                options.arguments = vec!["fetch".to_string(), "origin".to_string(), value.clone()];
+        execute_git_command(&self.url, progress_bar, options.clone())
+            .context(format_context!("while fetching existing bare repository"))?;
 
-                execute_git_command(&self.url, progress_bar, options.clone())
-                    .context(format_context!("while fetching existing bare repository"))?;
-
-                options.arguments = vec![
-                    "checkout".to_string(),
-                    "--detach".to_string(),
-                    value.clone(),
-                ];
-            }
-            Checkout::NewBranch(value) => {
-                options.arguments = vec!["fetch".to_string(), "origin".to_string(), value.clone()];
-
-                execute_git_command(&self.url, progress_bar, options.clone())
-                    .context(format_context!("while fetching existing bare repository"))?;
-
-                options.arguments = vec!["checkout".to_string(), value.clone()];
-            }
-        }
+        options.arguments = vec![
+            "checkout".to_string(),
+            "--detach".to_string(),
+            revision.to_owned(),
+        ];
 
         execute_git_command(&self.url, progress_bar, options)
-            .context(format_context!("checkout {checkout:?}"))?;
+            .context(format_context!("checkout {revision:?}"))?;
 
         Ok(())
     }
@@ -440,10 +504,10 @@ impl Worktree {
         &self,
         progress_bar: &mut printer::MultiProgressBar,
         dev_branch: &str,
-        checkout: &Checkout,
+        revision: &str,
     ) -> anyhow::Result<()> {
-        self.checkout(progress_bar, checkout)
-            .context(format_context!("switch new branch {:?}", checkout))?;
+        self.checkout(progress_bar, revision)
+            .context(format_context!("switch new branch {:?}", revision))?;
 
         let options = printer::ExecuteOptions {
             working_directory: Some(self.full_path.clone()),

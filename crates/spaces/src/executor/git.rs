@@ -15,6 +15,74 @@ pub struct Git {
 }
 
 impl Git {
+    fn resolve_revision(
+        &self,
+        revision: &str,
+        progress: &mut printer::MultiProgressBar,
+    ) -> anyhow::Result<String> {
+        let mut result = revision.to_string();
+        let parts = revision.split(":").collect::<Vec<&str>>();
+        if parts.len() == 2 {
+            let branch = parts[0];
+            let semver = parts[1];
+            let logs = git::get_branch_log(&self.url, &self.spaces_key, branch, progress).context(
+                format_context!("Failed to get branch log for {}", self.spaces_key),
+            )?;
+
+            let required = semver::VersionReq::parse(semver)
+                .context(format_context!("Failed to parse semver {}", semver,))?;
+
+            // logs has tags in reverse chronological order
+            // uses the newest commit that does not violate the semver requirement
+            let mut commit = None;
+            let mut is_semver_satisfied = false;
+            for log in logs {
+                let current_commit = log.commit.clone();
+                if let Some(tag) = log.tag.as_ref() {
+                    let tag = tag.trim_matches('v');
+                    if let Ok(version) = semver::Version::parse(tag) {
+                        if required.matches(&version) {
+                            progress.log(
+                                printer::Level::Debug,
+                                format!(
+                                    "Found tag {} for branch {} that satisfies semver requirement",
+                                    tag, branch
+                                )
+                                .as_str(),
+                            );
+                            is_semver_satisfied = true;
+                        } else if is_semver_satisfied {
+                            progress.log(printer::Level::Debug,
+                            format!("Using commit {commit:?} for branch {branch} as it is the newest commit that satisfies semver requirement").as_str());
+                            break;
+                        }
+                    } else {
+                        commit = Some(current_commit);
+                    }
+                } else {
+                    commit = Some(current_commit);
+                }
+            }
+
+            if let Some(commit) = commit {
+                result = commit.to_string();
+            }
+        } else if parts.len() != 1 {
+            return Err(format_error!(
+                "Invalid revision format. Use `<branch>:<semver requirement>`"
+            ));
+        }
+        progress.log(
+            printer::Level::Info,
+            format!(
+                "Resolved revision {} to {} for {}",
+                revision, result, self.url
+            )
+            .as_str(),
+        );
+        Ok(result)
+    }
+
     fn execute_worktree_clone(
         &self,
         name: &str,
@@ -34,13 +102,21 @@ impl Git {
 
         match &self.checkout {
             git::Checkout::NewBranch(branch_name) => {
+                let revision = self
+                    .resolve_revision(branch_name, progress)
+                    .context(format_context!("failed to resolve revision"))?;
+
                 worktree
-                    .switch_new_branch(progress, branch_name, &self.checkout)
+                    .switch_new_branch(progress, branch_name, &revision)
                     .context(format_context!("{name} - Failed to checkout new branch"))?;
             }
-            _ => {
+            git::Checkout::Revision(revision) => {
+                let revision = self
+                    .resolve_revision(revision, progress)
+                    .context(format_context!("failed to resolve revision"))?;
+
                 worktree
-                    .checkout(progress, &self.checkout)
+                    .checkout(progress, &revision)
                     .context(format_context!("{name} - Failed to switch branch"))?;
             }
         }
@@ -95,13 +171,18 @@ impl Git {
         match &self.checkout {
             git::Checkout::NewBranch(branch_name) => {
                 checkout_options.arguments.push("switch".to_string());
+                checkout_options.arguments.push("-c".to_string());
                 checkout_options.arguments.push(branch_name.clone());
-
                 // TODO: switch to a new branch
             }
-            git::Checkout::Revision(branch_name) => {
+            git::Checkout::Revision(revision) => {
+                // if revision of the format "branch:semver" then get the tags on the branch
+                let revision = self
+                    .resolve_revision(revision, progress)
+                    .context(format_context!("failed to resolve revision"))?;
+
                 checkout_options.arguments.push("checkout".to_string());
-                checkout_options.arguments.push(branch_name.clone());
+                checkout_options.arguments.push(revision.clone());
             }
         }
 
@@ -203,10 +284,15 @@ impl Git {
                     format_context!("Failed to get commit hash for {}", self.spaces_key),
                 )?
             {
+                let rev = if let Some(tag) =
+                    git::get_commit_tag(&self.url, &self.spaces_key, &mut progress)
+                {
+                    tag
+                } else {
+                    commit_hash.to_string()
+                };
                 // strip the trailing newline
-                let commit_hash = commit_hash.trim_end_matches('\n');
-                let commit_hash = commit_hash.trim_end_matches('\r');
-                workspace::add_git_commit_lock(name, commit_hash.to_string());
+                workspace::add_git_commit_lock(name, rev);
             }
         } else if let Some(commit_hash) = workspace::get_git_commit_lock(name) {
             let options = printer::ExecuteOptions {
