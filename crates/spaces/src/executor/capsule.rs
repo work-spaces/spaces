@@ -26,7 +26,7 @@ fn is_semver_check_ok(version: &semver::Version, required_semver: &str) -> anyho
         required_semver,
     ))?;
 
-    let is_ok = required.matches(&version);
+    let is_ok = required.matches(version);
     Ok(is_ok)
 }
 
@@ -254,9 +254,9 @@ fn get_state() -> &'static RwLock<State> {
         return state;
     }
 
-    let info_file_path = format!("{}", workspace::SPACES_CAPSULES_INFO_NAME);
+    let info_file_path = workspace::SPACES_CAPSULES_INFO_NAME;
 
-    let info_file = if std::path::Path::new(info_file_path.as_str()).exists() {
+    let info_file = if std::path::Path::new(info_file_path).exists() {
         let info_file = load_file_info(".");
         match info_file {
             Ok(info) => info,
@@ -544,7 +544,7 @@ impl Capsule {
             let capsule_info = load_file_info(&workspace_path)
                 .context(format_context!("Failed to load capsules.spaces.json"))?;
 
-            state.info_file = capsule_info.clone();
+            state.info_file.clone_from(&capsule_info);
             capsule_info
         };
 

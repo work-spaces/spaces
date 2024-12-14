@@ -1,4 +1,4 @@
-use crate::{info, workspace};
+use crate::{builtins::info, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};

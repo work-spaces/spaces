@@ -1,8 +1,6 @@
-pub mod checkout;
 pub mod inputs;
-pub mod run;
 
-use crate::{executor, info, label, workspace};
+use crate::{executor, builtins::info, label, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::ValueEnum;
@@ -10,309 +8,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::RwLock;
 use std::sync::{Arc, Condvar, Mutex};
-
-pub struct State {
-    pub tasks: RwLock<HashMap<String, Task>>,
-    pub graph: graph::Graph,
-    pub sorted: Vec<petgraph::prelude::NodeIndex>,
-    pub latest_starlark_module: Option<String>,
-    pub all_modules: HashSet<String>,
-}
-
-impl State {
-    pub fn get_sanitized_rule_name(&self, rule_name: &str) -> String {
-        label::sanitize_rule(rule_name, self.latest_starlark_module.as_ref())
-    }
-
-    pub fn insert_task(&self, mut task: Task) -> anyhow::Result<()> {
-        // update the rule name to have the starlark module name
-        let rule_label = label::sanitize_rule(
-            task.rule.name.as_str(),
-            self.latest_starlark_module.as_ref(),
-        );
-        task.rule.name.clone_from(&rule_label);
-
-        // update deps that refer to rules in the same starlark module
-        if let Some(deps) = task.rule.deps.as_mut() {
-            for dep in deps.iter_mut() {
-                if label::is_rule_sanitized(dep) {
-                    continue;
-                }
-                *dep = label::sanitize_rule(dep.as_str(), self.latest_starlark_module.as_ref());
-            }
-        }
-
-        let mut tasks = self.tasks.write().unwrap();
-
-        if let Some(task) = tasks.get(&rule_label){
-            return Err(format_error!("Rule already exists {rule_label} with {task:?}"));
-        } else {
-            tasks.insert(rule_label, task);
-        }
-
-        Ok(())
-    }
-
-    pub fn sort_tasks(&mut self, target: Option<String>, phase: Phase) -> anyhow::Result<()> {
-        let mut tasks = self.tasks.write().unwrap();
-
-        let setup_tasks = tasks
-            .values()
-            .filter(|task| task.rule.type_ == Some(RuleType::Setup))
-            .cloned()
-            .collect::<Vec<Task>>();
-
-        self.graph.clear();
-        // add all tasks to the graph
-        for task in tasks.values() {
-            self.graph.add_task(task.rule.name.clone());
-        }
-
-        let tasks_copy = tasks.clone();
-
-        for task in tasks.values_mut() {
-            // capture implicit dependencies based on inputs/outputs
-            for other_task in tasks_copy.values() {
-                // can't create a dependency on itself
-                if task.rule.name == other_task.rule.name {
-                    continue;
-                }
-                task.update_implicit_dependency(other_task);
-            }
-
-            // all non-setup tasks need to depend on the Setup tasks
-            if task.rule.type_ != Some(RuleType::Setup) {
-                for setup_task in setup_tasks.iter() {
-                    if task.phase == setup_task.phase {
-                        task.rule
-                            .deps
-                            .get_or_insert_with(Vec::new)
-                            .push(setup_task.rule.name.clone());
-                    }
-                }
-            }
-
-            let task_phase = task.phase;
-            if phase == Phase::Checkout && task_phase != Phase::Checkout {
-                // skip evaluating non-checkout tasks during checkout
-                continue;
-            }
-
-            // connect the dependencies
-            if let Some(deps) = task.rule.deps.clone() {
-                for dep in deps {
-                    let dep_task = tasks_copy
-                        .get(&dep)
-                        .ok_or(format_error!("Task Depedency not found {dep}"))?;
-
-                    match task_phase {
-                        Phase::Run => {
-                            if dep_task.phase != Phase::Run {
-                                return Err(format_error!(
-                                    "Run task {} cannot depend on non-run task {}", task.rule.name, dep_task.rule.name
-                                ));
-                            }
-                            if task.rule.type_ == Some(RuleType::Setup) && dep_task.rule.type_ != Some(RuleType::Setup) {
-                                return Err(format_error!(
-                                    "Setup task {} cannot depend on non-setup task {}", task.rule.name, dep_task.rule.name
-                                ));
-                            }
-                        }
-                        Phase::Checkout => {
-                            if dep_task.phase != Phase::Checkout {
-                                return Err(format_error!(
-                                    "Checkout task {} cannot depend on non-checkout task {}", task.rule.name, dep_task.rule.name
-                                ));
-                            }
-                        }
-                        _ => {}
-                    }
-                    
-
-                    task.add_signal_dependency(dep_task);
-                    self.graph
-                        .add_dependency(&task.rule.name, &dep)
-                        .context(format_context!(
-                            "Failed to add dependency {dep} to task {}",
-                            task.rule.name
-                        ))?;
-                }
-            }
-        }
-
-        let target_is_some = target.is_some();
-
-        self.sorted = self
-            .graph
-            .get_sorted_tasks(target)
-            .context(format_context!("Failed to sort tasks"))?;
-
-        if target_is_some {
-            // enable any optional tasks in the graph
-            for node_index in self.sorted.iter() {
-                let task_name = self.graph.get_task(*node_index);
-                let task = tasks
-                    .get_mut(task_name)
-                    .ok_or(format_error!("Task not found {task_name}"))?;
-                if task.rule.type_ == Some(RuleType::Optional) {
-                    task.rule.type_ = Some(RuleType::Run);
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    pub fn show_tasks(&self, printer: &mut printer::Printer) -> anyhow::Result<()> {
-        let tasks = self.tasks.read().unwrap();
-        let mut task_info_list = std::collections::HashMap::new();
-        for node_index in self.sorted.iter() {
-            let task_name = self.graph.get_task(*node_index);
-            let task = tasks
-                .get(task_name)
-                .ok_or(format_error!("Task not found {task_name}"))?;
-
-            if printer.verbosity.level == printer::Level::Debug {
-                printer.debug(task_name, &task)?;
-            } else if printer.verbosity.level <= printer::Level::Message || task.rule.help.is_some() {
-                task_info_list.insert(task.rule.name.clone(), task.rule.help.clone());
-            }
-        }
-
-        printer.info("targets", &task_info_list)?;
-
-        Ok(())
-    }
-
-    pub fn execute(
-        &self,
-        printer: &mut printer::Printer,
-        phase: Phase,
-    ) -> anyhow::Result<executor::TaskResult> {
-        let mut task_result = executor::TaskResult::new();
-        let mut multi_progress = printer::MultiProgress::new(printer);
-        let mut handle_list = Vec::new();
-
-        for node_index in self.sorted.iter() {
-            let task_name = self.graph.get_task(*node_index);
-            let task = {
-                let tasks = self.tasks.read().expect("Failed to get read lock on tasks");
-
-                tasks
-                    .get(task_name)
-                    .ok_or(format_error!("Task not found {task_name}"))?
-                    .clone()
-            };
-
-            if task.phase == phase {
-                let message = if task.rule.type_ == Some(RuleType::Optional) {
-                    "Skipped (Optional)".to_string()
-                } else {
-                    let message = if let Some(rule_type) = task.rule.type_ {
-                        format!("{:?}", rule_type)
-                    } else {
-                        format!("{:?}", phase)
-                    };
-                    format!("Complete ({message})")
-                };
-
-                let mut progress_bar = multi_progress.add_progress(
-                    task.rule.name.as_str(),
-                    Some(100),
-                    Some(message.as_str()),
-                );
-
-                progress_bar.log(
-                    printer::Level::Debug,
-                    format!("Staging task {}", task.rule.name).as_str(),
-                );
-                handle_list.push(task.execute(progress_bar));
-
-                loop {
-                    let mut number_running = 0;
-                    for handle in handle_list.iter() {
-                        if !handle.is_finished() {
-                            number_running += 1;
-                        }
-                    }
-
-                    // this could be configured with a another global starlark function
-                    if number_running < info::get_max_queue_count() {
-                        break;
-                    } else {
-                        std::thread::sleep(std::time::Duration::from_millis(100));
-                    }
-                }
-            }
-        }
-
-        let mut first_error = None;
-        for handle in handle_list {
-            let handle_join_result = handle.join();
-            match handle_join_result {
-                Ok(handle_result) => {
-                    match handle_result {
-                        Ok(handle_task_result) => {
-                            task_result.extend(handle_task_result);
-                        }
-                        Err(err) => {
-                            first_error = Some(format_error!("Task failed: {:?}", err));
-                        }
-                    }
-                }
-                Err(err) => {
-                    first_error = Some(format_error!("Failed to join thread: {:?}", err));
-                }
-            }
-        }
-
-        inputs::save().context(format_context!("Failed to save inputs"))?;
-        workspace::save_changes().context(format_context!("while saving changes"))?;
-
-        if let Some(err) = first_error {
-            return Err(err);
-        }
-
-        Ok(task_result)
-    }
-}
-
-static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
-
-pub fn get_state() -> &'static RwLock<State> {
-    if let Some(state) = STATE.try_get() {
-        return state;
-    }
-
-    STATE.set(RwLock::new(State {
-        tasks: RwLock::new(HashMap::new()),
-        graph: graph::Graph::default(),
-        sorted: Vec::new(),
-        latest_starlark_module: None,
-        all_modules: HashSet::new(),
-    }));
-    STATE.get()
-}
-
-pub fn get_checkout_path() -> anyhow::Result<String> {
-    let state = get_state().read().unwrap();
-    if let Some(latest) = state.latest_starlark_module.as_ref() {
-        let path = std::path::Path::new(latest.as_str());
-        let parent = path
-            .parent()
-            .map(|e| e.to_string_lossy().to_string())
-            .unwrap_or_default();
-        Ok(parent)
-    } else {
-        Err(format_error!("No starlark module set"))
-    }
-}
-
-pub fn get_path_to_build_checkout(rule_name: &str) -> anyhow::Result<String> {
-    let state = get_state().read().unwrap();
-    let rule_name = state.get_sanitized_rule_name(rule_name);
-    Ok(format!("build/{}", rule_name))
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, ValueEnum)]
 pub enum Phase {
@@ -350,15 +45,47 @@ pub struct Signal {
     name: String,
 }
 
+#[derive(Default, Debug, Clone)]
+struct RuleSignal {
+    signal: Arc<(Mutex<Signal>, Condvar)>,
+}
+
+impl RuleSignal {
+    fn new(name: String) -> Self {
+        RuleSignal {
+            signal: Arc::new((Mutex::new(Signal { ready: false, name }), Condvar::new())),
+        }
+    }
+
+    fn wait_is_ready(&self, duration: std::time::Duration) {
+        loop {
+            let (lock, cvar) = &*self.signal;
+            let signal_access = lock.lock().unwrap();
+            if !signal_access.ready {
+                let _ = cvar.wait_timeout(signal_access, duration).unwrap();
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn set_ready_notify_all(&self){
+        let (lock, cvar) = &*self.signal;
+        let mut signal_access = lock.lock().unwrap();
+        signal_access.ready = true;
+        cvar.notify_all();
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
     pub executor: executor::Task,
     pub phase: Phase,
     pub rule: Rule,
     #[serde(skip)]
-    signal: Arc<(Mutex<Signal>, Condvar)>,
+    signal: RuleSignal,
     #[serde(skip)]
-    deps_signals: Vec<Arc<(Mutex<Signal>, Condvar)>>,
+    deps_signals: Vec<RuleSignal>,
 }
 
 impl Task {
@@ -366,13 +93,7 @@ impl Task {
         Task {
             executor,
             phase,
-            signal: Arc::new((
-                Mutex::new(Signal {
-                    ready: false,
-                    name: rule.name.clone(),
-                }),
-                Condvar::new(),
-            )),
+            signal: RuleSignal::new(rule.name.clone()),
             deps_signals: Vec::new(),
             rule,
         }
@@ -438,9 +159,9 @@ impl Task {
             );
 
             let mut count = 1;
-            for deps_signal in deps_signals {
+            for deps_rule_signal in deps_signals {
                 {
-                    let (lock, _) = &*deps_signal;
+                    let (lock, _) = &*deps_rule_signal.signal;
                     let signal_access = lock.lock().unwrap();
                     progress.log(
                         printer::Level::Debug,
@@ -451,18 +172,8 @@ impl Task {
                         .as_str(),
                     );
                 }
-                loop {
-                    let (lock, cvar) = &*deps_signal;
-                    let signal_access = lock.lock().unwrap();
-                    if !signal_access.ready {
-                        let _ = cvar
-                            .wait_timeout(signal_access, std::time::Duration::from_millis(100))
-                            .unwrap();
-                    } else {
-                        break;
-                    }
-                    //progress.increment_with_overflow(1);
-                }
+
+                deps_rule_signal.wait_is_ready(std::time::Duration::from_millis(100));
                 count += 1;
             }
 
@@ -517,9 +228,15 @@ impl Task {
                     format!("{name} check for new digest").as_str(),
                 );
 
-                let seed = serde_json::to_string(&executor).context(format_context!("Failed to serialize"))?;
-                let digest = inputs::is_rule_inputs_changed(&mut progress, &rule_name, seed.as_str(), inputs)
-                    .context(format_context!("Failed to check inputs for {rule_name}"))?;
+                let seed = serde_json::to_string(&executor)
+                    .context(format_context!("Failed to serialize"))?;
+                let digest = inputs::is_rule_inputs_changed(
+                    &mut progress,
+                    &rule_name,
+                    seed.as_str(),
+                    inputs,
+                )
+                .context(format_context!("Failed to check inputs for {rule_name}"))?;
                 if digest.is_none() {
                     // the digest has not changed - not need to execute
                     skip_execute_message = Some(format!("Skipping {name}: same inputs"));
@@ -581,10 +298,7 @@ impl Task {
                 task.phase = Phase::Complete;
             }
 
-            let (lock, cvar) = &*signal;
-            let mut signal_access = lock.lock().unwrap();
-            signal_access.ready = true;
-            cvar.notify_all();
+            signal.set_ready_notify_all();
 
             task_result
         })
@@ -593,4 +307,362 @@ impl Task {
     pub fn add_signal_dependency(&mut self, task: &Task) {
         self.deps_signals.push(task.signal.clone());
     }
+}
+
+
+pub fn get_sanitized_rule_name(rule_name: &str) -> String {
+    let state = get_state().read().unwrap();
+    state.get_sanitized_rule_name(rule_name)
+}
+
+pub fn insert_task(task: Task) -> anyhow::Result<()> {
+    let state = get_state().read().unwrap();
+    state.insert_task(task)
+}
+
+pub fn set_latest_starlark_module(name: &str) {
+    let mut state = get_state().write().unwrap();
+    state.latest_starlark_module = Some(name.to_string());
+    state.all_modules.insert(name.to_string());
+}   
+
+pub fn show_tasks(printer: &mut printer::Printer) -> anyhow::Result<()> {
+    let state = get_state().read().unwrap();
+    state.show_tasks(printer)
+}
+
+pub fn sort_tasks(target: Option<String>, phase: Phase) -> anyhow::Result<()> {
+    let mut state = get_state().write().unwrap();
+    state.sort_tasks(target, phase)
+}
+
+pub fn execute(printer: &mut printer::Printer, phase: Phase) -> anyhow::Result<executor::TaskResult> {
+    let state = get_state().read().unwrap();
+    state.execute(printer, phase)
+}
+
+pub fn debug_sorted_tasks(printer: &mut printer::Printer, phase: Phase) -> anyhow::Result<()> {
+    let state = get_state().read().unwrap();
+    for node_index in state.sorted.iter() {
+        let task_name = state.graph.get_task(*node_index);
+        if let Some(task) = state.tasks.read().unwrap().get(task_name) {
+            if task.phase == phase {
+                printer.log(
+                    printer::Level::Debug,
+                    format!("Queued task {task_name}").as_str(),
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+pub struct State {
+    pub tasks: RwLock<HashMap<String, Task>>,
+    pub graph: graph::Graph,
+    pub sorted: Vec<petgraph::prelude::NodeIndex>,
+    pub latest_starlark_module: Option<String>,
+    pub all_modules: HashSet<String>,
+}
+
+impl State {
+    pub fn get_sanitized_rule_name(&self, rule_name: &str) -> String {
+        label::sanitize_rule(rule_name, self.latest_starlark_module.as_ref())
+    }
+
+    pub fn insert_task(&self, mut task: Task) -> anyhow::Result<()> {
+        // update the rule name to have the starlark module name
+        let rule_label = label::sanitize_rule(
+            task.rule.name.as_str(),
+            self.latest_starlark_module.as_ref(),
+        );
+        task.rule.name.clone_from(&rule_label);
+
+        // update deps that refer to rules in the same starlark module
+        if let Some(deps) = task.rule.deps.as_mut() {
+            for dep in deps.iter_mut() {
+                if label::is_rule_sanitized(dep) {
+                    continue;
+                }
+                *dep = label::sanitize_rule(dep.as_str(), self.latest_starlark_module.as_ref());
+            }
+        }
+
+        let mut tasks = self.tasks.write().unwrap();
+
+        if let Some(task) = tasks.get(&rule_label) {
+            return Err(format_error!(
+                "Rule already exists {rule_label} with {task:?}"
+            ));
+        } else {
+            tasks.insert(rule_label, task);
+        }
+
+        Ok(())
+    }
+
+    pub fn sort_tasks(&mut self, target: Option<String>, phase: Phase) -> anyhow::Result<()> {
+        let mut tasks = self.tasks.write().unwrap();
+
+        let setup_tasks = tasks
+            .values()
+            .filter(|task| task.rule.type_ == Some(RuleType::Setup))
+            .cloned()
+            .collect::<Vec<Task>>();
+
+        self.graph.clear();
+        // add all tasks to the graph
+        for task in tasks.values() {
+            self.graph.add_task(task.rule.name.clone());
+        }
+
+        let tasks_copy = tasks.clone();
+
+        for task in tasks.values_mut() {
+            // capture implicit dependencies based on inputs/outputs
+            for other_task in tasks_copy.values() {
+                // can't create a dependency on itself
+                if task.rule.name == other_task.rule.name {
+                    continue;
+                }
+                task.update_implicit_dependency(other_task);
+            }
+
+            // all non-setup tasks need to depend on the Setup tasks
+            if task.rule.type_ != Some(RuleType::Setup) {
+                for setup_task in setup_tasks.iter() {
+                    if task.phase == setup_task.phase {
+                        task.rule
+                            .deps
+                            .get_or_insert_with(Vec::new)
+                            .push(setup_task.rule.name.clone());
+                    }
+                }
+            }
+
+            let task_phase = task.phase;
+            if phase == Phase::Checkout && task_phase != Phase::Checkout {
+                // skip evaluating non-checkout tasks during checkout
+                continue;
+            }
+
+            // connect the dependencies
+            if let Some(deps) = task.rule.deps.clone() {
+                for dep in deps {
+                    let dep_task = tasks_copy
+                        .get(&dep)
+                        .ok_or(format_error!("Task Depedency not found {dep}"))?;
+
+                    match task_phase {
+                        Phase::Run => {
+                            if dep_task.phase != Phase::Run {
+                                return Err(format_error!(
+                                    "Run task {} cannot depend on non-run task {}",
+                                    task.rule.name,
+                                    dep_task.rule.name
+                                ));
+                            }
+                            if task.rule.type_ == Some(RuleType::Setup)
+                                && dep_task.rule.type_ != Some(RuleType::Setup)
+                            {
+                                return Err(format_error!(
+                                    "Setup task {} cannot depend on non-setup task {}",
+                                    task.rule.name,
+                                    dep_task.rule.name
+                                ));
+                            }
+                        }
+                        Phase::Checkout => {
+                            if dep_task.phase != Phase::Checkout {
+                                return Err(format_error!(
+                                    "Checkout task {} cannot depend on non-checkout task {}",
+                                    task.rule.name,
+                                    dep_task.rule.name
+                                ));
+                            }
+                        }
+                        _ => {}
+                    }
+
+                    task.add_signal_dependency(dep_task);
+                    self.graph
+                        .add_dependency(&task.rule.name, &dep)
+                        .context(format_context!(
+                            "Failed to add dependency {dep} to task {}",
+                            task.rule.name
+                        ))?;
+                }
+            }
+        }
+
+        let target_is_some = target.is_some();
+
+        self.sorted = self
+            .graph
+            .get_sorted_tasks(target)
+            .context(format_context!("Failed to sort tasks"))?;
+
+        if target_is_some {
+            // enable any optional tasks in the graph
+            for node_index in self.sorted.iter() {
+                let task_name = self.graph.get_task(*node_index);
+                let task = tasks
+                    .get_mut(task_name)
+                    .ok_or(format_error!("Task not found {task_name}"))?;
+                if task.rule.type_ == Some(RuleType::Optional) {
+                    task.rule.type_ = Some(RuleType::Run);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn show_tasks(&self, printer: &mut printer::Printer) -> anyhow::Result<()> {
+        let tasks = self.tasks.read().unwrap();
+        let mut task_info_list = std::collections::HashMap::new();
+        for node_index in self.sorted.iter() {
+            let task_name = self.graph.get_task(*node_index);
+            let task = tasks
+                .get(task_name)
+                .ok_or(format_error!("Task not found {task_name}"))?;
+
+            if printer.verbosity.level == printer::Level::Debug {
+                printer.debug(task_name, &task)?;
+            } else if printer.verbosity.level <= printer::Level::Message || task.rule.help.is_some()
+            {
+                task_info_list.insert(task.rule.name.clone(), task.rule.help.clone());
+            }
+        }
+
+        printer.info("targets", &task_info_list)?;
+
+        Ok(())
+    }
+
+    pub fn execute(
+        &self,
+        printer: &mut printer::Printer,
+        phase: Phase,
+    ) -> anyhow::Result<executor::TaskResult> {
+        let mut task_result = executor::TaskResult::new();
+        let mut multi_progress = printer::MultiProgress::new(printer);
+        let mut handle_list = Vec::new();
+
+        for node_index in self.sorted.iter() {
+            let task_name = self.graph.get_task(*node_index);
+            let task = {
+                let tasks = self.tasks.read().expect("Failed to get read lock on tasks");
+                tasks
+                    .get(task_name)
+                    .ok_or(format_error!("Task not found {task_name}"))?
+                    .clone()
+            };
+
+            if task.phase == phase {
+                let message = if task.rule.type_ == Some(RuleType::Optional) {
+                    "Skipped (Optional)".to_string()
+                } else {
+                    let message = if let Some(rule_type) = task.rule.type_ {
+                        format!("{:?}", rule_type)
+                    } else {
+                        format!("{:?}", phase)
+                    };
+                    format!("Complete ({message})")
+                };
+
+                let mut progress_bar = multi_progress.add_progress(
+                    task.rule.name.as_str(),
+                    Some(100),
+                    Some(message.as_str()),
+                );
+
+                progress_bar.log(
+                    printer::Level::Debug,
+                    format!("Staging task {}", task.rule.name).as_str(),
+                );
+                handle_list.push(task.execute(progress_bar));
+
+                loop {
+                    let mut number_running = 0;
+                    for handle in handle_list.iter() {
+                        if !handle.is_finished() {
+                            number_running += 1;
+                        }
+                    }
+
+                    // this could be configured with a another global starlark function
+                    if number_running < info::get_max_queue_count() {
+                        break;
+                    } else {
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                }
+            }
+        }
+
+        let mut first_error = None;
+        for handle in handle_list {
+            let handle_join_result = handle.join();
+            match handle_join_result {
+                Ok(handle_result) => match handle_result {
+                    Ok(handle_task_result) => {
+                        task_result.extend(handle_task_result);
+                    }
+                    Err(err) => {
+                        first_error = Some(format_error!("Task failed: {:?}", err));
+                    }
+                },
+                Err(err) => {
+                    first_error = Some(format_error!("Failed to join thread: {:?}", err));
+                }
+            }
+        }
+
+        inputs::save().context(format_context!("Failed to save inputs"))?;
+        workspace::save_changes().context(format_context!("while saving changes"))?;
+
+        if let Some(err) = first_error {
+            return Err(err);
+        }
+
+        Ok(task_result)
+    }
+}
+
+static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
+
+fn get_state() -> &'static RwLock<State> {
+    if let Some(state) = STATE.try_get() {
+        return state;
+    }
+
+    STATE.set(RwLock::new(State {
+        tasks: RwLock::new(HashMap::new()),
+        graph: graph::Graph::default(),
+        sorted: Vec::new(),
+        latest_starlark_module: None,
+        all_modules: HashSet::new(),
+    }));
+    STATE.get()
+}
+
+pub fn get_checkout_path() -> anyhow::Result<String> {
+    let state = get_state().read().unwrap();
+    if let Some(latest) = state.latest_starlark_module.as_ref() {
+        let path = std::path::Path::new(latest.as_str());
+        let parent = path
+            .parent()
+            .map(|e| e.to_string_lossy().to_string())
+            .unwrap_or_default();
+        Ok(parent)
+    } else {
+        Err(format_error!("No starlark module set"))
+    }
+}
+
+pub fn get_path_to_build_checkout(rule_name: &str) -> anyhow::Result<String> {
+    let state = get_state().read().unwrap();
+    let rule_name = state.get_sanitized_rule_name(rule_name);
+    Ok(format!("build/{}", rule_name))
 }

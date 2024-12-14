@@ -1,4 +1,4 @@
-use crate::{executor, info, rules, workspace};
+use crate::{executor, builtins, builtins::info, rules, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use starlark::environment::{FrozenModule, GlobalsBuilder, Module};
@@ -18,12 +18,8 @@ fn evaluate_module(
     content: String,
     with_rules: WithRules,
 ) -> anyhow::Result<FrozenModule> {
-    {
-        let mut state = rules::get_state().write().unwrap();
-        if workspace::is_rules_module(name) {
-            state.latest_starlark_module = Some(name.to_string());
-            state.all_modules.insert(name.to_string());
-        }
+    if workspace::is_rules_module(name) {
+        rules::set_latest_starlark_module(name);
     }
 
     let ast =
@@ -64,8 +60,8 @@ fn evaluate_module(
 
     let globals_builder = if with_rules == WithRules::Yes {
         globals_builder
-            .with_struct("checkout", rules::checkout::globals)
-            .with_struct("run", rules::run::globals)
+            .with_struct("checkout", builtins::checkout::globals)
+            .with_struct("run", builtins::run::globals)
     } else {
         globals_builder
     };
@@ -82,27 +78,6 @@ fn evaluate_module(
     // After creating a module we freeze it, preventing further mutation.
     // It can now be used as the input for other Starlark modules.
     module.freeze()
-}
-
-pub fn sort_tasks(target: Option<String>, phase: rules::Phase) -> anyhow::Result<()> {
-    let mut state = rules::get_state().write().unwrap();
-    state.sort_tasks(target, phase)
-}
-
-fn debug_sorted_tasks(printer: &mut printer::Printer, phase: rules::Phase) -> anyhow::Result<()> {
-    let state: std::sync::RwLockReadGuard<'_, rules::State> = rules::get_state().read().unwrap();
-    for node_index in state.sorted.iter() {
-        let task_name = state.graph.get_task(*node_index);
-        if let Some(task) = state.tasks.read().unwrap().get(task_name) {
-            if task.phase == phase {
-                printer.log(
-                    printer::Level::Debug,
-                    format!("Queued task {task_name}").as_str(),
-                )?;
-            }
-        }
-    }
-    Ok(())
 }
 
 pub fn run_starlark_modules(
@@ -152,14 +127,12 @@ pub fn run_starlark_modules(
         // During checkout phase, additional modules may be added to the queue
         // if the repo contains more spaces.star files
         if phase == rules::Phase::Checkout {
-            sort_tasks(None, phase).context(format_context!("Failed to sort tasks"))?;
+            rules::sort_tasks(None, phase).context(format_context!("Failed to sort tasks"))?;
             printer.log(printer::Level::Debug, "--Checkout Phase--")?;
-            debug_sorted_tasks(printer, phase)
+            rules::debug_sorted_tasks(printer, phase)
                 .context(format_context!("Failed to debug sorted tasks"))?;
 
-            let state = rules::get_state().read().unwrap();
-            let task_result = state
-                .execute(printer, phase)
+            let task_result = rules::execute(printer, phase)
                 .context(format_context!("Failed to execute tasks"))?;
             if !task_result.new_modules.is_empty() {
                 printer.log(
@@ -204,40 +177,35 @@ pub fn run_starlark_modules(
                 format!("Is Workspace reproducible: {is_reproducible}").as_str(),
             )?;
 
-            sort_tasks(target.clone(), phase).context(format_context!("Failed to sort tasks"))?;
+            rules::sort_tasks(target.clone(), phase)
+                .context(format_context!("Failed to sort tasks"))?;
 
-            debug_sorted_tasks(printer, phase)
+            rules::debug_sorted_tasks(printer, phase)
                 .context(format_context!("Failed to debug sorted tasks"))?;
 
-            let state = rules::get_state().read().unwrap();
-            let _new_modules = state
-                .execute(printer, phase)
+            let _new_modules = rules::execute(printer, phase)
                 .context(format_context!("Failed to execute tasks"))?;
         }
         rules::Phase::Evaluate => {
             printer.log(printer::Level::Debug, "--Evaluate Phase--")?;
-            sort_tasks(target.clone(), phase).context(format_context!("Failed to sort tasks"))?;
+            rules::sort_tasks(target.clone(), phase)
+                .context(format_context!("Failed to sort tasks"))?;
 
-            debug_sorted_tasks(printer, rules::Phase::Run)
+            rules::debug_sorted_tasks(printer, rules::Phase::Run)
                 .context(format_context!("Failed to debug sorted tasks"))?;
 
-            let state = rules::get_state().read().unwrap();
-            state
-                .show_tasks(printer)
-                .context(format_context!("Failed to show tasks"))?;
+            rules::show_tasks(printer).context(format_context!("Failed to show tasks"))?;
         }
         rules::Phase::Checkout => {
             printer.log(printer::Level::Debug, "--Post Checkout Phase--")?;
 
             // at this point everything should be preset, sort tasks as if in run phase
-            sort_tasks(target.clone(), rules::Phase::Run)
+            rules::sort_tasks(target.clone(), rules::Phase::Run)
                 .context(format_context!("Failed to sort tasks"))?;
-            debug_sorted_tasks(printer, rules::Phase::PostCheckout)
+            rules::debug_sorted_tasks(printer, rules::Phase::PostCheckout)
                 .context(format_context!("Failed to debug sorted tasks"))?;
 
-            let state = rules::get_state().read().unwrap();
-            state
-                .execute(printer, rules::Phase::PostCheckout)
+            rules::execute(printer, rules::Phase::PostCheckout)
                 .context(format_context!("failed to execute post checkout phase"))?;
 
             // prepend PATH with sysroot/bin if sysroot/bin is not already in the PATH
@@ -255,19 +223,12 @@ pub fn run_starlark_modules(
             }
 
             executor::env::finalize_env(&env).context(format_context!("failed to finalize env"))?;
+            let env_str = serde_json::to_string_pretty(&env)?;
 
-            let mut workspace_file_content = String::new();
-            workspace_file_content.push_str(workspace::WORKSPACE_FILE_HEADER);
-            workspace_file_content.push('\n');
+            workspace::save_env_file(env_str.as_str())
+                .context(format_context!("Failed to save env file"))?;
 
-            workspace_file_content.push_str("workspace_env = ");
-
-            workspace_file_content.push_str(serde_json::to_string_pretty(&env)?.as_str());
-            workspace_file_content.push_str("\n\ninfo.set_env(env = workspace_env) \n");
-
-            let workspace_file_path = format!("{workspace_path}/{}", workspace::ENV_FILE_NAME);
-            std::fs::write(workspace_file_path.as_str(), workspace_file_content)
-                .context(format_context!("Failed to write workspace file"))?;
+            //workspace::save_lock_file().context(format_context!("Failed to save workspace lock file"))?;
         }
         _ => {}
     }

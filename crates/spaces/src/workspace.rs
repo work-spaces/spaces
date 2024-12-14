@@ -1,15 +1,16 @@
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, sync::RwLock};
+use std::{collections::{HashSet, HashMap}, sync::RwLock};
 
 pub const ENV_FILE_NAME: &str = "env.spaces.star";
+pub const LOCK_FILE_NAME: &str = "lock.spaces.star";
 pub const SPACES_MODULE_NAME: &str = "spaces.star";
 pub const SPACES_STDIN_NAME: &str = "stdin.star";
 pub const SPACES_LOGS_NAME: &str = "@logs";
 pub const SPACES_CAPSULES_NAME: &str = "@capsules";
 pub const SPACES_CAPSULES_INFO_NAME: &str = "capsules.spaces.json";
-const SPACES_SYNC_ORDER_NAME: &str = "sync.spaces.json";
+const SETTINGS_FILE_NAME: &str = "settings.spaces.json";
 const SPACES_HOME_ENV_VAR: &str = "SPACES_HOME";
 pub const SPACES_PROCESS_GROUP_ENV_VAR: &str = "SPACES_PROCESS_GROUP";
 pub const SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE: &str = "SPACES_IS_WORKSPACE_REPRODUCIBLE";
@@ -20,19 +21,25 @@ Spaces Environment Workspace file
 """
 "#;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LockFile {
+    pub rules: HashMap<String, String>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Default)]
-pub struct SyncLoadOrder {
+pub struct Settings {
     pub store_path: String,
     order: Vec<String>,
 }
 
-impl SyncLoadOrder {
+impl Settings {
     pub fn load(path: &str) -> anyhow::Result<Self> {
-        let load_path = format!("{path}/{SPACES_SYNC_ORDER_NAME}");
+        let load_path = format!("{path}/{SETTINGS_FILE_NAME}");
         let content = std::fs::read_to_string(load_path.as_str()).context(format_context!(
             "Failed to read load order file {load_path}"
         ))?;
-        let order: SyncLoadOrder = serde_json::from_str(content.as_str()).context(
+        let order: Settings = serde_json::from_str(content.as_str()).context(
             format_context!("Failed to parse load order file {load_path}"),
         )?;
         Ok(order)
@@ -43,7 +50,7 @@ impl SyncLoadOrder {
     }
 
     pub fn save(&self, workspace_path: &str) -> anyhow::Result<()> {
-        let path = format!("{workspace_path}/{SPACES_SYNC_ORDER_NAME}");
+        let path = format!("{workspace_path}/{SETTINGS_FILE_NAME}");
         let content = serde_json::to_string_pretty(&self)
             .context(format_context!("Failed to serialize load order"))?;
         std::fs::write(path.as_str(), content.as_str())
@@ -59,6 +66,8 @@ struct State {
     digest: String,
     store_path: String,
     changes: Option<changes::Changes>,
+    locks: HashMap<String, String>,
+    is_create_lock_file: bool
 }
 
 static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
@@ -71,6 +80,51 @@ pub fn calculate_digest(modules: &Vec<(String, String)>) -> String {
     hasher.finalize().to_string()
 }
 
+pub fn save_env_file(env: &str) -> anyhow::Result<()> {
+    let mut workspace_file_content = String::new();
+    workspace_file_content.push_str(WORKSPACE_FILE_HEADER);
+    workspace_file_content.push('\n');
+    workspace_file_content.push_str("workspace_env = ");
+    workspace_file_content.push_str(env);
+    workspace_file_content.push_str("\n\ninfo.set_env(env = workspace_env) \n");
+    let state = get_state().read().unwrap();
+    let workspace_file_path = format!("{}/{}", state.absolute_path, ENV_FILE_NAME);
+    std::fs::write(workspace_file_path.as_str(), workspace_file_content)
+        .context(format_context!("Failed to write workspace file"))?;
+
+    Ok(())
+}
+
+pub fn is_create_lock_file() -> bool {
+    let state = get_state().read().unwrap();
+    state.is_create_lock_file
+}
+
+pub fn set_create_lock_file(is_create_lock_file: bool) {
+    let mut state = get_state().write().unwrap();
+    state.is_create_lock_file = is_create_lock_file;
+}
+
+pub fn save_lock_file() -> anyhow::Result<()> {
+    let state = get_state().read().unwrap();
+    if !state.is_create_lock_file {
+        return Ok(());
+    }
+    let mut workspace_file_content = String::new();
+    workspace_file_content.push_str(WORKSPACE_FILE_HEADER);
+    workspace_file_content.push('\n');
+    workspace_file_content.push_str("workspace_locks = ");
+    let locks_str = serde_json::to_string_pretty(&state.locks).context(format_context!("Failed to serialize locks"))?;
+    workspace_file_content.push_str(locks_str.as_str());
+    workspace_file_content.push_str("\n\ninfo.set_locks(locks = workspace_locks) \n");
+
+    let workspace_file_path = format!("{}/{}", state.absolute_path, LOCK_FILE_NAME);
+    std::fs::write(workspace_file_path.as_str(), workspace_file_content)
+        .context(format_context!("Failed to write workspace file"))?;
+
+    Ok(())
+}
+
 pub fn set_digest(digest: String) {
     let mut state = get_state().write().unwrap();
     state.digest = digest.to_string();
@@ -79,6 +133,16 @@ pub fn set_digest(digest: String) {
 pub fn get_digest() -> String {
     let state = get_state().read().unwrap();
     state.digest.clone()
+}
+
+pub fn get_git_commit_lock(rule_name: &str) -> Option<String> {
+    let state = get_state().read().unwrap();
+    state.locks.get(rule_name).cloned()
+}
+
+pub fn set_locks(locks: HashMap<String, String>) {
+    let mut state = get_state().write().unwrap();
+    state.locks = locks;
 }
 
 pub fn get_current_working_directory() -> anyhow::Result<String> {
@@ -152,6 +216,11 @@ pub fn get_cargo_binstall_root() -> String {
     format!("{}/cargo_binstall_bin_dir", get_spaces_tools_path())
 }
 
+pub fn add_git_commit_lock(rule_name: &str, commit: String) {
+    let mut state = get_state().write().unwrap();
+    state.locks.insert(rule_name.to_string(), commit);
+}
+
 pub fn get_rule_inputs_digest(
     progress: &mut printer::MultiProgressBar,
     seed: &str,
@@ -181,6 +250,8 @@ fn get_state() -> &'static RwLock<State> {
         log_directory: SPACES_LOGS_NAME.to_string(),
         changes: None,
         store_path: get_checkout_store_path(),
+        locks: HashMap::new(),
+        is_create_lock_file: false,
     }));
     STATE.get()
 }
@@ -258,17 +329,24 @@ impl Workspace {
 
         progress.set_total(walkdir.len() as u64);
 
-        let env_content = std::fs::read_to_string(format!("{}/{}", absolute_path, ENV_FILE_NAME))
-            .context(format_context!("Failed to read workspace file"))?;
-
         let mut loaded_modules = HashSet::new();
+        let mut modules = vec![];
+
+        if let Ok(lock_content) = std::fs::read_to_string(format!("{}/{}", absolute_path, LOCK_FILE_NAME)) {
+            loaded_modules.insert(LOCK_FILE_NAME.to_string());
+            modules.push((LOCK_FILE_NAME.to_string(), lock_content));
+        }
+
+        let env_content = std::fs::read_to_string(format!("{}/{}", absolute_path, ENV_FILE_NAME))
+            .context(format_context!("Failed to read workspace file: {ENV_FILE_NAME}"))?;
+
         loaded_modules.insert(ENV_FILE_NAME.to_string());
-        let mut modules = vec![(ENV_FILE_NAME.to_string(), env_content)];
+        modules.push((ENV_FILE_NAME.to_string(), env_content));
 
         let mut original_modules = vec![];
 
         let mut store_path = None;
-        if let Ok(load_order) = SyncLoadOrder::load(absolute_path.as_str()) {
+        if let Ok(load_order) = Settings::load(absolute_path.as_str()) {
             progress.log(printer::Level::Trace, "Loading modules from sync order");
             store_path = Some(load_order.store_path);
             for module in load_order.order {

@@ -1,4 +1,4 @@
-use crate::{info, workspace};
+use crate::{builtins::info, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -196,34 +196,52 @@ impl Git {
             git::Checkout::Revision(branch_name) => branch_name.clone(),
         };
 
-        // check if checkout is on a branch or commit
-        let options = printer::ExecuteOptions {
-            working_directory: Some(self.spaces_key.clone()),
-            arguments: vec![
-                "show-ref".to_string(),
-                "--verify".to_string(),
-                "--quiet".to_string(),
-                format!("refs/heads/{}", ref_name).to_string(),
-            ],
-            ..Default::default()
-        };
+        let mut is_locked = false;
+        if workspace::is_create_lock_file() {
+            if let Some(commit_hash) =
+                git::get_commit_hash(&self.url, &self.spaces_key, &mut progress).context(
+                    format_context!("Failed to get commit hash for {}", self.spaces_key),
+                )?
+            {
+                // strip the trailing newline
+                let commit_hash = commit_hash.trim_end_matches('\n');
+                let commit_hash = commit_hash.trim_end_matches('\r');
+                workspace::add_git_commit_lock(name, commit_hash.to_string());
+            }
+        } else if let Some(commit_hash) = workspace::get_git_commit_lock(name) {
+            let options = printer::ExecuteOptions {
+                working_directory: Some(self.spaces_key.clone()),
+                arguments: vec!["checkout".to_string(), "--detach".to_string(), commit_hash],
+                ..Default::default()
+            };
 
-        progress.log(
-            printer::Level::Debug,
-            format!("{}: git show-ref {options:?}", self.spaces_key).as_str(),
-        );
-
-        let is_branch = git::execute_git_command(&self.url, &mut progress, options).is_ok();
-        if is_branch {
             progress.log(
-                printer::Level::Info,
-                format!(
-                    "{} is a branch - workspace is not reproducible",
-                    self.spaces_key
-                )
-                .as_str(),
+                printer::Level::Debug,
+                format!("{}: git {options:?}", self.spaces_key).as_str(),
             );
-            info::set_is_reproducible(false);
+
+            git::execute_git_command(&self.url, &mut progress, options).context(
+                format_context!("Failed to checkout commit hash from {}", self.spaces_key),
+            )?;
+
+            is_locked = true;
+        }
+
+        // after possibly applying the lock commit, check for reproducibility
+        if !is_locked {
+            // check if checkout is on a branch or commiy
+            let is_branch = git::is_branch(&self.url, &self.spaces_key, &ref_name, &mut progress);
+            if is_branch {
+                progress.log(
+                    printer::Level::Info,
+                    format!(
+                        "{} is a branch - workspace is not reproducible",
+                        self.spaces_key
+                    )
+                    .as_str(),
+                );
+                info::set_is_reproducible(false);
+            }
         }
 
         Ok(())

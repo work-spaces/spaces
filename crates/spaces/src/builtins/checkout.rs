@@ -453,15 +453,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for repo"))?;
 
-        let state = rules::get_state().read().unwrap();
         let rule_name = rule.name.clone();
-        state
-            .insert_task(rules::Task::new(
-                rule,
-                rules::Phase::Checkout,
-                executor::Task::Target,
-            ))
-            .context(format_context!("Failed to insert task {rule_name}"))?;
+        rules::insert_task(rules::Task::new(
+            rule,
+            rules::Phase::Checkout,
+            executor::Task::Target,
+        ))
+        .context(format_context!("Failed to insert task {rule_name}"))?;
         Ok(NoneType)
     }
 
@@ -477,24 +475,22 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let worktree_path = workspace::absolute_path();
 
-        let state = rules::get_state().read().unwrap();
         let checkout = repo.get_checkout();
         let spaces_key = rule.name.clone();
         let rule_name = rule.name.clone();
-        state
-            .insert_task(rules::Task::new(
-                rule,
-                rules::Phase::Checkout,
-                executor::Task::Git(executor::git::Git {
-                    url: repo.url,
-                    spaces_key,
-                    worktree_path,
-                    checkout,
-                    clone: repo.clone.unwrap_or(git::Clone::Default),
-                    is_evaluate_spaces_modules: repo.is_evaluate_spaces_modules.unwrap_or(true),
-                }),
-            ))
-            .context(format_context!("Failed to insert task {rule_name}"))?;
+        rules::insert_task(rules::Task::new(
+            rule,
+            rules::Phase::Checkout,
+            executor::Task::Git(executor::git::Git {
+                url: repo.url,
+                spaces_key,
+                worktree_path,
+                checkout,
+                clone: repo.clone.unwrap_or(git::Clone::Default),
+                is_evaluate_spaces_modules: repo.is_evaluate_spaces_modules.unwrap_or(true),
+            }),
+        ))
+        .context(format_context!("Failed to insert task {rule_name}"))?;
         Ok(NoneType)
     }
 
@@ -537,19 +533,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             expect: None,
         };
 
-        let state = rules::get_state().read().unwrap();
         let rule_name = rule.name.clone();
-        state
-            .insert_task(rules::Task::new(
-                rule,
-                rules::Phase::Checkout,
-                executor::Task::Exec(exec),
-            ))
-            .context(format_context!("Failed to insert task {rule_name}"))?;
+        rules::insert_task(rules::Task::new(
+            rule,
+            rules::Phase::Checkout,
+            executor::Task::Exec(exec),
+        ))
+        .context(format_context!("Failed to insert task {rule_name}"))?;
 
         for bin in cargo_bin.bins {
-            let state = rules::get_state().read().unwrap();
-
             let mut bin_rule = hard_link_rule.clone();
             bin_rule.name = format!("{}/{}", hard_link_rule.name, bin);
 
@@ -557,16 +549,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             let output_file = format!("{}/bin/{}", output_directory, bin);
 
             let rule_name = hard_link_rule.name.clone();
-            state
-                .insert_task(rules::Task::new(
-                    bin_rule,
-                    rules::Phase::PostCheckout,
-                    executor::Task::AddHardLink(asset::AddHardLink {
-                        source: output_file,
-                        destination: format!("sysroot/bin/{}", bin),
-                    }),
-                ))
-                .context(format_context!("Failed to insert task {rule_name}"))?;
+            rules::insert_task(rules::Task::new(
+                bin_rule,
+                rules::Phase::PostCheckout,
+                executor::Task::AddHardLink(asset::AddHardLink {
+                    source: output_file,
+                    destination: format!("sysroot/bin/{}", bin),
+                }),
+            ))
+            .context(format_context!("Failed to insert task {rule_name}"))?;
         }
 
         Ok(NoneType)
@@ -615,10 +606,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let asset: asset::AddWhichAsset = serde_json::from_value(asset.to_json_value()?)
             .context(format_context!("Failed to parse which asset arguments"))?;
 
-        let state = rules::get_state().read().unwrap();
         let rule_name = rule.name.clone();
-        state
-            .insert_task(rules::Task::new(
+        rules::insert_task(rules::Task::new(
                 rule,
                 rules::Phase::Checkout,
                 executor::Task::AddWhichAsset(asset),
@@ -638,10 +627,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let asset: asset::AddHardLink = serde_json::from_value(asset.to_json_value()?)
             .context(format_context!("Failed to parse which asset arguments"))?;
 
-        let state = rules::get_state().read().unwrap();
         let rule_name = rule.name.clone();
-        state
-            .insert_task(rules::Task::new(
+        rules::insert_task(rules::Task::new(
                 rule,
                 rules::Phase::Checkout,
                 executor::Task::AddHardLink(asset),
@@ -661,10 +648,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let asset: asset::AddSoftLink = serde_json::from_value(asset.to_json_value()?)
             .context(format_context!("Failed to parse which asset arguments"))?;
 
-        let state = rules::get_state().read().unwrap();
         let rule_name = rule.name.clone();
-        state
-            .insert_task(rules::Task::new(
+        rules::insert_task(rules::Task::new(
                 rule,
                 rules::Phase::Checkout,
                 executor::Task::AddSoftLink(asset),
@@ -701,11 +686,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             serde_json::from_value(asset.to_json_value()?)
                 .context(format_context!("Failed to parse asset arguments"))?;
 
-        let state = rules::get_state().read().unwrap();
         let rule_name = rule.name.clone();
-
-        state
-            .insert_task(rules::Task::new(
+        rules::insert_task(rules::Task::new(
                 rule,
                 rules::Phase::Checkout,
                 executor::Task::AddAsset(add_asset),
@@ -724,11 +706,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let capsule: executor::capsule::Capsule = serde_json::from_value(capsule.to_json_value()?)
             .context(format_context!("Failed to parse capsule arguments"))?;
 
-        let state = rules::get_state().read().unwrap();
         let rule_name = rule.name.clone();
 
-        state
-            .insert_task(rules::Task::new(
+        rules::insert_task(rules::Task::new(
                 rule,
                 rules::Phase::Checkout,
                 executor::Task::Capsule(capsule),
@@ -751,11 +731,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             serde_json::from_value(asset.to_json_value()?)
                 .context(format_context!("Failed to parse archive arguments"))?;
 
-        let state = rules::get_state().read().unwrap();
         let rule_name = rule.name.clone();
-
-        state
-            .insert_task(rules::Task::new(
+        rules::insert_task(rules::Task::new(
                 rule,
                 rules::Phase::PostCheckout,
                 executor::Task::UpdateAsset(update_asset),
@@ -776,11 +753,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let update_env: executor::env::UpdateEnv = serde_json::from_value(env.to_json_value()?)
             .context(format_context!("Failed to parse archive arguments"))?;
 
-        let state = rules::get_state().read().unwrap();
         let rule_name = rule.name.clone();
-
-        state
-            .insert_task(rules::Task::new(
+        rules::insert_task(rules::Task::new(
                 rule,
                 rules::Phase::PostCheckout,
                 executor::Task::UpdateEnv(update_env),
@@ -796,7 +770,6 @@ fn add_http_archive(
     archive_option: Option<http_archive::Archive>,
 ) -> anyhow::Result<()> {
     if let Some(archive) = archive_option {
-        let state = rules::get_state().read().unwrap();
 
         //create a target that waits for all downloads
         //then create links based on all downloads being complete
@@ -812,8 +785,7 @@ fn add_http_archive(
         ))?;
 
         let rule_name = rule.name.clone();
-        state
-            .insert_task(rules::Task::new(
+        rules::insert_task(rules::Task::new(
                 rule,
                 rules::Phase::Checkout,
                 executor::Task::HttpArchive(executor::http_archive::HttpArchive { http_archive }),

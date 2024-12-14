@@ -112,15 +112,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for repo"))?;
 
-        let state = rules::get_state().read().unwrap();
         let rule_name = rule.name.clone();
-        state
-            .insert_task(rules::Task::new(
-                rule,
-                rules::Phase::Run,
-                executor::Task::Target,
-            ))
-            .context(format_context!("Failed to insert task {rule_name}"))?;
+        rules::insert_task(rules::Task::new(
+            rule,
+            rules::Phase::Run,
+            executor::Task::Target,
+        ))
+        .context(format_context!("Failed to insert task {rule_name}"))?;
         Ok(NoneType)
     }
 
@@ -133,21 +131,21 @@ pub fn globals(builder: &mut GlobalsBuilder) {
      * - MVS: https://research.swtch.com/vgo-mvs
      * It must support at least one of the following:
      * - Build and Install to the spaces store at a unique hashed location
-     *   - The workspaces can references the store location 
+     *   - The workspaces can references the store location
      * - Install (COPY) runtime artifacts to the workspace
      * - Download pre-built binaries: this will be used if it is available
      *   - Not all workflows will be re-locatable. So some must be built locally and installed to the store
-     * 
+     *
      * To pass informatin to the workflow, this rule will create a add_workflow.spaces.star
      * file and place it in the sub-workspace.
-     * 
+     *
      * The caller will need to know:
      * - Where are the workflow artifacts installed?
      * - Are the workflow artifacts relocatable?
-     * 
+     *
      * The workflow can create a JSON file in the sub-workspace that contains all
      * the information needed. The JSON file will be created during the checkout phase.
-     * 
+     *
      */
     //fn add_workflow()
 
@@ -172,15 +170,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             );
         }
 
-        let state = rules::get_state().read().unwrap();
         let rule_name = rule.name.clone();
-        state
-            .insert_task(rules::Task::new(
-                rule,
-                rules::Phase::Run,
-                executor::Task::Exec(exec),
-            ))
-            .context(format_context!("Failed to insert task {rule_name}"))?;
+        rules::insert_task(rules::Task::new(
+            rule,
+            rules::Phase::Run,
+            executor::Task::Exec(exec),
+        ))
+        .context(format_context!("Failed to insert task {rule_name}"))?;
         Ok(NoneType)
     }
 
@@ -205,26 +201,23 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             );
         }
 
-        let state = rules::get_state().read().unwrap();
-
         for target in exec_if.then_.iter_mut() {
-            *target = state.get_sanitized_rule_name(target);
+            *target = rules::get_sanitized_rule_name(target);
         }
 
         if let Some(else_targets) = exec_if.else_.as_mut() {
             for target in else_targets.iter_mut() {
-                *target = state.get_sanitized_rule_name(target);
+                *target = rules::get_sanitized_rule_name(target);
             }
         }
 
         let rule_name = rule.name.clone();
-        state
-            .insert_task(rules::Task::new(
-                rule,
-                rules::Phase::Run,
-                executor::Task::ExecIf(exec_if),
-            ))
-            .context(format_context!("Failed to insert task {rule_name}"))?;
+        rules::insert_task(rules::Task::new(
+            rule,
+            rules::Phase::Run,
+            executor::Task::ExecIf(exec_if),
+        ))
+        .context(format_context!("Failed to insert task {rule_name}"))?;
         Ok(NoneType)
     }
 
@@ -251,7 +244,6 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             serde_json::from_value(archive.to_json_value()?)
                 .context(format_context!("bad options for archive"))?;
 
-        let state = rules::get_state().read().unwrap();
         let rule_name = rule.name.clone();
         let mut inputs = HashSet::new();
         inputs.insert(format!("+{}/**", create_archive.input));
@@ -260,15 +252,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let mut outputs = HashSet::new();
         outputs.insert(format!(
             "build/{}/{}",
-            state.get_sanitized_rule_name(rule_name.as_str()),
+            rules::get_sanitized_rule_name(rule_name.as_str()),
             create_archive.get_output_file()
         ));
         rule.outputs = Some(outputs);
 
         let archive = executor::archive::Archive { create_archive };
 
-        state
-            .insert_task(rules::Task::new(
+        rules::insert_task(rules::Task::new(
                 rule,
                 rules::Phase::Run,
                 executor::Task::CreateArchive(archive),

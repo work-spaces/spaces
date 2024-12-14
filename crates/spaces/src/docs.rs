@@ -1,7 +1,4 @@
-use crate::{
-    info,
-    rules::{checkout, run},
-};
+use crate::builtins::{checkout, info, run};
 use clap::ValueEnum;
 use starstd::Function;
 
@@ -206,13 +203,16 @@ fn show_all(markdown: &mut printer::markdown::Markdown) -> anyhow::Result<()> {
 
     markdown.paragraph("Evaluate run scripts without executin rules:")?;
 
-    markdown.code_block("sh", r#"# show rules with a `help` entry
+    markdown.code_block(
+        "sh",
+        r#"# show rules with a `help` entry
 spaces evaluate
 # show all rules
 spaces --verbosity=message evaluate
 # show all rules with all details
 spaces --verbosity=debug evaluate
-"#)?;
+"#,
+    )?;
 
     markdown.printer.newline()?;
 

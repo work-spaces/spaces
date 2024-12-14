@@ -65,7 +65,7 @@ pub fn execute_git_command(
     url: &str,
     progress_bar: &mut printer::MultiProgressBar,
     options: printer::ExecuteOptions,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Option<String>> {
     let mut is_ready = false;
     use std::ops::DerefMut;
 
@@ -78,6 +78,11 @@ pub fn execute_git_command(
     );
 
     let mut log_file_path = None;
+
+    progress_bar.log(
+        printer::Level::Debug,
+        format!("Wait for git repo {url}").as_str(),
+    );
     while !is_ready {
         {
             let mut state_lock = get_state().write().unwrap();
@@ -102,20 +107,76 @@ pub fn execute_git_command(
     let mut options = options.clone();
 
     options.log_file_path = log_file_path;
-    options.environment.push(("GIT_TERMINAL_PROMPT".to_string(), "0".to_string()));
+    options
+        .environment
+        .push(("GIT_TERMINAL_PROMPT".to_string(), "0".to_string()));
+
+    progress_bar.log(
+        printer::Level::Debug,
+        format!("Execute Command for {url}").as_str(),
+    );
 
     let full_command = options.get_full_command_in_working_directory("git");
-    progress_bar
+    let result = progress_bar
         .execute_process("git", options)
-        .context(format_context!("{full_command}"))?;
+        .context(format_context!("{full_command}"));
 
     {
         let mut state_lock = get_state().write().unwrap();
         let state = state_lock.deref_mut();
         state.active_repos.remove(url);
     }
+    progress_bar.log(
+        printer::Level::Debug,
+        format!("git repo released {url}").as_str(),
+    );
 
-    Ok(())
+    result
+}
+
+pub fn get_commit_hash(
+    url: &str,
+    directory: &str,
+    progress_bar: &mut printer::MultiProgressBar,
+) -> anyhow::Result<Option<String>> {
+    let options = printer::ExecuteOptions {
+        working_directory: Some(directory.to_string()),
+        arguments: vec![
+            "show".to_string(),
+            "-s".to_string(),
+            "--format=%H".to_string(),
+        ],
+        is_return_stdout: true,
+        ..Default::default()
+    };
+
+    progress_bar.log(
+        printer::Level::Debug,
+        format!("{directory}: git {options:?}").as_str(),
+    );
+
+    let commit_hash = execute_git_command(url, progress_bar, options).context(
+        format_context!("Failed to get commit hash from {directory}"),
+    )?;
+
+    Ok(commit_hash)
+}
+
+pub fn is_branch(url: &str,
+    directory: &str,
+    ref_name: &str, 
+    progress_bar: &mut printer::MultiProgressBar,) -> bool {
+    let options = printer::ExecuteOptions {
+        working_directory: Some(directory.to_string()),
+        arguments: vec![
+            "show-ref".to_string(),
+            "--verify".to_string(),
+            "--quiet".to_string(),
+            format!("refs/heads/{}", ref_name).to_string(),
+        ],
+        ..Default::default()
+    };
+    execute_git_command(url, progress_bar, options).is_ok()
 }
 
 #[derive(Clone, Debug)]

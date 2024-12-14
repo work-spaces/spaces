@@ -5,7 +5,7 @@ mod arguments;
 mod docs;
 mod evaluator;
 mod executor;
-mod info;
+mod builtins;
 mod label;
 mod ledger;
 mod rules;

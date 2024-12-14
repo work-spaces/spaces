@@ -1,11 +1,11 @@
-use crate::{rules, workspace};
+use crate::{builtins, workspace};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 
 fn download_and_install(
     multi_progress: &mut printer::MultiProgress,
     name: &str,
-    platform_archive: rules::checkout::PlatformArchive,
+    platform_archive: builtins::checkout::PlatformArchive,
 ) -> anyhow::Result<()> {
     let this_platform =
         platform::Platform::get_platform().context(format_context!("Failed to get platform"))?;
@@ -46,7 +46,7 @@ pub fn install_tools(printer: &mut printer::Printer) -> anyhow::Result<()> {
     let gh_includes = Some(vec!["**/bin/gh".to_string()]);
     let gh_prefix = Some("sysroot".to_string());
 
-    let gh = rules::checkout::PlatformArchive {
+    let gh = builtins::checkout::PlatformArchive {
         macos_aarch64: Some(http_archive::Archive {
             url: "https://github.com/cli/cli/releases/download/v2.53.0/gh_2.53.0_macOS_arm64.zip"
                 .to_string(),
@@ -125,7 +125,7 @@ pub fn install_tools(printer: &mut printer::Printer) -> anyhow::Result<()> {
 
     let cargo_binstall_prefix = Some("sysroot/bin".to_string());
 
-    let cargo_binstall = rules::checkout::PlatformArchive {
+    let cargo_binstall = builtins::checkout::PlatformArchive {
         macos_aarch64: Some(http_archive::Archive {
             url: "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.10.9/cargo-binstall-aarch64-apple-darwin.zip".to_string(),
             sha256: "18fe179cad3c90f21da0b983483452c94b910bce9ec05bd53ba9409157aa68f0".to_string(),

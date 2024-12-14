@@ -292,7 +292,7 @@ impl HttpArchive {
         let target_prefix = if let Some(add_prefix) = self.archive.add_prefix.as_ref() {
             if add_prefix.starts_with("//") {
                 format!("{workspace_directory}/{add_prefix}")
-            } else if add_prefix.starts_with("/") {
+            } else if add_prefix.starts_with('/') {
                 add_prefix.to_owned()
             } else {
                 format!("{workspace_directory}/{add_prefix}")

@@ -388,7 +388,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 .resolve()
                 .context(format_context!("Failed to resolve dependency"))?;
 
-            let json_value = serde_json::to_value(&resolved_dependency)
+            let json_value = serde_json::to_value(resolved_dependency)
                 .context(format_context!("Failed to convert Result to JSON"))?;
 
             // Convert the JSON value to a Starlark value
@@ -407,6 +407,17 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         state.env = serde_json::from_value(env.to_json_value()?)
             .context(format_context!("Failed to parse archive arguments"))?;
+
+        Ok(NoneType)
+    }
+
+    fn set_locks(
+        #[starlark(require = named)] locks: starlark::values::Value,
+    ) -> anyhow::Result<NoneType> {
+        let locks = serde_json::from_value(locks.to_json_value()?)
+            .context(format_context!("Failed to parse archive arguments"))?;
+
+        workspace::set_locks(locks);
 
         Ok(NoneType)
     }
@@ -441,11 +452,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             serde_json::from_value(archive.to_json_value()?)
                 .context(format_context!("bad options for archive"))?;
 
-        let state = rules::get_state().read().unwrap();
+        let sanitized_rule_name = rules::get_sanitized_rule_name(rule_name);
 
         Ok(format!(
-            "build/{}/{}",
-            state.get_sanitized_rule_name(rule_name),
+            "build/{sanitized_rule_name}/{}",
             create_archive.get_output_file()
         ))
     }
@@ -467,11 +477,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let output_path = std::path::Path::new(create_archive_output.as_str());
         let output_sha_suffix = output_path.with_extension("").with_extension("sha256.txt");
 
-        let state = rules::get_state().read().unwrap();
+        let sanitized_rule_name = rules::get_sanitized_rule_name(rule_name);
 
         let mut output = HashMap::new();
-
-        let rule_output_path = format!("build/{}", state.get_sanitized_rule_name(rule_name),);
+        let rule_output_path = format!("build/{sanitized_rule_name}");
 
         output.insert(
             "archive_path".to_string(),

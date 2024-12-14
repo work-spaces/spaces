@@ -19,7 +19,6 @@ url = "2"
 toml = "0.8"
 serde_yaml = "0.9"
 
-
 git.path = "crates/git"
 graph.path = "crates/graph"
 platform.path = "crates/platform"

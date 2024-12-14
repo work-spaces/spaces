@@ -1,4 +1,4 @@
-use crate::{docs, evaluator, info, rules, tools, workspace};
+use crate::{builtins::info, docs, evaluator, rules, tools, workspace};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
@@ -79,18 +79,6 @@ fn run_starlark_modules_in_workspace(
     Ok(())
 }
 
-const SPACES_STARLARK_SDK: &str = r#"
-checkout.add_repo(
-    rule = {"name": "spaces-starlark-sdk"},
-    repo = {
-        "url": "https://github.com/work-spaces/spaces-starlark-sdk",
-        "rev": "main",
-        "checkout": "Revision",
-        "clone": "Worktree"
-    }
-)
-"#;
-
 fn handle_verbosity(
     printer: &mut printer::Printer,
     verbosity: printer::Level,
@@ -150,8 +138,8 @@ pub fn execute() -> anyhow::Result<()> {
             commands:
                 Commands::Checkout {
                     name,
-                    spaces_starlark_sdk,
                     script,
+                    create_lock_file,
                 },
         } => {
             handle_verbosity(&mut printer, verbosity.into(), ci, hide_progress_bars);
@@ -162,21 +150,11 @@ pub fn execute() -> anyhow::Result<()> {
             std::fs::create_dir_all(name.as_str())
                 .context(format_context!("while creating workspace directory {name}"))?;
 
-            let mut load_order = workspace::SyncLoadOrder::default();
+            let mut settings = workspace::Settings::default();
             let mut scripts = Vec::new();
-            if spaces_starlark_sdk {
-                let script_name = format!("spaces-starlark-sdk.{}", workspace::SPACES_MODULE_NAME);
-                let script_path = format!("{name}/{script_name}");
-                load_order.push(script_name.as_str());
-                scripts.push((script_name, SPACES_STARLARK_SDK.to_string()));
-
-                std::fs::write(script_path.as_str(), SPACES_STARLARK_SDK).context(
-                    format_context!("while writing script file {script_path} to workspace"),
-                )?;
-            }
 
             for one_script in script {
-                let script_path = if one_script.ends_with(workspace::SPACES_MODULE_NAME) {
+                let script_path = if workspace::is_rules_module(&one_script) {
                     one_script.clone()
                 } else {
                     format!("{one_script}.{}", workspace::SPACES_MODULE_NAME)
@@ -188,7 +166,7 @@ pub fn execute() -> anyhow::Result<()> {
                     .unwrap()
                     .to_string_lossy()
                     .to_string();
-                load_order.push(file_name.as_str());
+                settings.push(file_name.as_str());
 
                 let one_script_contents = std::fs::read_to_string(script_path.as_str())
                     .context(format_context!("while reading script file {script_path}"))?;
@@ -204,10 +182,7 @@ pub fn execute() -> anyhow::Result<()> {
                 scripts.push((file_name, one_script_contents));
             }
 
-            load_order.store_path = workspace::get_checkout_store_path();
-            load_order
-                .save(name.as_str())
-                .context(format_context!("while saving load order in {name}"))?;
+            settings.store_path = workspace::get_checkout_store_path();
 
             std::fs::write(format!("{}/{}", name, workspace::ENV_FILE_NAME), "").context(
                 format_context!("while creating {} file", workspace::ENV_FILE_NAME),
@@ -225,12 +200,18 @@ pub fn execute() -> anyhow::Result<()> {
                 ),
             )?;
 
+            workspace::set_create_lock_file(create_lock_file);
+
             run_starlark_modules_in_workspace(
                 &mut printer,
                 rules::Phase::Checkout,
                 RunWorkspace::Script(scripts),
             )
             .context(format_context!("while executing checkout rules"))?;
+
+            settings.save(&workspace::absolute_path()).context(format_context!("while saving settings"))?;
+            workspace::save_lock_file().context(format_context!("Failed to save workspace lock file"))?;
+            
         }
 
         Arguments {
@@ -335,12 +316,12 @@ enum Commands {
         /// The name of the workspace
         #[arg(long)]
         name: String,
-        /// Checkout gitub.com/work-spaces/spaces-starlark-sdk to the workspace.
-        #[arg(long)]
-        spaces_starlark_sdk: bool,
         /// The path(s) to the star file containing checkout rules. Paths are processed in order.
         #[arg(long, value_hint = ValueHint::FilePath)]
         script: Vec<String>,
+        /// Create a lock file for the workspace. This file can be passed on the next checkout as a script to re-create the exact workspace.
+        #[arg(long)]
+        create_lock_file: bool,
     },
     /// Synchronizes the workspace with the checkout rules.
     Sync {},
