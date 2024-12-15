@@ -3,6 +3,7 @@ pub mod asset;
 pub mod capsule;
 pub mod env;
 pub mod exec;
+pub mod oras;
 pub mod git;
 pub mod http_archive;
 
@@ -38,6 +39,7 @@ pub enum Task {
     Target,
     CreateArchive(archive::Archive),
     HttpArchive(http_archive::HttpArchive),
+    OrasArchive(oras::OrasArchive),
     AddWhichAsset(asset::AddWhichAsset),
     AddHardLink(asset::AddHardLink),
     AddSoftLink(asset::AddSoftLink),
@@ -58,6 +60,7 @@ impl Task {
         let mut enabled_targets = Vec::new();
         match self {
             Task::HttpArchive(archive) => archive.execute(name, progress),
+            Task::OrasArchive(archive) => archive.execute(name, progress),
             Task::Exec(exec) => exec.execute(name, &mut progress),
             Task::ExecIf(exec_if) => {
                 enabled_targets = exec_if.execute(name, progress);

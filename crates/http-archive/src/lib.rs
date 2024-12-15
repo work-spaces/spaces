@@ -1,5 +1,4 @@
 mod gh;
-mod oras;
 
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
@@ -21,13 +20,14 @@ fn get_state() -> &'static RwLock<State> {
     STATE.get()
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub enum ArchiveLink {
     None,
+    #[default]
     Hard,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct Archive {
     pub url: String,
@@ -35,6 +35,7 @@ pub struct Archive {
     pub link: ArchiveLink,
     pub includes: Option<Vec<String>>,
     pub excludes: Option<Vec<String>>,
+    pub globs: Option<Vec<String>>,
     pub strip_prefix: Option<String>,
     pub add_prefix: Option<String>,
     pub filename: Option<String>,
@@ -119,7 +120,7 @@ pub struct HttpArchive {
     pub spaces_key: String,
     archive: Archive,
     archive_driver: Option<easy_archiver::driver::Driver>,
-    full_path_to_archive: String,
+    pub full_path_to_archive: String,
     tools_path: String,
     allow_gh_for_download: bool,
 }
@@ -146,9 +147,6 @@ impl HttpArchive {
             .to_string_lossy()
             .to_string();
 
-        let oras_command = format!("{}/oras", tools_path);
-
-        let mut is_oras_sha256 = false;
         let (filename, effective_sha256) = if archive.sha256.starts_with("http") {
             let sha256 = download_string(archive.sha256.as_str())
                 .context(format_context!("Failed to download {}", archive.sha256))?;
@@ -159,14 +157,6 @@ impl HttpArchive {
                 ));
             }
             (None, Some(sha256))
-        } else if let Some((file_name, oras_sha256)) =
-            oras::get_sha256(oras_command.as_str(), &archive.sha256).context(format_context!(
-                "Failed to get oras sha256 for {}",
-                archive.sha256
-            ))?
-        {
-            is_oras_sha256 = true;
-            (Some(file_name), Some(oras_sha256))
         } else {
             (None, None)
         };
@@ -183,16 +173,12 @@ impl HttpArchive {
         let full_path_to_archive = match archive_driver_result {
             Ok(driver) => {
                 archive_driver = Some(driver);
-                if is_oras_sha256 {
-                    format!("{full_path_to_archive}/{archive_file_name}")
-                } else {
-                    format!(
-                        "{}/{}.{}",
-                        full_path_to_archive,
-                        effective_sha256,
-                        driver.extension()
-                    )
-                }
+                format!(
+                    "{}/{}.{}",
+                    full_path_to_archive,
+                    effective_sha256,
+                    driver.extension()
+                )
             }
             Err(_) => {
                 format!("{full_path_to_archive}/{archive_file_name}")
@@ -380,22 +366,6 @@ impl HttpArchive {
                     .context(format_context!("Failed to download using gh"))?;
 
                 progress_bar
-            } else if let Some(arguments) = oras::transform_url_to_arguments(
-                self.archive.url.as_str(),
-                &self.full_path_to_archive,
-            ) {
-                let oras_command = format!("{}/oras", self.tools_path);
-                oras::download(
-                    &oras_command,
-                    &self.archive.url,
-                    arguments,
-                    &mut progress_bar,
-                )
-                .context(format_context!("Failed to download using oras"))?;
-
-                // need to get the filename to extract and update the archiver driver
-
-                progress_bar
             } else {
                 progress_bar.log(
                     printer::Level::Trace,
@@ -525,9 +495,8 @@ impl HttpArchive {
     }
 
     fn url_to_relative_path(url: &str, filename: &Option<String>) -> anyhow::Result<String> {
-        let sane_url = oras::pre_process_url(url);
-        let archive_url = url::Url::parse(&sane_url)
-            .context(format_context!("Failed to parse bare store url {sane_url}"))?;
+        let archive_url = url::Url::parse(&url)
+            .context(format_context!("Failed to parse bare store url {url}"))?;
 
         let host = archive_url
             .host_str()

@@ -788,7 +788,7 @@ dependencies = [
 [[package]]
 name = "easy-archiver"
 version = "0.1.0"
-source = "git+https://github.com/work-spaces/easy-archiver?rev=42c3d49431c065e0f274ea3897b659da0a62c656#42c3d49431c065e0f274ea3897b659da0a62c656"
+source = "git+https://github.com/work-spaces/easy-archiver?rev=5601790c957b5b5efc989b6b0e1ac5eb685d2eff#5601790c957b5b5efc989b6b0e1ac5eb685d2eff"
 dependencies = [
  "anyhow",
  "anyhow-source-location",

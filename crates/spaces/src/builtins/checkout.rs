@@ -672,6 +672,28 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .context(format_context!("Failed to parse archive arguments"))?;
 
         add_http_archive(rule, Some(archive)).context(format_context!("Failed to add archive"))?;
+        Ok(NoneType)
+    }
+
+    fn add_oras_archive(
+        #[starlark(require = named)] rule: starlark::values::Value,
+        #[starlark(require = named)] oras_archive: starlark::values::Value,
+        // includes, excludes, strip_prefix
+    ) -> anyhow::Result<NoneType> {
+        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+            .context(format_context!("bad options for oras rule"))?;
+
+        let oras_archive: executor::oras::OrasArchive =
+            serde_json::from_value(oras_archive.to_json_value()?)
+                .context(format_context!("Failed to parse oras archive arguments"))?;
+
+        let rule_name = rule.name.clone();
+        rules::insert_task(rules::Task::new(
+            rule,
+            rules::Phase::Checkout,
+            executor::Task::OrasArchive(oras_archive),
+        ))
+        .context(format_context!("Failed to insert task {rule_name}"))?;
 
         Ok(NoneType)
     }
@@ -772,9 +794,19 @@ fn add_http_archive(
     rule: rules::Rule,
     archive_option: Option<http_archive::Archive>,
 ) -> anyhow::Result<()> {
-    if let Some(archive) = archive_option {
+    if let Some(mut archive) = archive_option {
         //create a target that waits for all downloads
         //then create links based on all downloads being complete
+
+        archive.sha256 = if archive.sha256.starts_with("http") {
+            // download the sha256 file
+            http_archive::download_string(&archive.sha256).context(format_context!(
+                "Failed to download sha256 file {}",
+                archive.sha256
+            ))?
+        } else {
+            archive.sha256
+        };
 
         let http_archive = http_archive::HttpArchive::new(
             &workspace::get_store_path(),
