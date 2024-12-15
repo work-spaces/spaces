@@ -1,10 +1,12 @@
+mod gh;
+mod oras;
+
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::RwLock;
 use tokio::io::AsyncWriteExt;
-use url::Url;
 
 struct State {}
 
@@ -41,59 +43,6 @@ pub struct Archive {
 #[derive(Debug, Serialize, Deserialize)]
 struct Files {
     files: HashSet<String>,
-}
-
-fn transform_url_to_gh_arguments(
-    allow_gh_for_download: bool,
-    url: &str,
-    full_path_to_archive: &str,
-) -> Option<Vec<String>> {
-    if !allow_gh_for_download {
-        return None;
-    }
-
-    // use which to see if gh is installed
-    if which::which("gh").is_err() {
-        return None;
-    }
-
-    // Parse the URL
-    let parsed_url = Url::parse(url).ok()?;
-
-    // Ensure the URL is for GitHub releases
-    if parsed_url.domain()? != "github.com" {
-        return None;
-    }
-
-    // Split the path to extract owner, repo, and tag
-    let mut path_segments = parsed_url.path_segments()?;
-    let owner = path_segments.next()?;
-    let repo = path_segments.next()?;
-    let release_segment = path_segments.next()?;
-
-    // Ensure it's a release download URL
-    if release_segment != "releases" {
-        return None;
-    }
-
-    // Check if it has "download/tag" structure
-    let download_segment = path_segments.next()?;
-    let tag = if download_segment == "download" {
-        path_segments.next()?
-    } else {
-        return None;
-    };
-    let pattern = path_segments.next()?;
-
-    // Return the GitHub CLI command arguments
-    Some(vec![
-        "release".to_string(),
-        "download".to_string(),
-        tag.to_string(),
-        format!("--repo={}/{}", owner, repo),
-        format!("--pattern={}", pattern),
-        format!("--output={full_path_to_archive}"),
-    ])
 }
 
 pub fn download(
@@ -171,11 +120,17 @@ pub struct HttpArchive {
     archive: Archive,
     archive_driver: Option<easy_archiver::driver::Driver>,
     full_path_to_archive: String,
+    tools_path: String,
     allow_gh_for_download: bool,
 }
 
 impl HttpArchive {
-    pub fn new(bare_store_path: &str, spaces_key: &str, archive: &Archive) -> anyhow::Result<Self> {
+    pub fn new(
+        bare_store_path: &str,
+        spaces_key: &str,
+        archive: &Archive,
+        tools_path: &str,
+    ) -> anyhow::Result<Self> {
         let relative_path = Self::url_to_relative_path(archive.url.as_str(), &archive.filename)
             .context(format_context!("no relative path for {}", archive.url))?;
 
@@ -183,7 +138,7 @@ impl HttpArchive {
 
         let archive_path = std::path::Path::new(full_path_to_archive.as_str());
 
-        let archive_file_name = archive_path
+        let mut archive_file_name = archive_path
             .file_name()
             .ok_or(format_error!(
                 "No file name found in archive path {full_path_to_archive}"
@@ -191,12 +146,10 @@ impl HttpArchive {
             .to_string_lossy()
             .to_string();
 
-        let archive_driver_result =
-            easy_archiver::driver::Driver::from_filename(archive_file_name.as_str()).context(
-                format_context!("Failed to get driver for {archive_file_name}"),
-            );
+        let oras_command = format!("{}/oras", tools_path);
 
-        let effective_sha256 = if archive.sha256.starts_with("http") {
+        let mut is_oras_sha256 = false;
+        let (filename, effective_sha256) = if archive.sha256.starts_with("http") {
             let sha256 = download_string(archive.sha256.as_str())
                 .context(format_context!("Failed to download {}", archive.sha256))?;
             if sha256.len() != 64 {
@@ -205,23 +158,45 @@ impl HttpArchive {
                     archive.url
                 ));
             }
-            sha256
+            (None, Some(sha256))
+        } else if let Some((file_name, oras_sha256)) =
+            oras::get_sha256(oras_command.as_str(), &archive.sha256).context(format_context!(
+                "Failed to get oras sha256 for {}",
+                archive.sha256
+            ))?
+        {
+            is_oras_sha256 = true;
+            (Some(file_name), Some(oras_sha256))
         } else {
-            archive.sha256.clone()
+            (None, None)
         };
+
+        archive_file_name = filename.unwrap_or(archive_file_name);
+        let effective_sha256 = effective_sha256.unwrap_or(archive.sha256.clone());
+
+        let archive_driver_result =
+            easy_archiver::driver::Driver::from_filename(archive_file_name.as_str()).context(
+                format_context!("Failed to get driver for {archive_file_name}"),
+            );
 
         let mut archive_driver = None;
         let full_path_to_archive = match archive_driver_result {
             Ok(driver) => {
                 archive_driver = Some(driver);
-                format!(
-                    "{}/{}.{}",
-                    full_path_to_archive,
-                    effective_sha256,
-                    driver.extension()
-                )
+                if is_oras_sha256 {
+                    format!("{full_path_to_archive}/{archive_file_name}")
+                } else {
+                    format!(
+                        "{}/{}.{}",
+                        full_path_to_archive,
+                        effective_sha256,
+                        driver.extension()
+                    )
+                }
             }
-            Err(_) => format!("{full_path_to_archive}/{archive_file_name}"),
+            Err(_) => {
+                format!("{full_path_to_archive}/{archive_file_name}")
+            }
         };
 
         let mut archive = archive.clone();
@@ -233,6 +208,7 @@ impl HttpArchive {
             full_path_to_archive,
             spaces_key: spaces_key.to_string(),
             allow_gh_for_download: true,
+            tools_path: tools_path.to_owned(),
         })
     }
 
@@ -332,7 +308,11 @@ impl HttpArchive {
             } else {
                 progress_bar.log(
                     printer::Level::Warning,
-                    format!("Failed to strip prefix {:?} from {file}", self.archive.strip_prefix).as_str(),
+                    format!(
+                        "Failed to strip prefix {:?} from {file}",
+                        self.archive.strip_prefix
+                    )
+                    .as_str(),
                 );
             }
             progress_bar.increment(1);
@@ -390,27 +370,30 @@ impl HttpArchive {
             .context(format_context!("Failed to create runtime"))?;
 
         let mut next_progress_bar = if self.is_download_required() {
-            if let Some(arguments) = transform_url_to_gh_arguments(
+            if let Some(arguments) = gh::transform_url_to_arguments(
                 self.allow_gh_for_download,
                 self.archive.url.as_str(),
                 &self.full_path_to_archive,
             ) {
-                let options = printer::ExecuteOptions {
-                    arguments,
-                    ..Default::default()
-                };
-
-                progress_bar.log(
-                    printer::Level::Trace,
-                    format!("{} Downloading using gh {options:?}", self.archive.url).as_str(),
-                );
+                let gh_command = format!("{}/gh", self.tools_path);
+                gh::download(&gh_command, &self.archive.url, arguments, &mut progress_bar)
+                    .context(format_context!("Failed to download using gh"))?;
 
                 progress_bar
-                    .execute_process("gh", options)
-                    .context(format_context!(
-                        "failed to download {} using gh",
-                        self.archive.url
-                    ))?;
+            } else if let Some(arguments) = oras::transform_url_to_arguments(
+                self.archive.url.as_str(),
+                &self.full_path_to_archive,
+            ) {
+                let oras_command = format!("{}/oras", self.tools_path);
+                oras::download(
+                    &oras_command,
+                    &self.archive.url,
+                    arguments,
+                    &mut progress_bar,
+                )
+                .context(format_context!("Failed to download using oras"))?;
+
+                // need to get the filename to extract and update the archiver driver
 
                 progress_bar
             } else {
@@ -498,7 +481,7 @@ impl HttpArchive {
 
         let next_progress_bar = if self.archive_driver.is_some() {
             let decoder = easy_archiver::Decoder::new(
-                self.full_path_to_archive.as_str(),
+                &self.full_path_to_archive,
                 Some(self.archive.sha256.clone()),
                 &self.get_path_to_extracted_files(),
                 progress_bar,
@@ -542,8 +525,9 @@ impl HttpArchive {
     }
 
     fn url_to_relative_path(url: &str, filename: &Option<String>) -> anyhow::Result<String> {
-        let archive_url = url::Url::parse(url)
-            .context(format_context!("Failed to parse bare store url {url}"))?;
+        let sane_url = oras::pre_process_url(url);
+        let archive_url = url::Url::parse(&sane_url)
+            .context(format_context!("Failed to parse bare store url {sane_url}"))?;
 
         let host = archive_url
             .host_str()

@@ -23,7 +23,7 @@ fn download_and_install(
 
     if let Some(archive) = archive.as_ref() {
         let mut http_archive =
-            http_archive::HttpArchive::new(bare_store.as_str(), "unused", archive)
+            http_archive::HttpArchive::new(bare_store.as_str(), "unused", archive, "no tools path")
                 .context(format_context!("Failed to create http archive"))?;
 
         http_archive.allow_gh_for_download(false);

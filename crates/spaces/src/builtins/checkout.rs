@@ -1,5 +1,5 @@
 use crate::executor::asset;
-use crate::{executor, rules, workspace, environment};
+use crate::{environment, executor, rules, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -609,11 +609,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let rule_name = rule.name.clone();
         rules::insert_task(rules::Task::new(
-                rule,
-                rules::Phase::Checkout,
-                executor::Task::AddWhichAsset(asset),
-            ))
-            .context(format_context!("Failed to insert task {rule_name}"))?;
+            rule,
+            rules::Phase::Checkout,
+            executor::Task::AddWhichAsset(asset),
+        ))
+        .context(format_context!("Failed to insert task {rule_name}"))?;
 
         Ok(NoneType)
     }
@@ -630,11 +630,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let rule_name = rule.name.clone();
         rules::insert_task(rules::Task::new(
-                rule,
-                rules::Phase::Checkout,
-                executor::Task::AddHardLink(asset),
-            ))
-            .context(format_context!("Failed to insert task {rule_name}"))?;
+            rule,
+            rules::Phase::Checkout,
+            executor::Task::AddHardLink(asset),
+        ))
+        .context(format_context!("Failed to insert task {rule_name}"))?;
 
         Ok(NoneType)
     }
@@ -651,11 +651,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let rule_name = rule.name.clone();
         rules::insert_task(rules::Task::new(
-                rule,
-                rules::Phase::Checkout,
-                executor::Task::AddSoftLink(asset),
-            ))
-            .context(format_context!("Failed to insert task {rule_name}"))?;
+            rule,
+            rules::Phase::Checkout,
+            executor::Task::AddSoftLink(asset),
+        ))
+        .context(format_context!("Failed to insert task {rule_name}"))?;
 
         Ok(NoneType)
     }
@@ -689,11 +689,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let rule_name = rule.name.clone();
         rules::insert_task(rules::Task::new(
-                rule,
-                rules::Phase::Checkout,
-                executor::Task::AddAsset(add_asset),
-            ))
-            .context(format_context!("Failed to insert task {rule_name}"))?;
+            rule,
+            rules::Phase::Checkout,
+            executor::Task::AddAsset(add_asset),
+        ))
+        .context(format_context!("Failed to insert task {rule_name}"))?;
         Ok(NoneType)
     }
 
@@ -710,11 +710,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let rule_name = rule.name.clone();
 
         rules::insert_task(rules::Task::new(
-                rule,
-                rules::Phase::Checkout,
-                executor::Task::Capsule(capsule),
-            ))
-            .context(format_context!("Failed to insert task {rule_name}"))?;
+            rule,
+            rules::Phase::Checkout,
+            executor::Task::Capsule(capsule),
+        ))
+        .context(format_context!("Failed to insert task {rule_name}"))?;
 
         // insert a Run rule also
 
@@ -734,11 +734,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let rule_name = rule.name.clone();
         rules::insert_task(rules::Task::new(
-                rule,
-                rules::Phase::PostCheckout,
-                executor::Task::UpdateAsset(update_asset),
-            ))
-            .context(format_context!("Failed to insert task {rule_name}"))?;
+            rule,
+            rules::Phase::PostCheckout,
+            executor::Task::UpdateAsset(update_asset),
+        ))
+        .context(format_context!("Failed to insert task {rule_name}"))?;
 
         Ok(NoneType)
     }
@@ -758,11 +758,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let rule_name = rule.name.clone();
         rules::insert_task(rules::Task::new(
-                rule,
-                rules::Phase::PostCheckout,
-                executor::Task::UpdateEnv(update_env),
-            ))
-            .context(format_context!("Failed to insert task {rule_name}"))?;
+            rule,
+            rules::Phase::PostCheckout,
+            executor::Task::UpdateEnv(update_env),
+        ))
+        .context(format_context!("Failed to insert task {rule_name}"))?;
 
         Ok(NoneType)
     }
@@ -773,7 +773,6 @@ fn add_http_archive(
     archive_option: Option<http_archive::Archive>,
 ) -> anyhow::Result<()> {
     if let Some(archive) = archive_option {
-
         //create a target that waits for all downloads
         //then create links based on all downloads being complete
 
@@ -781,6 +780,7 @@ fn add_http_archive(
             &workspace::get_store_path(),
             rule.name.as_str(),
             &archive,
+            format!("{}/sysroot/bin", workspace::get_spaces_tools_path()).as_str(),
         )
         .context(format_context!(
             "Failed to create http_archive {}",
@@ -789,11 +789,11 @@ fn add_http_archive(
 
         let rule_name = rule.name.clone();
         rules::insert_task(rules::Task::new(
-                rule,
-                rules::Phase::Checkout,
-                executor::Task::HttpArchive(executor::http_archive::HttpArchive { http_archive }),
-            ))
-            .context(format_context!("Failed to insert task {rule_name}"))?;
+            rule,
+            rules::Phase::Checkout,
+            executor::Task::HttpArchive(executor::http_archive::HttpArchive { http_archive }),
+        ))
+        .context(format_context!("Failed to insert task {rule_name}"))?;
     }
     Ok(())
 }

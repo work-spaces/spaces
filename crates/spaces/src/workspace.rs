@@ -2,7 +2,7 @@ use crate::{environment, state_lock};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashMap, HashSet};
 
 pub const ENV_FILE_NAME: &str = "env.spaces.star";
 pub const LOCK_FILE_NAME: &str = "lock.spaces.star";
@@ -40,9 +40,9 @@ impl Settings {
         let content = std::fs::read_to_string(load_path.as_str()).context(format_context!(
             "Failed to read load order file {load_path}"
         ))?;
-        let order: Settings = serde_json::from_str(content.as_str()).context(
-            format_context!("Failed to parse load order file {load_path}"),
-        )?;
+        let order: Settings = serde_json::from_str(content.as_str()).context(format_context!(
+            "Failed to parse load order file {load_path}"
+        ))?;
         Ok(order)
     }
 
@@ -121,7 +121,8 @@ pub fn save_lock_file() -> anyhow::Result<()> {
     workspace_file_content.push_str(WORKSPACE_FILE_HEADER);
     workspace_file_content.push('\n');
     workspace_file_content.push_str("workspace_locks = ");
-    let locks_str = serde_json::to_string_pretty(&state.locks).context(format_context!("Failed to serialize locks"))?;
+    let locks_str = serde_json::to_string_pretty(&state.locks)
+        .context(format_context!("Failed to serialize locks"))?;
     workspace_file_content.push_str(locks_str.as_str());
     workspace_file_content.push_str("\n\ninfo.set_locks(locks = workspace_locks) \n");
 
@@ -193,7 +194,10 @@ pub fn update_changes(
 pub fn save_changes() -> anyhow::Result<()> {
     let changes_path = get_changes_path();
     let state = get_state().read();
-    let changes = state.changes.as_ref().ok_or(format_error!("No changes available"))?;
+    let changes = state
+        .changes
+        .as_ref()
+        .ok_or(format_error!("No changes available"))?;
     changes
         .save(changes_path)
         .context(format_context!("Failed to save changes file"))?;
@@ -234,7 +238,10 @@ pub fn get_rule_inputs_digest(
     globs: &HashSet<String>,
 ) -> anyhow::Result<String> {
     let state = get_state().read();
-    let changes = state.changes.as_ref().ok_or(format_error!("No changes available"))?;
+    let changes = state
+        .changes
+        .as_ref()
+        .ok_or(format_error!("No changes available"))?;
     changes.get_digest(progress, seed, globs)
 }
 pub fn set_ci_true() {
@@ -256,6 +263,14 @@ pub fn update_env(env: environment::Environment) -> anyhow::Result<()> {
     let mut state = get_state().write();
     state.env.vars.extend(env.vars);
     state.env.paths.extend(env.paths);
+    if let Some(inherited_vars) = env.inherited_vars {
+        if let Some(existing_inherited_vars) = state.env.inherited_vars.as_mut() {
+            existing_inherited_vars.extend(inherited_vars.clone());
+        } else {
+            state.env.inherited_vars = Some(inherited_vars);
+        }
+    }
+
     if let Some(system_paths) = env.system_paths {
         if let Some(existing_system_paths) = state.env.system_paths.as_mut() {
             existing_system_paths.extend(system_paths.clone());
@@ -291,16 +306,11 @@ pub fn set_is_reproducible(value: bool) {
 
 pub fn is_reproducible() -> bool {
     let state = get_state().read();
-    if let Some(value) = state
-        .env
-        .vars
-        .get(SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE)
-    {
+    if let Some(value) = state.env.vars.get(SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE) {
         return value == "true";
     }
     false
 }
-
 
 fn get_unique() -> anyhow::Result<String> {
     let duration_since_epoch = std::time::SystemTime::now()
@@ -415,13 +425,17 @@ impl Workspace {
         let mut loaded_modules = HashSet::new();
         let mut modules = vec![];
 
-        if let Ok(lock_content) = std::fs::read_to_string(format!("{}/{}", absolute_path, LOCK_FILE_NAME)) {
+        if let Ok(lock_content) =
+            std::fs::read_to_string(format!("{}/{}", absolute_path, LOCK_FILE_NAME))
+        {
             loaded_modules.insert(LOCK_FILE_NAME.to_string());
             modules.push((LOCK_FILE_NAME.to_string(), lock_content));
         }
 
         let env_content = std::fs::read_to_string(format!("{}/{}", absolute_path, ENV_FILE_NAME))
-            .context(format_context!("Failed to read workspace file: {ENV_FILE_NAME}"))?;
+            .context(format_context!(
+            "Failed to read workspace file: {ENV_FILE_NAME}"
+        ))?;
 
         loaded_modules.insert(ENV_FILE_NAME.to_string());
         modules.push((ENV_FILE_NAME.to_string(), env_content));
