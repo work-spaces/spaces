@@ -1,4 +1,4 @@
-use crate::{executor, rules, state_lock, workspace};
+use crate::{rules, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use starlark::environment::GlobalsBuilder;
@@ -6,34 +6,6 @@ use starlark::values::none::NoneType;
 use starlark::values::{Heap, Value};
 use starstd::{Arg, Function};
 use std::collections::HashMap;
-
-#[derive(Debug)]
-struct State {
-    phase: rules::Phase,
-}
-
-static STATE: state::InitCell<state_lock::StateLock<State>> = state::InitCell::new();
-
-fn get_state() -> &'static state_lock::StateLock<State> {
-    if let Some(state) = STATE.try_get() {
-        return state;
-    }
-
-    STATE.set(state_lock::StateLock::new(State {
-        phase: rules::Phase::Cancelled,
-    }));
-    STATE.get()
-}
-
-pub fn set_phase(phase: rules::Phase) {
-    let mut state = get_state().write();
-    state.phase = phase;
-}
-
-fn get_phase() -> rules::Phase {
-    let state = get_state().read();
-    state.phase
-}
 
 pub const FUNCTIONS: &[Function] = &[
     Function {
@@ -291,32 +263,6 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Err(format_error!(
             "{var_name} is not set in the workspace environment"
         ))
-    }
-
-    fn get_capsule_info<'v>(
-        dependency: starlark::values::Value,
-        heap: &'v Heap,
-    ) -> anyhow::Result<Option<Value<'v>>> {
-        let phase = get_phase();
-        if phase == rules::Phase::Run {
-            let capsule_depedency: executor::capsule::Dependency =
-                serde_json::from_value(dependency.to_json_value()?)
-                    .context(format_context!("Failed to parse dependency arguments"))?;
-
-            let resolved_dependency = capsule_depedency
-                .resolve()
-                .context(format_context!("Failed to resolve dependency"))?;
-
-            let json_value = serde_json::to_value(resolved_dependency)
-                .context(format_context!("Failed to convert Result to JSON"))?;
-
-            // Convert the JSON value to a Starlark value
-            let alloc_value = heap.alloc(json_value);
-
-            Ok(Some(alloc_value))
-        } else {
-            Ok(None)
-        }
     }
 
     fn set_env(

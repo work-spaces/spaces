@@ -30,9 +30,8 @@ impl Environment {
         path
     }
 
-    pub fn get_vars(&self) -> anyhow::Result<HashMap<String, String>> {
+    pub fn get_inherited_vars(&self) -> anyhow::Result<HashMap<String, String>> {
         let mut env_vars = HashMap::new();
-
         if let Some(inherited) = &self.inherited_vars {
             for key in inherited {
                 let value = std::env::var(key).context(format_context!(
@@ -41,6 +40,13 @@ impl Environment {
                 env_vars.insert(key.clone(), value);
             }
         }
+        Ok(env_vars)
+    }
+
+    pub fn get_vars(&self) -> anyhow::Result<HashMap<String, String>> {
+        let mut env_vars = HashMap::new();
+
+        env_vars.extend(self.get_inherited_vars().context(format_context!("Failed to get inherited vars"))?);
 
         for (key, value) in self.vars.iter() {
             env_vars.insert(key.clone(), value.clone());

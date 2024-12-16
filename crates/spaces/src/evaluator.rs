@@ -99,8 +99,6 @@ pub fn run_starlark_modules(
     let mut module_queue = std::collections::VecDeque::new();
     module_queue.extend(modules);
 
-    builtins::info::set_phase(phase);
-
     printer.log(
         printer::Level::Trace,
         format!("Input module queue:{module_queue:?}").as_str(),

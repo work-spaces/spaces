@@ -781,7 +781,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let rule_name = rule.name.clone();
         rules::insert_task(rules::Task::new(
             rule,
-            rules::Phase::PostCheckout,
+            rules::Phase::Checkout,
             executor::Task::UpdateEnv(update_env),
         ))
         .context(format_context!("Failed to insert task {rule_name}"))?;

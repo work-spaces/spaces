@@ -1,31 +1,9 @@
-use crate::{executor, workspace, state_lock};
+use crate::{executor, state_lock, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
-use printer::MultiProgressBar;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-fn get_semver_version(version: &str) -> anyhow::Result<semver::Version> {
-    let mut sane_version = version.to_owned();
-    let dot_count = sane_version.match_indices('.').count();
-    if dot_count == 1 {
-        sane_version.push_str(".0");
-    }
-    let version_parsed = semver::Version::parse(&sane_version)
-        .context(format_context!("Failed to parse {version}"))?;
-
-    Ok(version_parsed)
-}
-
-fn is_semver_check_ok(version: &semver::Version, required_semver: &str) -> anyhow::Result<bool> {
-    let required = semver::VersionReq::parse(required_semver).context(format_context!(
-        "Failed to parse semver {}",
-        required_semver,
-    ))?;
-
-    let is_ok = required.matches(version);
-    Ok(is_ok)
-}
 
 fn get_process_group_id() -> String {
     if let Ok(process_group_id) = std::env::var(workspace::SPACES_PROCESS_GROUP_ENV_VAR) {
@@ -73,56 +51,6 @@ pub struct Descriptor {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResolvedDependency {
-    pub prefix: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Dependency {
-    pub descriptor: Descriptor,
-    pub semver: String,
-    pub dependency_type: DependencyType,
-}
-
-impl Dependency {
-    pub fn resolve(&self) -> anyhow::Result<ResolvedDependency> {
-        let state = get_state().read();
-        let mut current_version = None;
-        let mut current_entry = None;
-        for entry in state.info_file.iter() {
-            if entry.descriptor == self.descriptor {
-                let entry_version = get_semver_version(&entry.version)
-                    .context(format_context!("Failed to parse version for {:?}", entry))?;
-
-                if is_semver_check_ok(&entry_version, &self.semver)? {
-                    if let Some(current_version) = current_version.as_mut() {
-                        if entry_version < *current_version {
-                            *current_version = entry_version;
-                            current_entry = Some(entry);
-                        }
-                    } else {
-                        current_version = Some(entry_version);
-                        current_entry = Some(entry);
-                    }
-                }
-            }
-        }
-
-        if let Some(entry) = current_entry {
-            return Ok(ResolvedDependency {
-                prefix: entry.prefix.clone(),
-            });
-        }
-
-        Err(anyhow::anyhow!(
-            "Failed to resolve dependency {:?} with semver {}",
-            self.descriptor,
-            self.semver
-        ))
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Info {
     descriptor: Descriptor, // descriptor of the capsule
     version: String,        // Version of the capsule
@@ -153,6 +81,7 @@ enum CapsuleRunStatus {
 pub struct CapsuleRunInfo {
     pub process_group_id: String, // The workspace digest
     pub digest: String,
+    pub is_locked: bool,
 }
 
 impl CapsuleRunInfo {
@@ -217,7 +146,7 @@ impl CapsuleRunInfo {
                 ));
             }
         }
-
+        self.is_locked = true;
         Ok(CapsuleRunStatus::StartNow)
     }
 
@@ -232,11 +161,45 @@ impl CapsuleRunInfo {
         let path = self.get_run_info_path();
         progress.set_message("Capsule already started, waiting for it to finish");
         let capsule_run_info_path = std::path::Path::new(&path);
+        let mut log_count = 0;
         while capsule_run_info_path.exists() {
+            let contents = std::fs::read_to_string(capsule_run_info_path)
+                .context(format_context!("Failed to read {path}"))?;
+
+            let lock_info: CapsuleRunInfo = serde_json::from_str(&contents).context(
+                format_context!("failed to parse {path} - delete the file and try again"),
+            )?;
+
+            if lock_info.process_group_id != self.process_group_id {
+                progress.log(
+                    printer::Level::Message,
+                    format!("Capsule {} is no longer running, unlocking", self.digest).as_str(),
+                );
+                return Ok(());
+            }
+
             progress.increment(1);
-            std::thread::sleep(std::time::Duration::from_millis(50));
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            log_count += 1;
+            if log_count == 10 {
+                progress.log(
+                    printer::Level::Debug,
+                    format!("Still waiting for capsule to finish at {}", path).as_str(),
+                );
+                log_count = 0;
+            }
         }
         Ok(())
+    }
+}
+
+impl Drop for CapsuleRunInfo {
+    fn drop(&mut self) {
+        if !self.is_locked {
+            return;
+        }
+
+        let _ = self.unlock();
     }
 }
 
@@ -270,7 +233,6 @@ fn get_state() -> &'static state_lock::StateLock<State> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Capsule {
-    pub required: Vec<Dependency>, // list of required dependencies that this capsule must provide
     pub scripts: Vec<String>,      // list of starlark scripts to execute
     pub prefix: Option<String>, // --prefix location where the capsule should be installed in the sysroot (default is none)
 }
@@ -299,13 +261,21 @@ fn get_spaces_command() -> anyhow::Result<String> {
     Ok(spaces_exec.to_string_lossy().to_string())
 }
 
-fn get_spaces_env() -> HashMap<String, String> {
+fn get_spaces_env() -> anyhow::Result<HashMap<String, String>> {
     let mut env = HashMap::new();
+    let workspace_env = workspace::get_env();
     env.insert(
         workspace::SPACES_PROCESS_GROUP_ENV_VAR.to_string(),
         get_process_group_id(),
     );
-    env
+
+    env.extend(
+        workspace_env
+            .get_inherited_vars()
+            .context(format_context!("Failed to get inherited vars"))?,
+    );
+
+    Ok(env)
 }
 
 impl Capsule {
@@ -334,7 +304,7 @@ impl Capsule {
             std::env::var("PATH").unwrap_or_default(),
         );
 
-        env.extend(get_spaces_env());
+        env.extend(get_spaces_env().context(format_context!("Failed to get spaces env"))?);
 
         // run spaces checkout in @capsules using name
         let spaces_checkout = executor::exec::Exec {
@@ -372,7 +342,7 @@ impl Capsule {
             command: spaces_command,
             args: Some(args),
             working_directory: Some(workspace_path),
-            env: Some(get_spaces_env()),
+            env: Some(get_spaces_env().context(format_context!("Failed to get spaces env"))?),
             redirect_stdout: None,
             expect: None,
         };
@@ -381,55 +351,6 @@ impl Capsule {
         spaces_run
             .execute(&run_name, progress)
             .context(format_context!("Failed to checkout workflow {name}"))?;
-
-        Ok(())
-    }
-
-    fn check_required_dependencies(
-        &self,
-        info_list: &InfoFile,
-        progress: &mut MultiProgressBar,
-    ) -> anyhow::Result<()> {
-        for dep in self.required.iter() {
-            let mut is_dep_ok = false;
-            for entry in info_list {
-                if entry.descriptor == dep.descriptor {
-                    progress.log(
-                        printer::Level::Trace,
-                        format!(
-                            "Checking dependency {:?}:{} against {:?}:{}",
-                            dep.descriptor, dep.semver, entry.descriptor, entry.version
-                        )
-                        .as_str(),
-                    );
-
-                    let version_check = get_semver_version(&entry.version)
-                        .context(format_context!("Failed to parse version for {:?}", entry))?;
-
-                    if is_semver_check_ok(&version_check, &dep.semver)? {
-                        is_dep_ok = true;
-                        break;
-                    } else {
-                        progress.log(
-                            printer::Level::Message,
-                            format!(
-                                "Dependency {:?} is not satisfied by {}",
-                                dep.descriptor, entry.version
-                            )
-                            .as_str(),
-                        );
-                    }
-                }
-            }
-
-            if !is_dep_ok {
-                return Err(anyhow::anyhow!(
-                    "Dependency {:?} is not satisfied by the correct version {}",
-                    dep.descriptor,
-                    dep.semver
-                ));
-            }
-        }
 
         Ok(())
     }
@@ -524,7 +445,7 @@ impl Capsule {
             .context(format_context!("Failed to lock capsule"))?;
 
         progress.log(
-            printer::Level::Debug,
+            printer::Level::Message,
             format!(
                 "Capsule run status for {} is {:?}",
                 capsule_run_info.digest, run_status
@@ -546,11 +467,6 @@ impl Capsule {
             capsule_info
         };
 
-        self.check_required_dependencies(&capsule_info, progress)
-            .context(format_context!(
-                "Required dependencies not provided by specified capsule scripts"
-            ))?;
-
         if run_status == CapsuleRunStatus::StartNow {
             progress.log(
                 printer::Level::Info,
@@ -561,8 +477,8 @@ impl Capsule {
                 .context(format_context!("Failed to run capsule {name}"))?;
 
             progress.log(
-                printer::Level::Info,
-                format!("Unlocking capsule {}", capsule_run_info.digest).as_str(),
+                printer::Level::Message,
+                format!("Ready to unlock capsule {}", capsule_run_info.digest).as_str(),
             );
 
             let capsule_complete_info = CapsuleCompleteInfo {
@@ -572,6 +488,11 @@ impl Capsule {
             let capsule_info_json = serde_json::to_string_pretty(&capsule_complete_info)
                 .context(format_context!("Failed to serialize capsule info"))?;
 
+            progress.log(
+                printer::Level::Debug,
+                format!("Updating capsule info {}", capsule_run_info.digest).as_str(),
+            );
+
             for entry in capsule_info.iter() {
                 let file_path = format!("{}/{}.json", entry.prefix, capsule_run_info.digest);
                 std::fs::write(file_path.as_str(), capsule_info_json.as_str()).context(
@@ -579,9 +500,6 @@ impl Capsule {
                 )?;
             }
 
-            capsule_run_info
-                .unlock()
-                .context(format_context!("Failed to unlock capsule"))?;
         } else {
             progress.log(
                 printer::Level::Info,
@@ -604,6 +522,11 @@ impl Capsule {
                     .context(format_context!("Failed to hard link capsule to workspace"))?;
             }
         }
+
+        progress.log(
+            printer::Level::Message,
+            format!("Now unlocking {}", capsule_run_info.digest).as_str(),
+        );
 
         // ensure the semver is satisfied for this item
         // check for semver incompatibilities

@@ -67,6 +67,24 @@ fn get_state() -> &'static RwLock<State> {
     STATE.get()
 }
 
+fn get_lock_file_path(working_directory: &Option<String>) -> anyhow::Result<String> {
+    let default_dir = String::new();
+    let working_directory_ref = working_directory.as_ref().unwrap_or(&default_dir);
+    let working_path = std::path::Path::new(working_directory_ref);
+    let git_dir = working_path.join(".git");
+    let git_dir_path = if git_dir.exists() {
+        if git_dir.is_file() {
+            std::fs::read_to_string(git_dir.clone())
+                .context(format_context!("Failed to read {git_dir:?}"))?
+        } else {
+            git_dir.to_string_lossy().to_string()
+        }
+    } else {
+        working_path.to_string_lossy().to_string()
+    };
+    Ok(git_dir_path)
+}
+
 pub fn execute_git_command(
     url: &str,
     progress_bar: &mut printer::MultiProgressBar,
@@ -85,12 +103,17 @@ pub fn execute_git_command(
 
     let mut log_file_path = None;
 
+    let lock_file_folder = get_lock_file_path(&options.working_directory)
+        .context(format_context!("Failed to get lock file path"))?;
+    let git_lock_path = std::path::Path::new(&lock_file_folder).join("index.lock");
+
     progress_bar.log(
         printer::Level::Debug,
-        format!("Wait for git repo {url}").as_str(),
+        format!("Wait for git repo {url} -> {git_lock_path:?}").as_str(),
     );
+
     while !is_ready {
-        {
+        if !git_lock_path.exists() {
             let mut state_lock = get_state().write().unwrap();
             let state = state_lock.deref_mut();
 
@@ -279,23 +302,7 @@ impl BareRepository {
 
         let full_path = format!("{}{}", bare_store_path, name_dot_git);
 
-        if std::path::Path::new(&full_path).exists() {
-            // config to fetch all heads/refs
-            // This will grab newly created branches
-
-            let options_git_config = printer::ExecuteOptions {
-                working_directory: Some(full_path.to_string()),
-                arguments: vec![
-                    "config".to_string(),
-                    "remote.origin.fetch".to_string(),
-                    "refs/heads/*:refs/heads/*".to_string(),
-                ],
-                ..Default::default()
-            };
-
-            execute_git_command(url, progress_bar, options_git_config)
-                .context(format_context!("while setting git options"))?;
-        } else {
+        if !std::path::Path::new(&full_path).exists() {
             options.working_directory = Some(bare_store_path.clone());
 
             std::fs::create_dir_all(&bare_store_path)
@@ -325,6 +332,19 @@ impl BareRepository {
 
             execute_git_command(url, progress_bar, options_git_config_auto_push)
                 .context(format_context!("while configuring auto-push"))?;
+
+                let options_git_config = printer::ExecuteOptions {
+                    working_directory: Some(full_path.to_string()),
+                    arguments: vec![
+                        "config".to_string(),
+                        "remote.origin.fetch".to_string(),
+                        "refs/heads/*:refs/remotes/origin/*".to_string(),
+                    ],
+                    ..Default::default()
+                };
+    
+                execute_git_command(url, progress_bar, options_git_config)
+                    .context(format_context!("while setting git options"))?;
         }
 
         Ok(Self {
