@@ -71,6 +71,12 @@ fn run_starlark_modules_in_workspace(
                 .context(format_context!("while executing workspace rules"))?
         }
         RunWorkspace::Script(scripts) => {
+            for (name, _) in scripts.iter() {
+                printer.log(
+                    printer::Level::Message,
+                    format!("Digesting {}", name).as_str(),
+                )?;
+            }
             workspace::set_digest(workspace::calculate_digest(&scripts));
             evaluator::run_starlark_modules(printer, scripts, phase, None)
                 .context(format_context!("while executing checkout rules"))?

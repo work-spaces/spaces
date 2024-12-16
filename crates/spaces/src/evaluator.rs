@@ -172,7 +172,7 @@ pub fn run_starlark_modules(
                 } else {
                     printer::Level::Info
                 },
-                format!("Is Workspace reproducible: {is_reproducible}").as_str(),
+                format!("Is Workspace reproducible: {is_reproducible} -> {}", workspace::get_digest()).as_str(),
             )?;
 
             rules::sort_tasks(target.clone(), phase)

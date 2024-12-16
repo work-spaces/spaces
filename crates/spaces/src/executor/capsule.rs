@@ -528,9 +528,6 @@ impl Capsule {
             format!("Now unlocking {}", capsule_run_info.digest).as_str(),
         );
 
-        // ensure the semver is satisfied for this item
-        // check for semver incompatibilities
-
         Ok(())
     }
 }

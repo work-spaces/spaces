@@ -425,13 +425,6 @@ impl Workspace {
         let mut loaded_modules = HashSet::new();
         let mut modules = vec![];
 
-        if let Ok(lock_content) =
-            std::fs::read_to_string(format!("{}/{}", absolute_path, LOCK_FILE_NAME))
-        {
-            loaded_modules.insert(LOCK_FILE_NAME.to_string());
-            modules.push((LOCK_FILE_NAME.to_string(), lock_content));
-        }
-
         let env_content = std::fs::read_to_string(format!("{}/{}", absolute_path, ENV_FILE_NAME))
             .context(format_context!(
             "Failed to read workspace file: {ENV_FILE_NAME}"
@@ -469,6 +462,12 @@ impl Workspace {
             );
         }
 
+        for (name, _) in original_modules.iter() {
+            progress.log(
+                printer::Level::Message,
+                format!("Digesting {}", name).as_str(),
+            );
+        }
         let workspace_digest = calculate_digest(&original_modules);
         modules.extend(original_modules);
 
