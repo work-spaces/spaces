@@ -84,7 +84,7 @@ impl OrasArchive {
 
         if let Some(manifest) = manifest {
             let value: serde_json::Value = serde_json::from_str(&manifest)
-                .context(format_context!("failed to parse manifest"))?;
+                .context(format_context!("failed to parse manifest from {artifact_label}"))?;
             let mut sha256_option = None;
             let mut filename_option = None;
 

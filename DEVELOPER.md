@@ -23,7 +23,7 @@ cargo build
 Publish a release by pushing a tag
 
 ```sh
-export VERSION=0.11.6
+export VERSION=0.11.7
 git tag -a v$VERSION -m "Update version"
 git push origin tag v$VERSION
 ```
@@ -39,3 +39,7 @@ git push origin tag v$VERSION
   - starlark scripts need some way to track state
   - or instead of using stdout, pipe all the stdout to a shared printer?
   - or have a printer server running to work with IO
+- Allow comma separated scripts from the command line --script=lock,preload,node-sdk
+- Check SPACES_WORKFLOWS ENV for workflows folders: search folders in order to scripts
+- Allow some rules to pass stdout to terminal
+- option to remove bold() from printer

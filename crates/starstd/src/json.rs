@@ -65,4 +65,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         Ok(json_string)
     }
+
+    fn is_string_json(value: &str) -> anyhow::Result<bool> {
+        Ok(serde_json::from_str::<serde_json::Value>(value).is_ok())
+    }
 }
