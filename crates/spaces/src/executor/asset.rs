@@ -3,7 +3,7 @@ use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-use crate::{workspace, state_lock};
+use crate::workspace;
 
 #[derive(Debug)]
 struct State {

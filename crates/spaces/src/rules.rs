@@ -1,6 +1,6 @@
 pub mod inputs;
 
-use crate::{executor, label, workspace, state_lock};
+use crate::{executor, label, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::ValueEnum;

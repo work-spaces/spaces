@@ -1,5 +1,5 @@
 use crate::executor::asset;
-use crate::{environment, executor, rules, workspace};
+use crate::{executor, rules, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};

@@ -1,4 +1,4 @@
-use crate::{workspace, state_lock};
+use crate::workspace;
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use bincode::{Decode, Encode};
@@ -73,7 +73,7 @@ impl Inputs {
         &self,
         progress: &mut printer::MultiProgressBar,
         rule_name: &str,
-        seed: &str, 
+        seed: &str,
         inputs: &HashSet<String>,
     ) -> anyhow::Result<Option<String>> {
         let digest = workspace::get_rule_inputs_digest(progress, seed, inputs)

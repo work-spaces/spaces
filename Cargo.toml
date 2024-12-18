@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/spaces", "crates/graph", "crates/git", "crates/platform", "crates/starstd", "crates/changes"]
+members = ["crates/spaces", "crates/graph", "crates/git", "crates/platform", "crates/starstd", "crates/changes", "crates/environment", "crates/state_lock"]
 
 [workspace.dependencies]
 anyhow-source-location = { git = "https://github.com/work-spaces/anyhow-source-location", rev = "019b7804e35a72f945b3b4b3a96520cdbaa77f70" }
@@ -25,6 +25,8 @@ platform.path = "crates/platform"
 http-archive.path = "crates/http-archive"
 starstd.path = "crates/starstd"
 changes.path = "crates/changes"
+environment.path = "crates/environment"
+state_lock.path = "crates/state_lock"
 
 [profile.dev]
 opt-level = 3
