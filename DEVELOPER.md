@@ -36,10 +36,12 @@ git push origin tag v$VERSION
   - uploading to oras will happen through starlark exec run rules
 - add a run rule to send a signal to another running process (by rule)
 - Instead of running spaces recursively for capsules, can it be run in the same process?
-  - starlark scripts need some way to track state
+  - starlark scripts need some way to track state and know which workspace they are running in
+    - only evaulate one script at a time
   - or instead of using stdout, pipe all the stdout to a shared printer?
   - or have a printer server running to work with IO
 - Allow comma separated scripts from the command line --script=lock,preload,node-sdk
 - Check SPACES_WORKFLOWS ENV for workflows folders: search folders in order to scripts
 - Allow some rules to pass stdout to terminal
 - option to remove bold() from printer
+- Fix worktrees multiple access issue.
