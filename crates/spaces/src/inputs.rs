@@ -1,4 +1,3 @@
-use crate::workspace;
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use bincode::{Decode, Encode};
@@ -18,34 +17,13 @@ pub fn validate_input_globs(globs: &Option<HashSet<String>>) -> anyhow::Result<(
     Ok(())
 }
 
-pub fn is_rule_inputs_changed(
-    progress: &mut printer::MultiProgressBar,
-    rule_name: &str,
-    seed: &str,
-    inputs: &HashSet<String>,
-) -> anyhow::Result<Option<String>> {
-    let state = get_state().read();
-    state.inputs.is_changed(progress, rule_name, seed, inputs)
-}
-
-pub fn update_rule_digest(rule: &str, digest: String) {
-    let mut state = get_state().write();
-    state.inputs.save_digest(rule, digest);
-}
-
-pub fn save() -> anyhow::Result<()> {
-    let state = get_state().read();
-    let inputs_path = workspace::get_inputs_path();
-    state.inputs.save(inputs_path)
-}
-
 #[derive(Debug, Clone, Encode, Decode)]
-struct Inputs {
+pub struct Inputs {
     inputs: HashMap<String, String>,
 }
 
 impl Inputs {
-    fn new(io_path: &str) -> Inputs {
+    pub fn new(io_path: &str) -> Inputs {
         match Self::load(io_path) {
             Ok(inputs) => inputs,
             Err(_) => Inputs {
@@ -54,14 +32,14 @@ impl Inputs {
         }
     }
 
-    fn save(&self, io_path: &str) -> anyhow::Result<()> {
+    pub fn save(&self, io_path: &str) -> anyhow::Result<()> {
         let encoded = bincode::encode_to_vec(self, bincode::config::standard())
             .context(format_context!("Failed to encode io"))?;
         std::fs::write(io_path, encoded).context(format_context!("Failed to write io"))?;
         Ok(())
     }
 
-    fn load(path: &str) -> anyhow::Result<Inputs> {
+    pub fn load(path: &str) -> anyhow::Result<Inputs> {
         let file = std::fs::File::open(path).context(format_context!("Failed to open {path:?}"))?;
         let reader = std::io::BufReader::new(file);
         let changes: Inputs = bincode::decode_from_reader(reader, bincode::config::standard())
@@ -69,15 +47,11 @@ impl Inputs {
         Ok(changes)
     }
 
-    fn is_changed(
+    pub fn is_changed(
         &self,
-        progress: &mut printer::MultiProgressBar,
         rule_name: &str,
-        seed: &str,
-        inputs: &HashSet<String>,
+        digest: String,
     ) -> anyhow::Result<Option<String>> {
-        let digest = workspace::get_rule_inputs_digest(progress, seed, inputs)
-            .context(format_context!("Failed to get digest for rule {rule_name}"))?;
 
         let current_digest = match self.inputs.get(rule_name) {
             Some(digest) => digest,
@@ -91,27 +65,7 @@ impl Inputs {
         }
     }
 
-    fn save_digest(&mut self, rule: &str, digest: String) {
+    pub fn save_digest(&mut self, rule: &str, digest: String) {
         self.inputs.insert(rule.to_string(), digest);
     }
-}
-
-#[derive(Debug)]
-struct State {
-    pub inputs: Inputs,
-}
-
-static STATE: state::InitCell<state_lock::StateLock<State>> = state::InitCell::new();
-
-fn get_state() -> &'static state_lock::StateLock<State> {
-    if let Some(state) = STATE.try_get() {
-        return state;
-    }
-
-    let inputs_path = workspace::get_inputs_path();
-
-    STATE.set(state_lock::StateLock::new(State {
-        inputs: Inputs::new(inputs_path),
-    }));
-    STATE.get()
 }

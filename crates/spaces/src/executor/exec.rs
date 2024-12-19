@@ -1,4 +1,4 @@
-use crate::{workspace};
+use crate::{singleton, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -54,11 +54,12 @@ pub struct Exec {
 impl Exec {
     pub fn execute(
         &self,
-        name: &str,
         progress: &mut printer::MultiProgressBar,
+        workspace: workspace::WorkspaceArc,
+        name: &str,
     ) -> anyhow::Result<()> {
         let arguments = self.args.clone().unwrap_or_default();
-        let workspace_env = workspace::get_env();
+        let workspace_env = workspace.read().get_env();
 
         let mut environment_map = workspace_env
             .get_vars()
@@ -68,13 +69,13 @@ impl Exec {
             environment_map.insert(key, value);
         }
 
-        let workspace_path = workspace::absolute_path();
+        let workspace_path = workspace.read().get_absolute_path();
         let environment = environment_map.into_iter().collect::<Vec<_>>();
 
-        let log_file_path = if workspace::get_is_ci() {
+        let log_file_path = if singleton::get_is_ci() {
             None
         } else {
-            Some(workspace::get_log_file(name))
+            Some(workspace.read().get_log_file(name))
         };
 
         let options = printer::ExecuteOptions {
@@ -84,7 +85,7 @@ impl Exec {
             working_directory: self
                 .working_directory
                 .clone()
-                .map(|cwd| format!("{}/{}", workspace_path, cwd)),
+                .map(|cwd| format!("{workspace_path}/{cwd}")),
             is_return_stdout: self.redirect_stdout.is_some(),
             log_file_path: log_file_path.clone(),
             clear_environment: true,
@@ -261,8 +262,11 @@ pub struct ExecIf {
 }
 
 impl ExecIf {
-    pub fn execute(&self, name: &str, mut progress: printer::MultiProgressBar) -> Vec<String> {
-        let condition_result = self.if_.execute(name, &mut progress);
+    pub fn execute(&self, 
+        mut progress: printer::MultiProgressBar,
+        workspace: workspace::WorkspaceArc,
+        name: &str) -> Vec<String> {
+        let condition_result = self.if_.execute(&mut progress, workspace.clone(), name);
         let mut result = Vec::new();
         match condition_result {
             Ok(_) => {

@@ -12,11 +12,11 @@ pub struct Archive {
 impl Archive {
     pub fn execute(
         &self,
-        name: &str,
         mut progress: printer::MultiProgressBar,
+        workspace: workspace::WorkspaceArc,
+        name: &str,
     ) -> anyhow::Result<()> {
-        let workspace_directory = workspace::absolute_path();
-
+        let workspace_directory = workspace.read().get_absolute_path();
         let output_directory = format!("{workspace_directory}/build/{name}");
 
         std::fs::create_dir_all(output_directory.as_str()).context(format_context!(

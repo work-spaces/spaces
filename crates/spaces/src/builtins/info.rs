@@ -1,4 +1,4 @@
-use crate::{rules, workspace};
+use crate::{rules, singleton};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use starlark::environment::GlobalsBuilder;
@@ -173,12 +173,18 @@ pub const FUNCTIONS: &[Function] = &[
 pub fn globals(builder: &mut GlobalsBuilder) {
     // remove and replace with get_path_to_store()
     fn store_path() -> anyhow::Result<String> {
-        Ok(workspace::get_store_path())
+        let workspace_arc =
+            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+        let workspace = workspace_arc.read();
+        Ok(workspace.get_store_path())
     }
 
     // remove and replace with get_absolute_path_to_workspace()
     fn absolute_workspace_path() -> anyhow::Result<String> {
-        Ok(workspace::absolute_path())
+        let workspace_arc =
+            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+        let workspace = workspace_arc.read();
+        Ok(workspace.absolute_path.clone())
     }
 
     // remove and replace with get_platform_name()
@@ -212,15 +218,21 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     }
 
     fn is_workspace_reproducible() -> anyhow::Result<bool> {
-        Ok(workspace::is_reproducible())
+        let workspace_arc =
+            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+        let workspace = workspace_arc.read();
+        Ok(workspace.is_reproducible())
     }
 
     fn get_workspace_digest() -> anyhow::Result<String> {
-        Ok(workspace::get_digest())
+        let workspace_arc =
+            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+        let workspace = workspace_arc.read();
+        Ok(workspace.digest.clone())
     }
 
     fn is_ci() -> anyhow::Result<bool> {
-        Ok(workspace::get_is_ci())
+        Ok(singleton::get_is_ci())
     }
 
     fn is_platform_windows() -> anyhow::Result<bool> {
@@ -247,11 +259,17 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         if var_name == "PATH" {
             return Ok(true);
         }
-        Ok(workspace::get_env().vars.contains_key(var_name))
+        let workspace_arc =
+            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+        let workspace = workspace_arc.read();
+        Ok(workspace.get_env().vars.contains_key(var_name))
     }
 
     fn get_env_var(var_name: &str) -> anyhow::Result<String> {
-        let env = workspace::get_env();
+        let workspace_arc =
+            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+        let workspace = workspace_arc.read();
+        let env = workspace.get_env();
         if var_name == "PATH" {
             return Ok(env.get_path());
         }
@@ -268,10 +286,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     fn set_env(
         #[starlark(require = named)] env: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
+        let workspace_arc =
+            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+        let mut workspace = workspace_arc.write();
         let env = serde_json::from_value(env.to_json_value()?)
             .context(format_context!("Failed to parse archive arguments"))?;
 
-        workspace::set_env(env);
+        workspace.set_env(env);
 
         Ok(NoneType)
     }
@@ -282,7 +303,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let locks = serde_json::from_value(locks.to_json_value()?)
             .context(format_context!("Failed to parse archive arguments"))?;
 
-        workspace::set_locks(locks);
+        let workspace_arc =
+            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+        let mut workspace = workspace_arc.write();
+
+        workspace.locks = locks;
 
         Ok(NoneType)
     }
@@ -292,11 +317,17 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     }
 
     fn get_path_to_store() -> anyhow::Result<String> {
-        Ok(workspace::get_store_path())
+        let workspace_arc =
+            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+        let workspace = workspace_arc.read();
+        Ok(workspace.get_store_path())
     }
 
     fn get_absolute_path_to_workspace() -> anyhow::Result<String> {
-        Ok(workspace::absolute_path())
+        let workspace_arc =
+            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+        let workspace = workspace_arc.read();
+        Ok(workspace.absolute_path.clone())
     }
 
     fn get_path_to_checkout() -> anyhow::Result<String> {
@@ -326,7 +357,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     }
 
     fn get_path_to_spaces_tools() -> anyhow::Result<String> {
-        Ok(workspace::get_spaces_tools_path())
+        let workspace_arc =
+            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+        let workspace = workspace_arc.read();
+        Ok(workspace.get_spaces_tools_path())
     }
 
     fn get_build_archive_info<'v>(
@@ -392,7 +426,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         if count > 64 {
             return Err(anyhow::anyhow!("max_queue_count must be less than 65"));
         }
-        workspace::set_max_queue_count(count);
+        singleton::set_max_queue_count(count);
         Ok(NoneType)
     }
 }

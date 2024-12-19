@@ -1,6 +1,4 @@
-pub mod inputs;
-
-use crate::{executor, label, workspace};
+use crate::{executor, label, singleton, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::ValueEnum;
@@ -68,7 +66,7 @@ impl RuleSignal {
         }
     }
 
-    fn set_ready_notify_all(&self){
+    fn set_ready_notify_all(&self) {
         let (lock, cvar) = &*self.signal;
         let mut signal_access = lock.lock().unwrap();
         signal_access.ready = true;
@@ -124,6 +122,7 @@ impl Task {
     pub fn execute(
         &self,
         mut progress: printer::MultiProgressBar,
+        workspace: workspace::WorkspaceArc,
     ) -> std::thread::JoinHandle<anyhow::Result<executor::TaskResult>> {
         let name = self.rule.name.clone();
         let executor = self.executor.clone();
@@ -219,7 +218,9 @@ impl Task {
                     format!("{name} update workspace changes").as_str(),
                 );
 
-                workspace::update_changes(&mut progress, inputs)
+                workspace
+                    .write()
+                    .update_changes(&mut progress, inputs)
                     .context(format_context!("Failed to update workspace changes"))?;
 
                 progress.log(
@@ -229,7 +230,7 @@ impl Task {
 
                 let seed = serde_json::to_string(&executor)
                     .context(format_context!("Failed to serialize"))?;
-                let digest = inputs::is_rule_inputs_changed(
+                let digest = workspace.read().is_rule_inputs_changed(
                     &mut progress,
                     &rule_name,
                     seed.as_str(),
@@ -258,7 +259,7 @@ impl Task {
 
             let task_result = if skip_execute_message.is_none() {
                 executor
-                    .execute(name.as_str(), progress)
+                    .execute(progress, workspace.clone(), &rule_name)
                     .context(format_context!("Failed to exec {}", name))
             } else {
                 Ok(executor::TaskResult::new())
@@ -266,7 +267,7 @@ impl Task {
 
             if task_result.is_ok() {
                 if let Some(digest) = updated_digest {
-                    inputs::update_rule_digest(&rule_name, digest);
+                    workspace.write().update_rule_digest(&rule_name, digest);
                 }
             }
 
@@ -308,7 +309,6 @@ impl Task {
     }
 }
 
-
 pub fn get_sanitized_rule_name(rule_name: &str) -> String {
     let state = get_state().read();
     state.get_sanitized_rule_name(rule_name)
@@ -323,7 +323,7 @@ pub fn set_latest_starlark_module(name: &str) {
     let mut state = get_state().write();
     state.latest_starlark_module = Some(name.to_string());
     state.all_modules.insert(name.to_string());
-}   
+}
 
 pub fn show_tasks(printer: &mut printer::Printer) -> anyhow::Result<()> {
     let state = get_state().read();
@@ -335,9 +335,13 @@ pub fn sort_tasks(target: Option<String>, phase: Phase) -> anyhow::Result<()> {
     state.sort_tasks(target, phase)
 }
 
-pub fn execute(printer: &mut printer::Printer, phase: Phase) -> anyhow::Result<executor::TaskResult> {
-    let state = get_state().read();
-    state.execute(printer, phase)
+pub fn execute(
+    printer: &mut printer::Printer,
+    workspace: workspace::WorkspaceArc,
+    phase: Phase,
+) -> anyhow::Result<executor::TaskResult> {
+    let state: std::sync::RwLockReadGuard<'_, State> = get_state().read();
+    state.execute(printer, workspace, phase)
 }
 
 pub fn debug_sorted_tasks(printer: &mut printer::Printer, phase: Phase) -> anyhow::Result<()> {
@@ -543,6 +547,7 @@ impl State {
     pub fn execute(
         &self,
         printer: &mut printer::Printer,
+        workspace: workspace::WorkspaceArc,
         phase: Phase,
     ) -> anyhow::Result<executor::TaskResult> {
         let mut task_result = executor::TaskResult::new();
@@ -581,7 +586,7 @@ impl State {
                     printer::Level::Debug,
                     format!("Staging task {}", task.rule.name).as_str(),
                 );
-                handle_list.push(task.execute(progress_bar));
+                handle_list.push(task.execute(progress_bar, workspace.clone()));
 
                 loop {
                     let mut number_running = 0;
@@ -592,7 +597,7 @@ impl State {
                     }
 
                     // this could be configured with a another global starlark function
-                    if number_running < workspace::get_max_queue_count() {
+                    if number_running < singleton::get_max_queue_count() {
                         break;
                     } else {
                         std::thread::sleep(std::time::Duration::from_millis(100));
@@ -619,8 +624,11 @@ impl State {
             }
         }
 
-        inputs::save().context(format_context!("Failed to save inputs"))?;
-        workspace::save_changes().context(format_context!("while saving changes"))?;
+        workspace.read().save_inputs().context(format_context!("Failed to save inputs"))?;
+        workspace
+            .write()
+            .save_changes()
+            .context(format_context!("while saving changes"))?;
 
         if let Some(err) = first_error {
             return Err(err);

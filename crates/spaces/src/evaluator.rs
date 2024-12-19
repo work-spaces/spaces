@@ -1,10 +1,24 @@
-use crate::{builtins, rules, workspace};
+use crate::{builtins, rules, singleton, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use starlark::environment::{FrozenModule, GlobalsBuilder, Module};
 use starlark::eval::{Evaluator, ReturnFileLoader};
 use starlark::syntax::{AstModule, Dialect};
 use std::collections::HashSet;
+
+#[derive(Debug)]
+struct State {}
+
+static STATE: state::InitCell<state_lock::StateLock<State>> = state::InitCell::new();
+
+fn get_state() -> &'static state_lock::StateLock<State> {
+    if let Some(state) = STATE.try_get() {
+        return state;
+    }
+    STATE.set(state_lock::StateLock::new(State {}));
+
+    STATE.get()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum WithRules {
@@ -82,11 +96,12 @@ fn evaluate_module(
 
 pub fn run_starlark_modules(
     printer: &mut printer::Printer,
+    workspace: workspace::WorkspaceArc,
     modules: Vec<(String, String)>,
     phase: rules::Phase,
     target: Option<String>,
 ) -> anyhow::Result<()> {
-    let workspace_path = workspace::absolute_path();
+    let workspace_path = workspace.read().absolute_path.to_owned();
     let mut known_modules = HashSet::new();
 
     for (_, content) in modules.iter() {
@@ -103,12 +118,15 @@ pub fn run_starlark_modules(
         printer::Level::Trace,
         format!("Input module queue:{module_queue:?}").as_str(),
     )?;
+
     // All modules are evaulated in this loop
     // During checkout additional modules may be added to the queue
     // For Run mode, the env module is processed first and available
     // to subsequent modules
     while !module_queue.is_empty() {
         if let Some((name, content)) = module_queue.pop_front() {
+            let mut _workspace_lock = get_state().write();
+            singleton::set_active_workspace(workspace.clone());
             printer.log(
                 printer::Level::Trace,
                 format!("Evaluating module {}", name).as_str(),
@@ -130,7 +148,7 @@ pub fn run_starlark_modules(
             rules::debug_sorted_tasks(printer, phase)
                 .context(format_context!("Failed to debug sorted tasks"))?;
 
-            let task_result = rules::execute(printer, phase)
+            let task_result = rules::execute(printer, workspace.clone(), phase)
                 .context(format_context!("Failed to execute tasks"))?;
             if !task_result.new_modules.is_empty() {
                 printer.log(
@@ -165,14 +183,18 @@ pub fn run_starlark_modules(
         rules::Phase::Run => {
             printer.log(printer::Level::Message, "--Run Phase--")?;
 
-            let is_reproducible = workspace::is_reproducible();
+            let is_reproducible = workspace.read().is_reproducible();
             printer.log(
                 if is_reproducible {
                     printer::Level::Message
                 } else {
                     printer::Level::Info
                 },
-                format!("Is Workspace reproducible: {is_reproducible} -> {}", workspace::get_digest()).as_str(),
+                format!(
+                    "Is Workspace reproducible: {is_reproducible} -> {}",
+                    workspace.read().digest
+                )
+                .as_str(),
             )?;
 
             rules::sort_tasks(target.clone(), phase)
@@ -181,7 +203,7 @@ pub fn run_starlark_modules(
             rules::debug_sorted_tasks(printer, phase)
                 .context(format_context!("Failed to debug sorted tasks"))?;
 
-            let _new_modules = rules::execute(printer, phase)
+            let _new_modules = rules::execute(printer, workspace.clone(), phase)
                 .context(format_context!("Failed to execute tasks"))?;
         }
         rules::Phase::Evaluate => {
@@ -203,31 +225,33 @@ pub fn run_starlark_modules(
             rules::debug_sorted_tasks(printer, rules::Phase::PostCheckout)
                 .context(format_context!("Failed to debug sorted tasks"))?;
 
-            rules::execute(printer, rules::Phase::PostCheckout)
+            rules::execute(printer, workspace.clone(), rules::Phase::PostCheckout)
                 .context(format_context!("failed to execute post checkout phase"))?;
 
             // prepend PATH with sysroot/bin if sysroot/bin is not already in the PATH
-            let mut env = workspace::get_env();
-            let sysroot_bin = format!("{}/sysroot/bin", workspace::absolute_path());
+            let mut env = workspace.read().get_env();
+            let sysroot_bin = format!("{}/sysroot/bin", workspace.read().absolute_path);
             if !env.paths.contains(&sysroot_bin) {
                 env.paths.insert(0, sysroot_bin);
             }
 
-            if workspace::is_reproducible() {
+            if workspace.read().is_reproducible() {
                 env.vars.insert(
                     workspace::SPACES_ENV_WORKSPACE_DIGEST.to_string(),
-                    workspace::get_digest(),
+                    workspace.read().digest.clone(),
                 );
             }
 
-            let workspace = workspace::absolute_path();
-            let workspace_path = std::path::Path::new(&workspace);
+            let absolute_path = workspace.read().absolute_path.clone();
+            let workspace_path = std::path::Path::new(&absolute_path);
             let env_path = workspace_path.join("env");
             env.create_shell_env(env_path)
                 .context(format_context!("failed to finalize env"))?;
             let env_str = serde_json::to_string_pretty(&env)?;
 
-            workspace::save_env_file(env_str.as_str())
+            workspace
+                .read()
+                .save_env_file(env_str.as_str())
                 .context(format_context!("Failed to save env file"))?;
         }
         _ => {}
@@ -245,5 +269,3 @@ pub fn run_starlark_script(name: &str, script: &str) -> anyhow::Result<()> {
 
     Ok(())
 }
-
-

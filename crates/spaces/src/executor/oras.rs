@@ -3,8 +3,8 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 
-fn get_oras_command() -> String {
-    format!("{}/sysroot/bin/oras", workspace::get_spaces_tools_path())
+fn get_oras_command(tools_path: &str) -> String {
+    format!("{tools_path}/sysroot/bin/oras")
 }
 
 struct ManifestDetails {
@@ -33,6 +33,7 @@ impl OrasArchive {
     pub fn download(
         &self,
         progress_bar: &mut printer::MultiProgressBar,
+        workspace: workspace::WorkspaceArc,
         output_folder: &str,
     ) -> anyhow::Result<()> {
         let artifact_label = self.get_artifact_label();
@@ -53,7 +54,7 @@ impl OrasArchive {
         );
 
         progress_bar
-            .execute_process(&get_oras_command(), options)
+            .execute_process(&get_oras_command(&workspace.read().get_spaces_tools_path()), options)
             .context(format_context!(
                 "failed to download {artifact_label} using oras",
             ))?;
@@ -64,6 +65,7 @@ impl OrasArchive {
     fn get_manifest_details(
         &self,
         progress: &mut printer::MultiProgressBar,
+        workspace: workspace::WorkspaceArc,
     ) -> anyhow::Result<ManifestDetails> {
         let artifact_label = self.get_artifact_label();
         let options = printer::ExecuteOptions {
@@ -77,7 +79,7 @@ impl OrasArchive {
         };
 
         let manifest = progress
-            .execute_process(get_oras_command().as_str(), options)
+            .execute_process(get_oras_command(&workspace.read().get_spaces_tools_path()).as_str(), options)
             .context(format_context!(
                 "failed to download {artifact_label} using oras",
             ))?;
@@ -117,13 +119,14 @@ impl OrasArchive {
 
     pub fn execute(
         &self,
-        name: &str,
         mut progress: printer::MultiProgressBar,
+        workspace: workspace::WorkspaceArc,
+        name: &str,
     ) -> anyhow::Result<()> {
         // download the manifest and get the digest
 
         let manifest_details = self
-            .get_manifest_details(&mut progress)
+            .get_manifest_details(&mut progress, workspace.clone())
             .context(format_context!("Failed to fetch manifest"))?;
 
         let archive = http_archive::Archive {
@@ -135,8 +138,8 @@ impl OrasArchive {
             ..Default::default()
         };
 
-        let tools_path = format!("{}/sysroot/bin", workspace::get_spaces_tools_path());
-        let store_path = workspace::get_store_path();
+        let tools_path = format!("{}/sysroot/bin", workspace.read().get_spaces_tools_path());
+        let store_path = workspace.read().get_store_path();
         let http_archive = http_archive::HttpArchive::new(&store_path, name, &archive, &tools_path)
             .context(format_context!("Failed to create http_archive {archive:?}"))?;
 
@@ -149,7 +152,7 @@ impl OrasArchive {
                 .to_string_lossy()
                 .to_string();
             // need to ensure the archive is downloaded before using http_archive which doesn't know how to download
-            self.download(&mut progress, &parent)
+            self.download(&mut progress, workspace.clone(), &parent)
                 .context(format_context!("Failed to download using oras"))?;
 
             let full_path_to_download =
@@ -165,7 +168,7 @@ impl OrasArchive {
             .sync(progress)
             .context(format_context!("Failed to sync http_archive {}", name))?;
 
-        let workspace_directory = workspace::absolute_path();
+        let workspace_directory = workspace.read().absolute_path.clone();
 
         http_archive
             .create_links(next_progress_bar, workspace_directory.as_str(), name)

@@ -18,12 +18,12 @@ fn download_and_install(
         platform::Platform::WindowsX86_64 => platform_archive.windows_x86_64,
         platform::Platform::WindowsAarch64 => platform_archive.windows_aarch64,
     };
-    let bare_store = workspace::get_store_path();
-    let spaces_tools = workspace::get_spaces_tools_path();
+    let store_path = workspace::get_checkout_store_path();
+    let spaces_tools = workspace::get_spaces_tools_path(store_path.as_str());
 
     if let Some(archive) = archive.as_ref() {
         let mut http_archive =
-            http_archive::HttpArchive::new(bare_store.as_str(), "unused", archive, "no tools path")
+            http_archive::HttpArchive::new(store_path.as_str(), "unused", archive, "no tools path")
                 .context(format_context!("Failed to create http archive"))?;
 
         http_archive.allow_gh_for_download(false);
@@ -68,10 +68,12 @@ fn download_and_install(
     Ok(())
 }
 
-pub fn install_tools(printer: &mut printer::Printer, is_force_link: bool) -> anyhow::Result<()> {
+pub fn install_tools(printer: &mut printer::Printer, 
+    is_force_link: bool) -> anyhow::Result<()> {
    
     // install gh in the store bin if it does not exist
-    let store_sysroot_bin = workspace::get_spaces_tools_path();
+    let store_path = workspace::get_checkout_store_path();
+    let store_sysroot_bin = workspace::get_spaces_tools_path(store_path.as_str());
     std::fs::create_dir_all(store_sysroot_bin.as_str()).context(format_context!(
         "Failed to create directory {store_sysroot_bin}"
     ))?;
@@ -96,7 +98,7 @@ pub fn install_tools(printer: &mut printer::Printer, is_force_link: bool) -> any
 
     for (name, tool) in tools {
         multi_progress.printer.log(printer::Level::Debug, format!("dowload and install {name}").as_str())?;
-        download_and_install(&mut multi_progress, name, tool, is_force_link)
+        download_and_install(&mut multi_progress,  name, tool, is_force_link)
             .context(format_context!("Failed to download and install tools"))?;
     }
 

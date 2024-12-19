@@ -4,7 +4,6 @@ use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-
 fn get_process_group_id() -> String {
     if let Ok(process_group_id) = std::env::var(workspace::SPACES_PROCESS_GROUP_ENV_VAR) {
         process_group_id
@@ -14,7 +13,10 @@ fn get_process_group_id() -> String {
     }
 }
 
-fn get_capsule_digest(capsules_path: &str, scripts: &Vec<String>) -> anyhow::Result<String> {
+fn get_capsule_digest(
+    capsules_path: &str,
+    scripts: &Vec<String>,
+) -> anyhow::Result<String> {
     let mut modules = Vec::new();
     for script in scripts {
         let mut effective_script = script.clone();
@@ -82,13 +84,24 @@ pub struct CapsuleRunInfo {
     pub process_group_id: String, // The workspace digest
     pub digest: String,
     pub is_locked: bool,
+    #[serde(skip)]
+    workspace: Option<workspace::WorkspaceArc>,
 }
 
 impl CapsuleRunInfo {
+    fn new(workspace: workspace::WorkspaceArc) -> CapsuleRunInfo {
+        CapsuleRunInfo {
+            process_group_id: "".to_string(),
+            digest: "".to_string(),
+            is_locked: false,
+            workspace: Some(workspace),
+        }
+    }
+
     fn get_run_info_path(&self) -> String {
         format!(
             "{}/capsules/run/{}.json",
-            workspace::get_store_path(),
+            self.workspace.clone().unwrap().read().get_store_path(),
             self.digest
         )
     }
@@ -99,10 +112,13 @@ impl CapsuleRunInfo {
         scripts: &Vec<String>,
     ) -> anyhow::Result<CapsuleRunStatus> {
         self.process_group_id = get_process_group_id();
-        self.digest = get_capsule_digest(capsules_path, scripts)
+        self.digest = get_capsule_digest( capsules_path, scripts)
             .context(format_context!("Failed to get capsule digest"))?;
 
-        let run_info_dir = format!("{}/capsules/run", workspace::get_store_path());
+        let run_info_dir = format!(
+            "{}/capsules/run",
+            self.workspace.clone().unwrap().read().get_store_path()
+        );
 
         std::fs::create_dir_all(run_info_dir.as_str())
             .context(format_context!("Failed to create {run_info_dir}"))?;
@@ -233,7 +249,7 @@ fn get_state() -> &'static state_lock::StateLock<State> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Capsule {
-    pub scripts: Vec<String>,      // list of starlark scripts to execute
+    pub scripts: Vec<String>,   // list of starlark scripts to execute
     pub prefix: Option<String>, // --prefix location where the capsule should be installed in the sysroot (default is none)
 }
 
@@ -261,9 +277,9 @@ fn get_spaces_command() -> anyhow::Result<String> {
     Ok(spaces_exec.to_string_lossy().to_string())
 }
 
-fn get_spaces_env() -> anyhow::Result<HashMap<String, String>> {
+fn get_spaces_env(workspace: workspace::WorkspaceArc) -> anyhow::Result<HashMap<String, String>> {
     let mut env = HashMap::new();
-    let workspace_env = workspace::get_env();
+    let workspace_env = workspace.read().get_env();
     env.insert(
         workspace::SPACES_PROCESS_GROUP_ENV_VAR.to_string(),
         get_process_group_id(),
@@ -281,10 +297,11 @@ fn get_spaces_env() -> anyhow::Result<HashMap<String, String>> {
 impl Capsule {
     fn checkout_capsule(
         &self,
+        progress: &mut printer::MultiProgressBar,
+        workspace: workspace::WorkspaceArc,
         name: &str,
         spaces_command: String,
         workspace_name: &str,
-        progress: &mut printer::MultiProgressBar,
     ) -> anyhow::Result<()> {
         let mut args = vec![
             "--hide-progress-bars".to_string(),
@@ -304,7 +321,10 @@ impl Capsule {
             std::env::var("PATH").unwrap_or_default(),
         );
 
-        env.extend(get_spaces_env().context(format_context!("Failed to get spaces env"))?);
+        env.extend(
+            get_spaces_env(workspace.clone())
+                .context(format_context!("Failed to get spaces env"))?,
+        );
 
         // run spaces checkout in @capsules using name
         let spaces_checkout = executor::exec::Exec {
@@ -318,7 +338,7 @@ impl Capsule {
 
         let checkout_name = format!("{}_checkout", name);
         spaces_checkout
-            .execute(&checkout_name, progress)
+            .execute(progress, workspace, &checkout_name)
             .context(format_context!("Failed to checkout workflow {name}"))?;
 
         Ok(())
@@ -326,6 +346,7 @@ impl Capsule {
 
     fn run_capsule(
         &self,
+        workspace: workspace::WorkspaceArc,
         name: &str,
         spaces_command: String,
         workspace_path: String,
@@ -342,14 +363,17 @@ impl Capsule {
             command: spaces_command,
             args: Some(args),
             working_directory: Some(workspace_path),
-            env: Some(get_spaces_env().context(format_context!("Failed to get spaces env"))?),
+            env: Some(
+                get_spaces_env(workspace.clone())
+                    .context(format_context!("Failed to get spaces env"))?,
+            ),
             redirect_stdout: None,
             expect: None,
         };
 
         let run_name = format!("{}_run", name);
         spaces_run
-            .execute(&run_name, progress)
+            .execute(progress, workspace.clone(), &run_name)
             .context(format_context!("Failed to checkout workflow {name}"))?;
 
         Ok(())
@@ -424,15 +448,16 @@ impl Capsule {
 
     pub fn execute(
         &self,
-        name: &str,
         progress: &mut printer::MultiProgressBar,
+        workspace: workspace::WorkspaceArc,
+        name: &str,
     ) -> anyhow::Result<()> {
         // create add_workflow.spaces.star - pass it as the first script
         let spaces_command =
             get_spaces_command().context(format_context!("While executing capsule run"))?;
         let workspace_name = name.replace(':', "_");
 
-        let mut capsule_run_info = CapsuleRunInfo::default();
+        let mut capsule_run_info = CapsuleRunInfo::new(workspace.clone());
         let workspace_path = format!("{}/{}", workspace::SPACES_CAPSULES_NAME, workspace_name);
 
         progress.log(
@@ -453,8 +478,14 @@ impl Capsule {
             .as_str(),
         );
 
-        self.checkout_capsule(name, spaces_command.clone(), &workspace_name, progress)
-            .context(format_context!("Failed to checkout capsule {name}"))?;
+        self.checkout_capsule(
+            progress,
+            workspace.clone(),
+            name,
+            spaces_command.clone(),
+            &workspace_name,
+        )
+        .context(format_context!("Failed to checkout capsule {name}"))?;
 
         // check capsules.spaces.json for a valid CapsuleCheckoutInfo struct
         let capsule_info = {
@@ -473,8 +504,14 @@ impl Capsule {
                 format!("`spaces run` for capsule {}", capsule_run_info.digest).as_str(),
             );
 
-            self.run_capsule(name, spaces_command, workspace_path, progress)
-                .context(format_context!("Failed to run capsule {name}"))?;
+            self.run_capsule(
+                workspace.clone(),
+                name,
+                spaces_command,
+                workspace_path,
+                progress,
+            )
+            .context(format_context!("Failed to run capsule {name}"))?;
 
             progress.log(
                 printer::Level::Message,
@@ -499,7 +536,6 @@ impl Capsule {
                     format_context!("Failed to write capsule info to {file_path}"),
                 )?;
             }
-
         } else {
             progress.log(
                 printer::Level::Info,

@@ -1,4 +1,4 @@
-use crate::{docs, evaluator, rules, tools, workspace, runner};
+use crate::{docs, evaluator, rules, tools, workspace, runner, singleton};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
@@ -49,7 +49,7 @@ fn handle_verbosity(
     is_hide_progress_bars: bool,
 ) {
     if is_ci {
-        workspace::set_ci_true();
+        singleton::set_ci(true);
         printer.verbosity.level = printer::Level::Trace;
         printer.verbosity.is_show_progress_bars = false;
     } else {
@@ -59,7 +59,6 @@ fn handle_verbosity(
 }
 
 pub fn execute() -> anyhow::Result<()> {
-    use crate::ledger;
 
     if std::env::args().len() == 1 {
         let mut stdin_contents = String::new();
@@ -125,7 +124,9 @@ pub fn execute() -> anyhow::Result<()> {
             runner::run_starlark_modules_in_workspace(
                 &mut printer,
                 rules::Phase::Checkout,
+                None,
                 runner::RunWorkspace::Target(None),
+                false,
             )
             .context(format_context!("while executing checkout rules"))?;
         }
@@ -141,7 +142,9 @@ pub fn execute() -> anyhow::Result<()> {
             runner::run_starlark_modules_in_workspace(
                 &mut printer,
                 rules::Phase::Run,
+                None,
                 runner::RunWorkspace::Target(target),
+                false,
             )
             .context(format_context!("while executing run rules"))?;
         }
@@ -161,7 +164,9 @@ pub fn execute() -> anyhow::Result<()> {
             runner::run_starlark_modules_in_workspace(
                 &mut printer,
                 rules::Phase::Evaluate,
+                None,
                 runner::RunWorkspace::Target(target),
+                false,
             )
             .context(format_context!("while executing run rules"))?;
         }
@@ -191,19 +196,6 @@ pub fn execute() -> anyhow::Result<()> {
             handle_verbosity(&mut printer, verbosity.into(), ci, hide_progress_bars);
 
             docs::show(&mut printer, item)?;
-        }
-
-        Arguments {
-            verbosity,
-            hide_progress_bars,
-            ci,
-            commands: Commands::List {},
-        } => {
-            handle_verbosity(&mut printer, verbosity.into(), ci, hide_progress_bars);
-
-            let ledger =
-                ledger::Ledger::new().with_context(|| format_context!("while creating ledger"))?;
-            ledger.show_status()?;
         }
     }
 
@@ -253,6 +245,4 @@ enum Commands {
         #[arg(value_enum)]
         item: Option<docs::DocItem>,
     },
-    /// Lists the workspaces in the spaces store on the local machine. (experimental)
-    List {},
 }

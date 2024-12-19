@@ -9,13 +9,18 @@ pub struct HttpArchive {
 }
 
 impl HttpArchive {
-    pub fn execute(&self, name: &str, progress: printer::MultiProgressBar) -> anyhow::Result<()> {
+    pub fn execute(
+        &self,
+        progress: printer::MultiProgressBar,
+        workspace: workspace::WorkspaceArc,
+        name: &str,
+    ) -> anyhow::Result<()> {
         let next_progress_bar = self
             .http_archive
             .sync(progress)
             .context(format_context!("Failed to sync http_archive {}", name))?;
 
-        let workspace_directory = workspace::absolute_path();
+        let workspace_directory = workspace.read().get_absolute_path();
 
         self.http_archive
             .create_links(next_progress_bar, workspace_directory.as_str(), name)

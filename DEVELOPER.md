@@ -40,6 +40,7 @@ git push origin tag v$VERSION
     - only evaulate one script at a time
   - or instead of using stdout, pipe all the stdout to a shared printer?
   - or have a printer server running to work with IO
+  - Put all state in the `Workspace` and then pass that around use state_lock inside an Arc
 - Allow comma separated scripts from the command line --script=lock,preload,node-sdk
 - Check SPACES_WORKFLOWS ENV for workflows folders: search folders in order to scripts
 - Allow some rules to pass stdout to terminal

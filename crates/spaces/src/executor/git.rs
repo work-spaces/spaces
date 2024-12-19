@@ -85,12 +85,13 @@ impl Git {
 
     fn execute_worktree_clone(
         &self,
-        name: &str,
         progress: &mut printer::MultiProgressBar,
+        workspace: workspace::WorkspaceArc,
+        name: &str,
     ) -> anyhow::Result<()> {
         let bare_repo = git::BareRepository::new(
             progress,
-            workspace::get_store_path().as_str(),
+            workspace.read().get_store_path().as_str(),
             &self.spaces_key,
             &self.url,
         )
@@ -126,9 +127,10 @@ impl Git {
 
     fn execute_default_clone(
         &self,
+        progress: &mut printer::MultiProgressBar,
+        workspace: workspace::WorkspaceArc,
         name: &str,
         filter: Option<String>,
-        progress: &mut printer::MultiProgressBar,
     ) -> anyhow::Result<()> {
         let mut clone_arguments = vec!["clone".to_string()];
         if let Some(filter) = filter {
@@ -140,6 +142,7 @@ impl Git {
 
         let clone_options = printer::ExecuteOptions {
             arguments: clone_arguments,
+            working_directory: Some(workspace.read().get_absolute_path()),
             ..Default::default()
         };
 
@@ -164,7 +167,11 @@ impl Git {
         }
 
         let mut checkout_options = printer::ExecuteOptions {
-            working_directory: Some(self.spaces_key.clone()),
+            working_directory: Some(
+                workspace
+                    .read()
+                    .get_relative_directory(self.spaces_key.as_str()),
+            ),
             ..Default::default()
         };
 
@@ -203,8 +210,9 @@ impl Git {
 
     fn execute_shallow_clone(
         &self,
-        name: &str,
         progress: &mut printer::MultiProgressBar,
+        workspace: workspace::WorkspaceArc,
+        name: &str,
     ) -> anyhow::Result<()> {
         let branch = match &self.checkout {
             git::Checkout::NewBranch(branch_name) => {
@@ -226,6 +234,7 @@ impl Git {
                 branch.clone(),
                 "--single-branch".to_string(),
             ],
+            working_directory: Some(workspace.read().get_absolute_path()),
             ..Default::default()
         };
 
@@ -254,21 +263,27 @@ impl Git {
 
     pub fn execute(
         &self,
+        progress: &mut printer::MultiProgressBar,
+        workspace: workspace::WorkspaceArc,
         name: &str,
-        mut progress: printer::MultiProgressBar,
     ) -> anyhow::Result<()> {
         match self.clone {
             git::Clone::Worktree => self
-                .execute_worktree_clone(name, &mut progress)
+                .execute_worktree_clone(progress, workspace.clone(), name)
                 .context(format_context!("spaces clone failed"))?,
             git::Clone::Default => self
-                .execute_default_clone(name, None, &mut progress)
+                .execute_default_clone(progress, workspace.clone(), name, None)
                 .context(format_context!("default clone failed"))?,
             git::Clone::Blobless => self
-                .execute_default_clone(name, Some("blob:none".to_string()), &mut progress)
+                .execute_default_clone(
+                    progress,
+                    workspace.clone(),
+                    name,
+                    Some("blob:none".to_string()),
+                )
                 .context(format_context!("default clone failed"))?,
             git::Clone::Shallow => self
-                .execute_shallow_clone(name, &mut progress)
+                .execute_shallow_clone(progress, workspace.clone(), name)
                 .context(format_context!("default clone failed"))?,
         }
 
@@ -278,26 +293,33 @@ impl Git {
         };
 
         let mut is_locked = false;
-        if workspace::is_create_lock_file() {
+        if workspace.read().is_create_lock_file {
             if let Some(commit_hash) =
-                git::get_commit_hash(&self.url, &self.spaces_key, &mut progress).context(
+                git::get_commit_hash(&self.url, &self.spaces_key, progress).context(
                     format_context!("Failed to get commit hash for {}", self.spaces_key),
                 )?
             {
-                let rev = if let Some(tag) =
-                    git::get_commit_tag(&self.url, &self.spaces_key, &mut progress)
-                {
-                    tag
-                } else {
-                    commit_hash.to_string()
-                };
+                let rev =
+                    if let Some(tag) = git::get_commit_tag(&self.url, &self.spaces_key, progress) {
+                        tag
+                    } else {
+                        commit_hash.to_string()
+                    };
                 // strip the trailing newline
-                workspace::add_git_commit_lock(name, rev);
+                workspace.write().add_git_commit_lock(name, rev);
             }
-        } else if let Some(commit_hash) = workspace::get_git_commit_lock(name) {
+        } else if let Some(commit_hash) = workspace.read().locks.get(name) {
             let options = printer::ExecuteOptions {
-                working_directory: Some(self.spaces_key.clone()),
-                arguments: vec!["checkout".to_string(), "--detach".to_string(), commit_hash],
+                working_directory: Some(
+                    workspace
+                        .read()
+                        .get_relative_directory(self.spaces_key.as_str()),
+                ),
+                arguments: vec![
+                    "checkout".to_string(),
+                    "--detach".to_string(),
+                    commit_hash.clone(),
+                ],
                 ..Default::default()
             };
 
@@ -306,9 +328,10 @@ impl Git {
                 format!("{}: git {options:?}", self.spaces_key).as_str(),
             );
 
-            git::execute_git_command(&self.url, &mut progress, options).context(
-                format_context!("Failed to checkout commit hash from {}", self.spaces_key),
-            )?;
+            git::execute_git_command(&self.url, progress, options).context(format_context!(
+                "Failed to checkout commit hash from {}",
+                self.spaces_key
+            ))?;
 
             is_locked = true;
         }
@@ -316,7 +339,7 @@ impl Git {
         // after possibly applying the lock commit, check for reproducibility
         if !is_locked {
             // check if checkout is on a branch or commiy
-            let is_branch = git::is_branch(&self.url, &self.spaces_key, &ref_name, &mut progress);
+            let is_branch = git::is_branch(&self.url, &self.spaces_key, &ref_name, progress);
             if is_branch {
                 progress.log(
                     printer::Level::Info,
@@ -326,7 +349,7 @@ impl Git {
                     )
                     .as_str(),
                 );
-                workspace::set_is_reproducible(false);
+                workspace.write().set_is_reproducible(false);
             }
         }
 

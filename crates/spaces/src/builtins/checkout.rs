@@ -1,5 +1,5 @@
 use crate::executor::asset;
-use crate::{executor, rules, workspace};
+use crate::{executor, rules, singleton};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -474,7 +474,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for repo rule"))?;
 
-        let worktree_path = workspace::absolute_path();
+        let workspace_arc =
+            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+        let workspace = workspace_arc.read();
+
+        let worktree_path = workspace.absolute_path.clone();
 
         let checkout = repo.get_checkout();
         let spaces_key = rule.name.clone();
@@ -505,7 +509,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for cargo_bin rule"))?;
 
-        let cargo_binstall_dir = workspace::get_cargo_binstall_root();
+        let workspace_arc =
+            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+        let workspace = workspace_arc.read();
+
+        let cargo_binstall_dir = workspace.get_cargo_binstall_root();
 
         let output_directory = format!("{}/{}", cargo_binstall_dir, cargo_bin.version);
 
@@ -517,7 +525,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let cargo_binstall_path = format!(
             "{}/sysroot/bin/cargo-binstall",
-            workspace::get_spaces_tools_path()
+            workspace.get_spaces_tools_path()
         );
 
         let exec = executor::exec::Exec {
@@ -808,11 +816,15 @@ fn add_http_archive(
             archive.sha256
         };
 
+        let workspace_arc =
+            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+        let workspace = workspace_arc.read();
+
         let http_archive = http_archive::HttpArchive::new(
-            &workspace::get_store_path(),
+            &workspace.get_store_path(),
             rule.name.as_str(),
             &archive,
-            format!("{}/sysroot/bin", workspace::get_spaces_tools_path()).as_str(),
+            format!("{}/sysroot/bin", workspace.get_spaces_tools_path()).as_str(),
         )
         .context(format_context!(
             "Failed to create http_archive {}",

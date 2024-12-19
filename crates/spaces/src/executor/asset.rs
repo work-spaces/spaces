@@ -1,27 +1,9 @@
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 
 use crate::workspace;
 
-#[derive(Debug)]
-struct State {
-    updated_assets: HashSet<String>,
-}
-
-static STATE: state::InitCell<state_lock::StateLock<State>> = state::InitCell::new();
-
-fn get_state() -> &'static state_lock::StateLock<State> {
-    if let Some(state) = STATE.try_get() {
-        return state;
-    }
-
-    STATE.set(state_lock::StateLock::new(State {
-        updated_assets: HashSet::new(),
-    }));
-    STATE.get()
-}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum AssetFormat {
@@ -67,21 +49,19 @@ fn format_value(format: AssetFormat, value: &serde_json::Value) -> anyhow::Resul
 impl UpdateAsset {
     pub fn execute(
         &self,
-        _name: &str,
         mut progress: printer::MultiProgressBar,
+        workspace: workspace::WorkspaceArc,
+        _name: &str,
     ) -> anyhow::Result<()> {
         use json_value_merge::Merge;
 
-        // hold the mutex to ensure exclusive access to the output file
-        let mut state = get_state().write();
-
-        let dest_path = get_destination_path(&self.destination).context(format_context!(
+        let dest_path = get_destination_path(workspace.clone(), &self.destination).context(format_context!(
             "Failed to get destination path for asset file {}",
             &self.destination
         ))?;
 
         let new_value =
-            if state.updated_assets.contains(&self.destination) {
+            if workspace.read().updated_assets.contains(&self.destination) {
                 let old_value = std::fs::read_to_string(dest_path.clone()).context(
                     format_context!("Failed to read asset file {}", dest_path.display()),
                 )?;
@@ -98,7 +78,7 @@ impl UpdateAsset {
 
                 old_value
             } else {
-                state.updated_assets.insert(self.destination.clone());
+                workspace.write().updated_assets.insert(self.destination.clone());
                 self.value.clone()
             };
 
@@ -107,7 +87,7 @@ impl UpdateAsset {
             &self.destination
         ))?;
 
-        save_asset(&self.destination, &content).context(format_context!("failed to add asset"))?;
+        save_asset(workspace, &self.destination, &content).context(format_context!("failed to add asset"))?;
 
         Ok(())
     }
@@ -121,14 +101,19 @@ pub struct AddWhichAsset {
 }
 
 impl AddWhichAsset {
-    pub fn execute(&self, _name: &str, _progress: printer::MultiProgressBar) -> anyhow::Result<()> {
+    pub fn execute(
+        &self,
+        _progress: printer::MultiProgressBar,
+        workspace: workspace::WorkspaceArc,
+        _name: &str,
+    ) -> anyhow::Result<()> {
         let path = which::which(self.which.as_str()).context(format_context!(
             "Failed to find {} on using `which`. This is required for this workspace",
             self.which
         ))?;
 
         // create the hard link to sysroot
-        let workspace = workspace::absolute_path();
+        let workspace = workspace.read().get_absolute_path();
         let destination = format!("{}/{}", workspace, self.destination);
 
         let source = path.to_string_lossy().to_string();
@@ -153,9 +138,14 @@ pub struct AddHardLink {
 }
 
 impl AddHardLink {
-    pub fn execute(&self, _name: &str, _progress: printer::MultiProgressBar) -> anyhow::Result<()> {
+    pub fn execute(
+        &self,
+        _progress: printer::MultiProgressBar,
+        workspace: workspace::WorkspaceArc,
+        _name: &str,
+    ) -> anyhow::Result<()> {
         // create the hard link to sysroot
-        let workspace = workspace::absolute_path();
+        let workspace = workspace.read().get_absolute_path();
         let destination = format!("{}/{}", workspace, self.destination);
         let source = self.source.clone();
 
@@ -179,8 +169,13 @@ pub struct AddAsset {
 }
 
 impl AddAsset {
-    pub fn execute(&self, _name: &str, _progress: printer::MultiProgressBar) -> anyhow::Result<()> {
-        save_asset(&self.destination, &self.content)
+    pub fn execute(
+        &self,
+        _progress: printer::MultiProgressBar,
+        workspace: workspace::WorkspaceArc,
+        _name: &str,
+    ) -> anyhow::Result<()> {
+        save_asset(workspace, &self.destination, &self.content)
             .context(format_context!("failed to add asset"))?;
         Ok(())
     }
@@ -194,9 +189,14 @@ pub struct AddSoftLink {
 }
 
 impl AddSoftLink {
-    pub fn execute(&self, _name: &str, _progress: printer::MultiProgressBar) -> anyhow::Result<()> {
+    pub fn execute(
+        &self,
+        _progress: printer::MultiProgressBar,
+        workspace: workspace::WorkspaceArc,
+        _name: &str,
+    ) -> anyhow::Result<()> {
         // create the hard link to sysroot
-        let workspace = workspace::absolute_path();
+        let workspace = workspace.read().get_absolute_path();
         let destination = format!("{}/{}", workspace, self.destination);
         let source = self.source.clone();
 
@@ -251,13 +251,20 @@ impl AddSoftLink {
     }
 }
 
-fn get_destination_path(destination: &str) -> anyhow::Result<std::path::PathBuf> {
-    let workspace_path = workspace::absolute_path();
+fn get_destination_path(
+    workspace: workspace::WorkspaceArc,
+    destination: &str,
+) -> anyhow::Result<std::path::PathBuf> {
+    let workspace_path = workspace.read().get_absolute_path();
     Ok(std::path::Path::new(&workspace_path).join(destination))
 }
 
-fn save_asset(destination: &str, content: &str) -> anyhow::Result<()> {
-    let output_path = get_destination_path(destination)
+fn save_asset(
+    workspace: workspace::WorkspaceArc,
+    destination: &str,
+    content: &str,
+) -> anyhow::Result<()> {
+    let output_path = get_destination_path(workspace, destination)
         .context(format_context!("Failed to get destaiont for {destination}"))?;
     if let Some(parent) = output_path.parent() {
         std::fs::create_dir_all(parent).context(format_context!(

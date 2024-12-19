@@ -12,14 +12,15 @@ pub struct UpdateEnv {
 impl UpdateEnv {
     pub fn execute(
         &self,
-        name: &str,
         mut progress: printer::MultiProgressBar,
+        workspace: workspace::WorkspaceArc,
+        name: &str,
     ) -> anyhow::Result<()> {
         progress.log(
             printer::Level::Debug,
             format!("Update env {name}: {:?}", &self).as_str(),
         );
-        workspace::update_env(self.environment.clone())
+        workspace.write().update_env(self.environment.clone())
             .context(format_context!("failed to update env"))?;
         Ok(())
     }

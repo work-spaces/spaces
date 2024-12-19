@@ -2,6 +2,7 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use crate::inputs;
 
 pub const ENV_FILE_NAME: &str = "env.spaces.star";
 pub const LOCK_FILE_NAME: &str = "lock.spaces.star";
@@ -21,11 +22,7 @@ Spaces Environment Workspace file
 """
 "#;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LockFile {
-    pub rules: HashMap<String, String>,
-}
+pub type WorkspaceArc = std::sync::Arc<state_lock::StateLock<Workspace>>;
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct Settings {
@@ -60,23 +57,6 @@ impl Settings {
     }
 }
 
-#[derive(Debug)]
-struct State {
-    absolute_path: String,
-    log_directory: String,
-    digest: String,
-    store_path: String,
-    changes: Option<changes::Changes>,
-    locks: HashMap<String, String>,
-    is_create_lock_file: bool,
-    #[allow(dead_code)]
-    new_branch_name: Option<String>,
-    env: environment::Environment,
-    is_ci: bool,
-    max_queue_count: i64,
-}
-
-static STATE: state::InitCell<state_lock::StateLock<State>> = state::InitCell::new();
 
 pub fn calculate_digest(modules: &Vec<(String, String)>) -> String {
     let mut hasher = blake3::Hasher::new();
@@ -86,71 +66,6 @@ pub fn calculate_digest(modules: &Vec<(String, String)>) -> String {
     hasher.finalize().to_string()
 }
 
-pub fn save_env_file(env: &str) -> anyhow::Result<()> {
-    let mut workspace_file_content = String::new();
-    workspace_file_content.push_str(WORKSPACE_FILE_HEADER);
-    workspace_file_content.push('\n');
-    workspace_file_content.push_str("workspace_env = ");
-    workspace_file_content.push_str(env);
-    workspace_file_content.push_str("\n\ninfo.set_env(env = workspace_env) \n");
-    let state = get_state().read();
-    let workspace_file_path = format!("{}/{}", state.absolute_path, ENV_FILE_NAME);
-    std::fs::write(workspace_file_path.as_str(), workspace_file_content)
-        .context(format_context!("Failed to write workspace file"))?;
-
-    Ok(())
-}
-
-pub fn is_create_lock_file() -> bool {
-    let state = get_state().read();
-    state.is_create_lock_file
-}
-
-pub fn set_create_lock_file(is_create_lock_file: bool) {
-    let mut state = get_state().write();
-    state.is_create_lock_file = is_create_lock_file;
-}
-
-pub fn save_lock_file() -> anyhow::Result<()> {
-    let state = get_state().read();
-    if !state.is_create_lock_file {
-        return Ok(());
-    }
-    let mut workspace_file_content = String::new();
-    workspace_file_content.push_str(WORKSPACE_FILE_HEADER);
-    workspace_file_content.push('\n');
-    workspace_file_content.push_str("workspace_locks = ");
-    let locks_str = serde_json::to_string_pretty(&state.locks)
-        .context(format_context!("Failed to serialize locks"))?;
-    workspace_file_content.push_str(locks_str.as_str());
-    workspace_file_content.push_str("\n\ninfo.set_locks(locks = workspace_locks) \n");
-
-    let workspace_file_path = format!("{}/{}", state.absolute_path, LOCK_FILE_NAME);
-    std::fs::write(workspace_file_path.as_str(), workspace_file_content)
-        .context(format_context!("Failed to write workspace file"))?;
-
-    Ok(())
-}
-
-pub fn set_digest(digest: String) {
-    let mut state = get_state().write();
-    state.digest = digest.to_string();
-}
-
-pub fn get_digest() -> String {
-    let state = get_state().read();
-    state.digest.clone()
-}
-
-pub fn get_git_commit_lock(rule_name: &str) -> Option<String> {
-    let state = get_state().read();
-    state.locks.get(rule_name).cloned()
-}
-
-pub fn set_locks(locks: HashMap<String, String>) {
-    let mut state = get_state().write();
-    state.locks = locks;
-}
 
 pub fn get_current_working_directory() -> anyhow::Result<String> {
     let current_working_directory = std::env::current_dir()
@@ -177,32 +92,6 @@ pub fn get_workspace_path(workspace_path: &str, current_path: &str, target_path:
     }
 }
 
-pub fn update_changes(
-    progress: &mut printer::MultiProgressBar,
-    inputs: &HashSet<String>,
-) -> anyhow::Result<()> {
-    let mut state = get_state().write();
-    if let Some(changes) = state.changes.as_mut() {
-        changes
-            .update_from_inputs(progress, inputs)
-            .context(format_context!("Failed to update workspace changes"))?;
-    }
-    Ok(())
-}
-
-pub fn save_changes() -> anyhow::Result<()> {
-    let changes_path = get_changes_path();
-    let state = get_state().read();
-    let changes = state
-        .changes
-        .as_ref()
-        .ok_or(format_error!("No changes available"))?;
-    changes
-        .save(changes_path)
-        .context(format_context!("Failed to save changes file"))?;
-    Ok(())
-}
-
 pub fn get_checkout_store_path() -> String {
     if let Ok(spaces_home) = std::env::var(SPACES_HOME_ENV_VAR) {
         return format!("{}/.spaces/store", spaces_home);
@@ -213,102 +102,8 @@ pub fn get_checkout_store_path() -> String {
     panic!("Failed to get home directory");
 }
 
-pub fn get_store_path() -> String {
-    let state = get_state().read();
-    state.store_path.clone()
-}
-
-pub fn get_spaces_tools_path() -> String {
-    format!("{}/spaces_tools", get_store_path())
-}
-
-pub fn get_cargo_binstall_root() -> String {
-    format!("{}/cargo_binstall_bin_dir", get_spaces_tools_path())
-}
-
-pub fn add_git_commit_lock(rule_name: &str, commit: String) {
-    let mut state = get_state().write();
-    state.locks.insert(rule_name.to_string(), commit);
-}
-
-pub fn get_rule_inputs_digest(
-    progress: &mut printer::MultiProgressBar,
-    seed: &str,
-    globs: &HashSet<String>,
-) -> anyhow::Result<String> {
-    let state = get_state().read();
-    let changes = state
-        .changes
-        .as_ref()
-        .ok_or(format_error!("No changes available"))?;
-    changes.get_digest(progress, seed, globs)
-}
-pub fn set_ci_true() {
-    let mut state = get_state().write();
-    state.is_ci = true;
-}
-
-pub fn get_is_ci() -> bool {
-    let state = get_state().read();
-    state.is_ci
-}
-
-pub fn set_env(env: environment::Environment) {
-    let mut state = get_state().write();
-    state.env = env;
-}
-
-pub fn update_env(env: environment::Environment) -> anyhow::Result<()> {
-    let mut state = get_state().write();
-    state.env.vars.extend(env.vars);
-    state.env.paths.extend(env.paths);
-    if let Some(inherited_vars) = env.inherited_vars {
-        if let Some(existing_inherited_vars) = state.env.inherited_vars.as_mut() {
-            existing_inherited_vars.extend(inherited_vars.clone());
-        } else {
-            state.env.inherited_vars = Some(inherited_vars);
-        }
-    }
-
-    if let Some(system_paths) = env.system_paths {
-        if let Some(existing_system_paths) = state.env.system_paths.as_mut() {
-            existing_system_paths.extend(system_paths.clone());
-        } else {
-            state.env.system_paths = Some(system_paths);
-        }
-    }
-    Ok(())
-}
-
-pub fn get_env() -> environment::Environment {
-    let state = get_state().read();
-    state.env.clone()
-}
-
-pub fn get_max_queue_count() -> i64 {
-    let state = get_state().read();
-    state.max_queue_count
-}
-
-pub fn set_max_queue_count(count: i64) {
-    let mut state = get_state().write();
-    state.max_queue_count = count;
-}
-
-pub fn set_is_reproducible(value: bool) {
-    let mut state = get_state().write();
-    state.env.vars.insert(
-        SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE.to_owned(),
-        value.to_string(),
-    );
-}
-
-pub fn is_reproducible() -> bool {
-    let state = get_state().read();
-    if let Some(value) = state.env.vars.get(SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE) {
-        return value == "true";
-    }
-    false
+pub fn get_spaces_tools_path(store_path: &str) -> String {
+    format!("{store_path}/spaces_tools")
 }
 
 fn get_unique() -> anyhow::Result<String> {
@@ -318,41 +113,6 @@ fn get_unique() -> anyhow::Result<String> {
     let duration_since_epoch_string = format!("{}", duration_since_epoch.as_nanos());
     let unique_sha256 = sha256::digest(duration_since_epoch_string.as_bytes());
     Ok(unique_sha256.as_str()[0..4].to_string())
-}
-
-fn get_state() -> &'static state_lock::StateLock<State> {
-    if let Some(state) = STATE.try_get() {
-        return state;
-    }
-
-    let mut env = environment::Environment::default();
-
-    env.vars.insert(
-        SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE.to_owned(),
-        "true".to_string(),
-    );
-
-    STATE.set(state_lock::StateLock::new(State {
-        absolute_path: "".to_string(),
-        digest: "".to_string(),
-        log_directory: SPACES_LOGS_NAME.to_string(),
-        changes: None,
-        store_path: get_checkout_store_path(),
-        locks: HashMap::new(),
-        is_create_lock_file: false,
-        new_branch_name: None,
-        env,
-        is_ci: false,
-        max_queue_count: 8,
-    }));
-    STATE.get()
-}
-
-pub fn get_log_file(rule_name: &str) -> String {
-    let state = get_state().read();
-    let rule_name = rule_name.replace('/', "_");
-    let rule_name = rule_name.replace(':', "_");
-    format!("{}/{rule_name}.log", state.log_directory)
 }
 
 pub fn build_directory() -> &'static str {
@@ -367,16 +127,47 @@ pub fn get_changes_path() -> &'static str {
     "build/workspace.changes.spaces"
 }
 
-pub fn absolute_path() -> String {
-    get_state().read().absolute_path.clone()
-}
-
 #[derive(Debug)]
 pub struct Workspace {
     pub modules: Vec<(String, String)>,
+    pub absolute_path: String, // set at startup
+    pub log_directory: String, // always @logs/timestamp
+    pub is_create_lock_file: bool, // set at startup
+    pub digest: String, // set at startup
+    pub store_path: Option<String>, // set at startup
+    pub locks: HashMap<String, String>, // set during eval
+    pub env: environment::Environment, // set during eval
+    #[allow(dead_code)]
+    pub new_branch_name: Option<String>, // set during eval - not used
+    changes: changes::Changes, // modified during run
+    inputs: inputs::Inputs, // modified during run
+    pub updated_assets: HashSet<String>, // used by assets to keep track of exclusive access
 }
 
 impl Workspace {
+
+    pub fn set_is_reproducible(&mut self, value: bool) {
+        self.env.vars.insert(
+            SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE.to_owned(),
+            value.to_string(),
+        );
+    }
+
+    pub fn get_relative_directory(&self, relative_path: &str) -> String {
+        format!("{}/{}", self.absolute_path, relative_path)
+    }
+
+    pub fn get_absolute_path(&self) -> String {
+        self.absolute_path.clone()
+    }
+    
+    pub fn is_reproducible(&self) -> bool {
+        if let Some(value) = self.env.vars.get(SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE) {
+            return value == "true";
+        }
+        false
+    }
+
     fn find_workspace_root(current_working_directory: &str) -> anyhow::Result<String> {
         let mut current_directory = current_working_directory.to_owned();
         loop {
@@ -402,16 +193,20 @@ impl Workspace {
         true
     }
 
-    pub fn new(mut progress: printer::MultiProgressBar) -> anyhow::Result<Self> {
+    pub fn new(mut progress: printer::MultiProgressBar, absolute_path_to_workspace: Option<String>) -> anyhow::Result<Self> {
         let date = chrono::Local::now();
 
-        let current_working_directory = get_current_working_directory().context(
-            format_context!("Failed to get current working directory in new workspace"),
-        )?;
+        let absolute_path = if let Some(absolute_path) = absolute_path_to_workspace {
+            absolute_path
+        } else {
+            let current_working_directory = get_current_working_directory().context(
+                format_context!("Failed to get current working directory in new workspace"),
+            )?;
 
-        // search the current directory and all parent directories for the workspace file
-        let absolute_path = Self::find_workspace_root(current_working_directory.as_str())
-            .context(format_context!("While searching for workspace root"))?;
+            // search the current directory and all parent directories for the workspace file
+            Self::find_workspace_root(current_working_directory.as_str())
+                .context(format_context!("While searching for workspace root"))?
+        };
 
         // walkdir and find all spaces.star files in the workspace
         let walkdir: Vec<_> = walkdir::WalkDir::new(absolute_path.as_str())
@@ -509,13 +304,10 @@ impl Workspace {
             format_context!("Failed to set current directory to {absolute_path}"),
         )?;
 
-        let mut state = get_state().write();
+        let log_directory = format!("{SPACES_LOGS_NAME}/logs_{}", date.format("%Y%m%d-%H-%M-%S"));
 
-        state.log_directory = format!("{SPACES_LOGS_NAME}/logs_{}", date.format("%Y%m%d-%H-%M-%S"));
-
-        std::fs::create_dir_all(state.log_directory.as_str()).context(format_context!(
-            "Failed to create log folder {}",
-            state.log_directory
+        std::fs::create_dir_all(log_directory.as_str()).context(format_context!(
+            "Failed to create log folder {log_directory}",
         ))?;
 
         std::fs::create_dir_all(build_directory())
@@ -525,16 +317,165 @@ impl Workspace {
         let skip_folders = vec![SPACES_LOGS_NAME.to_string()];
         let changes = changes::Changes::new(changes_path, skip_folders);
 
-        state.digest = workspace_digest;
-        state.absolute_path = absolute_path;
-        state.changes = Some(changes);
-        if let Some(store_path) = store_path {
-            state.store_path = store_path;
-        }
-
         #[allow(unused)]
         let unique = get_unique().context(format_context!("failed to get unique marker"))?;
 
-        Ok(Self { modules })
+        let mut env = environment::Environment::default();
+
+        env.vars.insert(
+            SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE.to_owned(),
+            "true".to_string(),
+        );
+
+        
+        Ok(Self { 
+            modules,
+            absolute_path,
+            log_directory,
+            is_create_lock_file: false,
+            digest: workspace_digest,
+            store_path,
+            locks: HashMap::new(),
+            env,
+            new_branch_name: None,
+            changes,
+            updated_assets: HashSet::new(),
+            inputs: inputs::Inputs::new(get_inputs_path()),
+         })
     }
+
+    pub fn set_env(&mut self, env: environment::Environment) {
+        self.env = env;
+    }
+    
+    pub fn update_env(&mut self, env: environment::Environment) -> anyhow::Result<()> {
+        self.env.vars.extend(env.vars);
+        self.env.paths.extend(env.paths);
+        if let Some(inherited_vars) = env.inherited_vars {
+            if let Some(existing_inherited_vars) = self.env.inherited_vars.as_mut() {
+                existing_inherited_vars.extend(inherited_vars.clone());
+            } else {
+                self.env.inherited_vars = Some(inherited_vars);
+            }
+        }
+    
+        if let Some(system_paths) = env.system_paths {
+            if let Some(existing_system_paths) = self.env.system_paths.as_mut() {
+                existing_system_paths.extend(system_paths.clone());
+            } else {
+                self.env.system_paths = Some(system_paths);
+            }
+        }
+        Ok(())
+    }
+    
+    pub fn get_env(&self) -> environment::Environment {
+        self.env.clone()
+    }
+
+    pub fn save_env_file(&self, env: &str) -> anyhow::Result<()> {
+        let mut workspace_file_content = String::new();
+        workspace_file_content.push_str(WORKSPACE_FILE_HEADER);
+        workspace_file_content.push('\n');
+        workspace_file_content.push_str("workspace_env = ");
+        workspace_file_content.push_str(env);
+        workspace_file_content.push_str("\n\ninfo.set_env(env = workspace_env) \n");
+        let workspace_file_path = format!("{}/{}", self.absolute_path, ENV_FILE_NAME);
+        std::fs::write(workspace_file_path.as_str(), workspace_file_content)
+            .context(format_context!("Failed to write workspace file"))?;
+    
+        Ok(())
+    }
+    
+    
+    pub fn save_lock_file(&self) -> anyhow::Result<()> {
+        if !self.is_create_lock_file {
+            return Ok(());
+        }
+        let mut workspace_file_content = String::new();
+        workspace_file_content.push_str(WORKSPACE_FILE_HEADER);
+        workspace_file_content.push('\n');
+        workspace_file_content.push_str("workspace_locks = ");
+        let locks_str = serde_json::to_string_pretty(&self.locks)
+            .context(format_context!("Failed to serialize locks"))?;
+        workspace_file_content.push_str(locks_str.as_str());
+        workspace_file_content.push_str("\n\ninfo.set_locks(locks = workspace_locks) \n");
+    
+        let workspace_file_path = format!("{}/{}", self.absolute_path, LOCK_FILE_NAME);
+        std::fs::write(workspace_file_path.as_str(), workspace_file_content)
+            .context(format_context!("Failed to write workspace file"))?;
+    
+        Ok(())
+    }
+
+    pub fn update_changes(&mut self,
+        progress: &mut printer::MultiProgressBar,
+        inputs: &HashSet<String>,
+    ) -> anyhow::Result<()> {
+            self.changes
+                .update_from_inputs(progress, inputs)
+                .context(format_context!("Failed to update workspace changes"))?;
+        
+        Ok(())
+    }
+    
+    pub fn save_changes(&mut self) -> anyhow::Result<()> {
+        let changes_path = get_changes_path();
+        self.changes
+            .save(changes_path)
+            .context(format_context!("Failed to save changes file"))?;
+        Ok(())
+    }
+
+    pub fn add_git_commit_lock(&mut self, rule_name: &str, commit: String) {
+        self.locks.insert(rule_name.to_string(), commit);
+    }
+    
+    pub fn get_rule_inputs_digest(&self,
+        progress: &mut printer::MultiProgressBar,
+        seed: &str,
+        globs: &HashSet<String>,
+    ) -> anyhow::Result<String> {
+        self.changes.get_digest(progress, seed, globs)
+    }
+
+    pub fn get_store_path(&self) -> String {
+        self.store_path.clone().unwrap_or_else(|| get_checkout_store_path())
+    }
+
+    pub fn get_spaces_tools_path(&self) -> String {
+        get_spaces_tools_path(self.get_store_path().as_str())
+    }
+    
+    pub fn get_cargo_binstall_root(&self) -> String {
+        format!("{}/cargo_binstall_bin_dir", self.get_spaces_tools_path())
+    }
+    
+    pub fn get_log_file(&self, rule_name: &str) -> String {
+        let rule_name = rule_name.replace('/', "_");
+        let rule_name = rule_name.replace(':', "_");
+        format!("{}/{rule_name}.log", self.log_directory)
+    }
+
+    pub fn is_rule_inputs_changed(
+        &self,
+        progress: &mut printer::MultiProgressBar,
+        rule_name: &str,
+        seed: &str,
+        inputs: &HashSet<String>,
+    ) -> anyhow::Result<Option<String>> {
+        let digest = self.get_rule_inputs_digest(progress, seed, inputs)
+            .context(format_context!("Failed to get digest for rule {rule_name}"))?;
+        self.inputs.is_changed(rule_name, digest)
+    }
+    
+    pub fn update_rule_digest(&mut self, rule: &str, digest: String) {
+        self.inputs.save_digest(rule, digest);
+    }
+    
+    pub fn save_inputs(&self) -> anyhow::Result<()> {
+        let inputs_path = get_inputs_path();
+        self.inputs.save(inputs_path)
+    }
+    
 }

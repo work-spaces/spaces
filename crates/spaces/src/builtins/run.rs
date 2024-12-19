@@ -4,7 +4,7 @@ use starlark::{environment::GlobalsBuilder, values::none::NoneType};
 use starstd::{get_rule_argument, Arg, Function};
 use std::collections::HashSet;
 
-use crate::{executor, rules};
+use crate::{executor, rules, inputs};
 
 const ADD_EXEC_EXAMPLE: &str = r#"run.add_exec(
     rule = {"name": name, "type": "Setup", "deps": ["sysroot-python:venv"]},
@@ -147,7 +147,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for exec rule"))?;
 
-        rules::inputs::validate_input_globs(&rule.inputs)
+        inputs::validate_input_globs(&rule.inputs)
             .context(format_context!("invalid inputs globs with {}", rule.name))?;
 
         let mut exec: executor::exec::Exec = serde_json::from_value(exec.to_json_value()?)
@@ -178,7 +178,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for kill rule"))?;
 
-        rules::inputs::validate_input_globs(&rule.inputs)
+        inputs::validate_input_globs(&rule.inputs)
             .context(format_context!("invalid inputs globs with {}", rule.name))?;
 
         let mut kill_exec: executor::exec::Kill = serde_json::from_value(kill.to_json_value()?)
@@ -202,7 +202,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for exec_if rule"))?;
 
-        rules::inputs::validate_input_globs(&rule.inputs)
+        inputs::validate_input_globs(&rule.inputs)
             .context(format_context!("invalid inputs globs with {}", rule.name))?;
 
         let mut exec_if: executor::exec::ExecIf = serde_json::from_value(exec_if.to_json_value()?)

@@ -7,11 +7,12 @@ mod evaluator;
 mod executor;
 mod builtins;
 mod label;
-mod ledger;
+mod inputs;
 mod rules;
 mod tools;
 mod runner;
 mod workspace;
+mod singleton;
 
 fn main() -> anyhow::Result<()> {
     arguments::execute()
