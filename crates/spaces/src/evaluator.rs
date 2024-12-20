@@ -47,8 +47,13 @@ fn evaluate_module(
         if module_load_path.ends_with(workspace::SPACES_MODULE_NAME) {
             return Err(format_error!("Error: Attempting to load module ending with `spaces.star` module. This is a reserved module name."));
         }
-        let contents = std::fs::read_to_string(module_load_path.as_str())
-            .context(format_context!("Failed to read file {}", module_load_path))?;
+        let contents = std::fs::read_to_string(module_load_path.as_str()).with_context(|| {
+            format_context!(
+                "error: failed to load {}\n--> {name}:{}\n in workspace `{workspace_path}`",
+                load.module_id,
+                load.span.file.find_line(load.span.span.begin()) + 1,
+            )
+        })?;
 
         loads.push((
             load.module_id.to_owned(),

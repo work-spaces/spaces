@@ -27,6 +27,7 @@ fn get_state() -> &'static lock::StateLock<State> {
     STATE.get()
 }
 
+
 pub fn process_anyhow_error(error: anyhow::Error) {
     let mut state = get_state().write();
     for cause in error.chain().rev() {
@@ -42,10 +43,11 @@ pub fn process_error(error: String){
 pub fn show_error_chain() {
     let mut state = get_state().write();
     let args = std::env::args().collect::<Vec<String>>();
-    eprint!("Error Chain: {}\n", args.join(" "));
+    eprint!("While executing: {}\n", args.join(" "));
     state.error_chain.reverse();
     for (offset, error) in state.error_chain.iter().enumerate() {
-        eprintln!("  [{}]: {}", offset, error);
+        let show_error = error.to_string().replace('\n', "\n    ");
+        eprintln!("  [{offset}]: {show_error}");
     }
 }
 
