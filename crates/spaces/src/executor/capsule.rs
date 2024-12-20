@@ -1,22 +1,10 @@
 use crate::{executor, workspace};
 use anyhow::Context;
-use anyhow_source_location::{format_context, format_error};
+use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-fn get_process_group_id() -> String {
-    if let Ok(process_group_id) = std::env::var(workspace::SPACES_PROCESS_GROUP_ENV_VAR) {
-        process_group_id
-    } else {
-        // create process ID from system time
-        format!("{}", chrono::Utc::now().timestamp())
-    }
-}
-
-fn get_capsule_digest(
-    capsules_path: &str,
-    scripts: &Vec<String>,
-) -> anyhow::Result<String> {
+fn get_capsule_digest(capsules_path: &str, scripts: &Vec<String>) -> anyhow::Result<String> {
     let mut modules = Vec::new();
     for script in scripts {
         let mut effective_script = script.clone();
@@ -79,143 +67,51 @@ enum CapsuleRunStatus {
     StartNow,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug)]
 pub struct CapsuleRunInfo {
-    pub process_group_id: String, // The workspace digest
-    pub digest: String,
-    pub is_locked: bool,
-    #[serde(skip)]
-    workspace: Option<workspace::WorkspaceArc>,
+    lock_file: lock::FileLock,
+    digest: String,
 }
 
 impl CapsuleRunInfo {
-    fn new(workspace: workspace::WorkspaceArc) -> CapsuleRunInfo {
-        CapsuleRunInfo {
-            process_group_id: "".to_string(),
-            digest: "".to_string(),
-            is_locked: false,
-            workspace: Some(workspace),
-        }
-    }
-
-    fn get_run_info_path(&self) -> String {
-        format!(
-            "{}/capsules/run/{}.json",
-            self.workspace.clone().unwrap().read().get_store_path(),
-            self.digest
-        )
-    }
-
-    fn lock(
-        &mut self,
+    fn new(
+        workspace: workspace::WorkspaceArc,
         capsules_path: &str,
         scripts: &Vec<String>,
-    ) -> anyhow::Result<CapsuleRunStatus> {
-        self.process_group_id = get_process_group_id();
-        self.digest = get_capsule_digest( capsules_path, scripts)
-            .context(format_context!("Failed to get capsule digest"))?;
+    ) -> anyhow::Result<CapsuleRunInfo> {
+        let digest = get_capsule_digest(capsules_path, scripts).context(format_context!(
+            "Failed to get digest for capsule with scripts: {capsules_path}",
+        ))?;
 
-        let run_info_dir = format!(
-            "{}/capsules/run",
-            self.workspace.clone().unwrap().read().get_store_path()
+        let lock_file_path = format!(
+            "{}/capsules/run/{digest}.json",
+            workspace.read().get_store_path(),
         );
 
-        std::fs::create_dir_all(run_info_dir.as_str())
-            .context(format_context!("Failed to create {run_info_dir}"))?;
-
-        let capsule_run_info_path = self.get_run_info_path();
-
-        match std::fs::OpenOptions::new()
-            .write(true) // Open for writing
-            .create_new(true) // Create only if it does NOT exist
-            .open(capsule_run_info_path.as_str())
-        {
-            Ok(file) => {
-                serde_json::to_writer(file, &self)
-                    .context(format_context!("Failed to write {capsule_run_info_path}"))?;
-            }
-            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
-                let contents = std::fs::read_to_string(capsule_run_info_path.as_str())
-                    .context(format_context!("Failed to read {capsule_run_info_path}"))?;
-                let existing_info: CapsuleRunInfo =
-                    serde_json::from_str(&contents).context(format_context!(
-                        "failed to parse {capsule_run_info_path} - delete the file and try again"
-                    ))?;
-
-                if existing_info.process_group_id == self.process_group_id {
-                    return Ok(CapsuleRunStatus::AlreadyStarted);
-                } else {
-                    let capsule_run_info_string = serde_json::to_string(&self)
-                        .context(format_context!("Failed to serialize capsule run info"))?;
-
-                    // over write the file
-                    std::fs::write(capsule_run_info_path.as_str(), capsule_run_info_string)
-                        .context(format_context!(
-                            "Failed to create file {capsule_run_info_path}"
-                        ))?;
-                }
-            }
-            Err(err) => {
-                return Err(format_error!(
-                    "Failed to create file '{}': {err:?} - delete the file and try again",
-                    capsule_run_info_path
-                ));
-            }
-        }
-        self.is_locked = true;
-        Ok(CapsuleRunStatus::StartNow)
+        Ok(CapsuleRunInfo {
+            digest,
+            lock_file: lock::FileLock::new(lock_file_path),
+        })
     }
 
-    fn unlock(&mut self) -> anyhow::Result<()> {
-        let capsule_run_info_path = self.get_run_info_path();
-        std::fs::remove_file(capsule_run_info_path.as_str())
-            .context(format_context!("Failed to remove {capsule_run_info_path}"))?;
-        Ok(())
+    fn try_lock(&mut self) -> anyhow::Result<CapsuleRunStatus> {
+        match self
+            .lock_file
+            .try_lock()
+            .context(format_context!("Failed to lock capsule"))?
+        {
+            lock::LockStatus::Busy => Ok(CapsuleRunStatus::AlreadyStarted),
+            lock::LockStatus::Locked => Ok(CapsuleRunStatus::StartNow),
+        }
     }
 
     fn wait(&self, progress: &mut printer::MultiProgressBar) -> anyhow::Result<()> {
-        let path = self.get_run_info_path();
         progress.set_message("Capsule already started, waiting for it to finish");
-        let capsule_run_info_path = std::path::Path::new(&path);
-        let mut log_count = 0;
-        while capsule_run_info_path.exists() {
-            let contents = std::fs::read_to_string(capsule_run_info_path)
-                .context(format_context!("Failed to read {path}"))?;
+        self.lock_file
+            .wait(progress)
+            .context(format_context!("Failed to wait for capsule to finish"))?;
 
-            let lock_info: CapsuleRunInfo = serde_json::from_str(&contents).context(
-                format_context!("failed to parse {path} - delete the file and try again"),
-            )?;
-
-            if lock_info.process_group_id != self.process_group_id {
-                progress.log(
-                    printer::Level::Message,
-                    format!("Capsule {} is no longer running, unlocking", self.digest).as_str(),
-                );
-                return Ok(());
-            }
-
-            progress.increment(1);
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            log_count += 1;
-            if log_count == 10 {
-                progress.log(
-                    printer::Level::Debug,
-                    format!("Still waiting for capsule to finish at {}", path).as_str(),
-                );
-                log_count = 0;
-            }
-        }
         Ok(())
-    }
-}
-
-impl Drop for CapsuleRunInfo {
-    fn drop(&mut self) {
-        if !self.is_locked {
-            return;
-        }
-
-        let _ = self.unlock();
     }
 }
 
@@ -224,9 +120,9 @@ struct State {
     info_file: InfoFile,
 }
 
-static STATE: state::InitCell<state_lock::StateLock<State>> = state::InitCell::new();
+static STATE: state::InitCell<lock::StateLock<State>> = state::InitCell::new();
 
-fn get_state() -> &'static state_lock::StateLock<State> {
+fn get_state() -> &'static lock::StateLock<State> {
     if let Some(state) = STATE.try_get() {
         return state;
     }
@@ -243,7 +139,7 @@ fn get_state() -> &'static state_lock::StateLock<State> {
         Vec::new()
     };
 
-    STATE.set(state_lock::StateLock::new(State { info_file }));
+    STATE.set(lock::StateLock::new(State { info_file }));
     STATE.get()
 }
 
@@ -281,8 +177,8 @@ fn get_spaces_env(workspace: workspace::WorkspaceArc) -> anyhow::Result<HashMap<
     let mut env = HashMap::new();
     let workspace_env = workspace.read().get_env();
     env.insert(
-        workspace::SPACES_PROCESS_GROUP_ENV_VAR.to_string(),
-        get_process_group_id(),
+        lock::get_process_group_id_env_name().to_string(),
+        lock::get_process_group_id(),
     );
 
     env.extend(
@@ -346,11 +242,11 @@ impl Capsule {
 
     fn run_capsule(
         &self,
+        progress: &mut printer::MultiProgressBar,
         workspace: workspace::WorkspaceArc,
         name: &str,
         spaces_command: String,
         workspace_path: String,
-        progress: &mut printer::MultiProgressBar,
     ) -> anyhow::Result<()> {
         let args = vec![
             "--hide-progress-bars".to_string(),
@@ -457,7 +353,11 @@ impl Capsule {
             get_spaces_command().context(format_context!("While executing capsule run"))?;
         let workspace_name = name.replace(':', "_");
 
-        let mut capsule_run_info = CapsuleRunInfo::new(workspace.clone());
+        let mut capsule_run_info = CapsuleRunInfo::new(
+            workspace.clone(),
+            workspace::SPACES_CAPSULES_NAME,
+            &self.scripts,
+        ).context(format_context!("Failed to create capsule run info"))?;
         let workspace_path = format!("{}/{}", workspace::SPACES_CAPSULES_NAME, workspace_name);
 
         progress.log(
@@ -466,7 +366,7 @@ impl Capsule {
         );
 
         let run_status = capsule_run_info
-            .lock(workspace::SPACES_CAPSULES_NAME, &self.scripts)
+            .try_lock()
             .context(format_context!("Failed to lock capsule"))?;
 
         progress.log(
@@ -505,11 +405,11 @@ impl Capsule {
             );
 
             self.run_capsule(
+                progress,
                 workspace.clone(),
                 name,
                 spaces_command,
                 workspace_path,
-                progress,
             )
             .context(format_context!("Failed to run capsule {name}"))?;
 

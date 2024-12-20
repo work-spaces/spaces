@@ -13,3 +13,4 @@ anyhow.workspace = true
 printer.workspace = true
 state.workspace = true
 serde.workspace = true
+lock.workspace = true

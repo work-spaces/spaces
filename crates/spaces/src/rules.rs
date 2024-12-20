@@ -362,7 +362,7 @@ pub fn debug_sorted_tasks(printer: &mut printer::Printer, phase: Phase) -> anyho
 
 #[derive(Debug)]
 pub struct State {
-    pub tasks: state_lock::StateLock<HashMap<String, Task>>,
+    pub tasks: lock::StateLock<HashMap<String, Task>>,
     pub graph: graph::Graph,
     pub sorted: Vec<petgraph::prelude::NodeIndex>,
     pub latest_starlark_module: Option<String>,
@@ -615,11 +615,15 @@ impl State {
                         task_result.extend(handle_task_result);
                     }
                     Err(err) => {
-                        first_error = Some(format_error!("Task failed: {:?}", err));
+                        let err_message = err.to_string();
+                        singleton::process_anyhow_error(err);
+                        first_error = Some(format_error!("Task failed: {err_message}"));
                     }
                 },
                 Err(err) => {
-                    first_error = Some(format_error!("Failed to join thread: {:?}", err));
+                    let message = format!("Failed to join thread: {err:?}");
+                    singleton::process_error(message);
+                    first_error = Some(format_error!("Failed to join thread: {err:?}"));
                 }
             }
         }
@@ -638,15 +642,15 @@ impl State {
     }
 }
 
-static STATE: state::InitCell<state_lock::StateLock<State>> = state::InitCell::new();
+static STATE: state::InitCell<lock::StateLock<State>> = state::InitCell::new();
 
-fn get_state() -> &'static state_lock::StateLock<State> {
+fn get_state() -> &'static lock::StateLock<State> {
     if let Some(state) = STATE.try_get() {
         return state;
     }
 
-    STATE.set(state_lock::StateLock::new(State {
-        tasks: state_lock::StateLock::new(HashMap::new()),
+    STATE.set(lock::StateLock::new(State {
+        tasks: lock::StateLock::new(HashMap::new()),
         graph: graph::Graph::default(),
         sorted: Vec::new(),
         latest_starlark_module: None,

@@ -9,13 +9,13 @@ use std::collections::HashSet;
 #[derive(Debug)]
 struct State {}
 
-static STATE: state::InitCell<state_lock::StateLock<State>> = state::InitCell::new();
+static STATE: state::InitCell<lock::StateLock<State>> = state::InitCell::new();
 
-fn get_state() -> &'static state_lock::StateLock<State> {
+fn get_state() -> &'static lock::StateLock<State> {
     if let Some(state) = STATE.try_get() {
         return state;
     }
-    STATE.set(state_lock::StateLock::new(State {}));
+    STATE.set(lock::StateLock::new(State {}));
 
     STATE.get()
 }
@@ -101,9 +101,11 @@ pub fn run_starlark_modules(
     phase: rules::Phase,
     target: Option<String>,
 ) -> anyhow::Result<()> {
+    printer.log(printer::Level::Message, "--Run Starlark Modules--")?;
     let workspace_path = workspace.read().absolute_path.to_owned();
     let mut known_modules = HashSet::new();
 
+    printer.log(printer::Level::Debug, "Collect Known Modules")?;
     for (_, content) in modules.iter() {
         let hash = blake3::hash(content.as_bytes()).to_string();
         if !known_modules.contains(&hash) {
@@ -115,7 +117,7 @@ pub fn run_starlark_modules(
     module_queue.extend(modules);
 
     printer.log(
-        printer::Level::Trace,
+        printer::Level::Debug,
         format!("Input module queue:{module_queue:?}").as_str(),
     )?;
 
@@ -128,7 +130,7 @@ pub fn run_starlark_modules(
             let mut _workspace_lock = get_state().write();
             singleton::set_active_workspace(workspace.clone());
             printer.log(
-                printer::Level::Trace,
+                printer::Level::Message,
                 format!("Evaluating module {}", name).as_str(),
             )?;
             let _ = evaluate_module(

@@ -89,9 +89,20 @@ impl Git {
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
+
+        let (relative_bare_store_path, name_dot_git) = git::BareRepository::url_to_relative_path_and_name(&self.url)
+        .context(format_context!("Failed to parse {name} url: {}", self.url))?;
+        let store_path = workspace.read().get_store_path();
+        let lock_file_path = format!("{store_path}/{relative_bare_store_path}/{name_dot_git}.spaces.lock");
+        let mut lock_file = lock::FileLock::new(lock_file_path);
+
+        lock_file.lock(progress).context(format_context!(
+            "{name} - Failed to lock the repository {}", self.spaces_key
+        ))?;
+
         let bare_repo = git::BareRepository::new(
             progress,
-            workspace.read().get_store_path().as_str(),
+            store_path.as_str(),
             &self.spaces_key,
             &self.url,
         )

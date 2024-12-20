@@ -13,7 +13,6 @@ pub const SPACES_CAPSULES_NAME: &str = "@capsules";
 pub const SPACES_CAPSULES_INFO_NAME: &str = "capsules.spaces.json";
 const SETTINGS_FILE_NAME: &str = "settings.spaces.json";
 const SPACES_HOME_ENV_VAR: &str = "SPACES_HOME";
-pub const SPACES_PROCESS_GROUP_ENV_VAR: &str = "SPACES_PROCESS_GROUP";
 pub const SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE: &str = "SPACES_IS_WORKSPACE_REPRODUCIBLE";
 pub const SPACES_ENV_WORKSPACE_DIGEST: &str = "SPACES_WORKSPACE_DIGEST";
 pub const WORKSPACE_FILE_HEADER: &str = r#"
@@ -22,7 +21,7 @@ Spaces Environment Workspace file
 """
 "#;
 
-pub type WorkspaceArc = std::sync::Arc<state_lock::StateLock<Workspace>>;
+pub type WorkspaceArc = std::sync::Arc<lock::StateLock<Workspace>>;
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct Settings {

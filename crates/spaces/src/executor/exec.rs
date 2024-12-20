@@ -9,13 +9,13 @@ struct State {
     processes: HashMap<String, u32>,
 }
 
-static STATE: state::InitCell<state_lock::StateLock<State>> = state::InitCell::new();
+static STATE: state::InitCell<lock::StateLock<State>> = state::InitCell::new();
 
-fn get_state() -> &'static state_lock::StateLock<State> {
+fn get_state() -> &'static lock::StateLock<State> {
     if let Some(state) = STATE.try_get() {
         return state;
     }
-    STATE.set(state_lock::StateLock::new(State::default()));
+    STATE.set(lock::StateLock::new(State::default()));
     STATE.get()
 }
 

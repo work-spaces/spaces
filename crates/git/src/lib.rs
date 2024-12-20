@@ -67,24 +67,6 @@ fn get_state() -> &'static RwLock<State> {
     STATE.get()
 }
 
-fn get_lock_file_path(working_directory: &Option<String>) -> anyhow::Result<String> {
-    let default_dir = String::new();
-    let working_directory_ref = working_directory.as_ref().unwrap_or(&default_dir);
-    let working_path = std::path::Path::new(working_directory_ref);
-    let git_dir = working_path.join(".git");
-    let git_dir_path = if git_dir.exists() {
-        if git_dir.is_file() {
-            std::fs::read_to_string(git_dir.clone())
-                .context(format_context!("Failed to read {git_dir:?}"))?
-        } else {
-            git_dir.to_string_lossy().to_string()
-        }
-    } else {
-        working_path.to_string_lossy().to_string()
-    };
-    Ok(git_dir_path)
-}
-
 pub fn execute_git_command(
     url: &str,
     progress_bar: &mut printer::MultiProgressBar,
@@ -103,31 +85,21 @@ pub fn execute_git_command(
 
     let mut log_file_path = None;
 
-    let lock_file_folder = get_lock_file_path(&options.working_directory)
-        .context(format_context!("Failed to get lock file path"))?;
-    let git_lock_path = std::path::Path::new(&lock_file_folder).join("index.lock");
-
-    progress_bar.log(
-        printer::Level::Debug,
-        format!("Wait for git repo {url} -> {git_lock_path:?}").as_str(),
-    );
-
     while !is_ready {
-        if !git_lock_path.exists() {
-            let mut state_lock = get_state().write().unwrap();
-            let state = state_lock.deref_mut();
+        let mut state_lock = get_state().write().unwrap();
+        let state = state_lock.deref_mut();
 
-            if state.active_repos.contains(url) {
-                is_ready = false;
-            } else {
-                state.active_repos.insert(url.to_string());
-                is_ready = true;
-            }
-            log_file_path = state
-                .log_directory
-                .as_ref()
-                .map(|e| format!("{e}/{log_file_name}"));
+        if state.active_repos.contains(url) {
+            is_ready = false;
+        } else {
+            state.active_repos.insert(url.to_string());
+            is_ready = true;
         }
+        log_file_path = state
+            .log_directory
+            .as_ref()
+            .map(|e| format!("{e}/{log_file_name}"));
+
         if !is_ready {
             std::thread::sleep(std::time::Duration::from_millis(500));
         }
@@ -333,18 +305,18 @@ impl BareRepository {
             execute_git_command(url, progress_bar, options_git_config_auto_push)
                 .context(format_context!("while configuring auto-push"))?;
 
-                let options_git_config = printer::ExecuteOptions {
-                    working_directory: Some(full_path.to_string()),
-                    arguments: vec![
-                        "config".to_string(),
-                        "remote.origin.fetch".to_string(),
-                        "refs/heads/*:refs/remotes/origin/*".to_string(),
-                    ],
-                    ..Default::default()
-                };
-    
-                execute_git_command(url, progress_bar, options_git_config)
-                    .context(format_context!("while setting git options"))?;
+            let options_git_config = printer::ExecuteOptions {
+                working_directory: Some(full_path.to_string()),
+                arguments: vec![
+                    "config".to_string(),
+                    "remote.origin.fetch".to_string(),
+                    "refs/heads/*:refs/remotes/origin/*".to_string(),
+                ],
+                ..Default::default()
+            };
+
+            execute_git_command(url, progress_bar, options_git_config)
+                .context(format_context!("while setting git options"))?;
         }
 
         Ok(Self {
@@ -365,7 +337,7 @@ impl BareRepository {
         Ok(result)
     }
 
-    fn url_to_relative_path_and_name(url: &str) -> anyhow::Result<(String, String)> {
+    pub fn url_to_relative_path_and_name(url: &str) -> anyhow::Result<(String, String)> {
         let repo_url = url::Url::parse(url)
             .context(format_context!("Failed to parse bare store url {url}"))?;
 

@@ -288,6 +288,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ) -> anyhow::Result<NoneType> {
         let workspace_arc =
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
+        
+
         let mut workspace = workspace_arc.write();
         let env = serde_json::from_value(env.to_json_value()?)
             .context(format_context!("Failed to parse archive arguments"))?;

@@ -18,15 +18,23 @@ pub fn run_starlark_modules_in_workspace(
         let mut multi_progress = printer::MultiProgress::new(printer);
         let progress =
             multi_progress.add_progress("loading workspace", Some(100), Some("Complete"));
-        workspace::Workspace::new(progress, absolute_path_to_workspace).context(format_context!("while running workspace"))?
+        workspace::Workspace::new(progress, absolute_path_to_workspace)
+            .context(format_context!("while running workspace"))?
     };
 
-    let workspace_arc = workspace::WorkspaceArc::new(state_lock::StateLock::new(workspace));
+    let workspace_arc = workspace::WorkspaceArc::new(lock::StateLock::new(workspace));
     match run_workspace {
         RunWorkspace::Target(target) => {
-            evaluator::run_starlark_modules(printer, workspace_arc.clone(), workspace_arc.read().modules.clone(), phase, target)
-                .context(format_context!("while executing workspace rules"))?
-        }
+            let modules = workspace_arc.read().modules.clone();
+            evaluator::run_starlark_modules(
+            printer,
+            workspace_arc.clone(),
+            modules,
+            phase,
+            target,
+        )
+        .context(format_context!("while executing workspace rules"))?
+    }
         RunWorkspace::Script(scripts) => {
             for (name, _) in scripts.iter() {
                 printer.log(
@@ -38,17 +46,24 @@ pub fn run_starlark_modules_in_workspace(
             workspace_arc.write().is_create_lock_file = is_create_lock_file;
             workspace_arc.write().digest = workspace::calculate_digest(&scripts);
 
-            evaluator::run_starlark_modules(printer, workspace_arc.clone(),scripts, phase, None)
+            evaluator::run_starlark_modules(printer, workspace_arc.clone(), scripts, phase, None)
                 .context(format_context!("while executing checkout rules"))?;
 
-
-            workspace_arc.read().save_lock_file().context(format_context!("Failed to save workspace lock file"))?;
+            workspace_arc
+                .read()
+                .save_lock_file()
+                .context(format_context!("Failed to save workspace lock file"))?;
         }
     }
     Ok(())
 }
 
-pub fn checkout(printer: &mut printer::Printer, name: String, script: Vec<String>, create_lock_file: bool) -> anyhow::Result<()> {
+pub fn checkout(
+    printer: &mut printer::Printer,
+    name: String,
+    script: Vec<String>,
+    create_lock_file: bool,
+) -> anyhow::Result<()> {
     std::fs::create_dir_all(name.as_str())
         .context(format_context!("while creating workspace directory {name}"))?;
 
@@ -94,20 +109,20 @@ pub fn checkout(printer: &mut printer::Printer, name: String, script: Vec<String
         .context(format_context!("Failed to get current working directory"))?;
 
     let target_workspace_directory = current_working_directory.join(name.as_str());
+    let absolute_path_to_workspace = target_workspace_directory.to_string_lossy().to_string();
 
     run_starlark_modules_in_workspace(
         printer,
         rules::Phase::Checkout,
-        Some(target_workspace_directory.to_string_lossy().to_string()),
+        Some(absolute_path_to_workspace.clone()),
         RunWorkspace::Script(scripts),
         create_lock_file,
     )
     .context(format_context!("while executing checkout rules"))?;
 
     settings
-    .save(name.as_str())
-    .context(format_context!("while saving settings"))?;
-
+        .save(absolute_path_to_workspace.as_str())
+        .context(format_context!("while saving settings"))?;
 
     Ok(())
 }
