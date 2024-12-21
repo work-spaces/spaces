@@ -2,16 +2,18 @@ use crate::workspace;
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Git {
-    pub url: String,
-    pub spaces_key: String,
-    pub worktree_path: String,
+    pub url: Arc<str>,
+    pub spaces_key: Arc<str>,
+    pub worktree_path: Arc<str>,
     pub checkout: git::Checkout,
     pub clone: git::Clone,
     pub is_evaluate_spaces_modules: bool,
+    pub sparse_checkout: Option<git::SparseCheckout>,
 }
 
 impl Git {
@@ -89,24 +91,22 @@ impl Git {
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
-
-        let (relative_bare_store_path, name_dot_git) = git::BareRepository::url_to_relative_path_and_name(&self.url)
-        .context(format_context!("Failed to parse {name} url: {}", self.url))?;
+        let (relative_bare_store_path, name_dot_git) =
+            git::BareRepository::url_to_relative_path_and_name(&self.url)
+                .context(format_context!("Failed to parse {name} url: {}", self.url))?;
         let store_path = workspace.read().get_store_path();
-        let lock_file_path = format!("{store_path}/{relative_bare_store_path}/{name_dot_git}.spaces.lock");
-        let mut lock_file = lock::FileLock::new(lock_file_path);
+        let lock_file_path =
+            format!("{store_path}/{relative_bare_store_path}/{name_dot_git}.spaces.lock");
+        let mut lock_file = lock::FileLock::new(lock_file_path.into());
 
         lock_file.lock(progress).context(format_context!(
-            "{name} - Failed to lock the repository {}", self.spaces_key
+            "{name} - Failed to lock the repository {}",
+            self.spaces_key
         ))?;
 
-        let bare_repo = git::BareRepository::new(
-            progress,
-            store_path.as_str(),
-            &self.spaces_key,
-            &self.url,
-        )
-        .context(format_context!("Failed to create bare repository"))?;
+        let bare_repo =
+            git::BareRepository::new(progress, store_path.as_ref(), &self.spaces_key, &self.url)
+                .context(format_context!("Failed to create bare repository"))?;
 
         let worktree = bare_repo
             .add_worktree(progress, &self.worktree_path)
@@ -143,21 +143,28 @@ impl Git {
         name: &str,
         filter: Option<String>,
     ) -> anyhow::Result<()> {
-        let mut clone_arguments = vec!["clone".to_string()];
+        let mut clone_arguments: Vec<Arc<str>> = vec!["clone".into()];
         if let Some(filter) = filter {
-            clone_arguments.push(format!("--filter={}", filter));
+            clone_arguments.push(format!("--filter={}", filter).into());
+        }
+
+        if self.sparse_checkout.is_some() {
+            clone_arguments.push("--no-checkout".into());
         }
 
         clone_arguments.push(self.url.clone());
         clone_arguments.push(self.spaces_key.clone());
 
+        let workspace_directory = workspace.read().get_absolute_path();
+        let repo_directory: Arc<str> = format!("{}/{}", workspace_directory, self.spaces_key).into();
+
         let clone_options = printer::ExecuteOptions {
             arguments: clone_arguments,
-            working_directory: Some(workspace.read().get_absolute_path()),
+            working_directory: Some(workspace_directory.clone()),
             ..Default::default()
         };
 
-        let clone_path = std::path::Path::new(&self.spaces_key);
+        let clone_path = std::path::Path::new(self.spaces_key.as_ref());
         if clone_path.exists() {
             progress.log(
                 printer::Level::Info,
@@ -177,20 +184,35 @@ impl Git {
                 ))?;
         }
 
-        let mut checkout_options = printer::ExecuteOptions {
-            working_directory: Some(
-                workspace
-                    .read()
-                    .get_relative_directory(self.spaces_key.as_str()),
-            ),
-            ..Default::default()
-        };
+        let repository = git::Repository::new(self.url.clone(), repo_directory.clone());
+
+        if let Some(sparse_checkout) = self.sparse_checkout.as_ref() {
+            let mode_arg = match sparse_checkout.mode {
+                git::SparseCheckoutMode::Cone => "--cone",
+                git::SparseCheckoutMode::NoCone => "--no-cone",
+            };
+
+            repository
+                .execute(
+                    progress,
+                    vec![
+                        "sparse-checkout".into(),
+                        "init".into(),
+                        mode_arg.into(),
+                    ],
+                )
+                .context(format_context!(
+                    "Failed to init sparse checkout in {repo_directory}"
+                ))?;
+        }
+
+        let mut checkout_args: Vec<Arc<str>> = vec![];
 
         match &self.checkout {
             git::Checkout::NewBranch(branch_name) => {
-                checkout_options.arguments.push("switch".to_string());
-                checkout_options.arguments.push("-c".to_string());
-                checkout_options.arguments.push(branch_name.clone());
+                checkout_args.push("switch".into());
+                checkout_args.push("-c".into());
+                checkout_args.push(branch_name.clone());
                 // TODO: switch to a new branch
             }
             git::Checkout::Revision(revision) => {
@@ -199,18 +221,13 @@ impl Git {
                     .resolve_revision(revision, progress)
                     .context(format_context!("failed to resolve revision"))?;
 
-                checkout_options.arguments.push("checkout".to_string());
-                checkout_options.arguments.push(revision.clone());
+                checkout_args.push("checkout".into());
+                checkout_args.push(revision.clone().into());
             }
         }
 
-        progress.log(
-            printer::Level::Trace,
-            format!("git clone {checkout_options:?}").as_str(),
-        );
-
-        progress
-            .execute_process("git", checkout_options)
+        repository
+            .execute(progress, checkout_args)
             .context(format_context!(
                 "{name} - Failed to clone repository {}",
                 self.spaces_key
@@ -236,20 +253,20 @@ impl Git {
 
         let clone_options = printer::ExecuteOptions {
             arguments: vec![
-                "clone".to_string(),
-                "--depth".to_string(),
-                "1".to_string(),
+                "clone".into(),
+                "--depth".into(),
+                "1".into(),
                 self.url.clone(),
                 self.spaces_key.clone(),
-                "--branch".to_string(),
+                "--branch".into(),
                 branch.clone(),
-                "--single-branch".to_string(),
+                "--single-branch".into(),
             ],
             working_directory: Some(workspace.read().get_absolute_path()),
             ..Default::default()
         };
 
-        let clone_path = std::path::Path::new(&self.spaces_key);
+        let clone_path = std::path::Path::new(self.spaces_key.as_ref());
         if clone_path.exists() {
             progress.log(
                 printer::Level::Info,
@@ -310,11 +327,11 @@ impl Git {
                     format_context!("Failed to get commit hash for {}", self.spaces_key),
                 )?
             {
-                let rev =
+                let rev: Arc<str> =
                     if let Some(tag) = git::get_commit_tag(&self.url, &self.spaces_key, progress) {
                         tag
                     } else {
-                        commit_hash.to_string()
+                        commit_hash
                     };
                 // strip the trailing newline
                 workspace.write().add_git_commit_lock(name, rev);
@@ -324,11 +341,11 @@ impl Git {
                 working_directory: Some(
                     workspace
                         .read()
-                        .get_relative_directory(self.spaces_key.as_str()),
+                        .get_relative_directory(self.spaces_key.as_ref()),
                 ),
                 arguments: vec![
-                    "checkout".to_string(),
-                    "--detach".to_string(),
+                    "checkout".into(),
+                    "--detach".into(),
                     commit_hash.clone(),
                 ],
                 ..Default::default()

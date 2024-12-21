@@ -2,13 +2,14 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use bincode::{Decode, Encode};
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 mod glob;
 
 #[derive(Clone, Debug, Encode, Decode)]
 pub enum ChangeDetailType {
     None,
-    File(String),
+    File(Arc<str>),
     Directory,
 }
 
@@ -20,14 +21,14 @@ pub struct ChangeDetail {
 
 #[derive(Clone, Debug, Encode, Decode)]
 pub struct Changes {
-    path: String,
-    skip_folders: Vec<String>,
-    pub entries: HashMap<String, ChangeDetail>,
+    path: Arc<str>,
+    skip_folders: Vec<Arc<str>>,
+    pub entries: HashMap<Arc<str>, ChangeDetail>,
 }
 
 impl Changes {
-    fn skip_hashing(entry: &walkdir::DirEntry, skip_folders: &[String]) -> bool {
-        let file_name = entry.file_name().to_string_lossy().to_string();
+    fn skip_hashing(entry: &walkdir::DirEntry, skip_folders: &[Arc<str>]) -> bool {
+        let file_name: Arc<str> = entry.file_name().to_string_lossy().into();
         !skip_folders.contains(&file_name)
     }
 
@@ -41,7 +42,7 @@ impl Changes {
             let contents =
                 std::fs::read(path).context(format_context!("failed to load {path:?}"))?;
             let hash = blake3::hash(&contents);
-            ChangeDetailType::File(hash.to_string())
+            ChangeDetailType::File(hash.to_string().into())
         } else if path.is_dir() {
             ChangeDetailType::Directory
         } else {
@@ -62,11 +63,11 @@ impl Changes {
         Ok(change_detail)
     }
 
-    pub fn new(path: &str, skip_folders: Vec<String>) -> Changes {
+    pub fn new(path: &str, skip_folders: Vec<Arc<str>>) -> Changes {
         match Self::load(path) {
             Ok(changes) => changes,
             Err(_) => Changes {
-                path: path.to_string(),
+                path: path.into(),
                 entries: HashMap::new(),
                 skip_folders,
             },
@@ -75,9 +76,9 @@ impl Changes {
 
     fn filter_update(
         entry: &walkdir::DirEntry,
-        entries: &HashMap<String, ChangeDetail>,
-        skip_folders: &[String],
-        globs: &HashSet<String>,
+        entries: &HashMap<Arc<str>, ChangeDetail>,
+        skip_folders: &[Arc<str>],
+        globs: &HashSet<Arc<str>>,
     ) -> bool {
         if !Self::skip_hashing(entry, skip_folders) {
             return false;
@@ -87,13 +88,13 @@ impl Changes {
             return true;
         }
 
-        let file_path = entry.path().to_string_lossy().to_string();
+        let file_path: Arc<str> = entry.path().to_string_lossy().into();
 
-        if !glob::match_globs(globs, file_path.as_str()) {
+        if !glob::match_globs(globs, file_path.as_ref()) {
             return false;
         }
 
-        if let Some(change_detail) = entries.get(&file_path) {
+        if let Some(change_detail) = entries.get(file_path.as_ref()) {
             let modified = match entry.metadata() {
                 Ok(metadata) => metadata
                     .modified()
@@ -112,13 +113,13 @@ impl Changes {
     fn update_entry(
         &mut self,
         progress: &mut printer::MultiProgressBar,
-        path: String,
+        path: Arc<str>,
         change_detail: ChangeDetail,
     ) -> bool {
         let sane_path = Self::sanitize_path(&path);
         if let Some(previous_entry) = self
             .entries
-            .insert(sane_path.to_owned(), change_detail.clone())
+            .insert(sane_path.into(), change_detail.clone())
         {
             if let (ChangeDetailType::File(previous_hash), ChangeDetailType::File(new_hash)) =
                 (&previous_entry.detail_type, &change_detail.detail_type)
@@ -143,7 +144,7 @@ impl Changes {
     pub fn update_from_inputs(
         &mut self,
         progress: &mut printer::MultiProgressBar,
-        inputs: &HashSet<String>,
+        inputs: &HashSet<Arc<str>>,
     ) -> anyhow::Result<()> {
         for input in inputs {
             progress.log(
@@ -154,12 +155,12 @@ impl Changes {
             let mut count = 0usize;
             // convert input from a glob expression to a parent directory
             if input.find('*').is_none() {
-                let path = std::path::Path::new(input);
+                let path = std::path::Path::new(input.as_ref());
                 if path.exists() && path.is_file() {
                     let change_detail = Self::process_entry(progress, path)
                         .context(format_context!("Failed to process entry"))?;
 
-                    self.update_entry(progress, path.to_string_lossy().to_string(), change_detail);
+                    self.update_entry(progress, path.to_string_lossy().into(), change_detail);
 
                     progress.increment(1);
 
@@ -168,21 +169,21 @@ impl Changes {
             }
 
             let input_path = if let Some(asterisk_postion) = input.find('*') {
-                let mut path = input.clone();
+                let mut path = input.to_string();
                 path.truncate(asterisk_postion);
-                path
+                path.into()
             } else {
                 // check if input is a file or directory
                 input.clone()
             };
 
-            if let Some(glob_include_path) = glob::is_glob_include(input_path.as_str()) {
+            if let Some(glob_include_path) = glob::is_glob_include(input_path.as_ref()) {
                 progress.log(
                     printer::Level::Trace,
                     format!("Update glob {glob_include_path}").as_str(),
                 );
 
-                let walk_dir: Vec<_> = walkdir::WalkDir::new(glob_include_path.as_str())
+                let walk_dir: Vec<_> = walkdir::WalkDir::new(glob_include_path.as_ref())
                     .into_iter()
                     .filter_entry(|e| {
                         Self::filter_update(e, &self.entries, &self.skip_folders, inputs)
@@ -197,7 +198,7 @@ impl Changes {
 
                     if self.update_entry(
                         progress,
-                        path.to_string_lossy().to_string(),
+                        path.to_string_lossy().into(),
                         change_detail,
                     ) {
                         count += 1;
@@ -226,8 +227,8 @@ impl Changes {
         &self,
         progress: &mut printer::MultiProgressBar,
         seed: &str,
-        globs: &HashSet<String>,
-    ) -> anyhow::Result<String> {
+        globs: &HashSet<Arc<str>>,
+    ) -> anyhow::Result<Arc<str>> {
         let mut inputs = Vec::new();
         for path in self.entries.keys() {
             let sane_path = Self::sanitize_path(path);
@@ -261,7 +262,7 @@ impl Changes {
             );
         }
 
-        Ok(hasher.finalize().to_string())
+        Ok(hasher.finalize().to_string().into())
     }
 
     pub fn save(&self, path: &str) -> anyhow::Result<()> {

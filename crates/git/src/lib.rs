@@ -2,7 +2,7 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::sync::RwLock;
+use std::sync::{RwLock, Arc};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CheckoutOption {
@@ -12,8 +12,8 @@ pub enum CheckoutOption {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Checkout {
-    Revision(String),
-    NewBranch(String),
+    Revision(Arc<str>),
+    NewBranch(Arc<str>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Copy)]
@@ -24,14 +24,30 @@ pub enum Clone {
     Blobless,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Copy, Default)]
+pub enum SparseCheckoutMode {
+    #[default]
+    Cone,
+    NoCone,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct SparseCheckout {
+    pub mode: SparseCheckoutMode,
+    pub list: Vec<Arc<str>>,
+}
+
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Repo {
-    pub url: String,
+    pub url: Arc<str>,
     pub checkout: CheckoutOption,
-    pub rev: String,
+    pub rev: Arc<str>,
     pub clone: Option<Clone>,
     pub is_evaluate_spaces_modules: Option<bool>,
+    pub sparse_checkout: Option<SparseCheckout>,
 }
 
 impl Repo {
@@ -44,14 +60,14 @@ impl Repo {
 }
 
 pub struct LogEntry {
-    pub commit: String,
-    pub tag: Option<String>,
-    pub description: String,
+    pub commit: Arc<str>,
+    pub tag: Option<Arc<str>>,
+    pub description: Arc<str>,
 }
 
 struct State {
-    active_repos: HashSet<String>,
-    log_directory: Option<String>,
+    active_repos: HashSet<Arc<str>>,
+    log_directory: Option<Arc<str>>,
 }
 
 static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
@@ -92,13 +108,13 @@ pub fn execute_git_command(
         if state.active_repos.contains(url) {
             is_ready = false;
         } else {
-            state.active_repos.insert(url.to_string());
+            state.active_repos.insert(url.into());
             is_ready = true;
         }
         log_file_path = state
             .log_directory
             .as_ref()
-            .map(|e| format!("{e}/{log_file_name}"));
+            .map(|e| format!("{e}/{log_file_name}").into());
 
         if !is_ready {
             std::thread::sleep(std::time::Duration::from_millis(500));
@@ -110,7 +126,7 @@ pub fn execute_git_command(
     options.log_file_path = log_file_path;
     options
         .environment
-        .push(("GIT_TERMINAL_PROMPT".to_string(), "0".to_string()));
+        .push(("GIT_TERMINAL_PROMPT".into(), "0".into()));
 
     progress_bar.log(
         printer::Level::Debug,
@@ -139,13 +155,13 @@ pub fn get_commit_hash(
     url: &str,
     directory: &str,
     progress_bar: &mut printer::MultiProgressBar,
-) -> anyhow::Result<Option<String>> {
+) -> anyhow::Result<Option<Arc<str>>> {
     let options = printer::ExecuteOptions {
-        working_directory: Some(directory.to_string()),
+        working_directory: Some(directory.into()),
         arguments: vec![
-            "show".to_string(),
-            "-s".to_string(),
-            "--format=%H".to_string(),
+            "show".into(),
+            "-s".into(),
+            "--format=%H".into(),
         ],
         is_return_stdout: true,
         ..Default::default()
@@ -155,7 +171,7 @@ pub fn get_commit_hash(
         "Failed to get commit hash from {directory}"
     ))?;
 
-    let commit_hash = commit_hash.map(|e| e.trim().to_string());
+    let commit_hash = commit_hash.map(|e| e.trim().into());
     Ok(commit_hash)
 }
 
@@ -166,12 +182,12 @@ pub fn is_branch(
     progress_bar: &mut printer::MultiProgressBar,
 ) -> bool {
     let options = printer::ExecuteOptions {
-        working_directory: Some(directory.to_string()),
+        working_directory: Some(directory.into()),
         arguments: vec![
-            "show-ref".to_string(),
-            "--verify".to_string(),
-            "--quiet".to_string(),
-            format!("refs/heads/{}", ref_name).to_string(),
+            "show-ref".into(),
+            "--verify".into(),
+            "--quiet".into(),
+            format!("refs/heads/{}", ref_name).into(),
         ],
         ..Default::default()
     };
@@ -182,13 +198,13 @@ pub fn get_commit_tag(
     url: &str,
     directory: &str,
     progress_bar: &mut printer::MultiProgressBar,
-) -> Option<String> {
+) -> Option<Arc<str>> {
     let options = printer::ExecuteOptions {
-        working_directory: Some(directory.to_string()),
+        working_directory: Some(directory.into()),
         arguments: vec![
-            "describe".to_string(),
-            "--exact-match".to_string(),
-            "HEAD".to_string(),
+            "describe".into(),
+            "--exact-match".into(),
+            "HEAD".into(),
         ],
         is_return_stdout: true,
         ..Default::default()
@@ -196,7 +212,7 @@ pub fn get_commit_tag(
 
     if let Ok(Some(stdout)) = execute_git_command(url, progress_bar, options) {
         let stdout_trimmed = stdout.trim();
-        Some(stdout_trimmed.to_string())
+        Some(stdout_trimmed.into())
     } else {
         None
     }
@@ -209,15 +225,15 @@ pub fn get_branch_log(
     progress_bar: &mut printer::MultiProgressBar,
 ) -> anyhow::Result<Vec<LogEntry>> {
     let options = printer::ExecuteOptions {
-        working_directory: Some(directory.to_string()),
+        working_directory: Some(directory.into()),
         arguments: vec![
-            "log".to_string(),
-            "--oneline".to_string(),
-            "--decorate=short".to_string(),
-            "--no-color".to_string(),
-            "--reverse".to_string(),
-            "--pretty=format:\"%H;%D;%s\"".to_string(),
-            branch.to_string(),
+            "log".into(),
+            "--oneline".into(),
+            "--decorate=short".into(),
+            "--no-color".into(),
+            "--reverse".into(),
+            "--pretty=format:\"%H;%D;%s\"".into(),
+            branch.into(),
         ],
         is_return_stdout: true,
         ..Default::default()
@@ -232,12 +248,12 @@ pub fn get_branch_log(
             let line = line.trim_matches('"');
             let parts: Vec<&str> = line.split(';').collect();
             if parts.len() == 3 {
-                let tag = parts[1].strip_prefix("tag: ").map(|tag| tag.to_string());
+                let tag = parts[1].strip_prefix("tag: ").map(|tag| tag.into());
 
                 log_entries.push(LogEntry {
-                    commit: parts[0].to_string(),
+                    commit: parts[0].into(),
                     tag,
-                    description: parts[2].to_string(),
+                    description: parts[2].into(),
                 });
             }
         }
@@ -247,12 +263,14 @@ pub fn get_branch_log(
     }
 }
 
+
+
 #[derive(Clone, Debug)]
 pub struct BareRepository {
-    pub url: String,
-    pub full_path: String,
-    pub spaces_key: String,
-    pub name_dot_git: String,
+    pub url: Arc<str>,
+    pub full_path: Arc<str>,
+    pub spaces_key: Arc<str>,
+    pub name_dot_git: Arc<str>,
 }
 
 impl BareRepository {
@@ -267,37 +285,34 @@ impl BareRepository {
         let (relative_bare_store_path, name_dot_git) = Self::url_to_relative_path_and_name(url)
             .context(format_context!("Failed to parse {spaces_key} url: {url}"))?;
 
-        let bare_store_path = format!("{bare_store_path}/{relative_bare_store_path}");
+        let bare_store_path: Arc<str> = format!("{bare_store_path}/{relative_bare_store_path}").into();
 
-        std::fs::create_dir_all(&bare_store_path)
+        std::fs::create_dir_all(bare_store_path.as_ref())
             .context(format_context!("failed to creat dir {bare_store_path}"))?;
 
-        let full_path = format!("{}{}", bare_store_path, name_dot_git);
+        let full_path: Arc<str> = format!("{}{}", bare_store_path, name_dot_git).into();
 
-        if !std::path::Path::new(&full_path).exists() {
-            options.working_directory = Some(bare_store_path.clone());
-
-            std::fs::create_dir_all(&bare_store_path)
-                .context(format_context!("failed to create dir {bare_store_path}"))?;
+        if !std::path::Path::new(full_path.as_ref()).exists() {
+            options.working_directory = Some(bare_store_path);
 
             options.arguments = vec![
-                "clone".to_string(),
-                "--bare".to_string(),
-                "--filter=blob:none".to_string(),
-                url.to_string(),
+                "clone".into(),
+                "--bare".into(),
+                "--filter=blob:none".into(),
+                url.into(),
             ];
 
             execute_git_command(url, progress_bar, options)
                 .context(format_context!("while creating bare repo"))?;
 
             let options_git_config_auto_push = printer::ExecuteOptions {
-                working_directory: Some(full_path.to_string()),
+                working_directory: Some(full_path.clone()),
                 arguments: vec![
-                    "config".to_string(),
-                    "--add".to_string(),
-                    "--bool".to_string(),
-                    "push.autoSetupRemote".to_string(),
-                    "true".to_string(),
+                    "config".into(),
+                    "--add".into(),
+                    "--bool".into(),
+                    "push.autoSetupRemote".into(),
+                    "true".into(),
                 ],
                 ..Default::default()
             };
@@ -306,11 +321,11 @@ impl BareRepository {
                 .context(format_context!("while configuring auto-push"))?;
 
             let options_git_config = printer::ExecuteOptions {
-                working_directory: Some(full_path.to_string()),
+                working_directory: Some(full_path.clone()),
                 arguments: vec![
-                    "config".to_string(),
-                    "remote.origin.fetch".to_string(),
-                    "refs/heads/*:refs/remotes/origin/*".to_string(),
+                    "config".into(),
+                    "remote.origin.fetch".into(),
+                    "refs/heads/*:refs/remotes/origin/*".into(),
                 ],
                 ..Default::default()
             };
@@ -320,9 +335,9 @@ impl BareRepository {
         }
 
         Ok(Self {
-            url: url.to_owned(),
+            url: url.into(),
             full_path,
-            spaces_key: spaces_key.to_owned(),
+            spaces_key: spaces_key.into(),
             name_dot_git,
         })
     }
@@ -337,7 +352,7 @@ impl BareRepository {
         Ok(result)
     }
 
-    pub fn url_to_relative_path_and_name(url: &str) -> anyhow::Result<(String, String)> {
+    pub fn url_to_relative_path_and_name(url: &str) -> anyhow::Result<(Arc<str>, Arc<str>)> {
         let repo_url = url::Url::parse(url)
             .context(format_context!("Failed to parse bare store url {url}"))?;
 
@@ -369,11 +384,11 @@ impl BareRepository {
         let bare_store = format!("{scheme}/{host}{path}");
         repo_name.push_str(".git");
 
-        Ok((bare_store, repo_name))
+        Ok((bare_store.into(), repo_name.into()))
     }
 
     #[allow(dead_code)]
-    pub fn get_workspace_name_from_url(url: &str) -> anyhow::Result<String> {
+    pub fn get_workspace_name_from_url(url: &str) -> anyhow::Result<Arc<str>> {
         let (_, repo_name) = Self::url_to_relative_path_and_name(url)?;
 
         repo_name
@@ -381,13 +396,13 @@ impl BareRepository {
             .ok_or(format_error!(
                 "Failed to extract a workspace name from  {url}",
             ))
-            .map(|e| e.to_string())
+            .map(|e| e.into())
     }
 }
 
 pub struct Worktree {
-    pub full_path: String,
-    pub url: String,
+    pub full_path: Arc<str>,
+    pub url: Arc<str>,
 }
 
 impl Worktree {
@@ -408,18 +423,18 @@ impl Worktree {
         std::fs::create_dir_all(path).context(format_context!("failed to create dir {path}"))?;
 
         options.working_directory = Some(repository.full_path.clone());
-        options.arguments = vec!["worktree".to_string(), "prune".to_string()];
+        options.arguments = vec!["worktree".into(), "prune".into()];
 
         execute_git_command(&repository.url, progress_bar, options.clone())
             .context(format_context!("while pruning worktree"))?;
 
-        let full_path = format!("{}/{}", path, repository.spaces_key);
-        if !std::path::Path::new(&full_path).exists() {
+        let full_path: Arc<str> = format!("{}/{}", path, repository.spaces_key).into();
+        if !std::path::Path::new(full_path.as_ref()).exists() {
             options.arguments = vec![
-                "worktree".to_string(),
-                "add".to_string(),
-                "--detach".to_string(),
-                full_path.to_string(),
+                "worktree".into(),
+                "add".into(),
+                "--detach".into(),
+                full_path.clone(),
             ];
 
             execute_git_command(&repository.url, progress_bar, options)
@@ -432,11 +447,11 @@ impl Worktree {
         })
     }
 
-    pub fn get_spaces_star(&self) -> anyhow::Result<Option<String>> {
+    pub fn get_spaces_star(&self) -> anyhow::Result<Option<Arc<str>>> {
         //check for spaces.star in full_path and return Some string if the file exists
         let star_file = format!("{}/spaces.star", self.full_path);
         if std::path::Path::new(&star_file).exists() {
-            Ok(Some(star_file))
+            Ok(Some(star_file.into()))
         } else {
             Ok(None)
         }
@@ -452,18 +467,18 @@ impl Worktree {
             ..Default::default()
         };
         options.arguments = vec![
-            "fetch".to_string(),
-            "origin".to_string(),
-            revision.to_owned(),
+            "fetch".into(),
+            "origin".into(),
+            revision.into(),
         ];
 
         execute_git_command(&self.url, progress_bar, options.clone())
             .context(format_context!("while fetching existing bare repository"))?;
 
         options.arguments = vec![
-            "checkout".to_string(),
-            "--detach".to_string(),
-            revision.to_owned(),
+            "checkout".into(),
+            "--detach".into(),
+            revision.into(),
         ];
 
         execute_git_command(&self.url, progress_bar, options)
@@ -479,9 +494,9 @@ impl Worktree {
         let options = printer::ExecuteOptions {
             working_directory: Some(self.full_path.clone()),
             arguments: vec![
-                "checkout".to_string(),
-                "--detach".to_string(),
-                "HEAD".to_string(),
+                "checkout".into(),
+                "--detach".into(),
+                "HEAD".into(),
             ],
             ..Default::default()
         };
@@ -504,9 +519,9 @@ impl Worktree {
         let options = printer::ExecuteOptions {
             working_directory: Some(self.full_path.clone()),
             arguments: vec![
-                "switch".to_string(),
-                "-c".to_string(),
-                dev_branch.to_string(),
+                "switch".into(),
+                "-c".into(),
+                dev_branch.into(),
             ],
             ..Default::default()
         };
@@ -514,6 +529,34 @@ impl Worktree {
         execute_git_command(&self.url, progress_bar, options)
             .context(format_context!("switch new branch"))?;
 
+        Ok(())
+    }
+}
+
+
+pub struct Repository {
+    pub url: Arc<str>,
+    pub repo_path: Arc<str>,
+}
+
+impl Repository {
+    pub fn new(url: Arc<str>, repo_path: Arc<str>) -> Self {
+        Self { url, repo_path }
+    }
+
+    pub fn execute(
+        &self,
+        progress_bar: &mut printer::MultiProgressBar,
+        args: Vec<Arc<str>>,
+    ) -> anyhow::Result<()> {
+        let options = printer::ExecuteOptions {
+            working_directory: Some(self.repo_path.clone()),
+            arguments: args,
+            ..Default::default()
+        };
+
+        execute_git_command(&self.url, progress_bar, options)
+            .context(format_context!("while executing git command"))?;
         Ok(())
     }
 }

@@ -43,7 +43,7 @@ pub fn process_error(error: String){
 pub fn show_error_chain() {
     let mut state = get_state().write();
     let args = std::env::args().collect::<Vec<String>>();
-    eprint!("While executing: {}\n", args.join(" "));
+    eprintln!("While executing: {}", args.join(" "));
     state.error_chain.reverse();
     for (offset, error) in state.error_chain.iter().enumerate() {
         let show_error = error.to_string().replace('\n', "\n    ");

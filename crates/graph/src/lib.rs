@@ -1,8 +1,9 @@
 use anyhow_source_location::format_error;
+use std::sync::Arc;
 
 #[derive(Debug, Default)]
 pub struct Graph {
-    pub directed_graph: petgraph::graph::DiGraph<String, ()>,
+    pub directed_graph: petgraph::graph::DiGraph<Arc<str>, ()>,
 }
 
 impl Graph {
@@ -10,7 +11,7 @@ impl Graph {
         self.directed_graph.clear();
     }
 
-    pub fn add_task(&mut self, task: String) {
+    pub fn add_task(&mut self, task: Arc<str>) {
         self.directed_graph.add_node(task);
     }
 
@@ -18,13 +19,13 @@ impl Graph {
         let task_node = self
             .directed_graph
             .node_indices()
-            .find(|i| self.directed_graph[*i] == task_name)
+            .find(|i| self.directed_graph[*i].as_ref() == task_name)
             .ok_or(format_error!("Task not found {task_name}"))?;
 
         let dep_node = self
             .directed_graph
             .node_indices()
-            .find(|i| self.directed_graph[*i] == dep_name)
+            .find(|i| self.directed_graph[*i].as_ref() == dep_name)
             .ok_or(format_error!("Dependency not found {dep_name}"))?;
 
         self.directed_graph.add_edge(task_node, dep_node, ());
@@ -33,12 +34,12 @@ impl Graph {
     }
 
     pub fn get_task(&self, node: petgraph::prelude::NodeIndex) -> &str {
-        self.directed_graph[node].as_str()
+        self.directed_graph[node].as_ref()
     }
 
     pub fn get_sorted_tasks(
         &self,
-        target: Option<String>,
+        target: Option<Arc<str>>,
     ) -> anyhow::Result<Vec<petgraph::prelude::NodeIndex>> {
         let sorted_tasks = if let Some(target) = target {
             let target_node = self
@@ -46,7 +47,7 @@ impl Graph {
                 .node_indices()
                 .find(|&node| {
                     let value = &self.directed_graph[node];
-                    value.as_str() == target.as_str()
+                    value.as_ref() == target.as_ref()
                 })
                 .ok_or(format_error!("Target not found: {target}"))?;
 

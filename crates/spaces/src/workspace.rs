@@ -2,6 +2,7 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use crate::inputs;
 
 pub const ENV_FILE_NAME: &str = "env.spaces.star";
@@ -25,8 +26,8 @@ pub type WorkspaceArc = std::sync::Arc<lock::StateLock<Workspace>>;
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct Settings {
-    pub store_path: String,
-    order: Vec<String>,
+    pub store_path: Arc<str>,
+    order: Vec<Arc<str>>,
 }
 
 impl Settings {
@@ -41,8 +42,8 @@ impl Settings {
         Ok(order)
     }
 
-    pub fn push(&mut self, module: &str) {
-        self.order.push(module.to_string());
+    pub fn push(&mut self, module: Arc<str>) {
+        self.order.push(module);
     }
 
     pub fn save(&self, workspace_path: &str) -> anyhow::Result<()> {
@@ -57,52 +58,52 @@ impl Settings {
 }
 
 
-pub fn calculate_digest(modules: &Vec<(String, String)>) -> String {
+pub fn calculate_digest(modules: &[(Arc<str>, Arc<str>)]) -> Arc<str> {
     let mut hasher = blake3::Hasher::new();
     for (_, content) in modules {
         hasher.update(content.as_bytes());
     }
-    hasher.finalize().to_string()
+    hasher.finalize().to_string().into()
 }
 
 
-pub fn get_current_working_directory() -> anyhow::Result<String> {
+pub fn get_current_working_directory() -> anyhow::Result<Arc<str>> {
     let current_working_directory = std::env::current_dir()
         .context(format_context!("Failed to get current working directory - something might be wrong with your environment where CWD is not set"))?
         .to_string_lossy()
         .to_string();
-    Ok(current_working_directory)
+    Ok(current_working_directory.into())
 }
 
 pub fn is_rules_module(path: &str) -> bool {
     path.ends_with(SPACES_MODULE_NAME)
 }
 
-pub fn get_workspace_path(workspace_path: &str, current_path: &str, target_path: &str) -> String {
+pub fn get_workspace_path(workspace_path: &str, current_path: &str, target_path: &str) -> Arc<str> {
     if target_path.starts_with("//") {
-        format!("{workspace_path}/{target_path}")
+        format!("{workspace_path}/{target_path}").into()
     } else {
         let name_path = std::path::Path::new(current_path);
         if let Some(parent) = name_path.parent() {
-            format!("{}/{}", parent.to_string_lossy(), target_path)
+            format!("{}/{}", parent.to_string_lossy(), target_path).into()
         } else {
-            target_path.to_owned()
+            target_path.into()
         }
     }
 }
 
-pub fn get_checkout_store_path() -> String {
+pub fn get_checkout_store_path() -> Arc<str> {
     if let Ok(spaces_home) = std::env::var(SPACES_HOME_ENV_VAR) {
-        return format!("{}/.spaces/store", spaces_home);
+        return format!("{}/.spaces/store", spaces_home).into();
     }
     if let Ok(Some(home_path)) = homedir::my_home() {
-        return format!("{}/.spaces/store", home_path.to_string_lossy());
+        return format!("{}/.spaces/store", home_path.to_string_lossy()).into();
     }
     panic!("Failed to get home directory");
 }
 
-pub fn get_spaces_tools_path(store_path: &str) -> String {
-    format!("{store_path}/spaces_tools")
+pub fn get_spaces_tools_path(store_path: &str) -> Arc<str> {
+    format!("{store_path}/spaces_tools").into()
 }
 
 fn get_unique() -> anyhow::Result<String> {
@@ -128,51 +129,51 @@ pub fn get_changes_path() -> &'static str {
 
 #[derive(Debug)]
 pub struct Workspace {
-    pub modules: Vec<(String, String)>,
-    pub absolute_path: String, // set at startup
-    pub log_directory: String, // always @logs/timestamp
+    pub modules: Vec<(Arc<str>, Arc<str>)>,
+    pub absolute_path: Arc<str>, // set at startup
+    pub log_directory: Arc<str>, // always @logs/timestamp
     pub is_create_lock_file: bool, // set at startup
-    pub digest: String, // set at startup
-    pub store_path: Option<String>, // set at startup
-    pub locks: HashMap<String, String>, // set during eval
+    pub digest: Arc<str>, // set at startup
+    pub store_path: Option<Arc<str>>, // set at startup
+    pub locks: HashMap<Arc<str>, Arc<str>>, // set during eval
     pub env: environment::Environment, // set during eval
     #[allow(dead_code)]
-    pub new_branch_name: Option<String>, // set during eval - not used
+    pub new_branch_name: Option<Arc<str>>, // set during eval - not used
     changes: changes::Changes, // modified during run
     inputs: inputs::Inputs, // modified during run
-    pub updated_assets: HashSet<String>, // used by assets to keep track of exclusive access
+    pub updated_assets: HashSet<Arc<str>>, // used by assets to keep track of exclusive access
 }
 
 impl Workspace {
 
     pub fn set_is_reproducible(&mut self, value: bool) {
         self.env.vars.insert(
-            SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE.to_owned(),
-            value.to_string(),
+            SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE.into(),
+            value.to_string().into(),
         );
     }
 
-    pub fn get_relative_directory(&self, relative_path: &str) -> String {
-        format!("{}/{}", self.absolute_path, relative_path)
+    pub fn get_relative_directory(&self, relative_path: &str) -> Arc<str> {
+        format!("{}/{}", self.absolute_path, relative_path).into()
     }
 
-    pub fn get_absolute_path(&self) -> String {
+    pub fn get_absolute_path(&self) -> Arc<str> {
         self.absolute_path.clone()
     }
     
     pub fn is_reproducible(&self) -> bool {
         if let Some(value) = self.env.vars.get(SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE) {
-            return value == "true";
+            return value.as_ref() == "true";
         }
         false
     }
 
-    fn find_workspace_root(current_working_directory: &str) -> anyhow::Result<String> {
+    fn find_workspace_root(current_working_directory: &str) -> anyhow::Result<Arc<str>> {
         let mut current_directory = current_working_directory.to_owned();
         loop {
             let workspace_path = format!("{}/{}", current_directory, ENV_FILE_NAME);
             if std::path::Path::new(workspace_path.as_str()).exists() {
-                return Ok(current_directory.to_string());
+                return Ok(current_directory.into());
             }
             let parent_directory = std::path::Path::new(current_directory.as_str()).parent();
             if parent_directory.is_none() {
@@ -192,7 +193,7 @@ impl Workspace {
         true
     }
 
-    pub fn new(mut progress: printer::MultiProgressBar, absolute_path_to_workspace: Option<String>) -> anyhow::Result<Self> {
+    pub fn new(mut progress: printer::MultiProgressBar, absolute_path_to_workspace: Option<Arc<str>>) -> anyhow::Result<Self> {
         let date = chrono::Local::now();
 
         let absolute_path = if let Some(absolute_path) = absolute_path_to_workspace {
@@ -203,12 +204,12 @@ impl Workspace {
             )?;
 
             // search the current directory and all parent directories for the workspace file
-            Self::find_workspace_root(current_working_directory.as_str())
+            Self::find_workspace_root(current_working_directory.as_ref())
                 .context(format_context!("While searching for workspace root"))?
         };
 
         // walkdir and find all spaces.star files in the workspace
-        let walkdir: Vec<_> = walkdir::WalkDir::new(absolute_path.as_str())
+        let walkdir: Vec<_> = walkdir::WalkDir::new(absolute_path.as_ref())
             .into_iter()
             .filter_entry(Self::filter_predicate)
             .collect();
@@ -216,24 +217,24 @@ impl Workspace {
         progress.set_total(walkdir.len() as u64);
 
         let mut loaded_modules = HashSet::new();
-        let mut modules = vec![];
+        let mut modules: Vec<(Arc<str>, Arc<str>)> = vec![];
 
-        let env_content = std::fs::read_to_string(format!("{}/{}", absolute_path, ENV_FILE_NAME))
+        let env_content: Arc<str> = std::fs::read_to_string(format!("{}/{}", absolute_path, ENV_FILE_NAME))
             .context(format_context!(
             "Failed to read workspace file: {ENV_FILE_NAME}"
-        ))?;
+        ))?.into();
 
-        loaded_modules.insert(ENV_FILE_NAME.to_string());
-        modules.push((ENV_FILE_NAME.to_string(), env_content));
+        loaded_modules.insert(ENV_FILE_NAME.into());
+        modules.push((ENV_FILE_NAME.into(), env_content));
 
-        let mut original_modules = vec![];
+        let mut original_modules: Vec<(Arc<str>, Arc<str>)> = vec![];
 
         let mut store_path = None;
-        if let Ok(load_order) = Settings::load(absolute_path.as_str()) {
+        if let Ok(load_order) = Settings::load(absolute_path.as_ref()) {
             progress.log(printer::Level::Trace, "Loading modules from sync order");
             store_path = Some(load_order.store_path);
             for module in load_order.order {
-                if is_rules_module(module.as_str()) {
+                if is_rules_module(module.as_ref()) {
                     progress.increment(1);
                     let path = format!("{}/{}", absolute_path, module);
                     let content = std::fs::read_to_string(path.as_str())
@@ -244,7 +245,7 @@ impl Workspace {
                             format!("Loading module from sync order: {}", module).as_str(),
                         );
                         loaded_modules.insert(module.clone());
-                        original_modules.push((module, content));
+                        original_modules.push((module, content.into()));
                     }
                 }
             }
@@ -264,7 +265,7 @@ impl Workspace {
         let workspace_digest = calculate_digest(&original_modules);
         modules.extend(original_modules);
 
-        let mut unordered_modules = vec![];
+        let mut unordered_modules: Vec<(Arc<str>, Arc<str>)> = vec![];
 
         for entry in walkdir {
             progress.increment(1);
@@ -272,19 +273,18 @@ impl Workspace {
                 if entry.file_type().is_file()
                     && is_rules_module(entry.file_name().to_string_lossy().as_ref())
                 {
-                    let path = entry.path().to_string_lossy().to_string();
-                    let content = std::fs::read_to_string(path.as_str())
-                        .context(format_context!("Failed to read file {}", path))?;
+                    let path: Arc<str> = entry.path().to_string_lossy().into();
+                    let content: Arc<str> = std::fs::read_to_string(path.as_ref())
+                        .context(format_context!("Failed to read file {path}"))?.into();
 
-                    if let Some(path) = path.strip_prefix(format!("{}/", absolute_path).as_str()) {
-                        let path = path.to_string();
-                        if !loaded_modules.contains(&path) {
+                    if let Some(stripped_path) = path.strip_prefix(format!("{}/", absolute_path).as_str()) {
+                        if !loaded_modules.contains(stripped_path) {
                             progress.log(
                                 printer::Level::Trace,
-                                format!("Loading module from directory: {}", path).as_str(),
+                                format!("Loading module from directory: {stripped_path}").as_str(),
                             );
-                            loaded_modules.insert(path.clone());
-                            unordered_modules.push((path, content));
+                            loaded_modules.insert(stripped_path.into());
+                            unordered_modules.push((stripped_path.into(), content));
                         }
                     }
                 }
@@ -299,13 +299,13 @@ impl Workspace {
             format!("Workspace working directory: {absolute_path}").as_str(),
         );
 
-        std::env::set_current_dir(std::path::Path::new(absolute_path.as_str())).context(
+        std::env::set_current_dir(std::path::Path::new(absolute_path.as_ref())).context(
             format_context!("Failed to set current directory to {absolute_path}"),
         )?;
 
-        let log_directory = format!("{SPACES_LOGS_NAME}/logs_{}", date.format("%Y%m%d-%H-%M-%S"));
+        let log_directory: Arc<str> = format!("{SPACES_LOGS_NAME}/logs_{}", date.format("%Y%m%d-%H-%M-%S")).into();
 
-        std::fs::create_dir_all(log_directory.as_str()).context(format_context!(
+        std::fs::create_dir_all(log_directory.as_ref()).context(format_context!(
             "Failed to create log folder {log_directory}",
         ))?;
 
@@ -313,7 +313,7 @@ impl Workspace {
             .context(format_context!("Failed to create build directory"))?;
 
         let changes_path = get_changes_path();
-        let skip_folders = vec![SPACES_LOGS_NAME.to_string()];
+        let skip_folders = vec![SPACES_LOGS_NAME.into()];
         let changes = changes::Changes::new(changes_path, skip_folders);
 
         #[allow(unused)]
@@ -322,8 +322,8 @@ impl Workspace {
         let mut env = environment::Environment::default();
 
         env.vars.insert(
-            SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE.to_owned(),
-            "true".to_string(),
+            SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE.into(),
+            "true".into(),
         );
 
         
@@ -409,7 +409,7 @@ impl Workspace {
 
     pub fn update_changes(&mut self,
         progress: &mut printer::MultiProgressBar,
-        inputs: &HashSet<String>,
+        inputs: &HashSet<Arc<str>>,
     ) -> anyhow::Result<()> {
             self.changes
                 .update_from_inputs(progress, inputs)
@@ -426,34 +426,34 @@ impl Workspace {
         Ok(())
     }
 
-    pub fn add_git_commit_lock(&mut self, rule_name: &str, commit: String) {
-        self.locks.insert(rule_name.to_string(), commit);
+    pub fn add_git_commit_lock(&mut self, rule_name: &str, commit: Arc<str>) {
+        self.locks.insert(rule_name.into(), commit);
     }
     
     pub fn get_rule_inputs_digest(&self,
         progress: &mut printer::MultiProgressBar,
         seed: &str,
-        globs: &HashSet<String>,
-    ) -> anyhow::Result<String> {
+        globs: &HashSet<Arc<str>>,
+    ) -> anyhow::Result<Arc<str>> {
         self.changes.get_digest(progress, seed, globs)
     }
 
-    pub fn get_store_path(&self) -> String {
-        self.store_path.clone().unwrap_or_else(|| get_checkout_store_path())
+    pub fn get_store_path(&self) -> Arc<str> {
+        self.store_path.clone().unwrap_or_else(get_checkout_store_path)
     }
 
-    pub fn get_spaces_tools_path(&self) -> String {
-        get_spaces_tools_path(self.get_store_path().as_str())
+    pub fn get_spaces_tools_path(&self) -> Arc<str> {
+        get_spaces_tools_path(self.get_store_path().as_ref())
     }
     
-    pub fn get_cargo_binstall_root(&self) -> String {
-        format!("{}/cargo_binstall_bin_dir", self.get_spaces_tools_path())
+    pub fn get_cargo_binstall_root(&self) -> Arc<str> {
+        format!("{}/cargo_binstall_bin_dir", self.get_spaces_tools_path()).into()
     }
     
-    pub fn get_log_file(&self, rule_name: &str) -> String {
+    pub fn get_log_file(&self, rule_name: &str) -> Arc<str> {
         let rule_name = rule_name.replace('/', "_");
         let rule_name = rule_name.replace(':', "_");
-        format!("{}/{rule_name}.log", self.log_directory)
+        format!("{}/{rule_name}.log", self.log_directory).into()
     }
 
     pub fn is_rule_inputs_changed(
@@ -461,14 +461,14 @@ impl Workspace {
         progress: &mut printer::MultiProgressBar,
         rule_name: &str,
         seed: &str,
-        inputs: &HashSet<String>,
-    ) -> anyhow::Result<Option<String>> {
+        inputs: &HashSet<Arc<str>>,
+    ) -> anyhow::Result<Option<Arc<str>>> {
         let digest = self.get_rule_inputs_digest(progress, seed, inputs)
             .context(format_context!("Failed to get digest for rule {rule_name}"))?;
         self.inputs.is_changed(rule_name, digest)
     }
     
-    pub fn update_rule_digest(&mut self, rule: &str, digest: String) {
+    pub fn update_rule_digest(&mut self, rule: &str, digest: Arc<str>) {
         self.inputs.save_digest(rule, digest);
     }
     

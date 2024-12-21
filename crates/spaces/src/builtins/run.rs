@@ -156,11 +156,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         if let Some(redirect_stdout) = exec.redirect_stdout.as_mut() {
             *redirect_stdout = format!(
                 "{}/{}",
-                rules::get_path_to_build_checkout(rule.name.as_str())?,
+                rules::get_path_to_build_checkout(rule.name.clone())?,
                 redirect_stdout
-            );
+            ).into();
         }
-
         let rule_name = rule.name.clone();
         rules::insert_task(rules::Task::new(
             rule,
@@ -183,7 +182,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let mut kill_exec: executor::exec::Kill = serde_json::from_value(kill.to_json_value()?)
             .context(format_context!("bad options for kill"))?;
-        kill_exec.target = rules::get_sanitized_rule_name(&kill_exec.target);
+        kill_exec.target = rules::get_sanitized_rule_name(kill_exec.target.clone());
 
         let rule_name = rule.name.clone();
         rules::insert_task(rules::Task::new(
@@ -211,18 +210,18 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         if let Some(redirect_stdout) = exec_if.if_.redirect_stdout.as_mut() {
             *redirect_stdout = format!(
                 "{}/{}",
-                rules::get_path_to_build_checkout(rule.name.as_str())?,
+                rules::get_path_to_build_checkout(rule.name.clone())?,
                 redirect_stdout
-            );
+            ).into();
         }
 
         for target in exec_if.then_.iter_mut() {
-            *target = rules::get_sanitized_rule_name(target);
+            *target = rules::get_sanitized_rule_name(target.clone());
         }
 
         if let Some(else_targets) = exec_if.else_.as_mut() {
             for target in else_targets.iter_mut() {
-                *target = rules::get_sanitized_rule_name(target);
+                *target = rules::get_sanitized_rule_name(target.clone());
             }
         }
 
@@ -261,15 +260,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let rule_name = rule.name.clone();
         let mut inputs = HashSet::new();
-        inputs.insert(format!("+{}/**", create_archive.input));
+        inputs.insert(format!("+{}/**", create_archive.input).into());
         rule.inputs = Some(inputs);
 
         let mut outputs = HashSet::new();
         outputs.insert(format!(
             "build/{}/{}",
-            rules::get_sanitized_rule_name(rule_name.as_str()),
+            rules::get_sanitized_rule_name(rule_name.clone()),
             create_archive.get_output_file()
-        ));
+        ).into());
         rule.outputs = Some(outputs);
 
         let archive = executor::archive::Archive { create_archive };

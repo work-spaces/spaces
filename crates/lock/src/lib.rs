@@ -1,7 +1,8 @@
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
-use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+
 
 #[derive(Debug)]
 pub struct StateLock<ModuleState: std::fmt::Debug> {
@@ -39,18 +40,18 @@ pub fn get_process_group_id_env_name() -> &'static str {
     SPACES_PROCESS_GROUP_ENV_VAR
 }
 
-pub fn get_process_group_id() -> String {
+pub fn get_process_group_id() -> Arc<str> {
     if let Ok(process_group_id) = std::env::var(get_process_group_id_env_name()) {
-        process_group_id
+        process_group_id.into()
     } else {
         // create process ID from system time
-        format!("{}", chrono::Utc::now().timestamp())
+        format!("{}", chrono::Utc::now().timestamp()).into()
     }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct LockFileContents {
-    process_group_id: String,
+    process_group_id: Arc<str>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -61,12 +62,12 @@ pub enum LockStatus {
 
 #[derive(Debug)]
 pub struct FileLock {
-    pub path: String,
+    pub path: Arc<str>,
     is_locked: bool,
 }
 
 impl FileLock {
-    pub fn new(path: String) -> Self {
+    pub fn new(path: Arc<str>) -> Self {
         Self {
             path,
             is_locked: false,
@@ -74,7 +75,7 @@ impl FileLock {
     }
 
     pub fn try_lock(&mut self) -> anyhow::Result<LockStatus> {
-        let path_as_path = std::path::Path::new(&self.path);
+        let path_as_path = std::path::Path::new(self.path.as_ref());
         if let Some(parent) = path_as_path.parent() {
             std::fs::create_dir_all(parent).context(format_context!(
                 "Failed to create {}",
@@ -85,7 +86,7 @@ impl FileLock {
         match std::fs::OpenOptions::new()
             .write(true) // Open for writing
             .create_new(true) // Create only if it does NOT exist
-            .open(self.path.as_str())
+            .open(self.path.as_ref())
         {
             Ok(file) => {
                 let contents = LockFileContents {
@@ -96,7 +97,7 @@ impl FileLock {
             }
             Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
                 std::thread::sleep(std::time::Duration::from_millis(20));
-                let contents = std::fs::read_to_string(self.path.as_str())
+                let contents = std::fs::read_to_string(self.path.as_ref())
                     .context(format_context!("Failed to read {}", self.path))?;
                 let existing_info: LockFileContents =
                     serde_json::from_str(&contents).context(format_context!(
@@ -114,7 +115,7 @@ impl FileLock {
                         .context(format_context!("Failed to serialize capsule run info"))?;
 
                     // over write the file
-                    std::fs::write(self.path.as_str(), lock_contents.as_str())
+                    std::fs::write(self.path.as_ref(), lock_contents.as_str())
                         .context(format_context!("Failed to create file {}", self.path))?;
                 }
             }
@@ -142,14 +143,14 @@ impl FileLock {
     }
 
     pub fn unlock(&mut self) -> anyhow::Result<()> {
-        std::fs::remove_file(self.path.as_str())
+        std::fs::remove_file(self.path.as_ref())
             .context(format_context!("Failed to remove {}", self.path))?;
         Ok(())
     }
 
     pub fn wait(&self, progress: &mut printer::MultiProgressBar) -> anyhow::Result<()> {
         progress.set_message("Capsule already started, waiting for it to finish");
-        let lock_file_path = std::path::Path::new(&self.path);
+        let lock_file_path = std::path::Path::new(self.path.as_ref());
         let mut log_count = 0;
         while lock_file_path.exists() {
             let contents = std::fs::read_to_string(lock_file_path)

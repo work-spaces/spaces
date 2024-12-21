@@ -4,7 +4,7 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::sync::RwLock;
+use std::sync::{RwLock, Arc};
 use tokio::io::AsyncWriteExt;
 
 struct State {}
@@ -30,20 +30,20 @@ pub enum ArchiveLink {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct Archive {
-    pub url: String,
-    pub sha256: String,
+    pub url: Arc<str>,
+    pub sha256: Arc<str>,
     pub link: ArchiveLink,
-    pub includes: Option<Vec<String>>,
-    pub excludes: Option<Vec<String>>,
-    pub globs: Option<Vec<String>>,
-    pub strip_prefix: Option<String>,
-    pub add_prefix: Option<String>,
-    pub filename: Option<String>,
+    pub includes: Option<Vec<Arc<str>>>,
+    pub excludes: Option<Vec<Arc<str>>>,
+    pub globs: Option<Vec<Arc<str>>>,
+    pub strip_prefix: Option<Arc<str>>,
+    pub add_prefix: Option<Arc<str>>,
+    pub filename: Option<Arc<str>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Files {
-    files: HashSet<String>,
+    files: HashSet<Arc<str>>,
 }
 
 pub fn download(
@@ -106,13 +106,13 @@ pub fn download(
 }
 
 // TODO Add a version of this that uses GH
-pub fn download_string(url: &str) -> anyhow::Result<String> {
+pub fn download_string(url: &str) -> anyhow::Result<Arc<str>> {
     let response =
         reqwest::blocking::get(url).context(format_context!("Failed to download {url}"))?;
     let content = response
         .text()
         .context(format_context!("Failed to read response from {url}"))?;
-    Ok(content)
+    Ok(content.into())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -132,7 +132,7 @@ impl HttpArchive {
         archive: &Archive,
         tools_path: &str,
     ) -> anyhow::Result<Self> {
-        let relative_path = Self::url_to_relative_path(archive.url.as_str(), &archive.filename)
+        let relative_path = Self::url_to_relative_path(archive.url.as_ref(), &archive.filename)
             .context(format_context!("no relative path for {}", archive.url))?;
 
         let full_path_to_archive = format!("{bare_store_path}/{relative_path}");
@@ -148,7 +148,7 @@ impl HttpArchive {
             .to_string();
 
         let (filename, effective_sha256) = if archive.sha256.starts_with("http") {
-            let sha256 = download_string(archive.sha256.as_str())
+            let sha256 = download_string(archive.sha256.as_ref())
                 .context(format_context!("Failed to download {}", archive.sha256))?;
             if sha256.len() != 64 {
                 return Err(format_error!(
@@ -253,14 +253,14 @@ impl HttpArchive {
 
         let target_prefix = if let Some(add_prefix) = self.archive.add_prefix.as_ref() {
             if add_prefix.starts_with("//") {
-                format!("{workspace_directory}/{add_prefix}")
+                format!("{workspace_directory}/{add_prefix}").into()
             } else if add_prefix.starts_with('/') {
-                add_prefix.to_owned()
+                add_prefix.clone()
             } else {
-                format!("{workspace_directory}/{add_prefix}")
+                format!("{workspace_directory}/{add_prefix}").into()
             }
         } else {
-            format!("{workspace_directory}/{space_directory}")
+            format!("{workspace_directory}/{space_directory}").into()
         };
 
         progress_bar.set_total(files.len() as u64);
@@ -268,12 +268,12 @@ impl HttpArchive {
         for file in files {
             let source = format!("{}/{}", self.get_path_to_extracted_files(), file);
 
-            progress_bar.set_message(file.as_str());
+            progress_bar.set_message(file.as_ref());
             let relative_target_path =
                 if let Some(strip_prefix) = self.archive.strip_prefix.as_ref() {
-                    file.strip_prefix(strip_prefix)
+                    file.strip_prefix(strip_prefix.as_ref())
                 } else {
-                    Some(file.as_str())
+                    Some(file.as_ref())
                 };
 
             if let Some(relative_target_path) = relative_target_path {
@@ -358,7 +358,7 @@ impl HttpArchive {
         let mut next_progress_bar = if self.is_download_required() {
             if let Some(arguments) = gh::transform_url_to_arguments(
                 self.allow_gh_for_download,
-                self.archive.url.as_str(),
+                self.archive.url.as_ref(),
                 &self.full_path_to_archive,
             ) {
                 let gh_command = format!("{}/gh", self.tools_path);
@@ -409,7 +409,7 @@ impl HttpArchive {
         }
 
         download(
-            self.archive.url.as_str(),
+            self.archive.url.as_ref(),
             full_path_to_archive.as_str(),
             runtime,
             progress,
@@ -423,7 +423,7 @@ impl HttpArchive {
         Ok(())
     }
 
-    fn load_files_json(&self) -> anyhow::Result<HashSet<String>> {
+    fn load_files_json(&self) -> anyhow::Result<HashSet<Arc<str>>> {
         let file_path = self.get_path_to_extracted_files_json();
         let contents = std::fs::read_to_string(file_path.as_str())
             .context(format_context!("while reading {file_path}"))?;
@@ -452,7 +452,7 @@ impl HttpArchive {
         let next_progress_bar = if self.archive_driver.is_some() {
             let decoder = easy_archiver::Decoder::new(
                 &self.full_path_to_archive,
-                Some(self.archive.sha256.clone()),
+                Some(self.archive.sha256.to_string()),
                 &self.get_path_to_extracted_files(),
                 progress_bar,
             )
@@ -488,14 +488,14 @@ impl HttpArchive {
             progress_bar
         };
         self.save_files_json(Files {
-            files: extracted_files,
+            files: extracted_files.into_iter().map(|file| file.into()).collect(),
         })
         .context(format_context!("Failed to save json files manifest"))?;
         Ok(next_progress_bar)
     }
 
-    fn url_to_relative_path(url: &str, filename: &Option<String>) -> anyhow::Result<String> {
-        let archive_url = url::Url::parse(&url)
+    fn url_to_relative_path(url: &str, filename: &Option<Arc<str>>) -> anyhow::Result<String> {
+        let archive_url = url::Url::parse(url)
             .context(format_context!("Failed to parse bare store url {url}"))?;
 
         let host = archive_url

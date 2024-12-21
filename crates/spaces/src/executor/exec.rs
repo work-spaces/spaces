@@ -3,6 +3,7 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Default)]
 struct State {
@@ -43,11 +44,11 @@ pub enum Expect {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Exec {
-    pub command: String,
-    pub args: Option<Vec<String>>,
-    pub env: Option<HashMap<String, String>>,
-    pub working_directory: Option<String>,
-    pub redirect_stdout: Option<String>,
+    pub command: Arc<str>,
+    pub args: Option<Vec<Arc<str>>>,
+    pub env: Option<HashMap<Arc<str>, Arc<str>>>,
+    pub working_directory: Option<Arc<str>>,
+    pub redirect_stdout: Option<Arc<str>>,
     pub expect: Option<Expect>,
 }
 
@@ -79,13 +80,13 @@ impl Exec {
         };
 
         let options = printer::ExecuteOptions {
-            label: name.to_string(),
+            label: name.into(),
             arguments,
             environment,
             working_directory: self
                 .working_directory
                 .clone()
-                .map(|cwd| format!("{workspace_path}/{cwd}")),
+                .map(|cwd| format!("{workspace_path}/{cwd}").into()),
             is_return_stdout: self.redirect_stdout.is_some(),
             log_file_path: log_file_path.clone(),
             clear_environment: true,
@@ -128,10 +129,11 @@ impl Exec {
                 } else {
                     // if the command failed to execute, there won't be a log file
                     if let Some(log_file_path) = log_file_path {
-                        if std::path::Path::new(log_file_path.as_str()).exists() {
-                            let log_contents = std::fs::read_to_string(&log_file_path).context(
-                                format_context!("Failed to read log file {}", log_file_path),
-                            )?;
+                        if std::path::Path::new(log_file_path.as_ref()).exists() {
+                            let log_contents =
+                                std::fs::read_to_string(log_file_path.as_ref()).context(
+                                    format_context!("Failed to read log file {}", log_file_path),
+                                )?;
                             if log_contents.len() > 8192 {
                                 progress.log(
                                     printer::Level::Error,
@@ -157,7 +159,7 @@ impl Exec {
         if let (Some(stdout_content), Some(stdout_location)) =
             (stdout_content, self.redirect_stdout.as_ref())
         {
-            std::fs::write(stdout_location, stdout_content).context(format_context!(
+            std::fs::write(stdout_location.as_ref(), stdout_content).context(format_context!(
                 "Failed to write stdout to {}",
                 stdout_location
             ))?;
@@ -181,8 +183,8 @@ pub enum Signal {
 }
 
 impl Signal {
-    fn to_kill_arg(&self) -> &str {
-        match self {
+    fn to_kill_arg(self) -> Arc<str> {
+        let value = match self {
             Signal::Hup => "HUP",
             Signal::Int => "INT",
             Signal::Quit => "QUIT",
@@ -192,7 +194,8 @@ impl Signal {
             Signal::Terminate => "TERM",
             Signal::User1 => "USR1",
             Signal::User2 => "USR2",
-        }
+        };
+        value.into()
     }
 }
 
@@ -200,7 +203,7 @@ impl Signal {
 #[serde(deny_unknown_fields)]
 pub struct Kill {
     pub signal: Signal,
-    pub target: String,
+    pub target: Arc<str>,
     pub expect: Option<Expect>,
 }
 
@@ -210,13 +213,13 @@ impl Kill {
         name: &str,
         progress: &mut printer::MultiProgressBar,
     ) -> anyhow::Result<()> {
-        if let Some(process_id) = get_process_id(self.target.as_str()) {
+        if let Some(process_id) = get_process_id(self.target.as_ref()) {
             let options = printer::ExecuteOptions {
-                label: name.to_string(),
+                label: name.into(),
                 arguments: vec![
-                    "-s".to_string(),
-                    self.signal.to_kill_arg().to_string(),
-                    format!("{}", process_id),
+                    "-s".into(),
+                    self.signal.to_kill_arg(),
+                    format!("{}", process_id).into(),
                 ],
                 ..Default::default()
             };
@@ -237,13 +240,8 @@ impl Kill {
                 }
                 _ => {}
             }
-        } else {
-            match self.expect.as_ref() {
-                Some(Expect::Success) => {
-                    return Err(format_error!("No process found for {name}"));
-                }
-                _ => {}
-            }
+        } else if let Some(Expect::Success) = self.expect.as_ref() {
+            return Err(format_error!("No process found for {name}"));
         }
 
         Ok(())
@@ -256,16 +254,18 @@ pub struct ExecIf {
     #[serde(rename = "if")]
     pub if_: Exec,
     #[serde(rename = "then")]
-    pub then_: Vec<String>,
+    pub then_: Vec<Arc<str>>,
     #[serde(rename = "else")]
-    pub else_: Option<Vec<String>>,
+    pub else_: Option<Vec<Arc<str>>>,
 }
 
 impl ExecIf {
-    pub fn execute(&self, 
+    pub fn execute(
+        &self,
         mut progress: printer::MultiProgressBar,
         workspace: workspace::WorkspaceArc,
-        name: &str) -> Vec<String> {
+        name: &str,
+    ) -> Vec<Arc<str>> {
         let condition_result = self.if_.execute(&mut progress, workspace.clone(), name);
         let mut result = Vec::new();
         match condition_result {

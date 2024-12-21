@@ -2,32 +2,33 @@ use crate::workspace;
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
-fn get_oras_command(tools_path: &str) -> String {
-    format!("{tools_path}/sysroot/bin/oras")
+fn get_oras_command(tools_path: &str) -> Arc<str> {
+    format!("{tools_path}/sysroot/bin/oras").into()
 }
 
 struct ManifestDetails {
-    filename: String,
-    sha256: String,
+    filename: Arc<str>,
+    sha256: Arc<str>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OrasArchive {
-    pub url: String,
-    pub artifact: String,
-    pub tag: String,
-    pub manifest_digest_path: String,
-    pub manifest_artifact_path: String,
-    pub add_prefix: Option<String>,
-    pub strip_prefix: Option<String>,
-    pub globs: Option<Vec<String>>,
+    pub url: Arc<str>,
+    pub artifact: Arc<str>,
+    pub tag: Arc<str>,
+    pub manifest_digest_path: Arc<str>,
+    pub manifest_artifact_path: Arc<str>,
+    pub add_prefix: Option<Arc<str>>,
+    pub strip_prefix: Option<Arc<str>>,
+    pub globs: Option<Vec<Arc<str>>>,
 }
 
 impl OrasArchive {
-    fn get_artifact_label(&self) -> String {
-        format!("{}/{}:{}", self.url, self.artifact, self.tag)
+    fn get_artifact_label(&self) -> Arc<str> {
+        format!("{}/{}:{}", self.url, self.artifact, self.tag).into()
     }
 
     pub fn download(
@@ -40,9 +41,9 @@ impl OrasArchive {
 
         let options = printer::ExecuteOptions {
             arguments: vec![
-                "pull".to_string(),
-                "--no-tty".to_string(),
-                format!("--output={}", output_folder),
+                "pull".into(),
+                "--no-tty".into(),
+                format!("--output={}", output_folder).into(),
                 artifact_label.clone(),
             ],
             ..Default::default()
@@ -70,8 +71,8 @@ impl OrasArchive {
         let artifact_label = self.get_artifact_label();
         let options = printer::ExecuteOptions {
             arguments: vec![
-                "manifest".to_string(),
-                "fetch".to_string(),
+                "manifest".into(),
+                "fetch".into(),
                 artifact_label.clone(),
             ],
             is_return_stdout: true,
@@ -79,7 +80,7 @@ impl OrasArchive {
         };
 
         let manifest = progress
-            .execute_process(get_oras_command(&workspace.read().get_spaces_tools_path()).as_str(), options)
+            .execute_process(get_oras_command(&workspace.read().get_spaces_tools_path()).as_ref(), options)
             .context(format_context!(
                 "failed to download {artifact_label} using oras",
             ))?;
@@ -87,20 +88,20 @@ impl OrasArchive {
         if let Some(manifest) = manifest {
             let value: serde_json::Value = serde_json::from_str(&manifest)
                 .context(format_context!("failed to parse manifest from {artifact_label}"))?;
-            let mut sha256_option = None;
-            let mut filename_option = None;
+            let mut sha256_option: Option<Arc<str>> = None;
+            let mut filename_option: Option<Arc<str>> = None;
 
             if let Some(digest) = value.pointer(&self.manifest_digest_path) {
                 if let Some(digest) = digest.as_str() {
                     if let Some(sha256) = digest.strip_prefix("sha256:") {
-                        sha256_option = Some(sha256.to_string());
+                        sha256_option = Some(sha256.into());
                     }
                 }
             }
 
             if let Some(filename) = value.pointer(&self.manifest_artifact_path) {
                 if let Some(filename) = filename.as_str() {
-                    filename_option = Some(filename.to_string());
+                    filename_option = Some(filename.into());
                 }
             }
 
@@ -130,7 +131,7 @@ impl OrasArchive {
             .context(format_context!("Failed to fetch manifest"))?;
 
         let archive = http_archive::Archive {
-            url: format!("oras://{}/{}", self.url, manifest_details.filename),
+            url: format!("oras://{}/{}", self.url, manifest_details.filename).into(),
             sha256: manifest_details.sha256,
             add_prefix: self.add_prefix.clone(),
             strip_prefix: self.strip_prefix.clone(),
@@ -156,7 +157,7 @@ impl OrasArchive {
                 .context(format_context!("Failed to download using oras"))?;
 
             let full_path_to_download =
-                std::path::Path::new(&parent).join(&manifest_details.filename);
+                std::path::Path::new(&parent).join(manifest_details.filename.as_ref());
             //rename the file name to the name http_archive expects
             std::fs::rename(full_path_to_download.clone(), full_path).context(format_context!(
                 "Failed to rename {full_path_to_download:?} to {full_path:?}"
@@ -171,7 +172,7 @@ impl OrasArchive {
         let workspace_directory = workspace.read().absolute_path.clone();
 
         http_archive
-            .create_links(next_progress_bar, workspace_directory.as_str(), name)
+            .create_links(next_progress_bar, workspace_directory.as_ref(), name)
             .context(format_context!(
                 "Failed to create hard links for oras http_archive {}",
                 name

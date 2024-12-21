@@ -478,7 +478,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();
 
-        let worktree_path = workspace.absolute_path.clone();
+        let worktree_path  = workspace.absolute_path.clone();
 
         let checkout = repo.get_checkout();
         let spaces_key = rule.name.clone();
@@ -493,6 +493,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 checkout,
                 clone: repo.clone.unwrap_or(git::Clone::Default),
                 is_evaluate_spaces_modules: repo.is_evaluate_spaces_modules.unwrap_or(true),
+                sparse_checkout: None,
             }),
         ))
         .context(format_context!("Failed to insert task {rule_name}"))?;
@@ -529,12 +530,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         );
 
         let exec = executor::exec::Exec {
-            command: cargo_binstall_path,
+            command: cargo_binstall_path.into(),
             args: Some(vec![
-                format!("--version={}", cargo_bin.version),
-                format!("--root={output_directory}"),
-                "--no-confirm".to_string(),
-                cargo_bin.crate_.clone(),
+                format!("--version={}", cargo_bin.version).into(),
+                format!("--root={output_directory}").into(),
+                "--no-confirm".into(),
+                cargo_bin.crate_.into(),
             ]),
             env: None,
             working_directory: None,
@@ -552,7 +553,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         for bin in cargo_bin.bins {
             let mut bin_rule = hard_link_rule.clone();
-            bin_rule.name = format!("{}/{}", hard_link_rule.name, bin);
+            bin_rule.name = format!("{}/{}", hard_link_rule.name, bin).into();
 
             // cargo install uses the root/bin install directory
             let output_file = format!("{}/bin/{}", output_directory, bin);
@@ -822,7 +823,7 @@ fn add_http_archive(
 
         let http_archive = http_archive::HttpArchive::new(
             &workspace.get_store_path(),
-            rule.name.as_str(),
+            rule.name.as_ref(),
             &archive,
             format!("{}/sysroot/bin", workspace.get_spaces_tools_path()).as_str(),
         )

@@ -26,11 +26,11 @@ pub enum RuleType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Rule {
-    pub name: String,
-    pub deps: Option<Vec<String>>,
-    pub help: Option<String>,
-    pub inputs: Option<HashSet<String>>,
-    pub outputs: Option<HashSet<String>>,
+    pub name: Arc<str>,
+    pub deps: Option<Vec<Arc<str>>>,
+    pub help: Option<Arc<str>>,
+    pub inputs: Option<HashSet<Arc<str>>>,
+    pub outputs: Option<HashSet<Arc<str>>>,
     pub platforms: Option<Vec<platform::Platform>>,
     #[serde(rename = "type")]
     pub type_: Option<RuleType>,
@@ -39,7 +39,7 @@ pub struct Rule {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Signal {
     ready: bool,
-    name: String,
+    name: Arc<str>,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -48,7 +48,7 @@ struct RuleSignal {
 }
 
 impl RuleSignal {
-    fn new(name: String) -> Self {
+    fn new(name: Arc<str>) -> Self {
         RuleSignal {
             signal: Arc::new((Mutex::new(Signal { ready: false, name }), Condvar::new())),
         }
@@ -188,7 +188,7 @@ impl Task {
                 let state = get_state().read();
                 let tasks = state.tasks.read();
                 let task = tasks
-                    .get(&name)
+                    .get(name.as_ref())
                     .context(format_context!("Task not found {name}"))?;
                 if task.phase == Phase::Cancelled {
                     progress.log(
@@ -293,7 +293,7 @@ impl Task {
                 }
 
                 let task = tasks
-                    .get_mut(&name)
+                    .get_mut(name.as_ref())
                     .context(format_context!("Task not found {name}"))?;
                 task.phase = Phase::Complete;
             }
@@ -309,7 +309,7 @@ impl Task {
     }
 }
 
-pub fn get_sanitized_rule_name(rule_name: &str) -> String {
+pub fn get_sanitized_rule_name(rule_name: Arc<str>) -> Arc<str> {
     let state = get_state().read();
     state.get_sanitized_rule_name(rule_name)
 }
@@ -319,10 +319,10 @@ pub fn insert_task(task: Task) -> anyhow::Result<()> {
     state.insert_task(task)
 }
 
-pub fn set_latest_starlark_module(name: &str) {
+pub fn set_latest_starlark_module(name: Arc<str>) {
     let mut state = get_state().write();
-    state.latest_starlark_module = Some(name.to_string());
-    state.all_modules.insert(name.to_string());
+    state.latest_starlark_module = Some(name.clone());
+    state.all_modules.insert(name);
 }
 
 pub fn show_tasks(printer: &mut printer::Printer) -> anyhow::Result<()> {
@@ -330,7 +330,7 @@ pub fn show_tasks(printer: &mut printer::Printer) -> anyhow::Result<()> {
     state.show_tasks(printer)
 }
 
-pub fn sort_tasks(target: Option<String>, phase: Phase) -> anyhow::Result<()> {
+pub fn sort_tasks(target: Option<Arc<str>>, phase: Phase) -> anyhow::Result<()> {
     let mut state = get_state().write();
     state.sort_tasks(target, phase)
 }
@@ -362,25 +362,25 @@ pub fn debug_sorted_tasks(printer: &mut printer::Printer, phase: Phase) -> anyho
 
 #[derive(Debug)]
 pub struct State {
-    pub tasks: lock::StateLock<HashMap<String, Task>>,
+    pub tasks: lock::StateLock<HashMap<Arc<str>, Task>>,
     pub graph: graph::Graph,
     pub sorted: Vec<petgraph::prelude::NodeIndex>,
-    pub latest_starlark_module: Option<String>,
-    pub all_modules: HashSet<String>,
+    pub latest_starlark_module: Option<Arc<str>>,
+    pub all_modules: HashSet<Arc<str>>,
 }
 
 impl State {
-    pub fn get_sanitized_rule_name(&self, rule_name: &str) -> String {
-        label::sanitize_rule(rule_name, self.latest_starlark_module.as_ref())
+    pub fn get_sanitized_rule_name(&self, rule_name: Arc<str>) -> Arc<str> {
+        label::sanitize_rule(rule_name, self.latest_starlark_module.clone())
     }
 
     pub fn insert_task(&self, mut task: Task) -> anyhow::Result<()> {
         // update the rule name to have the starlark module name
         let rule_label = label::sanitize_rule(
-            task.rule.name.as_str(),
-            self.latest_starlark_module.as_ref(),
+            task.rule.name,
+            self.latest_starlark_module.clone(),
         );
-        task.rule.name.clone_from(&rule_label);
+        task.rule.name = rule_label.clone();
 
         // update deps that refer to rules in the same starlark module
         if let Some(deps) = task.rule.deps.as_mut() {
@@ -388,7 +388,7 @@ impl State {
                 if label::is_rule_sanitized(dep) {
                     continue;
                 }
-                *dep = label::sanitize_rule(dep.as_str(), self.latest_starlark_module.as_ref());
+                *dep = label::sanitize_rule(dep.clone(), self.latest_starlark_module.clone());
             }
         }
 
@@ -405,7 +405,7 @@ impl State {
         Ok(())
     }
 
-    pub fn sort_tasks(&mut self, target: Option<String>, phase: Phase) -> anyhow::Result<()> {
+    pub fn sort_tasks(&mut self, target: Option<Arc<str>>, phase: Phase) -> anyhow::Result<()> {
         let mut tasks = self.tasks.write();
 
         let setup_tasks = tasks
@@ -577,7 +577,7 @@ impl State {
                 };
 
                 let mut progress_bar = multi_progress.add_progress(
-                    task.rule.name.as_str(),
+                    task.rule.name.as_ref(),
                     Some(100),
                     Some(message.as_str()),
                 );
@@ -659,22 +659,22 @@ fn get_state() -> &'static lock::StateLock<State> {
     STATE.get()
 }
 
-pub fn get_checkout_path() -> anyhow::Result<String> {
+pub fn get_checkout_path() -> anyhow::Result<Arc<str>> {
     let state = get_state().read();
     if let Some(latest) = state.latest_starlark_module.as_ref() {
-        let path = std::path::Path::new(latest.as_str());
+        let path = std::path::Path::new(latest.as_ref());
         let parent = path
             .parent()
             .map(|e| e.to_string_lossy().to_string())
             .unwrap_or_default();
-        Ok(parent)
+        Ok(parent.into())
     } else {
         Err(format_error!("No starlark module set"))
     }
 }
 
-pub fn get_path_to_build_checkout(rule_name: &str) -> anyhow::Result<String> {
+pub fn get_path_to_build_checkout(rule_name: Arc<str>) -> anyhow::Result<Arc<str>> {
     let state = get_state().read();
     let rule_name = state.get_sanitized_rule_name(rule_name);
-    Ok(format!("build/{}", rule_name))
+    Ok(format!("build/{}", rule_name).into())
 }

@@ -3,11 +3,12 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
-fn get_capsule_digest(capsules_path: &str, scripts: &Vec<String>) -> anyhow::Result<String> {
+fn get_capsule_digest(capsules_path: &str, scripts: &[Arc<str>]) -> anyhow::Result<Arc<str>> {
     let mut modules = Vec::new();
     for script in scripts {
-        let mut effective_script = script.clone();
+        let mut effective_script = script.to_string();
         if !effective_script.ends_with(".spaces.star") {
             effective_script.push_str(".spaces.star");
         }
@@ -17,14 +18,14 @@ fn get_capsule_digest(capsules_path: &str, scripts: &Vec<String>) -> anyhow::Res
             format_context!("Failed to get current working when reading {script_path}"),
         )?;
 
-        let content = std::fs::read_to_string(script_path.as_str()).context(format_context!(
+        let content: Arc<str> = std::fs::read_to_string(script_path.as_str()).context(format_context!(
             "Failed to read script {} from {}",
             script_path,
             current_working_directory
-        ))?;
-        modules.push((script.clone(), content));
+        ))?.into();
+        modules.push((script.to_owned(), content));
     }
-    Ok(workspace::calculate_digest(&modules))
+    Ok(workspace::calculate_digest(modules.as_slice()))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Copy)]
@@ -35,16 +36,16 @@ pub enum DependencyType {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Descriptor {
-    pub domain: String, // domain of the capsule
-    pub owner: String,  // owner of the capsule
-    pub repo: String,   // repo of the capsule
+    pub domain: Arc<str>, // domain of the capsule
+    pub owner: Arc<str>,  // owner of the capsule
+    pub repo: Arc<str>,   // repo of the capsule
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Info {
     descriptor: Descriptor, // descriptor of the capsule
-    version: String,        // Version of the capsule
-    prefix: String,         // --prefix location where the capsule is available when installed
+    version: Arc<str>,        // Version of the capsule
+    prefix: Arc<str>,         // --prefix location where the capsule is available when installed
 }
 
 // capsules.spaces.json
@@ -52,13 +53,13 @@ type InfoFile = Vec<Info>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CapsuleCheckoutInfo {
-    pub digest: String,  // The workspace digest
+    pub digest: Arc<str>,  // The workspace digest
     pub info: Vec<Info>, // List of capsules that are available to build
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CapsuleCompleteInfo {
-    pub digest: String, // The workspace digest
+    pub digest: Arc<str>, // The workspace digest
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -70,14 +71,14 @@ enum CapsuleRunStatus {
 #[derive(Debug)]
 pub struct CapsuleRunInfo {
     lock_file: lock::FileLock,
-    digest: String,
+    digest: Arc<str>,
 }
 
 impl CapsuleRunInfo {
     fn new(
         workspace: workspace::WorkspaceArc,
         capsules_path: &str,
-        scripts: &Vec<String>,
+        scripts: &[Arc<str>],
     ) -> anyhow::Result<CapsuleRunInfo> {
         let digest = get_capsule_digest(capsules_path, scripts).context(format_context!(
             "Failed to get digest for capsule with scripts: {capsules_path}",
@@ -90,7 +91,7 @@ impl CapsuleRunInfo {
 
         Ok(CapsuleRunInfo {
             digest,
-            lock_file: lock::FileLock::new(lock_file_path),
+            lock_file: lock::FileLock::new(lock_file_path.into()),
         })
     }
 
@@ -130,11 +131,7 @@ fn get_state() -> &'static lock::StateLock<State> {
     let info_file_path = workspace::SPACES_CAPSULES_INFO_NAME;
 
     let info_file = if std::path::Path::new(info_file_path).exists() {
-        let info_file = load_file_info(".");
-        match info_file {
-            Ok(info) => info,
-            Err(_) => Vec::new(),
-        }
+        load_file_info(".").unwrap_or_default()
     } else {
         Vec::new()
     };
@@ -145,8 +142,8 @@ fn get_state() -> &'static lock::StateLock<State> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Capsule {
-    pub scripts: Vec<String>,   // list of starlark scripts to execute
-    pub prefix: Option<String>, // --prefix location where the capsule should be installed in the sysroot (default is none)
+    pub scripts: Vec<Arc<str>>,   // list of starlark scripts to execute
+    pub prefix: Option<Arc<str>>, // --prefix location where the capsule should be installed in the sysroot (default is none)
 }
 
 fn load_file_info(capsule_workspace_path: &str) -> anyhow::Result<InfoFile> {
@@ -168,16 +165,16 @@ fn load_file_info(capsule_workspace_path: &str) -> anyhow::Result<InfoFile> {
     Ok(info)
 }
 
-fn get_spaces_command() -> anyhow::Result<String> {
+fn get_spaces_command() -> anyhow::Result<Arc<str>> {
     let spaces_exec = which::which("spaces").context("Failed to find spaces executable")?;
-    Ok(spaces_exec.to_string_lossy().to_string())
+    Ok(spaces_exec.to_string_lossy().into())
 }
 
-fn get_spaces_env(workspace: workspace::WorkspaceArc) -> anyhow::Result<HashMap<String, String>> {
-    let mut env = HashMap::new();
+fn get_spaces_env(workspace: workspace::WorkspaceArc) -> anyhow::Result<HashMap<Arc<str>, Arc<str>>> {
+    let mut env: HashMap<Arc<str>, Arc<str>> = HashMap::new();
     let workspace_env = workspace.read().get_env();
     env.insert(
-        lock::get_process_group_id_env_name().to_string(),
+        lock::get_process_group_id_env_name().into(),
         lock::get_process_group_id(),
     );
 
@@ -196,25 +193,25 @@ impl Capsule {
         progress: &mut printer::MultiProgressBar,
         workspace: workspace::WorkspaceArc,
         name: &str,
-        spaces_command: String,
+        spaces_command: Arc<str>,
         workspace_name: &str,
     ) -> anyhow::Result<()> {
-        let mut args = vec![
-            "--hide-progress-bars".to_string(),
-            "--verbosity=debug".to_string(),
-            "checkout".to_string(),
+        let mut args: Vec<Arc<str>> = vec![
+            "--hide-progress-bars".into(),
+            "--verbosity=debug".into(),
+            "checkout".into(),
         ];
 
-        args.extend(self.scripts.iter().map(|e| format!("--script={e}")));
-        args.push(format!("--name={workspace_name}"));
+        args.extend(self.scripts.iter().map(|e| format!("--script={e}").into()));
+        args.push(format!("--name={workspace_name}").into());
 
         std::fs::create_dir_all(workspace::SPACES_CAPSULES_NAME)
             .context(format_context!("Failed to create @capsules"))?;
 
         let mut env = HashMap::new();
         env.insert(
-            "PATH".to_string(),
-            std::env::var("PATH").unwrap_or_default(),
+            "PATH".into(),
+            std::env::var("PATH").unwrap_or_default().into(),
         );
 
         env.extend(
@@ -226,7 +223,7 @@ impl Capsule {
         let spaces_checkout = executor::exec::Exec {
             command: spaces_command,
             args: Some(args),
-            working_directory: Some(workspace::SPACES_CAPSULES_NAME.to_string()),
+            working_directory: Some(workspace::SPACES_CAPSULES_NAME.into()),
             env: Some(env),
             redirect_stdout: None,
             expect: None,
@@ -245,13 +242,13 @@ impl Capsule {
         progress: &mut printer::MultiProgressBar,
         workspace: workspace::WorkspaceArc,
         name: &str,
-        spaces_command: String,
-        workspace_path: String,
+        spaces_command: Arc<str>,
+        workspace_path: Arc<str>,
     ) -> anyhow::Result<()> {
         let args = vec![
-            "--hide-progress-bars".to_string(),
-            "--verbosity=debug".to_string(),
-            "run".to_string(),
+            "--hide-progress-bars".into(),
+            "--verbosity=debug".into(),
+            "run".into(),
         ];
 
         // run spaces checkout in @capsules using name
@@ -308,7 +305,7 @@ impl Capsule {
                                 capsule_prefix,
                                 source_path
                             ))?;
-                    let prefix_path = std::path::Path::new(prefix);
+                    let prefix_path = std::path::Path::new(prefix.as_ref());
                     let destination_path = prefix_path.join(relative_path);
 
                     if let Some(parent) = destination_path.parent() {
@@ -358,7 +355,7 @@ impl Capsule {
             workspace::SPACES_CAPSULES_NAME,
             &self.scripts,
         ).context(format_context!("Failed to create capsule run info"))?;
-        let workspace_path = format!("{}/{}", workspace::SPACES_CAPSULES_NAME, workspace_name);
+        let workspace_path: Arc<str> = format!("{}/{}", workspace::SPACES_CAPSULES_NAME, workspace_name).into();
 
         progress.log(
             printer::Level::Info,

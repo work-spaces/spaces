@@ -19,11 +19,11 @@ fn download_and_install(
         platform::Platform::WindowsAarch64 => platform_archive.windows_aarch64,
     };
     let store_path = workspace::get_checkout_store_path();
-    let spaces_tools = workspace::get_spaces_tools_path(store_path.as_str());
+    let spaces_tools = workspace::get_spaces_tools_path(store_path.as_ref());
 
     if let Some(archive) = archive.as_ref() {
         let mut http_archive =
-            http_archive::HttpArchive::new(store_path.as_str(), "unused", archive, "no tools path")
+            http_archive::HttpArchive::new(store_path.as_ref(), "unused", archive, "no tools path")
                 .context(format_context!("Failed to create http archive"))?;
 
         http_archive.allow_gh_for_download(false);
@@ -35,7 +35,7 @@ fn download_and_install(
                 .context(format_context!("Failed to sync http archive"))?;
 
             http_archive
-                .create_links(progress_bar, spaces_tools.as_str(), "unused")
+                .create_links(progress_bar, spaces_tools.as_ref(), "unused")
                 .context(format_context!("Failed to create links"))?;
             None
         } else {
@@ -53,7 +53,7 @@ fn download_and_install(
 
         if let Some(progress_bar) = progress_bar {
                 http_archive
-                .create_links(progress_bar, spaces_tools.as_str(), "unused")
+                .create_links(progress_bar, spaces_tools.as_ref(), "unused")
                 .context(format_context!("Failed to create links"))?;
             
         }
@@ -73,8 +73,8 @@ pub fn install_tools(printer: &mut printer::Printer,
    
     // install gh in the store bin if it does not exist
     let store_path = workspace::get_checkout_store_path();
-    let store_sysroot_bin = workspace::get_spaces_tools_path(store_path.as_str());
-    std::fs::create_dir_all(store_sysroot_bin.as_str()).context(format_context!(
+    let store_sysroot_bin = workspace::get_spaces_tools_path(store_path.as_ref());
+    std::fs::create_dir_all(store_sysroot_bin.as_ref()).context(format_context!(
         "Failed to create directory {store_sysroot_bin}"
     ))?;
 

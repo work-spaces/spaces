@@ -1,16 +1,17 @@
 use crate::{evaluator, rules, workspace};
 use anyhow::Context;
 use anyhow_source_location::format_context;
+use std::sync::Arc;
 
 pub enum RunWorkspace {
-    Target(Option<String>),
-    Script(Vec<(String, String)>),
+    Target(Option<Arc<str>>),
+    Script(Vec<(Arc<str>, Arc<str>)>),
 }
 
 pub fn run_starlark_modules_in_workspace(
     printer: &mut printer::Printer,
     phase: rules::Phase,
-    absolute_path_to_workspace: Option<String>,
+    absolute_path_to_workspace: Option<Arc<str>>,
     run_workspace: RunWorkspace,
     is_create_lock_file: bool,
 ) -> anyhow::Result<()> {
@@ -60,11 +61,11 @@ pub fn run_starlark_modules_in_workspace(
 
 pub fn checkout(
     printer: &mut printer::Printer,
-    name: String,
-    script: Vec<String>,
+    name: Arc<str>,
+    script: Vec<Arc<str>>,
     create_lock_file: bool,
 ) -> anyhow::Result<()> {
-    std::fs::create_dir_all(name.as_str())
+    std::fs::create_dir_all(name.as_ref())
         .context(format_context!("while creating workspace directory {name}"))?;
 
     let mut settings = workspace::Settings::default();
@@ -74,29 +75,29 @@ pub fn checkout(
         let script_path = if workspace::is_rules_module(&one_script) {
             one_script.clone()
         } else {
-            format!("{one_script}.{}", workspace::SPACES_MODULE_NAME)
+            format!("{one_script}.{}", workspace::SPACES_MODULE_NAME).into()
         };
 
-        let script_as_path = std::path::Path::new(script_path.as_str());
-        let file_name = script_as_path
+        let script_as_path = std::path::Path::new(script_path.as_ref());
+        let file_name: Arc<str> = script_as_path
             .file_name()
             .unwrap()
             .to_string_lossy()
-            .to_string();
-        settings.push(file_name.as_str());
+            .into();
+        settings.push(file_name.clone());
 
-        let one_script_contents = std::fs::read_to_string(script_path.as_str())
+        let one_script_contents = std::fs::read_to_string(script_path.as_ref())
             .context(format_context!("while reading script file {script_path}"))?;
 
         std::fs::write(
-            format!("{}/{}", name, file_name),
+            format!("{name}/{file_name}"),
             one_script_contents.as_str(),
         )
         .context(format_context!(
             "while writing script file {script_path} to workspace"
         ))?;
 
-        scripts.push((file_name, one_script_contents));
+        scripts.push((file_name, one_script_contents.into()));
     }
 
     settings.store_path = workspace::get_checkout_store_path();
@@ -108,8 +109,8 @@ pub fn checkout(
     let current_working_directory = std::env::current_dir()
         .context(format_context!("Failed to get current working directory"))?;
 
-    let target_workspace_directory = current_working_directory.join(name.as_str());
-    let absolute_path_to_workspace = target_workspace_directory.to_string_lossy().to_string();
+    let target_workspace_directory = current_working_directory.join(name.as_ref());
+    let absolute_path_to_workspace: Arc<str> = target_workspace_directory.to_string_lossy().into();
 
     run_starlark_modules_in_workspace(
         printer,
@@ -121,7 +122,7 @@ pub fn checkout(
     .context(format_context!("while executing checkout rules"))?;
 
     settings
-        .save(absolute_path_to_workspace.as_str())
+        .save(absolute_path_to_workspace.as_ref())
         .context(format_context!("while saving settings"))?;
 
     Ok(())

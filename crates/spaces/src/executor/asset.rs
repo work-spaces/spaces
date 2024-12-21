@@ -1,6 +1,7 @@
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use crate::workspace;
 
@@ -18,7 +19,7 @@ pub enum AssetFormat {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UpdateAsset {
-    pub destination: String,
+    pub destination: Arc<str>,
     pub format: AssetFormat,
     pub value: serde_json::Value,
 }
@@ -256,7 +257,7 @@ fn get_destination_path(
     destination: &str,
 ) -> anyhow::Result<std::path::PathBuf> {
     let workspace_path = workspace.read().get_absolute_path();
-    Ok(std::path::Path::new(&workspace_path).join(destination))
+    Ok(std::path::Path::new(workspace_path.as_ref()).join(destination))
 }
 
 fn save_asset(

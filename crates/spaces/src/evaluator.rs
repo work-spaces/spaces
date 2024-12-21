@@ -5,6 +5,7 @@ use starlark::environment::{FrozenModule, GlobalsBuilder, Module};
 use starlark::eval::{Evaluator, ReturnFileLoader};
 use starlark::syntax::{AstModule, Dialect};
 use std::collections::HashSet;
+use std::sync::Arc;
 
 #[derive(Debug)]
 struct State {}
@@ -16,7 +17,6 @@ fn get_state() -> &'static lock::StateLock<State> {
         return state;
     }
     STATE.set(lock::StateLock::new(State {}));
-
     STATE.get()
 }
 
@@ -27,27 +27,27 @@ enum WithRules {
 }
 
 fn evaluate_module(
-    workspace_path: &str,
-    name: &str,
+    workspace_path: Arc<str>,
+    name: Arc<str>,
     content: String,
     with_rules: WithRules,
 ) -> anyhow::Result<FrozenModule> {
-    if workspace::is_rules_module(name) {
-        rules::set_latest_starlark_module(name);
+    if workspace::is_rules_module(name.as_ref()) {
+        rules::set_latest_starlark_module(name.clone());
     }
 
     let ast =
-        AstModule::parse(name, content, &Dialect::Standard).map_err(|e| format_error!("{e:?}"))?;
+        AstModule::parse(name.as_ref(), content, &Dialect::Standard).map_err(|e| format_error!("{e:?}"))?;
 
     // We can get the loaded modules from `ast.loads`.
     // And ultimately produce a `loader` capable of giving those modules to Starlark.
     let mut loads = Vec::new();
     for load in ast.loads() {
-        let module_load_path = workspace::get_workspace_path(workspace_path, name, load.module_id);
+        let module_load_path = workspace::get_workspace_path(workspace_path.as_ref(), name.as_ref(), load.module_id);
         if module_load_path.ends_with(workspace::SPACES_MODULE_NAME) {
             return Err(format_error!("Error: Attempting to load module ending with `spaces.star` module. This is a reserved module name."));
         }
-        let contents = std::fs::read_to_string(module_load_path.as_str()).with_context(|| {
+        let contents = std::fs::read_to_string(module_load_path.as_ref()).with_context(|| {
             format_context!(
                 "error: failed to load {}\n--> {name}:{}\n in workspace `{workspace_path}`",
                 load.module_id,
@@ -58,8 +58,8 @@ fn evaluate_module(
         loads.push((
             load.module_id.to_owned(),
             evaluate_module(
-                workspace_path,
-                module_load_path.as_str(),
+                workspace_path.clone(),
+                module_load_path.clone(),
                 contents,
                 with_rules,
             )?,
@@ -102,9 +102,9 @@ fn evaluate_module(
 pub fn run_starlark_modules(
     printer: &mut printer::Printer,
     workspace: workspace::WorkspaceArc,
-    modules: Vec<(String, String)>,
+    modules: Vec<(Arc<str>, Arc<str>)>,
     phase: rules::Phase,
-    target: Option<String>,
+    target: Option<Arc<str>>,
 ) -> anyhow::Result<()> {
     printer.log(printer::Level::Message, "--Run Starlark Modules--")?;
     let workspace_path = workspace.read().absolute_path.to_owned();
@@ -139,9 +139,9 @@ pub fn run_starlark_modules(
                 format!("Evaluating module {}", name).as_str(),
             )?;
             let _ = evaluate_module(
-                workspace_path.as_str(),
-                name.as_str(),
-                content,
+                workspace_path.clone(),
+                name.clone(),
+                content.to_string(),
                 WithRules::Yes,
             )
             .context(format_context!("Failed to evaluate module {}", name))?;
@@ -180,7 +180,7 @@ pub fn run_starlark_modules(
                 let hash = blake3::hash(content.as_bytes()).to_string();
                 if !known_modules.contains(&hash) {
                     known_modules.insert(hash);
-                    module_queue.push_front((module, content));
+                    module_queue.push_front((module, content.into()));
                 }
             }
         }
@@ -237,20 +237,20 @@ pub fn run_starlark_modules(
 
             // prepend PATH with sysroot/bin if sysroot/bin is not already in the PATH
             let mut env = workspace.read().get_env();
-            let sysroot_bin = format!("{}/sysroot/bin", workspace.read().absolute_path);
+            let sysroot_bin: Arc<str> = format!("{}/sysroot/bin", workspace.read().absolute_path).into();
             if !env.paths.contains(&sysroot_bin) {
                 env.paths.insert(0, sysroot_bin);
             }
 
             if workspace.read().is_reproducible() {
                 env.vars.insert(
-                    workspace::SPACES_ENV_WORKSPACE_DIGEST.to_string(),
+                    workspace::SPACES_ENV_WORKSPACE_DIGEST.into(),
                     workspace.read().digest.clone(),
                 );
             }
 
-            let absolute_path = workspace.read().absolute_path.clone();
-            let workspace_path = std::path::Path::new(&absolute_path);
+            let absolute_path = workspace.read().get_absolute_path();
+            let workspace_path = std::path::Path::new(absolute_path.as_ref());
             let env_path = workspace_path.join("env");
             env.create_shell_env(env_path)
                 .context(format_context!("failed to finalize env"))?;
@@ -267,11 +267,11 @@ pub fn run_starlark_modules(
     Ok(())
 }
 
-pub fn run_starlark_script(name: &str, script: &str) -> anyhow::Result<()> {
+pub fn run_starlark_script(name: Arc<str>, script: Arc<str>) -> anyhow::Result<()> {
     // load SPACES_WORKSPACE from env
-    let workspace = std::env::var("SPACES_WORKSPACE").unwrap_or(".".to_string());
+    let workspace = std::env::var("SPACES_WORKSPACE").unwrap_or(".".to_string()).into();
 
-    evaluate_module(workspace.as_str(), name, script.to_string(), WithRules::No)
+    evaluate_module(workspace, name.clone(), script.to_string(), WithRules::No)
         .context(format_context!("Failed to evaluate module {}", name))?;
 
     Ok(())

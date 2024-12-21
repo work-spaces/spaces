@@ -23,7 +23,7 @@ impl HttpArchive {
         let workspace_directory = workspace.read().get_absolute_path();
 
         self.http_archive
-            .create_links(next_progress_bar, workspace_directory.as_str(), name)
+            .create_links(next_progress_bar, workspace_directory.as_ref(), name)
             .context(format_context!(
                 "Failed to create hard links for http_archive {}",
                 name

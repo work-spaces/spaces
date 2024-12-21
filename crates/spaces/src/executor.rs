@@ -11,10 +11,11 @@ use crate::workspace;
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 pub struct TaskResult {
-    pub new_modules: Vec<String>,
-    pub enabled_targets: Vec<String>,
+    pub new_modules: Vec<Arc<str>>,
+    pub enabled_targets: Vec<Arc<str>>,
 }
 
 impl TaskResult {
@@ -94,7 +95,7 @@ impl Task {
             let parts = name.split(':').collect::<Vec<&str>>();
             if let Some(last) = parts.last() {
                 if !last.starts_with(workspace::SPACES_CAPSULES_NAME) {
-                    let workspace_path = std::path::Path::new(workspace.as_str());
+                    let workspace_path = std::path::Path::new(workspace.as_ref());
                     let new_repo_path = workspace_path.join(last);
                     // add files in the directory that end in spaces.star
                     let modules = std::fs::read_dir(new_repo_path.clone()).context(
@@ -108,7 +109,7 @@ impl Task {
                             if workspace::is_rules_module(path.as_str()) {
                                 let relative_workspace_path =
                                     format!("{}/{}", last, module.file_name().to_string_lossy());
-                                result.new_modules.push(relative_workspace_path);
+                                result.new_modules.push(relative_workspace_path.into());
                             }
                         }
                     }

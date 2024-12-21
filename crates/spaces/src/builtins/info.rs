@@ -176,15 +176,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let workspace_arc =
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();
-        Ok(workspace.get_store_path())
+        Ok(workspace.get_store_path().to_string())
     }
 
     // remove and replace with get_absolute_path_to_workspace()
     fn absolute_workspace_path() -> anyhow::Result<String> {
         let workspace_arc =
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
-        let workspace = workspace_arc.read();
-        Ok(workspace.absolute_path.clone())
+        let absolute_path = workspace_arc.read().get_absolute_path();
+        Ok(absolute_path.to_string())
     }
 
     // remove and replace with get_platform_name()
@@ -196,12 +196,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
     // remove and replace with get_path_to_checkout()
     fn checkout_path() -> anyhow::Result<String> {
-        rules::get_checkout_path()
+        rules::get_checkout_path().map(|p| p.to_string())
     }
 
     // remove and replace with get_path_to_checkout()
     fn current_workspace_path() -> anyhow::Result<String> {
-        rules::get_checkout_path()
+        rules::get_checkout_path().map(|p| p.to_string())
     }
 
     fn get_platform_name() -> anyhow::Result<String> {
@@ -228,7 +228,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let workspace_arc =
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();
-        Ok(workspace.digest.clone())
+        Ok(workspace.digest.clone().to_string())
     }
 
     fn is_ci() -> anyhow::Result<bool> {
@@ -271,11 +271,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let workspace = workspace_arc.read();
         let env = workspace.get_env();
         if var_name == "PATH" {
-            return Ok(env.get_path());
+            return Ok(env.get_path().to_string());
         }
 
         if let Some(value) = env.vars.get(var_name) {
-            return Ok(value.clone());
+            return Ok(value.clone().to_string());
         }
 
         Err(format_error!(
@@ -322,24 +322,24 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let workspace_arc =
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();
-        Ok(workspace.get_store_path())
+        Ok(workspace.get_store_path().to_string())
     }
 
     fn get_absolute_path_to_workspace() -> anyhow::Result<String> {
         let workspace_arc =
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();
-        Ok(workspace.absolute_path.clone())
+        Ok(workspace.absolute_path.clone().to_string())
     }
 
     fn get_path_to_checkout() -> anyhow::Result<String> {
-        rules::get_checkout_path()
+        rules::get_checkout_path().map(|p| p.to_string())
     }
 
     fn get_path_to_build_checkout(
         #[starlark(require = named)] rule_name: &str,
     ) -> anyhow::Result<String> {
-        rules::get_path_to_build_checkout(rule_name)
+        rules::get_path_to_build_checkout(rule_name.into()).map(|p| p.to_string())
     }
 
     fn get_path_to_build_archive(
@@ -350,7 +350,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             serde_json::from_value(archive.to_json_value()?)
                 .context(format_context!("bad options for archive"))?;
 
-        let sanitized_rule_name = rules::get_sanitized_rule_name(rule_name);
+        let sanitized_rule_name = rules::get_sanitized_rule_name(rule_name.into());
 
         Ok(format!(
             "build/{sanitized_rule_name}/{}",
@@ -362,7 +362,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let workspace_arc =
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();
-        Ok(workspace.get_spaces_tools_path())
+        Ok(workspace.get_spaces_tools_path().to_string())
     }
 
     fn get_build_archive_info<'v>(
@@ -378,7 +378,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let output_path = std::path::Path::new(create_archive_output.as_str());
         let output_sha_suffix = output_path.with_extension("").with_extension("sha256.txt");
 
-        let sanitized_rule_name = rules::get_sanitized_rule_name(rule_name);
+        let sanitized_rule_name = rules::get_sanitized_rule_name(rule_name.into());
 
         let mut output = HashMap::new();
         let rule_output_path = format!("build/{sanitized_rule_name}");

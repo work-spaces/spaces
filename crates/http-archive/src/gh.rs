@@ -1,11 +1,12 @@
 use anyhow::Context;
 use anyhow_source_location::format_context;
+use std::sync::Arc;
 
 pub fn transform_url_to_arguments(
     allow_gh_for_download: bool,
     url: &str,
     full_path_to_archive: &str,
-) -> Option<Vec<String>> {
+) -> Option<Vec<Arc<str>>> {
     if !allow_gh_for_download {
         return None;
     }
@@ -44,16 +45,16 @@ pub fn transform_url_to_arguments(
 
     // Return the GitHub CLI command arguments
     Some(vec![
-        "release".to_string(),
-        "download".to_string(),
-        tag.to_string(),
-        format!("--repo={}/{}", owner, repo),
-        format!("--pattern={}", pattern),
-        format!("--output={full_path_to_archive}"),
+        "release".into(),
+        "download".into(),
+        tag.into(),
+        format!("--repo={}/{}", owner, repo).into(),
+        format!("--pattern={}", pattern).into(),
+        format!("--output={full_path_to_archive}").into(),
     ])
 }
 
-pub fn download(gh_command: &str, url: &str, arguments: Vec<String>, progress_bar: &mut printer::MultiProgressBar) -> anyhow::Result<()> {
+pub fn download(gh_command: &str, url: &str, arguments: Vec<Arc<str>>, progress_bar: &mut printer::MultiProgressBar) -> anyhow::Result<()> {
     let options = printer::ExecuteOptions {
         arguments,
         ..Default::default()

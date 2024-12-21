@@ -3,8 +3,9 @@ use anyhow_source_location::{format_context, format_error};
 use bincode::{Decode, Encode};
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::Arc;
 
-pub fn validate_input_globs(globs: &Option<HashSet<String>>) -> anyhow::Result<()> {
+pub fn validate_input_globs(globs: &Option<HashSet<Arc<str>>>) -> anyhow::Result<()> {
     if let Some(globs) = globs.as_ref() {
         for glob in globs {
             if !glob.starts_with('+') && !glob.starts_with('-') {
@@ -19,7 +20,7 @@ pub fn validate_input_globs(globs: &Option<HashSet<String>>) -> anyhow::Result<(
 
 #[derive(Debug, Clone, Encode, Decode)]
 pub struct Inputs {
-    inputs: HashMap<String, String>,
+    inputs: HashMap<Arc<str>, Arc<str>>,
 }
 
 impl Inputs {
@@ -50,8 +51,8 @@ impl Inputs {
     pub fn is_changed(
         &self,
         rule_name: &str,
-        digest: String,
-    ) -> anyhow::Result<Option<String>> {
+        digest: Arc<str>,
+    ) -> anyhow::Result<Option<Arc<str>>> {
 
         let current_digest = match self.inputs.get(rule_name) {
             Some(digest) => digest,
@@ -65,7 +66,7 @@ impl Inputs {
         }
     }
 
-    pub fn save_digest(&mut self, rule: &str, digest: String) {
-        self.inputs.insert(rule.to_string(), digest);
+    pub fn save_digest(&mut self, rule: &str, digest: Arc<str>) {
+        self.inputs.insert(rule.into(), digest);
     }
 }

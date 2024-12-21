@@ -2,6 +2,7 @@ use crate::{docs, evaluator, rules, tools, workspace, runner, singleton};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
+use std::sync::Arc;
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
 pub enum Level {
@@ -64,20 +65,20 @@ pub fn execute() -> anyhow::Result<()> {
         let mut stdin_contents = String::new();
         use std::io::Read;
         std::io::stdin().read_to_string(&mut stdin_contents)?;
-        evaluator::run_starlark_script(workspace::SPACES_STDIN_NAME, stdin_contents.as_str())
+        evaluator::run_starlark_script(workspace::SPACES_STDIN_NAME.into(), stdin_contents.into())
             .context(format_context!("Failed to run starlark script"))?;
         return Ok(());
     }
 
     if std::env::args().len() >= 2 {
-        let filename = std::env::args().nth(1).unwrap();
-        let input = std::path::Path::new(filename.as_str());
+        let filename:Arc<str> = std::env::args().nth(1).unwrap().into();
+        let input = std::path::Path::new(filename.as_ref());
         if input.exists() && input.extension().unwrap_or_default() == "star" {
             starstd::script::set_args(std::env::args().skip(1).collect());
 
             let input_contents = std::fs::read_to_string(input)
                 .context(format_context!("Failed to read input file {input:?}"))?;
-            evaluator::run_starlark_script(filename.as_str(), input_contents.as_str())
+            evaluator::run_starlark_script(filename.clone(), input_contents.into())
                 .context(format_context!("Failed to run starlark script {filename}"))?;
 
             let exit_code = starstd::script::get_exit_code();
@@ -208,10 +209,10 @@ enum Commands {
     Checkout {
         /// The name of the workspace
         #[arg(long)]
-        name: String,
+        name: Arc<str>,
         /// The path(s) to the star file containing checkout rules. Paths are processed in order.
         #[arg(long, value_hint = ValueHint::FilePath)]
-        script: Vec<String>,
+        script: Vec<Arc<str>>,
         /// Create a lock file for the workspace. This file can be passed on the next checkout as a script to re-create the exact workspace.
         #[arg(long)]
         create_lock_file: bool,
@@ -225,13 +226,13 @@ enum Commands {
     Run {
         /// The name of the target to run (default is all targets).
         #[arg(long)]
-        target: Option<String>,
+        target: Option<Arc<str>>,
     },
     /// List the targets with all details in the workspace.
     Evaluate {
         /// The name of the target to evaluate (default is all targets).
         #[arg(long)]
-        target: Option<String>,
+        target: Option<Arc<str>>,
     },
     /// Generates shell completions for the spaces command.
     Completions {
