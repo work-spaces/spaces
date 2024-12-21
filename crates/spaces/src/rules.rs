@@ -143,16 +143,15 @@ impl Task {
                 }
             }
 
-            progress.log(
-                printer::Level::Trace,
+
+            logger::Logger::new_progress(&mut progress, name.clone()).trace(
                 format!("Skip execute message after platform check? {skip_execute_message:?}")
                     .as_str(),
             );
 
             let total = deps_signals.len();
 
-            progress.log(
-                printer::Level::Trace,
+            logger::Logger::new_progress(&mut progress, name.clone()).trace(
                 format!("{name} has {} dependencies", total).as_str(),
             );
 
@@ -161,8 +160,7 @@ impl Task {
                 {
                     let (lock, _) = &*deps_rule_signal.signal;
                     let signal_access = lock.lock().unwrap();
-                    progress.log(
-                        printer::Level::Debug,
+                    logger::Logger::new_progress(&mut progress, name.clone()).debug(
                         format!(
                             "{name} Waiting for dependency {} {count}/{total}",
                             signal_access.name
@@ -175,14 +173,12 @@ impl Task {
                 count += 1;
             }
 
-            progress.log(
-                printer::Level::Debug,
+            logger::Logger::new_progress(&mut progress, name.clone()).debug(
                 format!("{name} All dependencies are done").as_str(),
             );
 
             {
-                progress.log(
-                    printer::Level::Trace,
+                logger::Logger::new_progress(&mut progress, name.clone()).debug(
                     format!("{name} check for skipping/cancelation").as_str(),
                 );
                 let state = get_state().read();
@@ -191,21 +187,18 @@ impl Task {
                     .get(name.as_ref())
                     .context(format_context!("Task not found {name}"))?;
                 if task.phase == Phase::Cancelled {
-                    progress.log(
-                        printer::Level::Debug,
+                    logger::Logger::new_progress(&mut progress, name.clone()).debug(
                         format!("Skipping {name}: cancelled").as_str(),
                     );
                     skip_execute_message =
                         Some(format!("Skipping {name} because it was cancelled"));
                 } else if task.rule.type_ == Some(RuleType::Optional) {
-                    progress.log(
-                        printer::Level::Debug,
+                    logger::Logger::new_progress(&mut progress, name.clone()).debug(
                         format!("Skipping {name} because it is optional").as_str(),
                     );
                     skip_execute_message = Some(format!("Skipping {name}: optional"));
                 }
-                progress.log(
-                    printer::Level::Trace,
+                logger::Logger::new_progress(&mut progress, name.clone()).trace(
                     format!("{name} done checking skip cancellation").as_str(),
                 );
             }
@@ -213,8 +206,7 @@ impl Task {
             let rule_name = rule.name.clone();
 
             let updated_digest = if let Some(inputs) = &rule.inputs {
-                progress.log(
-                    printer::Level::Trace,
+                logger::Logger::new_progress(&mut progress, name.clone()).trace(
                     format!("{name} update workspace changes").as_str(),
                 );
 
@@ -223,8 +215,7 @@ impl Task {
                     .update_changes(&mut progress, inputs)
                     .context(format_context!("Failed to update workspace changes"))?;
 
-                progress.log(
-                    printer::Level::Trace,
+                logger::Logger::new_progress(&mut progress, name.clone()).trace(
                     format!("{name} check for new digest").as_str(),
                 );
 
@@ -241,8 +232,7 @@ impl Task {
                     // the digest has not changed - not need to execute
                     skip_execute_message = Some(format!("Skipping {name}: same inputs"));
                 }
-                progress.log(
-                    printer::Level::Debug,
+                logger::Logger::new_progress(&mut progress, name.clone()).debug(
                     format!("New digest for {rule_name}={digest:?}").as_str(),
                 );
                 digest
@@ -251,12 +241,13 @@ impl Task {
             };
 
             if let Some(skip_message) = skip_execute_message.as_ref() {
-                progress.log(printer::Level::Info, skip_message.as_str());
+                logger::Logger::new_progress(&mut progress, name.clone()).info( skip_message.as_str());
                 progress.set_message(skip_message);
             } else {
                 progress.set_message("Running");
             }
 
+            
             let task_result = if skip_execute_message.is_none() {
                 executor
                     .execute(progress, workspace.clone(), &rule_name)
@@ -264,6 +255,7 @@ impl Task {
             } else {
                 Ok(executor::TaskResult::new())
             };
+
 
             if task_result.is_ok() {
                 if let Some(digest) = updated_digest {
@@ -350,10 +342,9 @@ pub fn debug_sorted_tasks(printer: &mut printer::Printer, phase: Phase) -> anyho
         let task_name = state.graph.get_task(*node_index);
         if let Some(task) = state.tasks.read().get(task_name) {
             if task.phase == phase {
-                printer.log(
-                    printer::Level::Debug,
+                logger::Logger::new_printer(printer, "phase".into()).debug(
                     format!("Queued task {task_name}").as_str(),
-                )?;
+                );
             }
         }
     }
@@ -582,8 +573,7 @@ impl State {
                     Some(message.as_str()),
                 );
 
-                progress_bar.log(
-                    printer::Level::Debug,
+                logger::Logger::new_progress(&mut progress_bar, task_name.into()).debug(
                     format!("Staging task {}", task.rule.name).as_str(),
                 );
                 handle_list.push(task.execute(progress_bar, workspace.clone()));

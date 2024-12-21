@@ -38,17 +38,16 @@ pub fn run_starlark_modules_in_workspace(
     }
         RunWorkspace::Script(scripts) => {
             for (name, _) in scripts.iter() {
-                printer.log(
-                    printer::Level::Message,
-                    format!("Digesting {}", name).as_str(),
-                )?;
+                logger::Logger::new_printer(printer, name.clone()).message(
+                    format!("Digesting").as_str(),
+                );
             }
 
             workspace_arc.write().is_create_lock_file = is_create_lock_file;
             workspace_arc.write().digest = workspace::calculate_digest(&scripts);
 
             evaluator::run_starlark_modules(printer, workspace_arc.clone(), scripts, phase, None)
-                .context(format_context!("while executing checkout rules"))?;
+                .context(format_context!("while evaulating starlark modules"))?;
 
             workspace_arc
                 .read()
@@ -119,7 +118,7 @@ pub fn checkout(
         RunWorkspace::Script(scripts),
         create_lock_file,
     )
-    .context(format_context!("while executing checkout rules"))?;
+    .context(format_context!("while evaulating starklark modules for checkout"))?;
 
     settings
         .save(absolute_path_to_workspace.as_ref())

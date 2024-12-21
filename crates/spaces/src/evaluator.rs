@@ -36,14 +36,15 @@ fn evaluate_module(
         rules::set_latest_starlark_module(name.clone());
     }
 
-    let ast =
-        AstModule::parse(name.as_ref(), content, &Dialect::Standard).map_err(|e| format_error!("{e:?}"))?;
+    let ast = AstModule::parse(name.as_ref(), content, &Dialect::Standard)
+        .map_err(|e| format_error!("{e:?}"))?;
 
     // We can get the loaded modules from `ast.loads`.
     // And ultimately produce a `loader` capable of giving those modules to Starlark.
     let mut loads = Vec::new();
     for load in ast.loads() {
-        let module_load_path = workspace::get_workspace_path(workspace_path.as_ref(), name.as_ref(), load.module_id);
+        let module_load_path =
+            workspace::get_workspace_path(workspace_path.as_ref(), name.as_ref(), load.module_id);
         if module_load_path.ends_with(workspace::SPACES_MODULE_NAME) {
             return Err(format_error!("Error: Attempting to load module ending with `spaces.star` module. This is a reserved module name."));
         }
@@ -99,6 +100,10 @@ fn evaluate_module(
     module.freeze()
 }
 
+fn star_logger(printer: &mut printer::Printer) -> logger::Logger {
+    logger::Logger::new_printer(printer, "starlark".into())
+}
+
 pub fn run_starlark_modules(
     printer: &mut printer::Printer,
     workspace: workspace::WorkspaceArc,
@@ -106,11 +111,11 @@ pub fn run_starlark_modules(
     phase: rules::Phase,
     target: Option<Arc<str>>,
 ) -> anyhow::Result<()> {
-    printer.log(printer::Level::Message, "--Run Starlark Modules--")?;
+    star_logger(printer).message("--Run Starlark Modules--");
     let workspace_path = workspace.read().absolute_path.to_owned();
     let mut known_modules = HashSet::new();
 
-    printer.log(printer::Level::Debug, "Collect Known Modules")?;
+    star_logger(printer).debug("Collect Known Modules");
     for (_, content) in modules.iter() {
         let hash = blake3::hash(content.as_bytes()).to_string();
         if !known_modules.contains(&hash) {
@@ -121,10 +126,7 @@ pub fn run_starlark_modules(
     let mut module_queue = std::collections::VecDeque::new();
     module_queue.extend(modules);
 
-    printer.log(
-        printer::Level::Debug,
-        format!("Input module queue:{module_queue:?}").as_str(),
-    )?;
+    star_logger(printer).trace(format!("Input module queue:{module_queue:?}").as_str());
 
     // All modules are evaulated in this loop
     // During checkout additional modules may be added to the queue
@@ -134,10 +136,7 @@ pub fn run_starlark_modules(
         if let Some((name, content)) = module_queue.pop_front() {
             let mut _workspace_lock = get_state().write();
             singleton::set_active_workspace(workspace.clone());
-            printer.log(
-                printer::Level::Message,
-                format!("Evaluating module {}", name).as_str(),
-            )?;
+            star_logger(printer).message(format!("Evaluating module {}", name).as_str());
             let _ = evaluate_module(
                 workspace_path.clone(),
                 name.clone(),
@@ -151,17 +150,15 @@ pub fn run_starlark_modules(
         // if the repo contains more spaces.star files
         if phase == rules::Phase::Checkout {
             rules::sort_tasks(None, phase).context(format_context!("Failed to sort tasks"))?;
-            printer.log(printer::Level::Debug, "--Checkout Phase--")?;
+            star_logger(printer).debug("--Checkout Phase--");
             rules::debug_sorted_tasks(printer, phase)
                 .context(format_context!("Failed to debug sorted tasks"))?;
 
             let task_result = rules::execute(printer, workspace.clone(), phase)
                 .context(format_context!("Failed to execute tasks"))?;
             if !task_result.new_modules.is_empty() {
-                printer.log(
-                    printer::Level::Trace,
-                    format!("New Modules:{:?}", task_result.new_modules).as_str(),
-                )?;
+                star_logger(printer)
+                    .trace(format!("New Modules:{:?}", task_result.new_modules).as_str());
             }
 
             let mut new_modules = Vec::new();
@@ -188,21 +185,18 @@ pub fn run_starlark_modules(
 
     match phase {
         rules::Phase::Run => {
-            printer.log(printer::Level::Message, "--Run Phase--")?;
+            star_logger(printer).message("--Run Phase--");
 
             let is_reproducible = workspace.read().is_reproducible();
-            printer.log(
-                if is_reproducible {
-                    printer::Level::Message
-                } else {
-                    printer::Level::Info
-                },
-                format!(
-                    "Is Workspace reproducible: {is_reproducible} -> {}",
-                    workspace.read().digest
-                )
-                .as_str(),
-            )?;
+            let repro_message = format!(
+                "Is Workspace reproducible: {is_reproducible} -> {}",
+                workspace.read().digest
+            );
+            if is_reproducible {
+                star_logger(printer).message(repro_message.as_str());
+            } else {
+                star_logger(printer).info(repro_message.as_str());
+            }
 
             rules::sort_tasks(target.clone(), phase)
                 .context(format_context!("Failed to sort tasks"))?;
@@ -214,7 +208,7 @@ pub fn run_starlark_modules(
                 .context(format_context!("Failed to execute tasks"))?;
         }
         rules::Phase::Evaluate => {
-            printer.log(printer::Level::Debug, "--Evaluate Phase--")?;
+            star_logger(printer).message( "--Evaluate Phase--");
             rules::sort_tasks(target.clone(), phase)
                 .context(format_context!("Failed to sort tasks"))?;
 
@@ -224,7 +218,7 @@ pub fn run_starlark_modules(
             rules::show_tasks(printer).context(format_context!("Failed to show tasks"))?;
         }
         rules::Phase::Checkout => {
-            printer.log(printer::Level::Debug, "--Post Checkout Phase--")?;
+            star_logger(printer).message("--Post Checkout Phase--");
 
             // at this point everything should be preset, sort tasks as if in run phase
             rules::sort_tasks(target.clone(), rules::Phase::Run)
@@ -237,7 +231,8 @@ pub fn run_starlark_modules(
 
             // prepend PATH with sysroot/bin if sysroot/bin is not already in the PATH
             let mut env = workspace.read().get_env();
-            let sysroot_bin: Arc<str> = format!("{}/sysroot/bin", workspace.read().absolute_path).into();
+            let sysroot_bin: Arc<str> =
+                format!("{}/sysroot/bin", workspace.read().absolute_path).into();
             if !env.paths.contains(&sysroot_bin) {
                 env.paths.insert(0, sysroot_bin);
             }
@@ -269,7 +264,9 @@ pub fn run_starlark_modules(
 
 pub fn run_starlark_script(name: Arc<str>, script: Arc<str>) -> anyhow::Result<()> {
     // load SPACES_WORKSPACE from env
-    let workspace = std::env::var("SPACES_WORKSPACE").unwrap_or(".".to_string()).into();
+    let workspace = std::env::var("SPACES_WORKSPACE")
+        .unwrap_or(".".to_string())
+        .into();
 
     evaluate_module(workspace, name.clone(), script.to_string(), WithRules::No)
         .context(format_context!("Failed to evaluate module {}", name))?;

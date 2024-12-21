@@ -9,20 +9,24 @@ pub const ENV_FILE_NAME: &str = "env.spaces.star";
 pub const LOCK_FILE_NAME: &str = "lock.spaces.star";
 pub const SPACES_MODULE_NAME: &str = "spaces.star";
 pub const SPACES_STDIN_NAME: &str = "stdin.star";
-pub const SPACES_LOGS_NAME: &str = "@logs";
-pub const SPACES_CAPSULES_NAME: &str = "@capsules";
+pub const SPACES_LOGS_NAME: &str = ".spaces/logs";
+pub const SPACES_CAPSULES_NAME: &str = ".spaces/capsules";
 pub const SPACES_CAPSULES_INFO_NAME: &str = "capsules.spaces.json";
-const SETTINGS_FILE_NAME: &str = "settings.spaces.json";
+const SETTINGS_FILE_NAME: &str = ".spaces/settings.spaces.json";
 const SPACES_HOME_ENV_VAR: &str = "SPACES_HOME";
 pub const SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE: &str = "SPACES_IS_WORKSPACE_REPRODUCIBLE";
 pub const SPACES_ENV_WORKSPACE_DIGEST: &str = "SPACES_WORKSPACE_DIGEST";
 pub const WORKSPACE_FILE_HEADER: &str = r#"
 """
-Spaces Environment Workspace file
+Spaces Workspace file
 """
 "#;
 
 pub type WorkspaceArc = std::sync::Arc<lock::StateLock<Workspace>>;
+
+fn logger<'a>(progress: &'a mut printer::MultiProgressBar) -> logger::Logger<'a> {
+    logger::Logger::new_progress(progress, "workspace".into())
+}
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct Settings {
@@ -231,7 +235,7 @@ impl Workspace {
 
         let mut store_path = None;
         if let Ok(load_order) = Settings::load(absolute_path.as_ref()) {
-            progress.log(printer::Level::Trace, "Loading modules from sync order");
+            logger(&mut progress).trace("Loading modules from sync order");
             store_path = Some(load_order.store_path);
             for module in load_order.order {
                 if is_rules_module(module.as_ref()) {
@@ -240,8 +244,7 @@ impl Workspace {
                     let content = std::fs::read_to_string(path.as_str())
                         .context(format_context!("Failed to read file {}", path))?;
                     if !loaded_modules.contains(&module) {
-                        progress.log(
-                            printer::Level::Trace,
+                        logger(&mut progress).trace(
                             format!("Loading module from sync order: {}", module).as_str(),
                         );
                         loaded_modules.insert(module.clone());
@@ -250,15 +253,13 @@ impl Workspace {
                 }
             }
         } else {
-            progress.log(
-                printer::Level::Trace,
+            logger(&mut progress).trace(
                 format!("No sync order found at {absolute_path}").as_str(),
             );
         }
 
         for (name, _) in original_modules.iter() {
-            progress.log(
-                printer::Level::Message,
+            logger(&mut progress).message(
                 format!("Digesting {}", name).as_str(),
             );
         }
@@ -279,8 +280,7 @@ impl Workspace {
 
                     if let Some(stripped_path) = path.strip_prefix(format!("{}/", absolute_path).as_str()) {
                         if !loaded_modules.contains(stripped_path) {
-                            progress.log(
-                                printer::Level::Trace,
+                            logger(&mut progress).trace(
                                 format!("Loading module from directory: {stripped_path}").as_str(),
                             );
                             loaded_modules.insert(stripped_path.into());
@@ -294,8 +294,7 @@ impl Workspace {
         unordered_modules.sort_by(|a, b| a.0.cmp(&b.0));
         modules.extend(unordered_modules);
 
-        progress.log(
-            printer::Level::Info,
+        logger(&mut progress).info(
             format!("Workspace working directory: {absolute_path}").as_str(),
         );
 

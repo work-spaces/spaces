@@ -4,6 +4,10 @@ use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+fn logger<'a>(progress: &'a mut printer::MultiProgressBar, url: Arc<str>) -> logger::Logger<'a> {
+    logger::Logger::new_progress(progress, url)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Git {
@@ -99,14 +103,15 @@ impl Git {
             workspace_directory.clone(),
             self.spaces_key.clone(),
             clone_arguments,
-        ).context(format_context!(
+        )
+        .context(format_context!(
             "{name} - Failed to clone repository {}",
             self.spaces_key
         ))?;
 
         if let Some(sparse_checkout) = self.sparse_checkout.as_ref() {
-            repository.setup_sparse_checkout(
-                    progress,sparse_checkout)
+            repository
+                .setup_sparse_checkout(progress, sparse_checkout)
                 .context(format_context!(
                     "Failed to init sparse checkout in {repo_directory}"
                 ))?;
@@ -123,7 +128,7 @@ impl Git {
     }
 
     fn execute_shallow_clone(
-    &self,
+        &self,
         progress: &mut printer::MultiProgressBar,
         workspace: workspace::WorkspaceArc,
         name: &str,
@@ -154,13 +159,11 @@ impl Git {
 
         let clone_path = std::path::Path::new(self.spaces_key.as_ref());
         if clone_path.exists() {
-            progress.log(
-                printer::Level::Info,
+            logger(progress, self.url.clone()).message(
                 format!("{} already exists", self.spaces_key).as_str(),
             );
         } else {
-            progress.log(
-                printer::Level::Trace,
+            logger(progress, self.url.clone()).trace(
                 format!("git clone {clone_options:?}").as_str(),
             );
 
@@ -209,12 +212,12 @@ impl Git {
         let mut is_locked = false;
         if workspace.read().is_create_lock_file {
             if let Some(commit_hash) =
-                git::get_commit_hash(&self.url, &self.spaces_key, progress).context(
+                git::get_commit_hash(progress, &self.url, &self.spaces_key).context(
                     format_context!("Failed to get commit hash for {}", self.spaces_key),
                 )?
             {
                 let rev: Arc<str> =
-                    if let Some(tag) = git::get_commit_tag(&self.url, &self.spaces_key, progress) {
+                    if let Some(tag) = git::get_commit_tag(progress, &self.url, &self.spaces_key) {
                         tag
                     } else {
                         commit_hash
@@ -233,12 +236,11 @@ impl Git {
                 ..Default::default()
             };
 
-            progress.log(
-                printer::Level::Debug,
+            logger(progress, self.url.clone()).debug(
                 format!("{}: git {options:?}", self.spaces_key).as_str(),
             );
 
-            git::execute_git_command(&self.url, progress, options).context(format_context!(
+            git::execute_git_command(progress, &self.url, options).context(format_context!(
                 "Failed to checkout commit hash from {}",
                 self.spaces_key
             ))?;
@@ -249,10 +251,9 @@ impl Git {
         // after possibly applying the lock commit, check for reproducibility
         if !is_locked {
             // check if checkout is on a branch or commiy
-            let is_branch = git::is_branch(&self.url, &self.spaces_key, &ref_name, progress);
+            let is_branch = git::is_branch(progress, &self.url, &self.spaces_key, &ref_name);
             if is_branch {
-                progress.log(
-                    printer::Level::Info,
+                logger(progress, self.url.clone()).info(
                     format!(
                         "{} is a branch - workspace is not reproducible",
                         self.spaces_key

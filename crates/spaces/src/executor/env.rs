@@ -16,8 +16,7 @@ impl UpdateEnv {
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
-        progress.log(
-            printer::Level::Debug,
+        logger::Logger::new_progress(&mut progress, name.into()).debug(
             format!("Update env {name}: {:?}", &self).as_str(),
         );
         workspace.write().update_env(self.environment.clone())

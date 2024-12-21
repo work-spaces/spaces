@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+fn logger<'a>(progress: &'a mut printer::MultiProgressBar, name: &str) -> logger::Logger<'a> {
+    logger::Logger::new_progress(progress, name.into())
+}
+
 fn get_capsule_digest(capsules_path: &str, scripts: &[Arc<str>]) -> anyhow::Result<Arc<str>> {
     let mut modules = Vec::new();
     for script in scripts {
@@ -18,11 +22,13 @@ fn get_capsule_digest(capsules_path: &str, scripts: &[Arc<str>]) -> anyhow::Resu
             format_context!("Failed to get current working when reading {script_path}"),
         )?;
 
-        let content: Arc<str> = std::fs::read_to_string(script_path.as_str()).context(format_context!(
-            "Failed to read script {} from {}",
-            script_path,
-            current_working_directory
-        ))?.into();
+        let content: Arc<str> = std::fs::read_to_string(script_path.as_str())
+            .context(format_context!(
+                "Failed to read script {} from {}",
+                script_path,
+                current_working_directory
+            ))?
+            .into();
         modules.push((script.to_owned(), content));
     }
     Ok(workspace::calculate_digest(modules.as_slice()))
@@ -44,8 +50,8 @@ pub struct Descriptor {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Info {
     descriptor: Descriptor, // descriptor of the capsule
-    version: Arc<str>,        // Version of the capsule
-    prefix: Arc<str>,         // --prefix location where the capsule is available when installed
+    version: Arc<str>,      // Version of the capsule
+    prefix: Arc<str>,       // --prefix location where the capsule is available when installed
 }
 
 // capsules.spaces.json
@@ -53,8 +59,8 @@ type InfoFile = Vec<Info>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CapsuleCheckoutInfo {
-    pub digest: Arc<str>,  // The workspace digest
-    pub info: Vec<Info>, // List of capsules that are available to build
+    pub digest: Arc<str>, // The workspace digest
+    pub info: Vec<Info>,  // List of capsules that are available to build
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -170,7 +176,9 @@ fn get_spaces_command() -> anyhow::Result<Arc<str>> {
     Ok(spaces_exec.to_string_lossy().into())
 }
 
-fn get_spaces_env(workspace: workspace::WorkspaceArc) -> anyhow::Result<HashMap<Arc<str>, Arc<str>>> {
+fn get_spaces_env(
+    workspace: workspace::WorkspaceArc,
+) -> anyhow::Result<HashMap<Arc<str>, Arc<str>>> {
     let mut env: HashMap<Arc<str>, Arc<str>> = HashMap::new();
     let workspace_env = workspace.read().get_env();
     env.insert(
@@ -274,8 +282,8 @@ impl Capsule {
 
     fn hard_link_capsule_to_workspace(
         &self,
-        capsule_prefix: &str,
         progress: &mut printer::MultiProgressBar,
+        capsule_prefix: &str,
     ) -> anyhow::Result<()> {
         if let Some(prefix) = self.prefix.as_ref() {
             // walkdir on capsule prefix - hard link files to the workspace
@@ -284,8 +292,7 @@ impl Capsule {
 
             progress.set_total(walker_list.len() as u64);
 
-            progress.log(
-                printer::Level::Info,
+            logger(progress, capsule_prefix).info(
                 format!("Hard linking capsule prefix {capsule_prefix} to workspace path {prefix}, {} items", walker_list.len())
                     .as_str(),
             );
@@ -317,10 +324,8 @@ impl Capsule {
 
                     let destination = destination_path.to_string_lossy().to_string();
                     let source = source_path.to_string_lossy().to_string();
-                    progress.log(
-                        printer::Level::Trace,
-                        format!("Hard linking {:?} to {:?}", source, destination).as_str(),
-                    );
+                    logger(progress, capsule_prefix)
+                        .trace(format!("Hard linking {:?} to {:?}", source, destination).as_str());
 
                     http_archive::HttpArchive::create_hard_link(
                         destination.clone(),
@@ -354,20 +359,19 @@ impl Capsule {
             workspace.clone(),
             workspace::SPACES_CAPSULES_NAME,
             &self.scripts,
-        ).context(format_context!("Failed to create capsule run info"))?;
-        let workspace_path: Arc<str> = format!("{}/{}", workspace::SPACES_CAPSULES_NAME, workspace_name).into();
+        )
+        .context(format_context!("Failed to create capsule run info"))?;
+        let workspace_path: Arc<str> =
+            format!("{}/{}", workspace::SPACES_CAPSULES_NAME, workspace_name).into();
 
-        progress.log(
-            printer::Level::Info,
-            format!("Executing spaces capsule in {workspace_path}").as_str(),
-        );
+        logger(progress, name)
+            .info(format!("Executing spaces capsule in {workspace_path}").as_str());
 
         let run_status = capsule_run_info
             .try_lock()
             .context(format_context!("Failed to lock capsule"))?;
 
-        progress.log(
-            printer::Level::Message,
+        logger(progress, name).message(
             format!(
                 "Capsule run status for {} is {:?}",
                 capsule_run_info.digest, run_status
@@ -396,10 +400,8 @@ impl Capsule {
         };
 
         if run_status == CapsuleRunStatus::StartNow {
-            progress.log(
-                printer::Level::Info,
-                format!("`spaces run` for capsule {}", capsule_run_info.digest).as_str(),
-            );
+            logger(progress, name)
+                .info(format!("`spaces run` for capsule {}", capsule_run_info.digest).as_str());
 
             self.run_capsule(
                 progress,
@@ -410,10 +412,8 @@ impl Capsule {
             )
             .context(format_context!("Failed to run capsule {name}"))?;
 
-            progress.log(
-                printer::Level::Message,
-                format!("Ready to unlock capsule {}", capsule_run_info.digest).as_str(),
-            );
+            logger(progress, name)
+                .message(format!("Ready to unlock capsule {}", capsule_run_info.digest).as_str());
 
             let capsule_complete_info = CapsuleCompleteInfo {
                 digest: capsule_run_info.digest.clone(),
@@ -422,10 +422,8 @@ impl Capsule {
             let capsule_info_json = serde_json::to_string_pretty(&capsule_complete_info)
                 .context(format_context!("Failed to serialize capsule info"))?;
 
-            progress.log(
-                printer::Level::Debug,
-                format!("Updating capsule info {}", capsule_run_info.digest).as_str(),
-            );
+            logger(progress, name)
+                .debug(format!("Updating capsule info {}", capsule_run_info.digest).as_str());
 
             for entry in capsule_info.iter() {
                 let file_path = format!("{}/{}.json", entry.prefix, capsule_run_info.digest);
@@ -434,8 +432,7 @@ impl Capsule {
                 )?;
             }
         } else {
-            progress.log(
-                printer::Level::Info,
+            logger(progress, name).info(
                 format!("waiting for capsule {}", capsule_run_info.digest).as_str(),
             );
 
@@ -451,13 +448,12 @@ impl Capsule {
             }
 
             for prefix in capsule_prefix {
-                self.hard_link_capsule_to_workspace(&prefix, progress)
+                self.hard_link_capsule_to_workspace(progress, &prefix)
                     .context(format_context!("Failed to hard link capsule to workspace"))?;
             }
         }
 
-        progress.log(
-            printer::Level::Message,
+        logger(progress, name).message(
             format!("Now unlocking {}", capsule_run_info.digest).as_str(),
         );
 

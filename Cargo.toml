@@ -1,12 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["crates/spaces", "crates/graph", "crates/git", "crates/platform", "crates/starstd", "crates/changes", "crates/environment", "crates/lock"]
+members = ["crates/spaces", "crates/graph", "crates/git", "crates/platform", "crates/starstd", "crates/changes", "crates/environment", "crates/lock", "crates/logger"]
 
 [workspace.dependencies]
 anyhow-source-location = { git = "https://github.com/work-spaces/anyhow-source-location", rev = "019b7804e35a72f945b3b4b3a96520cdbaa77f70" }
 anyhow = "1"
-printer = { git = "https://github.com/work-spaces/printer-rs", rev = "ee614a4d17acc57f1dc97d1a0595b039676d9343" }
-easy-archiver = { git = "https://github.com/work-spaces/easy-archiver", rev = "06684234d75d209826d6f1ff240a8be5dbc99abd", features = [
+printer = { git = "https://github.com/work-spaces/printer-rs", rev = "a865c63f25d7e9c9ef3dec75f7392c6f7dc513d3" }
+easy-archiver = { git = "https://github.com/work-spaces/easy-archiver", rev = "c8aaf7d1e836a6a426c04bfb2bc2ce28e3948229", features = [
     "printer",
 ] }
 starlark = "0.12"
@@ -27,6 +27,7 @@ starstd.path = "crates/starstd"
 changes.path = "crates/changes"
 environment.path = "crates/environment"
 lock.path = "crates/lock"
+logger.path = "crates/logger"
 
 [profile.dev]
 opt-level = 3

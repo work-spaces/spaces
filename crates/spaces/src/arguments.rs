@@ -1,6 +1,6 @@
-use crate::{docs, evaluator, rules, tools, workspace, runner, singleton};
+use crate::{docs, evaluator, rules, runner, singleton, tools, workspace};
 use anyhow::Context;
-use anyhow_source_location::format_context;
+use anyhow_source_location::{format_context, format_error};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
 use std::sync::Arc;
 
@@ -60,7 +60,6 @@ fn handle_verbosity(
 }
 
 pub fn execute() -> anyhow::Result<()> {
-
     if std::env::args().len() == 1 {
         let mut stdin_contents = String::new();
         use std::io::Read;
@@ -71,7 +70,7 @@ pub fn execute() -> anyhow::Result<()> {
     }
 
     if std::env::args().len() >= 2 {
-        let filename:Arc<str> = std::env::args().nth(1).unwrap().into();
+        let filename: Arc<str> = std::env::args().nth(1).unwrap().into();
         let input = std::path::Path::new(filename.as_ref());
         if input.exists() && input.extension().unwrap_or_default() == "star" {
             starstd::script::set_args(std::env::args().skip(1).collect());
@@ -102,17 +101,32 @@ pub fn execute() -> anyhow::Result<()> {
                 Commands::Checkout {
                     name,
                     script,
+                    workflow,
                     create_lock_file,
                     force_install_tools,
                 },
         } => {
             handle_verbosity(&mut printer, verbosity.into(), ci, hide_progress_bars);
 
+            let mut inputs: Vec<Arc<str>> = vec![];
+            inputs.extend(script.clone());
+            if let Some(workflow) = workflow {
+                let parts: Vec<&str> = workflow.split(':').collect();
+                if parts.len() != 2 {
+                    return Err(format_error!("Invalid workflow format: {}.\n Use --workflow=<directory>:<script>,<script>,...", workflow));
+                }
+                let directory = parts[0];
+                let scripts = parts[1].split(',');
+                for script in scripts {
+                    inputs.push(format!("{}/{}", directory, script).into());
+                }
+            }
+
             tools::install_tools(&mut printer, force_install_tools)
                 .context(format_context!("while installing tools"))?;
 
-            runner::checkout(&mut printer, name, script, create_lock_file)
-                    .context(format_context!("while executing checkout rules"))?;
+            runner::checkout(&mut printer, name, inputs, create_lock_file)
+                .context(format_context!("during runner checkout"))?;
         }
 
         Arguments {
@@ -129,7 +143,7 @@ pub fn execute() -> anyhow::Result<()> {
                 runner::RunWorkspace::Target(None),
                 false,
             )
-            .context(format_context!("while executing checkout rules"))?;
+            .context(format_context!("during runner sync"))?;
         }
 
         Arguments {
@@ -213,6 +227,9 @@ enum Commands {
         /// The path(s) to the star file containing checkout rules. Paths are processed in order.
         #[arg(long, value_hint = ValueHint::FilePath)]
         script: Vec<Arc<str>>,
+        /// Workflow scripts to process in the format of "--workflow=<directory>:<script>,<script>,...". --script is processed first.
+        #[arg(long)]
+        workflow: Option<Arc<str>>,
         /// Create a lock file for the workspace. This file can be passed on the next checkout as a script to re-create the exact workspace.
         #[arg(long)]
         create_lock_file: bool,

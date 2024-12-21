@@ -4,7 +4,7 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::sync::{RwLock, Arc};
+use std::sync::{Arc, RwLock};
 use tokio::io::AsyncWriteExt;
 
 struct State {}
@@ -27,6 +27,13 @@ pub enum ArchiveLink {
     Hard,
 }
 
+fn label_logger<'a>(
+    progress: &'a mut printer::MultiProgressBar,
+    label: &str,
+) -> logger::Logger<'a> {
+    logger::Logger::new_progress(progress, label.into())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct Archive {
@@ -47,15 +54,13 @@ struct Files {
 }
 
 pub fn download(
+    mut progress: printer::MultiProgressBar,
     url: &str,
     destination: &str,
     runtime: &tokio::runtime::Runtime,
-    mut progress: printer::MultiProgressBar,
 ) -> anyhow::Result<tokio::task::JoinHandle<anyhow::Result<printer::MultiProgressBar>>> {
-    progress.log(
-        printer::Level::Trace,
-        format!("Downloading using reqwest {url} -> {destination}").as_str(),
-    );
+    label_logger(&mut progress, url)
+        .trace(format!("Downloading using reqwest {url} -> {destination}").as_str());
 
     let destination = destination.to_string();
     let url = url.to_string();
@@ -70,10 +75,7 @@ pub fn download(
             .header(reqwest::header::USER_AGENT, "wget")
             .header(reqwest::header::ACCEPT, "*/*");
 
-        progress.log(
-            printer::Level::Debug,
-            format!("Reqwest request: {request:?}").as_str(),
-        );
+        label_logger(&mut progress, &url).debug(format!("Reqwest request: {request:?}").as_str());
 
         let mut response = request.send().await?;
 
@@ -83,10 +85,7 @@ pub fn download(
             ));
         }
 
-        progress.log(
-            printer::Level::Debug,
-            format!("Response: {response:?}").as_str(),
-        );
+        label_logger(&mut progress, &url).debug(format!("Response: {response:?}").as_str());
 
         let total_size = response.content_length().unwrap_or(0);
         progress.set_total(total_size);
@@ -281,8 +280,7 @@ impl HttpArchive {
 
                 match self.archive.link {
                     ArchiveLink::Hard => {
-                        progress_bar.log(
-                            printer::Level::Trace,
+                        label_logger(&mut progress_bar, "hardlink").trace(
                             format!("Creating hard link {full_target_path} -> {source}").as_str(),
                         );
                         Self::create_hard_link(full_target_path.clone(), source.clone()).context(
@@ -292,8 +290,7 @@ impl HttpArchive {
                     ArchiveLink::None => (),
                 }
             } else {
-                progress_bar.log(
-                    printer::Level::Warning,
+                label_logger(&mut progress_bar, "hardlink").warning(
                     format!(
                         "Failed to strip prefix {:?} from {file}",
                         self.archive.strip_prefix
@@ -367,10 +364,8 @@ impl HttpArchive {
 
                 progress_bar
             } else {
-                progress_bar.log(
-                    printer::Level::Trace,
-                    format!("{} Downloading using reqwest", self.archive.url).as_str(),
-                );
+                label_logger(&mut progress_bar, &self.archive.url)
+                    .debug(format!("{} Downloading using reqwest", self.archive.url).as_str());
 
                 let join_handle = self
                     .download(&runtime, progress_bar)
@@ -378,17 +373,12 @@ impl HttpArchive {
                 runtime.block_on(join_handle)??
             }
         } else {
-            progress_bar.log(
-                printer::Level::Trace,
-                format!("{} download not required", self.archive.url).as_str(),
-            );
+            label_logger(&mut progress_bar, &self.archive.url)
+                .debug(format!("{} download not required", self.archive.url).as_str());
             progress_bar
         };
 
-        next_progress_bar.log(
-            printer::Level::Trace,
-            format!("{} Extracting", self.archive.url).as_str(),
-        );
+        label_logger(&mut next_progress_bar, &self.archive.url).debug("Extracting archive");
 
         let next_progress_bar = self.extract(next_progress_bar).context(format_context!(
             "extract failed {}",
@@ -409,10 +399,10 @@ impl HttpArchive {
         }
 
         download(
+            progress,
             self.archive.url.as_ref(),
             full_path_to_archive.as_str(),
             runtime,
-            progress,
         )
     }
 
@@ -437,10 +427,8 @@ impl HttpArchive {
         mut progress_bar: printer::MultiProgressBar,
     ) -> anyhow::Result<printer::MultiProgressBar> {
         if !self.is_extract_required() {
-            progress_bar.log(
-                printer::Level::Debug,
-                format!("{} Extract not required", self.archive.url).as_str(),
-            );
+            label_logger(&mut progress_bar, &self.archive.url)
+                .debug(format!("Extract not required").as_str());
             return Ok(progress_bar);
         }
 
@@ -488,7 +476,10 @@ impl HttpArchive {
             progress_bar
         };
         self.save_files_json(Files {
-            files: extracted_files.into_iter().map(|file| file.into()).collect(),
+            files: extracted_files
+                .into_iter()
+                .map(|file| file.into())
+                .collect(),
         })
         .context(format_context!("Failed to save json files manifest"))?;
         Ok(next_progress_bar)

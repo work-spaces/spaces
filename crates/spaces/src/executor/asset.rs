@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use crate::workspace;
 
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum AssetFormat {
     #[serde(rename = "json")]
@@ -52,43 +51,59 @@ impl UpdateAsset {
         &self,
         mut progress: printer::MultiProgressBar,
         workspace: workspace::WorkspaceArc,
-        _name: &str,
+        name: &str,
     ) -> anyhow::Result<()> {
         use json_value_merge::Merge;
 
-        let dest_path = get_destination_path(workspace.clone(), &self.destination).context(format_context!(
-            "Failed to get destination path for asset file {}",
-            &self.destination
-        ))?;
+        let mut logger = logger::Logger::new_progress(&mut progress, name.into());
+        let mut workspace_write_lock = workspace.write();
+        let workspace_path = workspace_write_lock.get_absolute_path();
 
-        let new_value =
-            if workspace.read().updated_assets.contains(&self.destination) {
-                let old_value = std::fs::read_to_string(dest_path.clone()).context(
-                    format_context!("Failed to read asset file {}", dest_path.display()),
-                )?;
+        let dest_path = get_destination_path(workspace_path.clone(), &self.destination).context(
+            format_context!(
+                "Failed to get destination path for asset file {}",
+                &self.destination
+            ),
+        )?;
 
-                progress.log(
-                    printer::Level::Trace,
-                    format!("Parsing asset file `{}` as {:?}", old_value, self.format).as_str(),
-                );
-                let mut old_value = parse_value(self.format, &old_value).context(
-                    format_context!("Failed to parse asset file {}", &self.destination),
-                )?;
+        logger.message(format!("update asset {}", self.destination).as_str());
 
-                old_value.merge(&self.value);
+        let new_value = if workspace_write_lock
+            .updated_assets
+            .contains(&self.destination)
+        {
+            logger.debug(format!("load existing value {}", self.destination).as_str());
 
-                old_value
-            } else {
-                workspace.write().updated_assets.insert(self.destination.clone());
-                self.value.clone()
-            };
+            let old_value = std::fs::read_to_string(dest_path.clone()).context(format_context!(
+                "Failed to read asset file {}",
+                dest_path.display()
+            ))?;
+
+            logger
+                .trace(format!("Parsing asset file `{}` as {:?}", old_value, self.format).as_str());
+            let mut old_value = parse_value(self.format, &old_value).context(format_context!(
+                "Failed to parse asset file {}",
+                &self.destination
+            ))?;
+
+            old_value.merge(&self.value);
+
+            old_value
+        } else {
+            logger.debug(format!("Add new value to {}", self.destination).as_str());
+            workspace_write_lock
+                .updated_assets
+                .insert(self.destination.clone());
+            self.value.clone()
+        };
 
         let content = format_value(self.format, &new_value).context(format_context!(
             "Failed to format asset file {}",
             &self.destination
         ))?;
 
-        save_asset(workspace, &self.destination, &content).context(format_context!("failed to add asset"))?;
+        save_asset(workspace_path, &self.destination, &content)
+            .context(format_context!("failed to add asset"))?;
 
         Ok(())
     }
@@ -176,7 +191,9 @@ impl AddAsset {
         workspace: workspace::WorkspaceArc,
         _name: &str,
     ) -> anyhow::Result<()> {
-        save_asset(workspace, &self.destination, &self.content)
+        let workspace_write_lock = workspace.write();
+        let workspace_path = workspace_write_lock.get_absolute_path();
+        save_asset(workspace_path, &self.destination, &self.content)
             .context(format_context!("failed to add asset"))?;
         Ok(())
     }
@@ -253,19 +270,14 @@ impl AddSoftLink {
 }
 
 fn get_destination_path(
-    workspace: workspace::WorkspaceArc,
+    workspace_path: Arc<str>,
     destination: &str,
 ) -> anyhow::Result<std::path::PathBuf> {
-    let workspace_path = workspace.read().get_absolute_path();
     Ok(std::path::Path::new(workspace_path.as_ref()).join(destination))
 }
 
-fn save_asset(
-    workspace: workspace::WorkspaceArc,
-    destination: &str,
-    content: &str,
-) -> anyhow::Result<()> {
-    let output_path = get_destination_path(workspace, destination)
+fn save_asset(workspace_path: Arc<str>, destination: &str, content: &str) -> anyhow::Result<()> {
+    let output_path = get_destination_path(workspace_path, destination)
         .context(format_context!("Failed to get destaiont for {destination}"))?;
     if let Some(parent) = output_path.parent() {
         std::fs::create_dir_all(parent).context(format_context!(

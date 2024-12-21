@@ -12,4 +12,5 @@ glob-match = "0.2"
 
 printer.workspace = true
 anyhow-source-location.workspace = true
+logger.workspace = true
 

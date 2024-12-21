@@ -10,3 +10,4 @@ serde_json.workspace = true
 anyhow.workspace = true
 anyhow-source-location.workspace = true
 printer.workspace = true
+logger.workspace = true

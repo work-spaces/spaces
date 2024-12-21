@@ -2,6 +2,10 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use std::sync::Arc;
 
+fn gh_logger<'a>(progress: &'a mut printer::MultiProgressBar) -> logger::Logger<'a> {
+    logger::Logger::new_progress(progress, "gh".into())
+}
+
 pub fn transform_url_to_arguments(
     allow_gh_for_download: bool,
     url: &str,
@@ -60,8 +64,7 @@ pub fn download(gh_command: &str, url: &str, arguments: Vec<Arc<str>>, progress_
         ..Default::default()
     };
 
-    progress_bar.log(
-        printer::Level::Trace,
+    gh_logger(progress_bar).trace(
         format!("{url} Downloading using gh {options:?}").as_str(),
     );
 

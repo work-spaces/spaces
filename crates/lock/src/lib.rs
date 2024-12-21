@@ -170,8 +170,7 @@ impl FileLock {
             std::thread::sleep(std::time::Duration::from_millis(500));
             log_count += 1;
             if log_count == 10 {
-                progress.log(
-                    printer::Level::Debug,
+                logger::Logger::new_progress(progress, "lock".into()).debug(
                     format!("Still waiting for capsule to finish at {}", self.path).as_str(),
                 );
                 log_count = 0;

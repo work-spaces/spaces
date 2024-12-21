@@ -19,6 +19,10 @@ pub struct ChangeDetail {
     pub detail_type: ChangeDetailType,
 }
 
+fn changes_logger(progress: &mut printer::MultiProgressBar) -> logger::Logger {
+    logger::Logger::new_progress(progress, "Changes".into())
+}
+
 #[derive(Clone, Debug, Encode, Decode)]
 pub struct Changes {
     path: Arc<str>,
@@ -117,6 +121,7 @@ impl Changes {
         change_detail: ChangeDetail,
     ) -> bool {
         let sane_path = Self::sanitize_path(&path);
+        let mut logger = logger::Logger::new_progress(progress, "Changes".into());
         if let Some(previous_entry) = self
             .entries
             .insert(sane_path.into(), change_detail.clone())
@@ -125,8 +130,7 @@ impl Changes {
                 (&previous_entry.detail_type, &change_detail.detail_type)
             {
                 if previous_hash != new_hash {
-                    progress.log(
-                        printer::Level::Debug,
+                    logger.debug(
                         format!("{path} hash changed").as_str(),
                     );
 
@@ -134,7 +138,7 @@ impl Changes {
                 }
             }
         } else {
-            progress.log(printer::Level::Debug, format!("{path} added hash").as_str());
+            logger.debug(format!("{path} added hash").as_str());
             return true;
         }
 
@@ -147,8 +151,7 @@ impl Changes {
         inputs: &HashSet<Arc<str>>,
     ) -> anyhow::Result<()> {
         for input in inputs {
-            progress.log(
-                printer::Level::Trace,
+            changes_logger(progress).trace(
                 format!("Update changes for {input}").as_str(),
             );
 
@@ -178,8 +181,7 @@ impl Changes {
             };
 
             if let Some(glob_include_path) = glob::is_glob_include(input_path.as_ref()) {
-                progress.log(
-                    printer::Level::Trace,
+                changes_logger(progress).trace(
                     format!("Update glob {glob_include_path}").as_str(),
                 );
 
@@ -208,8 +210,7 @@ impl Changes {
                 }
 
                 if count > 0 {
-                    progress.log(
-                        printer::Level::Message,
+                    changes_logger(progress).message(
                         format!("Updated {count} items from {input}").as_str(),
                     );
                 }
@@ -245,8 +246,7 @@ impl Changes {
         for input in inputs.iter() {
             if let Some(change_detail) = self.entries.get(*input) {
                 if let ChangeDetailType::File(hash) = &change_detail.detail_type {
-                    progress.log(
-                        printer::Level::Trace,
+                    changes_logger(progress).trace( 
                         format!("Hashing {input}:{hash}").as_str(),
                     );
                     count += 1;
@@ -256,8 +256,7 @@ impl Changes {
         }
 
         if count > 0 {
-            progress.log(
-                printer::Level::Message,
+            changes_logger(progress).message( 
                 format!("Hashed {count} items").as_str(),
             );
         }

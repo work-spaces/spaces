@@ -49,13 +49,15 @@ impl OrasArchive {
             ..Default::default()
         };
 
-        progress_bar.log(
-            printer::Level::Trace,
-            format!("{artifact_label} Downloading using oras {options:?}").as_str(),
-        );
+        let mut logger =
+            logger::Logger::new_progress(progress_bar, self.get_artifact_label().clone());
+        logger.debug(format!("Downloading using oras {}", options.arguments.join(" ")).as_str());
 
         progress_bar
-            .execute_process(&get_oras_command(&workspace.read().get_spaces_tools_path()), options)
+            .execute_process(
+                &get_oras_command(&workspace.read().get_spaces_tools_path()),
+                options,
+            )
             .context(format_context!(
                 "failed to download {artifact_label} using oras",
             ))?;
@@ -70,24 +72,24 @@ impl OrasArchive {
     ) -> anyhow::Result<ManifestDetails> {
         let artifact_label = self.get_artifact_label();
         let options = printer::ExecuteOptions {
-            arguments: vec![
-                "manifest".into(),
-                "fetch".into(),
-                artifact_label.clone(),
-            ],
+            arguments: vec!["manifest".into(), "fetch".into(), artifact_label.clone()],
             is_return_stdout: true,
             ..Default::default()
         };
 
         let manifest = progress
-            .execute_process(get_oras_command(&workspace.read().get_spaces_tools_path()).as_ref(), options)
+            .execute_process(
+                get_oras_command(&workspace.read().get_spaces_tools_path()).as_ref(),
+                options,
+            )
             .context(format_context!(
                 "failed to download {artifact_label} using oras",
             ))?;
 
         if let Some(manifest) = manifest {
-            let value: serde_json::Value = serde_json::from_str(&manifest)
-                .context(format_context!("failed to parse manifest from {artifact_label}"))?;
+            let value: serde_json::Value = serde_json::from_str(&manifest).context(
+                format_context!("failed to parse manifest from {artifact_label}"),
+            )?;
             let mut sha256_option: Option<Arc<str>> = None;
             let mut filename_option: Option<Arc<str>> = None;
 

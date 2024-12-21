@@ -23,8 +23,7 @@ impl Archive {
             "failed to create output directory {output_directory}"
         ))?;
 
-        progress.log(
-            printer::Level::Debug,
+        logger::Logger::new_progress(&mut progress, name.into()).debug(
             format!("Creating archive {output_directory}").as_str(),
         );
 

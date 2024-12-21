@@ -82,9 +82,16 @@ fn get_state() -> &'static RwLock<State> {
     STATE.get()
 }
 
-pub fn execute_git_command(
+fn url_logger<'a>(
+    progress_bar: &'a mut printer::MultiProgressBar,
     url: &str,
+) -> logger::Logger<'a> {
+    logger::Logger::new_progress(progress_bar, url.into())
+}
+
+pub fn execute_git_command(
     progress_bar: &mut printer::MultiProgressBar,
+    url: &str,
     options: printer::ExecuteOptions,
 ) -> anyhow::Result<Option<String>> {
     let mut is_ready = false;
@@ -127,10 +134,7 @@ pub fn execute_git_command(
         .environment
         .push(("GIT_TERMINAL_PROMPT".into(), "0".into()));
 
-    progress_bar.log(
-        printer::Level::Debug,
-        format!("Execute Command for {url}").as_str(),
-    );
+    url_logger(progress_bar, url).debug(format!("git {}", options.arguments.join(" ")).as_str());
 
     let full_command = options.get_full_command_in_working_directory("git");
     let result = progress_bar
@@ -142,18 +146,15 @@ pub fn execute_git_command(
         let state = state_lock.deref_mut();
         state.active_repos.remove(url);
     }
-    progress_bar.log(
-        printer::Level::Debug,
-        format!("git repo released {url}").as_str(),
-    );
+    url_logger(progress_bar, url).trace("Released");
 
     result
 }
 
 pub fn get_commit_hash(
+    progress_bar: &mut printer::MultiProgressBar,
     url: &str,
     directory: &str,
-    progress_bar: &mut printer::MultiProgressBar,
 ) -> anyhow::Result<Option<Arc<str>>> {
     let options = printer::ExecuteOptions {
         working_directory: Some(directory.into()),
@@ -162,7 +163,7 @@ pub fn get_commit_hash(
         ..Default::default()
     };
 
-    let commit_hash = execute_git_command(url, progress_bar, options).context(format_context!(
+    let commit_hash = execute_git_command(progress_bar, url, options).context(format_context!(
         "Failed to get commit hash from {directory}"
     ))?;
 
@@ -171,10 +172,10 @@ pub fn get_commit_hash(
 }
 
 pub fn is_branch(
+    progress_bar: &mut printer::MultiProgressBar,
     url: &str,
     directory: &str,
     ref_name: &str,
-    progress_bar: &mut printer::MultiProgressBar,
 ) -> bool {
     let options = printer::ExecuteOptions {
         working_directory: Some(directory.into()),
@@ -186,13 +187,13 @@ pub fn is_branch(
         ],
         ..Default::default()
     };
-    execute_git_command(url, progress_bar, options).is_ok()
+    execute_git_command(progress_bar, url, options).is_ok()
 }
 
 pub fn get_commit_tag(
+    progress_bar: &mut printer::MultiProgressBar,
     url: &str,
     directory: &str,
-    progress_bar: &mut printer::MultiProgressBar,
 ) -> Option<Arc<str>> {
     let options = printer::ExecuteOptions {
         working_directory: Some(directory.into()),
@@ -201,7 +202,7 @@ pub fn get_commit_tag(
         ..Default::default()
     };
 
-    if let Ok(Some(stdout)) = execute_git_command(url, progress_bar, options) {
+    if let Ok(Some(stdout)) = execute_git_command(progress_bar, url, options) {
         let stdout_trimmed = stdout.trim();
         Some(stdout_trimmed.into())
     } else {
@@ -210,10 +211,10 @@ pub fn get_commit_tag(
 }
 
 pub fn get_branch_log(
+    progress_bar: &mut printer::MultiProgressBar,
     url: &str,
     directory: &str,
     branch: &str,
-    progress_bar: &mut printer::MultiProgressBar,
 ) -> anyhow::Result<Vec<LogEntry>> {
     let options = printer::ExecuteOptions {
         working_directory: Some(directory.into()),
@@ -230,7 +231,7 @@ pub fn get_branch_log(
         ..Default::default()
     };
 
-    let stdout_option = execute_git_command(url, progress_bar, options)
+    let stdout_option = execute_git_command(progress_bar, url, options)
         .context(format_context!("Failed to get branch log from {directory}"))?;
 
     if let Some(stdout) = stdout_option {
@@ -292,7 +293,7 @@ impl BareRepository {
                 url.into(),
             ];
 
-            execute_git_command(url, progress_bar, options)
+            execute_git_command(progress_bar, url, options)
                 .context(format_context!("while creating bare repo"))?;
 
             let options_git_config_auto_push = printer::ExecuteOptions {
@@ -307,7 +308,7 @@ impl BareRepository {
                 ..Default::default()
             };
 
-            execute_git_command(url, progress_bar, options_git_config_auto_push)
+            execute_git_command(progress_bar, url, options_git_config_auto_push)
                 .context(format_context!("while configuring auto-push"))?;
 
             let options_git_config = printer::ExecuteOptions {
@@ -320,7 +321,7 @@ impl BareRepository {
                 ..Default::default()
             };
 
-            execute_git_command(url, progress_bar, options_git_config)
+            execute_git_command(progress_bar, url, options_git_config)
                 .context(format_context!("while setting git options"))?;
         }
 
@@ -415,7 +416,7 @@ impl Worktree {
         options.working_directory = Some(repository.full_path.clone());
         options.arguments = vec!["worktree".into(), "prune".into()];
 
-        execute_git_command(&repository.url, progress_bar, options.clone())
+        execute_git_command(progress_bar, &repository.url, options.clone())
             .context(format_context!("while pruning worktree"))?;
 
         let full_path: Arc<str> = format!("{}/{}", path, repository.spaces_key).into();
@@ -427,7 +428,7 @@ impl Worktree {
                 full_path.clone(),
             ];
 
-            execute_git_command(&repository.url, progress_bar, options)
+            execute_git_command(progress_bar, &repository.url, options)
                 .context(format_context!("while adding detached worktree"))?;
         }
 
@@ -517,15 +518,11 @@ impl Repository {
     ) -> anyhow::Result<Self> {
         let clone_path = std::path::Path::new(clone_name.as_ref());
         if clone_path.exists() {
-            progress.log(
-                printer::Level::Info,
-                format!("{} already exists", clone_name).as_str(),
-            );
+            url_logger(progress, url.as_ref())
+                .message(format!("{} already exists", clone_name).as_str());
         } else {
-            progress.log(
-                printer::Level::Message,
-                format!("{}: git {}", url, arguments.join(" ")).as_str(),
-            );
+            url_logger(progress, url.as_ref())
+                .message(format!("{}: git {}", url, arguments.join(" ")).as_str());
 
             let clone_options = printer::ExecuteOptions {
                 arguments,
@@ -553,7 +550,7 @@ impl Repository {
             let branch = parts[0];
             let semver = parts[1];
             let logs =
-                get_branch_log(&self.url, self.full_path.as_ref(), branch, progress).context(
+                get_branch_log(progress, &self.url, self.full_path.as_ref(), branch).context(
                     format_context!("Failed to get branch log for {}", self.full_path),
                 )?;
 
@@ -570,8 +567,7 @@ impl Repository {
                     let tag = tag.trim_matches('v');
                     if let Ok(version) = semver::Version::parse(tag) {
                         if required.matches(&version) {
-                            progress.log(
-                                printer::Level::Debug,
+                            url_logger(progress, self.url.as_ref()).debug(
                                 format!(
                                     "Found tag {} for branch {} that satisfies semver requirement",
                                     tag, branch
@@ -580,7 +576,7 @@ impl Repository {
                             );
                             is_semver_satisfied = true;
                         } else if is_semver_satisfied {
-                            progress.log(printer::Level::Debug,
+                            url_logger(progress, self.url.as_ref()).debug(
                             format!("Using commit {commit:?} for branch {branch} as it is the newest commit that satisfies semver requirement").as_str());
                             break;
                         }
@@ -600,8 +596,7 @@ impl Repository {
                 "Invalid revision format. Use `<branch>:<semver requirement>`"
             ));
         }
-        progress.log(
-            printer::Level::Info,
+        url_logger(progress, self.url.as_ref()).debug(
             format!(
                 "Resolved revision {} to {} for {}",
                 revision, result, self.url
@@ -622,12 +617,10 @@ impl Repository {
             ..Default::default()
         };
 
-        progress_bar.log(
-            printer::Level::Message,
-            format!("{}: git {}", self.url, options.arguments.join(" ")).as_str(),
-        );
+        url_logger(progress_bar, self.url.as_ref())
+            .message(format!("{}: git {}", self.url, options.arguments.join(" ")).as_str());
 
-        execute_git_command(&self.url, progress_bar, options)
+        execute_git_command(progress_bar, &self.url, options)
             .context(format_context!("while executing git command"))?;
         Ok(())
     }

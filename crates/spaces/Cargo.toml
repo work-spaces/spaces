@@ -28,6 +28,7 @@ toml.workspace = true
 changes.workspace = true
 environment.workspace = true
 lock.workspace = true
+logger.workspace = true
 
 semver = "1"
 num_cpus = "1"

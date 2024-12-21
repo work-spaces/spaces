@@ -18,3 +18,4 @@ serde_json.workspace = true
 easy-archiver.workspace = true
 glob-match.workspace = true
 url.workspace = true
+logger.workspace = true

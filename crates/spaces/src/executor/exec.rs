@@ -12,6 +12,10 @@ struct State {
 
 static STATE: state::InitCell<lock::StateLock<State>> = state::InitCell::new();
 
+fn logger<'a>(progress: &'a mut printer::MultiProgressBar, name: &str) -> logger::Logger<'a> {
+    logger::Logger::new_progress(progress, name.into())
+}
+
 fn get_state() -> &'static lock::StateLock<State> {
     if let Some(state) = STATE.try_get() {
         return state;
@@ -93,26 +97,17 @@ impl Exec {
             process_started_with_id: Some(handle_process_started),
         };
 
-        progress.log(
-            printer::Level::Debug,
-            format!("exec {name}: {} {options:?}", self.command).as_str(),
-        );
+        logger(progress, name).debug(format!("exec {name}: {} {options:?}", self.command).as_str());
 
         let result = progress.execute_process(&self.command, options);
 
         handle_process_ended(name);
 
-        progress.log(
-            printer::Level::Message,
-            format!("log file for {name}: {log_file_path:?}").as_str(),
-        );
+        logger(progress, name).message(format!("log file for {name}: {log_file_path:?}").as_str());
 
         let stdout_content = match result {
             Ok(content) => {
-                progress.log(
-                    printer::Level::Info,
-                    format!("exec {name} succeeded").as_str(),
-                );
+                logger(progress, name).info(format!("exec {name} succeeded").as_str());
 
                 if let Some(Expect::Failure) = self.expect.as_ref() {
                     return Err(format_error!("Expected failure but task succeeded"));
@@ -121,7 +116,7 @@ impl Exec {
                 }
             }
             Err(exec_error) => {
-                progress.log(printer::Level::Info, format!("exec {name} failed").as_str());
+                logger(progress, name).info(format!("exec {name} failed").as_str());
                 if let Some(Expect::Failure) = self.expect.as_ref() {
                     None
                 } else if let Some(Expect::Any) = self.expect.as_ref() {
@@ -135,17 +130,15 @@ impl Exec {
                                     format_context!("Failed to read log file {}", log_file_path),
                                 )?;
                             if log_contents.len() > 8192 {
-                                progress.log(
-                                    printer::Level::Error,
+                                logger(progress, name).error(
                                     format!("See log file {log_file_path} for details").as_str(),
                                 );
                             } else {
-                                progress.log(printer::Level::Error, log_contents.as_str());
+                                logger(progress, name).error(log_contents.as_str());
                             }
                         }
                     } else {
-                        progress.log(
-                            printer::Level::Error,
+                        logger(progress, name).error(
                             "No log file is available (log files disabled with the --ci option)",
                         );
                     }
@@ -270,15 +263,13 @@ impl ExecIf {
         let mut result = Vec::new();
         match condition_result {
             Ok(_) => {
-                progress.log(
-                    printer::Level::Trace,
+                logger(&mut progress, name).trace(
                     format!("exec {name} condition succeeded").as_str(),
                 );
                 result.clone_from(&self.then_);
             }
             Err(_) => {
-                progress.log(
-                    printer::Level::Trace,
+                logger(&mut progress, name).trace(
                     format!("exec {name} condition failed running").as_str(),
                 );
                 if let Some(else_) = self.else_.as_ref() {
@@ -286,9 +277,8 @@ impl ExecIf {
                 }
             }
         }
-        progress.log(
-            printer::Level::Trace,
-            format!("exec if {name} enable targets: {result:?}",).as_str(),
+        logger(&mut progress, name).trace(
+            format!("exec if enable targets: {result:?}",).as_str(),
         );
 
         result
