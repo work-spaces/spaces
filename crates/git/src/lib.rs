@@ -2,7 +2,7 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::sync::{RwLock, Arc};
+use std::sync::{Arc, RwLock};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CheckoutOption {
@@ -37,7 +37,6 @@ pub struct SparseCheckout {
     pub mode: SparseCheckoutMode,
     pub list: Vec<Arc<str>>,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -158,11 +157,7 @@ pub fn get_commit_hash(
 ) -> anyhow::Result<Option<Arc<str>>> {
     let options = printer::ExecuteOptions {
         working_directory: Some(directory.into()),
-        arguments: vec![
-            "show".into(),
-            "-s".into(),
-            "--format=%H".into(),
-        ],
+        arguments: vec!["show".into(), "-s".into(), "--format=%H".into()],
         is_return_stdout: true,
         ..Default::default()
     };
@@ -201,11 +196,7 @@ pub fn get_commit_tag(
 ) -> Option<Arc<str>> {
     let options = printer::ExecuteOptions {
         working_directory: Some(directory.into()),
-        arguments: vec![
-            "describe".into(),
-            "--exact-match".into(),
-            "HEAD".into(),
-        ],
+        arguments: vec!["describe".into(), "--exact-match".into(), "HEAD".into()],
         is_return_stdout: true,
         ..Default::default()
     };
@@ -263,8 +254,6 @@ pub fn get_branch_log(
     }
 }
 
-
-
 #[derive(Clone, Debug)]
 pub struct BareRepository {
     pub url: Arc<str>,
@@ -285,7 +274,8 @@ impl BareRepository {
         let (relative_bare_store_path, name_dot_git) = Self::url_to_relative_path_and_name(url)
             .context(format_context!("Failed to parse {spaces_key} url: {url}"))?;
 
-        let bare_store_path: Arc<str> = format!("{bare_store_path}/{relative_bare_store_path}").into();
+        let bare_store_path: Arc<str> =
+            format!("{bare_store_path}/{relative_bare_store_path}").into();
 
         std::fs::create_dir_all(bare_store_path.as_ref())
             .context(format_context!("failed to creat dir {bare_store_path}"))?;
@@ -447,6 +437,10 @@ impl Worktree {
         })
     }
 
+    pub fn to_repository(&self) -> Repository {
+        Repository::new(self.url.clone(), self.full_path.clone())
+    }
+
     pub fn get_spaces_star(&self) -> anyhow::Result<Option<Arc<str>>> {
         //check for spaces.star in full_path and return Some string if the file exists
         let star_file = format!("{}/spaces.star", self.full_path);
@@ -462,26 +456,12 @@ impl Worktree {
         progress_bar: &mut printer::MultiProgressBar,
         revision: &str,
     ) -> anyhow::Result<()> {
-        let mut options = printer::ExecuteOptions {
-            working_directory: Some(self.full_path.clone()),
-            ..Default::default()
-        };
-        options.arguments = vec![
-            "fetch".into(),
-            "origin".into(),
-            revision.into(),
-        ];
-
-        execute_git_command(&self.url, progress_bar, options.clone())
+        let repo = self.to_repository();
+        let arguments = vec!["fetch".into(), "origin".into(), revision.into()];
+        repo.execute(progress_bar, arguments)
             .context(format_context!("while fetching existing bare repository"))?;
-
-        options.arguments = vec![
-            "checkout".into(),
-            "--detach".into(),
-            revision.into(),
-        ];
-
-        execute_git_command(&self.url, progress_bar, options)
+        let arguments = vec!["checkout".into(), "--detach".into(), revision.into()];
+        repo.execute(progress_bar, arguments)
             .context(format_context!("checkout {revision:?}"))?;
 
         Ok(())
@@ -491,17 +471,9 @@ impl Worktree {
         &self,
         progress_bar: &mut printer::MultiProgressBar,
     ) -> anyhow::Result<()> {
-        let options = printer::ExecuteOptions {
-            working_directory: Some(self.full_path.clone()),
-            arguments: vec![
-                "checkout".into(),
-                "--detach".into(),
-                "HEAD".into(),
-            ],
-            ..Default::default()
-        };
-
-        execute_git_command(&self.url, progress_bar, options)
+        let repo = self.to_repository();
+        let arguments = vec!["checkout".into(), "--detach".into(), "HEAD".into()];
+        repo.execute(progress_bar, arguments)
             .context(format_context!("detech head"))?;
 
         Ok(())
@@ -516,32 +488,127 @@ impl Worktree {
         self.checkout(progress_bar, revision)
             .context(format_context!("switch new branch {:?}", revision))?;
 
-        let options = printer::ExecuteOptions {
-            working_directory: Some(self.full_path.clone()),
-            arguments: vec![
-                "switch".into(),
-                "-c".into(),
-                dev_branch.into(),
-            ],
-            ..Default::default()
-        };
+        let repo = self.to_repository();
+        let arguments = vec!["switch".into(), "-c".into(), dev_branch.into()];
 
-        execute_git_command(&self.url, progress_bar, options)
+        repo.execute(progress_bar, arguments)
             .context(format_context!("switch new branch"))?;
 
         Ok(())
     }
 }
 
-
 pub struct Repository {
+    pub full_path: Arc<str>,
     pub url: Arc<str>,
-    pub repo_path: Arc<str>,
 }
 
 impl Repository {
-    pub fn new(url: Arc<str>, repo_path: Arc<str>) -> Self {
-        Self { url, repo_path }
+    pub fn new(url: Arc<str>, full_path: Arc<str>) -> Self {
+        Self { url, full_path }
+    }
+
+    pub fn new_clone(
+        progress: &mut printer::MultiProgressBar,
+        url: Arc<str>,
+        working_directory: Arc<str>,
+        clone_name: Arc<str>,
+        arguments: Vec<Arc<str>>,
+    ) -> anyhow::Result<Self> {
+        let clone_path = std::path::Path::new(clone_name.as_ref());
+        if clone_path.exists() {
+            progress.log(
+                printer::Level::Info,
+                format!("{} already exists", clone_name).as_str(),
+            );
+        } else {
+            progress.log(
+                printer::Level::Message,
+                format!("{}: git {}", url, arguments.join(" ")).as_str(),
+            );
+
+            let clone_options = printer::ExecuteOptions {
+                arguments,
+                working_directory: Some(working_directory.clone()),
+                ..Default::default()
+            };
+
+            progress
+                .execute_process("git", clone_options)
+                .context(format_context!("Failed to clone repository {}", clone_name))?;
+        }
+        let full_path: Arc<str> = format!("{working_directory}/{clone_name}").into();
+
+        Ok(Self::new(url, full_path))
+    }
+
+    pub fn resolve_revision(
+        &self,
+        progress: &mut printer::MultiProgressBar,
+        revision: &str,
+    ) -> anyhow::Result<Arc<str>> {
+        let mut result = revision.to_string();
+        let parts = revision.split(':').collect::<Vec<&str>>();
+        if parts.len() == 2 {
+            let branch = parts[0];
+            let semver = parts[1];
+            let logs =
+                get_branch_log(&self.url, self.full_path.as_ref(), branch, progress).context(
+                    format_context!("Failed to get branch log for {}", self.full_path),
+                )?;
+
+            let required = semver::VersionReq::parse(semver)
+                .context(format_context!("Failed to parse semver {}", semver,))?;
+
+            // logs has tags in reverse chronological order
+            // uses the newest commit that does not violate the semver requirement
+            let mut commit = None;
+            let mut is_semver_satisfied = false;
+            for log in logs {
+                let current_commit = log.commit.clone();
+                if let Some(tag) = log.tag.as_ref() {
+                    let tag = tag.trim_matches('v');
+                    if let Ok(version) = semver::Version::parse(tag) {
+                        if required.matches(&version) {
+                            progress.log(
+                                printer::Level::Debug,
+                                format!(
+                                    "Found tag {} for branch {} that satisfies semver requirement",
+                                    tag, branch
+                                )
+                                .as_str(),
+                            );
+                            is_semver_satisfied = true;
+                        } else if is_semver_satisfied {
+                            progress.log(printer::Level::Debug,
+                            format!("Using commit {commit:?} for branch {branch} as it is the newest commit that satisfies semver requirement").as_str());
+                            break;
+                        }
+                    } else {
+                        commit = Some(current_commit);
+                    }
+                } else {
+                    commit = Some(current_commit);
+                }
+            }
+
+            if let Some(commit) = commit {
+                result = commit.to_string();
+            }
+        } else if parts.len() != 1 {
+            return Err(format_error!(
+                "Invalid revision format. Use `<branch>:<semver requirement>`"
+            ));
+        }
+        progress.log(
+            printer::Level::Info,
+            format!(
+                "Resolved revision {} to {} for {}",
+                revision, result, self.url
+            )
+            .as_str(),
+        );
+        Ok(result.into())
     }
 
     pub fn execute(
@@ -550,13 +617,80 @@ impl Repository {
         args: Vec<Arc<str>>,
     ) -> anyhow::Result<()> {
         let options = printer::ExecuteOptions {
-            working_directory: Some(self.repo_path.clone()),
+            working_directory: Some(self.full_path.clone()),
             arguments: args,
             ..Default::default()
         };
 
+        progress_bar.log(
+            printer::Level::Message,
+            format!("{}: git {}", self.url, options.arguments.join(" ")).as_str(),
+        );
+
         execute_git_command(&self.url, progress_bar, options)
             .context(format_context!("while executing git command"))?;
+        Ok(())
+    }
+
+    pub fn setup_sparse_checkout(
+        &self,
+        progress_bar: &mut printer::MultiProgressBar,
+        sparse_checkout: &SparseCheckout,
+    ) -> anyhow::Result<()> {
+        let mode_arg = match sparse_checkout.mode {
+            SparseCheckoutMode::Cone => "--cone",
+            SparseCheckoutMode::NoCone => "--no-cone",
+        };
+
+        self.execute(
+            progress_bar,
+            vec!["sparse-checkout".into(), "init".into(), mode_arg.into()],
+        )
+        .context(format_context!(
+            "Failed to init sparse checkout in {}",
+            self.full_path
+        ))?;
+
+        let mut arguments = vec!["sparse-checkout".into(), "set".into()];
+
+        arguments.extend(sparse_checkout.list.iter().map(|e| e.clone()));
+
+        self.execute(progress_bar, arguments)
+            .context(format_context!(
+                "Failed to set sparse checkout in {}",
+                self.full_path
+            ))?;
+
+        Ok(())
+    }
+
+    pub fn checkout(
+        &self,
+        progress_bar: &mut printer::MultiProgressBar,
+        checkout: &Checkout,
+    ) -> anyhow::Result<()> {
+        let mut checkout_args = Vec::new();
+        match checkout {
+            Checkout::NewBranch(branch_name) => {
+                checkout_args.push("switch".into());
+                checkout_args.push("-c".into());
+                checkout_args.push(branch_name.clone());
+                // TODO: switch to a new branch
+            }
+            Checkout::Revision(revision) => {
+                // if revision of the format "branch:semver" then get the tags on the branch
+                let revision = self
+                    .resolve_revision(progress_bar, revision)
+                    .context(format_context!("failed to resolve revision"))?;
+
+                checkout_args.push("checkout".into());
+                checkout_args.push(revision.clone().into());
+            }
+        }
+
+        self.execute(progress_bar, checkout_args)
+            .context(format_context!("while checking out {}", self.full_path))?;
+
         Ok(())
     }
 }

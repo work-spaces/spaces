@@ -493,7 +493,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 checkout,
                 clone: repo.clone.unwrap_or(git::Clone::Default),
                 is_evaluate_spaces_modules: repo.is_evaluate_spaces_modules.unwrap_or(true),
-                sparse_checkout: None,
+                sparse_checkout: repo.sparse_checkout,
             }),
         ))
         .context(format_context!("Failed to insert task {rule_name}"))?;

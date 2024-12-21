@@ -17,74 +17,6 @@ pub struct Git {
 }
 
 impl Git {
-    fn resolve_revision(
-        &self,
-        revision: &str,
-        progress: &mut printer::MultiProgressBar,
-    ) -> anyhow::Result<String> {
-        let mut result = revision.to_string();
-        let parts = revision.split(':').collect::<Vec<&str>>();
-        if parts.len() == 2 {
-            let branch = parts[0];
-            let semver = parts[1];
-            let logs = git::get_branch_log(&self.url, &self.spaces_key, branch, progress).context(
-                format_context!("Failed to get branch log for {}", self.spaces_key),
-            )?;
-
-            let required = semver::VersionReq::parse(semver)
-                .context(format_context!("Failed to parse semver {}", semver,))?;
-
-            // logs has tags in reverse chronological order
-            // uses the newest commit that does not violate the semver requirement
-            let mut commit = None;
-            let mut is_semver_satisfied = false;
-            for log in logs {
-                let current_commit = log.commit.clone();
-                if let Some(tag) = log.tag.as_ref() {
-                    let tag = tag.trim_matches('v');
-                    if let Ok(version) = semver::Version::parse(tag) {
-                        if required.matches(&version) {
-                            progress.log(
-                                printer::Level::Debug,
-                                format!(
-                                    "Found tag {} for branch {} that satisfies semver requirement",
-                                    tag, branch
-                                )
-                                .as_str(),
-                            );
-                            is_semver_satisfied = true;
-                        } else if is_semver_satisfied {
-                            progress.log(printer::Level::Debug,
-                            format!("Using commit {commit:?} for branch {branch} as it is the newest commit that satisfies semver requirement").as_str());
-                            break;
-                        }
-                    } else {
-                        commit = Some(current_commit);
-                    }
-                } else {
-                    commit = Some(current_commit);
-                }
-            }
-
-            if let Some(commit) = commit {
-                result = commit.to_string();
-            }
-        } else if parts.len() != 1 {
-            return Err(format_error!(
-                "Invalid revision format. Use `<branch>:<semver requirement>`"
-            ));
-        }
-        progress.log(
-            printer::Level::Info,
-            format!(
-                "Resolved revision {} to {} for {}",
-                revision, result, self.url
-            )
-            .as_str(),
-        );
-        Ok(result)
-    }
-
     fn execute_worktree_clone(
         &self,
         progress: &mut printer::MultiProgressBar,
@@ -114,8 +46,9 @@ impl Git {
 
         match &self.checkout {
             git::Checkout::NewBranch(branch_name) => {
-                let revision = self
-                    .resolve_revision(branch_name, progress)
+                let repository = worktree.to_repository();
+                let revision = repository
+                    .resolve_revision(progress, branch_name)
                     .context(format_context!("failed to resolve revision"))?;
 
                 worktree
@@ -123,8 +56,9 @@ impl Git {
                     .context(format_context!("{name} - Failed to checkout new branch"))?;
             }
             git::Checkout::Revision(revision) => {
-                let revision = self
-                    .resolve_revision(revision, progress)
+                let repository = worktree.to_repository();
+                let revision = repository
+                    .resolve_revision(progress, revision)
                     .context(format_context!("failed to resolve revision"))?;
 
                 worktree
@@ -156,80 +90,32 @@ impl Git {
         clone_arguments.push(self.spaces_key.clone());
 
         let workspace_directory = workspace.read().get_absolute_path();
-        let repo_directory: Arc<str> = format!("{}/{}", workspace_directory, self.spaces_key).into();
+        let repo_directory: Arc<str> =
+            format!("{}/{}", workspace_directory, self.spaces_key).into();
 
-        let clone_options = printer::ExecuteOptions {
-            arguments: clone_arguments,
-            working_directory: Some(workspace_directory.clone()),
-            ..Default::default()
-        };
-
-        let clone_path = std::path::Path::new(self.spaces_key.as_ref());
-        if clone_path.exists() {
-            progress.log(
-                printer::Level::Info,
-                format!("{} already exists", self.spaces_key).as_str(),
-            );
-        } else {
-            progress.log(
-                printer::Level::Trace,
-                format!("git clone {clone_options:?}").as_str(),
-            );
-
-            progress
-                .execute_process("git", clone_options)
-                .context(format_context!(
-                    "{name} - Failed to clone repository {}",
-                    self.spaces_key
-                ))?;
-        }
-
-        let repository = git::Repository::new(self.url.clone(), repo_directory.clone());
+        let repository = git::Repository::new_clone(
+            progress,
+            self.url.clone(),
+            workspace_directory.clone(),
+            self.spaces_key.clone(),
+            clone_arguments,
+        ).context(format_context!(
+            "{name} - Failed to clone repository {}",
+            self.spaces_key
+        ))?;
 
         if let Some(sparse_checkout) = self.sparse_checkout.as_ref() {
-            let mode_arg = match sparse_checkout.mode {
-                git::SparseCheckoutMode::Cone => "--cone",
-                git::SparseCheckoutMode::NoCone => "--no-cone",
-            };
-
-            repository
-                .execute(
-                    progress,
-                    vec![
-                        "sparse-checkout".into(),
-                        "init".into(),
-                        mode_arg.into(),
-                    ],
-                )
+            repository.setup_sparse_checkout(
+                    progress,sparse_checkout)
                 .context(format_context!(
                     "Failed to init sparse checkout in {repo_directory}"
                 ))?;
         }
 
-        let mut checkout_args: Vec<Arc<str>> = vec![];
-
-        match &self.checkout {
-            git::Checkout::NewBranch(branch_name) => {
-                checkout_args.push("switch".into());
-                checkout_args.push("-c".into());
-                checkout_args.push(branch_name.clone());
-                // TODO: switch to a new branch
-            }
-            git::Checkout::Revision(revision) => {
-                // if revision of the format "branch:semver" then get the tags on the branch
-                let revision = self
-                    .resolve_revision(revision, progress)
-                    .context(format_context!("failed to resolve revision"))?;
-
-                checkout_args.push("checkout".into());
-                checkout_args.push(revision.clone().into());
-            }
-        }
-
         repository
-            .execute(progress, checkout_args)
+            .checkout(progress, &self.checkout)
             .context(format_context!(
-                "{name} - Failed to clone repository {}",
+                "{name} - Failed to checkout repository {}",
                 self.spaces_key
             ))?;
 
@@ -237,7 +123,7 @@ impl Git {
     }
 
     fn execute_shallow_clone(
-        &self,
+    &self,
         progress: &mut printer::MultiProgressBar,
         workspace: workspace::WorkspaceArc,
         name: &str,
@@ -343,11 +229,7 @@ impl Git {
                         .read()
                         .get_relative_directory(self.spaces_key.as_ref()),
                 ),
-                arguments: vec![
-                    "checkout".into(),
-                    "--detach".into(),
-                    commit_hash.clone(),
-                ],
+                arguments: vec!["checkout".into(), "--detach".into(), commit_hash.clone()],
                 ..Default::default()
             };
 
