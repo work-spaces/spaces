@@ -143,7 +143,6 @@ impl Task {
                 }
             }
 
-
             logger::Logger::new_progress(&mut progress, name.clone()).trace(
                 format!("Skip execute message after platform check? {skip_execute_message:?}")
                     .as_str(),
@@ -151,9 +150,8 @@ impl Task {
 
             let total = deps_signals.len();
 
-            logger::Logger::new_progress(&mut progress, name.clone()).trace(
-                format!("{name} has {} dependencies", total).as_str(),
-            );
+            logger::Logger::new_progress(&mut progress, name.clone())
+                .trace(format!("{name} has {} dependencies", total).as_str());
 
             let mut count = 1;
             for deps_rule_signal in deps_signals {
@@ -173,81 +171,70 @@ impl Task {
                 count += 1;
             }
 
-            logger::Logger::new_progress(&mut progress, name.clone()).debug(
-                format!("{name} All dependencies are done").as_str(),
-            );
+            logger::Logger::new_progress(&mut progress, name.clone())
+                .debug(format!("{name} All dependencies are done").as_str());
 
             {
-                logger::Logger::new_progress(&mut progress, name.clone()).debug(
-                    format!("{name} check for skipping/cancelation").as_str(),
-                );
+                logger::Logger::new_progress(&mut progress, name.clone())
+                    .debug(format!("{name} check for skipping/cancelation").as_str());
                 let state = get_state().read();
                 let tasks = state.tasks.read();
                 let task = tasks
                     .get(name.as_ref())
                     .context(format_context!("Task not found {name}"))?;
                 if task.phase == Phase::Cancelled {
-                    logger::Logger::new_progress(&mut progress, name.clone()).debug(
-                        format!("Skipping {name}: cancelled").as_str(),
-                    );
+                    logger::Logger::new_progress(&mut progress, name.clone())
+                        .debug(format!("Skipping {name}: cancelled").as_str());
                     skip_execute_message =
                         Some(format!("Skipping {name} because it was cancelled"));
                 } else if task.rule.type_ == Some(RuleType::Optional) {
-                    logger::Logger::new_progress(&mut progress, name.clone()).debug(
-                        format!("Skipping {name} because it is optional").as_str(),
-                    );
+                    logger::Logger::new_progress(&mut progress, name.clone())
+                        .debug(format!("Skipping {name} because it is optional").as_str());
                     skip_execute_message = Some(format!("Skipping {name}: optional"));
                 }
-                logger::Logger::new_progress(&mut progress, name.clone()).trace(
-                    format!("{name} done checking skip cancellation").as_str(),
-                );
+                logger::Logger::new_progress(&mut progress, name.clone())
+                    .trace(format!("{name} done checking skip cancellation").as_str());
             }
 
             let rule_name = rule.name.clone();
 
             let updated_digest = if let Some(inputs) = &rule.inputs {
-                logger::Logger::new_progress(&mut progress, name.clone()).trace(
-                    format!("{name} update workspace changes").as_str(),
-                );
+                logger::Logger::new_progress(&mut progress, name.clone())
+                    .trace(format!("{name} update workspace changes").as_str());
 
                 workspace
                     .write()
                     .update_changes(&mut progress, inputs)
                     .context(format_context!("Failed to update workspace changes"))?;
 
-                logger::Logger::new_progress(&mut progress, name.clone()).trace(
-                    format!("{name} check for new digest").as_str(),
-                );
+                logger::Logger::new_progress(&mut progress, name.clone())
+                    .trace(format!("{name} check for new digest").as_str());
 
                 let seed = serde_json::to_string(&executor)
                     .context(format_context!("Failed to serialize"))?;
-                let digest = workspace.read().is_rule_inputs_changed(
-                    &mut progress,
-                    &rule_name,
-                    seed.as_str(),
-                    inputs,
-                )
-                .context(format_context!("Failed to check inputs for {rule_name}"))?;
+                let digest = workspace
+                    .read()
+                    .is_rule_inputs_changed(&mut progress, &rule_name, seed.as_str(), inputs)
+                    .context(format_context!("Failed to check inputs for {rule_name}"))?;
                 if digest.is_none() {
                     // the digest has not changed - not need to execute
                     skip_execute_message = Some(format!("Skipping {name}: same inputs"));
                 }
-                logger::Logger::new_progress(&mut progress, name.clone()).debug(
-                    format!("New digest for {rule_name}={digest:?}").as_str(),
-                );
+                logger::Logger::new_progress(&mut progress, name.clone())
+                    .debug(format!("New digest for {rule_name}={digest:?}").as_str());
                 digest
             } else {
                 None
             };
 
             if let Some(skip_message) = skip_execute_message.as_ref() {
-                logger::Logger::new_progress(&mut progress, name.clone()).info( skip_message.as_str());
+                logger::Logger::new_progress(&mut progress, name.clone())
+                    .info(skip_message.as_str());
                 progress.set_message(skip_message);
             } else {
                 progress.set_message("Running");
             }
 
-            
             // time how long it takes to execute the task
             let start_time = std::time::Instant::now();
 
@@ -260,8 +247,9 @@ impl Task {
             };
 
             let elapsed_time = start_time.elapsed();
-            workspace.write().update_rule_metrics(&rule_name, elapsed_time);
-
+            workspace
+                .write()
+                .update_rule_metrics(&rule_name, elapsed_time);
 
             if task_result.is_ok() {
                 if let Some(digest) = updated_digest {
@@ -348,9 +336,8 @@ pub fn debug_sorted_tasks(printer: &mut printer::Printer, phase: Phase) -> anyho
         let task_name = state.graph.get_task(*node_index);
         if let Some(task) = state.tasks.read().get(task_name) {
             if task.phase == phase {
-                logger::Logger::new_printer(printer, "phase".into()).debug(
-                    format!("Queued task {task_name}").as_str(),
-                );
+                logger::Logger::new_printer(printer, "phase".into())
+                    .debug(format!("Queued task {task_name}").as_str());
             }
         }
     }
@@ -373,10 +360,7 @@ impl State {
 
     pub fn insert_task(&self, mut task: Task) -> anyhow::Result<()> {
         // update the rule name to have the starlark module name
-        let rule_label = label::sanitize_rule(
-            task.rule.name,
-            self.latest_starlark_module.clone(),
-        );
+        let rule_label = label::sanitize_rule(task.rule.name, self.latest_starlark_module.clone());
         task.rule.name = rule_label.clone();
 
         // update deps that refer to rules in the same starlark module
@@ -450,9 +434,10 @@ impl State {
             // connect the dependencies
             if let Some(deps) = task.rule.deps.clone() {
                 for dep in deps {
-                    let dep_task = tasks_copy
-                        .get(&dep)
-                        .ok_or(format_error!("Task Depedency not found {dep}"))?;
+                    let dep_task = tasks_copy.get(&dep).ok_or(format_error!(
+                        "Task Depedency not found: {dep} specified by {}",
+                        task.rule.name
+                    ))?;
 
                     match task_phase {
                         Phase::Run => {
@@ -579,9 +564,8 @@ impl State {
                     Some(message.as_str()),
                 );
 
-                logger::Logger::new_progress(&mut progress_bar, task_name.into()).debug(
-                    format!("Staging task {}", task.rule.name).as_str(),
-                );
+                logger::Logger::new_progress(&mut progress_bar, task_name.into())
+                    .debug(format!("Staging task {}", task.rule.name).as_str());
                 handle_list.push(task.execute(progress_bar, workspace.clone()));
 
                 loop {
@@ -624,7 +608,10 @@ impl State {
             }
         }
 
-        workspace.read().save_inputs().context(format_context!("Failed to save inputs"))?;
+        workspace
+            .read()
+            .save_inputs()
+            .context(format_context!("Failed to save inputs"))?;
         workspace
             .write()
             .save_changes()

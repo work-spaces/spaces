@@ -373,7 +373,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule_name: &str,
         #[starlark(require = named)] archive: starlark::values::Value,
         heap: &'v Heap,
-    ) -> anyhow::Result<Option<Value<'v>>> {
+    ) -> anyhow::Result<Value<'v>> {
         let create_archive: easy_archiver::CreateArchive =
             serde_json::from_value(archive.to_json_value()?)
                 .context(format_context!("bad options for archive"))?;
@@ -402,7 +402,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         // Convert the JSON value to a Starlark value
         let alloc_value = heap.alloc(json_value);
 
-        Ok(Some(alloc_value))
+        Ok(alloc_value)
     }
 
     fn set_minimum_version(version: &str) -> anyhow::Result<NoneType> {

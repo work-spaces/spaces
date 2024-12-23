@@ -71,17 +71,17 @@ fn evaluate_module(
 
     let globals_builder = GlobalsBuilder::standard()
         .with(starstd::globals)
-        .with_struct("fs", starstd::fs::globals)
-        .with_struct("json", starstd::json::globals)
-        .with_struct("hash", starstd::hash::globals)
-        .with_struct("process", starstd::process::globals)
-        .with_struct("script", starstd::script::globals)
-        .with_struct("info", builtins::info::globals);
+        .with_namespace("fs", starstd::fs::globals)
+        .with_namespace("json", starstd::json::globals)
+        .with_namespace("hash", starstd::hash::globals)
+        .with_namespace("process", starstd::process::globals)
+        .with_namespace("script", starstd::script::globals)
+        .with_namespace("info", builtins::info::globals);
 
     let globals_builder = if with_rules == WithRules::Yes {
         globals_builder
-            .with_struct("checkout", builtins::checkout::globals)
-            .with_struct("run", builtins::run::globals)
+            .with_namespace("checkout", builtins::checkout::globals)
+            .with_namespace("run", builtins::run::globals)
     } else {
         globals_builder
     };
@@ -97,7 +97,7 @@ fn evaluate_module(
     }
     // After creating a module we freeze it, preventing further mutation.
     // It can now be used as the input for other Starlark modules.
-    module.freeze()
+    Ok(module.freeze()?)
 }
 
 fn star_logger(printer: &mut printer::Printer) -> logger::Logger {

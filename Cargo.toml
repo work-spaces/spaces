@@ -9,7 +9,7 @@ printer = { git = "https://github.com/work-spaces/printer-rs", rev = "a865c63f25
 easy-archiver = { git = "https://github.com/work-spaces/easy-archiver", rev = "630d2a90b9f678ca62799e3b87b59e1ca4278f3a", features = [
     "printer",
 ] }
-starlark = "0.12"
+starlark = "0.13"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 state = "0.6"
