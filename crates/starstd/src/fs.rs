@@ -66,6 +66,39 @@ pub const FUNCTIONS: &[Function] = &[
         example: None,
     },
     Function {
+        name: "is_file",
+        description: "Checks a path is a file",
+        return_type: "bool",
+        args: &[Arg {
+            name: "path",
+            description: "path relative to the workspace root",
+            dict: &[],
+        }],
+        example: None,
+    },
+    Function {
+        name: "is_directory",
+        description: "Checks if a path is a directory",
+        return_type: "bool",
+        args: &[Arg {
+            name: "path",
+            description: "path relative to the workspace root",
+            dict: &[],
+        }],
+        example: None,
+    },
+    Function {
+        name: "is_symlink",
+        description: "Checks if a path is a symlink",
+        return_type: "bool",
+        args: &[Arg {
+            name: "path",
+            description: "path relative to the workspace root",
+            dict: &[],
+        }],
+        example: None,
+    },
+    Function {
         name: "read_toml_to_dict",
         description: "Reads and parses a toml file",
         return_type: "str",
@@ -158,6 +191,18 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
     fn exists(path: &str) -> anyhow::Result<bool> {
         Ok(std::path::Path::new(path).exists())
+    }
+
+    fn is_file(path: &str) -> anyhow::Result<bool> {
+        Ok(std::path::Path::new(path).is_file())
+    }
+
+    fn is_directory(path: &str) -> anyhow::Result<bool> {
+        Ok(std::path::Path::new(path).is_dir())
+    }
+
+    fn is_symlink(path: &str) -> anyhow::Result<bool> {
+        Ok(std::path::Path::new(path).is_symlink())
     }
 
     fn read_toml_to_dict<'v>(path: &str, heap: &'v Heap) -> anyhow::Result<Value<'v>> {

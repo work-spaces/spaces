@@ -96,26 +96,36 @@ impl FileLock {
             }
             Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
                 std::thread::sleep(std::time::Duration::from_millis(20));
-                let contents = std::fs::read_to_string(self.path.as_ref())
-                    .context(format_context!("Failed to read {}", self.path))?;
-                let existing_info: LockFileContents =
-                    serde_json::from_str(&contents).context(format_context!(
-                        "failed to parse `{contents}` from {} - delete the file and try again",
-                        self.path
-                    ))?;
+                let contents_result = std::fs::read_to_string(self.path.as_ref())
+                    .context(format_context!("Failed to read {}", self.path));
 
-                if existing_info.process_group_id == get_process_group_id() {
-                    return Ok(LockStatus::Busy);
+                if let Ok(contents) = contents_result {
+                    let existing_info_result = serde_json::from_str::<LockFileContents>(&contents)
+                        .context(format_context!(
+                            "failed to parse `{contents}` from {} - delete the file and try again",
+                            self.path
+                        ));
+
+                    if let Ok(existing_info) = existing_info_result {
+                        if existing_info.process_group_id == get_process_group_id() {
+                            return Ok(LockStatus::Busy);
+                        } else {
+                            // File exists but belongs to an old process group
+                            let contents = LockFileContents {
+                                process_group_id: get_process_group_id(),
+                            };
+                            let lock_contents = serde_json::to_string(&contents)
+                                .context(format_context!("Failed to serialize capsule run info"))?;
+
+                            // over write the file
+                            std::fs::write(self.path.as_ref(), lock_contents.as_str())
+                                .context(format_context!("Failed to create file {}", self.path))?;
+                        }
+                    } else {
+                        return Ok(LockStatus::Busy);
+                    }
                 } else {
-                    let contents = LockFileContents {
-                        process_group_id: get_process_group_id(),
-                    };
-                    let lock_contents = serde_json::to_string(&contents)
-                        .context(format_context!("Failed to serialize capsule run info"))?;
-
-                    // over write the file
-                    std::fs::write(self.path.as_ref(), lock_contents.as_str())
-                        .context(format_context!("Failed to create file {}", self.path))?;
+                    return Ok(LockStatus::Busy);
                 }
             }
             Err(err) => {
