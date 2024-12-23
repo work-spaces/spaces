@@ -214,7 +214,7 @@ impl Capsule {
         args.push(format!("--name={workspace_name}").into());
 
         std::fs::create_dir_all(workspace::SPACES_CAPSULES_NAME)
-            .context(format_context!("Failed to create @capsules"))?;
+            .context(format_context!("Failed to create {}", workspace::SPACES_CAPSULES_NAME))?;
 
         let mut env = HashMap::new();
         env.insert(
@@ -227,7 +227,7 @@ impl Capsule {
                 .context(format_context!("Failed to get spaces env"))?,
         );
 
-        // run spaces checkout in @capsules using name
+        // run spaces checkout in SPACES_CAPSULES_NAME using name
         let spaces_checkout = executor::exec::Exec {
             command: spaces_command,
             args: Some(args),
@@ -259,7 +259,7 @@ impl Capsule {
             "run".into(),
         ];
 
-        // run spaces checkout in @capsules using name
+        // run spaces checkout in SPACES_CAPSULES_NAME using name
         let spaces_run = executor::exec::Exec {
             command: spaces_command,
             args: Some(args),

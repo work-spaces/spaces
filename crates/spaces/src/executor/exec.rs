@@ -97,7 +97,14 @@ impl Exec {
             process_started_with_id: Some(handle_process_started),
         };
 
-        logger(progress, name).debug(format!("exec {name}: {} {options:?}", self.command).as_str());
+        logger(progress, name).debug(
+            format!(
+                "Executing: {} {}",
+                self.command,
+                options.arguments.join(" ")
+            )
+            .as_str(),
+        );
 
         let result = progress.execute_process(&self.command, options);
 
@@ -263,23 +270,19 @@ impl ExecIf {
         let mut result = Vec::new();
         match condition_result {
             Ok(_) => {
-                logger(&mut progress, name).trace(
-                    format!("exec {name} condition succeeded").as_str(),
-                );
+                logger(&mut progress, name)
+                    .trace(format!("exec {name} condition succeeded").as_str());
                 result.clone_from(&self.then_);
             }
             Err(_) => {
-                logger(&mut progress, name).trace(
-                    format!("exec {name} condition failed running").as_str(),
-                );
+                logger(&mut progress, name)
+                    .trace(format!("exec {name} condition failed running").as_str());
                 if let Some(else_) = self.else_.as_ref() {
                     result.clone_from(else_);
                 }
             }
         }
-        logger(&mut progress, name).trace(
-            format!("exec if enable targets: {result:?}",).as_str(),
-        );
+        logger(&mut progress, name).trace(format!("exec if enable targets: {result:?}",).as_str());
 
         result
     }

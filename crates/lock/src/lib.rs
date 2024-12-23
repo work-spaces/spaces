@@ -3,7 +3,6 @@ use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-
 #[derive(Debug)]
 pub struct StateLock<ModuleState: std::fmt::Debug> {
     lock: RwLock<ModuleState>,
@@ -153,17 +152,27 @@ impl FileLock {
         let lock_file_path = std::path::Path::new(self.path.as_ref());
         let mut log_count = 0;
         while lock_file_path.exists() {
-            let contents = std::fs::read_to_string(lock_file_path)
-                .context(format_context!("Failed to read {}", self.path))?;
+            // another process may have just created this file.
+            // This delay gives the other process time to finish creating the file.
+            std::thread::sleep(std::time::Duration::from_millis(100));
 
-            let lock_info: LockFileContents =
-                serde_json::from_str(&contents).context(format_context!(
-                    "failed to parse {} - delete the file and try again",
-                    self.path
-                ))?;
+            // the holding process may have deleted the file by now.
+            let contents_result = std::fs::read_to_string(lock_file_path)
+                .context(format_context!("Failed to read {}", self.path));
 
-            if lock_info.process_group_id != get_process_group_id() {
-                return Ok(());
+            match contents_result {
+                Ok(contents) => {
+                    let lock_info: LockFileContents =
+                        serde_json::from_str(&contents).context(format_context!(
+                            "failed to parse {} - delete the file and try again",
+                            self.path
+                        ))?;
+
+                    if lock_info.process_group_id != get_process_group_id() {
+                        return Ok(());
+                    }
+                }
+                Err(_) => {}
             }
 
             progress.increment(1);

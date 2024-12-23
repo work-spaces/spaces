@@ -1,4 +1,4 @@
-use crate::{rules, singleton};
+use crate::{rules, singleton, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use starlark::environment::GlobalsBuilder;
@@ -312,6 +312,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         workspace.locks = locks;
 
         Ok(NoneType)
+    }
+
+    fn get_path_to_capsule_workspace() -> anyhow::Result<String> {
+        Ok(workspace::SPACES_CAPSULES_NAME.to_string())
     }
 
     fn get_cpu_count() -> anyhow::Result<i64> {

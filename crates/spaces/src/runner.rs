@@ -55,6 +55,11 @@ pub fn run_starlark_modules_in_workspace(
                 .context(format_context!("Failed to save workspace lock file"))?;
         }
     }
+
+    workspace::RuleMetricsFile::update(workspace_arc.clone())
+        .context(format_context!("Failed to update rule metrics file"))?;
+    
+
     Ok(())
 }
 

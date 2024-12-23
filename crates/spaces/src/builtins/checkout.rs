@@ -452,7 +452,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
         let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for repo"))?;
+            .context(format_context!("bad options for add target rule"))?;
 
         let rule_name = rule.name.clone();
         rules::insert_task(rules::Task::new(
@@ -578,7 +578,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] platforms: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
         let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for repo"))?;
+            .context(format_context!("bad options for add platform archive rule"))?;
         //convert platforms to starlark value
 
         let platforms: PlatformArchive = serde_json::from_value(platforms.to_json_value()?)?;
@@ -675,7 +675,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         // includes, excludes, strip_prefix
     ) -> anyhow::Result<NoneType> {
         let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for repo"))?;
+            .context(format_context!("bad options for add archive rule"))?;
 
         let archive: http_archive::Archive = serde_json::from_value(archive.to_json_value()?)
             .context(format_context!("Failed to parse archive arguments"))?;
@@ -712,7 +712,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] asset: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
         let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for repo"))?;
+            .context(format_context!("bad options for add asset rule"))?;
 
         let add_asset: executor::asset::AddAsset =
             serde_json::from_value(asset.to_json_value()?)
@@ -733,7 +733,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] capsule: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
         let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for repo"))?;
+            .context(format_context!("bad options for capsule rule"))?;
 
         let capsule: executor::capsule::Capsule = serde_json::from_value(capsule.to_json_value()?)
             .context(format_context!("Failed to parse capsule arguments"))?;
@@ -757,7 +757,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] asset: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
         let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for repo"))?;
+            .context(format_context!("bad options for update asset rule"))?;
         // support JSON, yaml, and toml
         let update_asset: executor::asset::UpdateAsset =
             serde_json::from_value(asset.to_json_value()?)
@@ -779,7 +779,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] env: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
         let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for repo"))?;
+            .context(format_context!("bad options for update env rule"))?;
 
         // support JSON, yaml, and toml
         let environment: environment::Environment = serde_json::from_value(env.to_json_value()?)

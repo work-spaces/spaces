@@ -1,18 +1,19 @@
+use crate::inputs;
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use crate::inputs;
 
 pub const ENV_FILE_NAME: &str = "env.spaces.star";
 pub const LOCK_FILE_NAME: &str = "lock.spaces.star";
 pub const SPACES_MODULE_NAME: &str = "spaces.star";
 pub const SPACES_STDIN_NAME: &str = "stdin.star";
 pub const SPACES_LOGS_NAME: &str = ".spaces/logs";
-pub const SPACES_CAPSULES_NAME: &str = ".spaces/capsules";
+pub const SPACES_CAPSULES_NAME: &str = ".spaces/capsule_workspace";
 pub const SPACES_CAPSULES_INFO_NAME: &str = "capsules.spaces.json";
 const SETTINGS_FILE_NAME: &str = ".spaces/settings.spaces.json";
+const METRICS_FILE_NAME: &str = ".spaces/metrics.spaces.json";
 const SPACES_HOME_ENV_VAR: &str = "SPACES_HOME";
 pub const SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE: &str = "SPACES_IS_WORKSPACE_REPRODUCIBLE";
 pub const SPACES_ENV_WORKSPACE_DIGEST: &str = "SPACES_WORKSPACE_DIGEST";
@@ -26,6 +27,48 @@ pub type WorkspaceArc = std::sync::Arc<lock::StateLock<Workspace>>;
 
 fn logger<'a>(progress: &'a mut printer::MultiProgressBar) -> logger::Logger<'a> {
     logger::Logger::new_progress(progress, "workspace".into())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleMetrics {
+    elapsed_time: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleMetricsFile {
+    metrics: Vec<HashMap<Arc<str>, RuleMetrics>>,
+}
+
+impl RuleMetricsFile {
+    pub fn update(
+        workspace: WorkspaceArc,
+    ) -> anyhow::Result<()> {
+        let workspace_path = workspace.read().get_absolute_path();
+        let metric_entry = workspace.read().rule_metrics.clone();
+        let metrics_file = format!("{workspace_path}/{METRICS_FILE_NAME}");
+        let metrics_path = std::path::Path::new(metrics_file.as_str());
+        let metrics = if metrics_path.exists() {
+            let content = std::fs::read_to_string(metrics_file.as_str()).context(
+                format_context!("Failed to read metrics file {metrics_file}"),
+            )?;
+            let mut metrics_content: RuleMetricsFile = serde_json::from_str(content.as_str()).context(
+                format_context!("Failed to parse metrics file {metrics_file}"),
+            )?;
+            metrics_content.metrics.push(metric_entry);
+            metrics_content
+        } else {
+            RuleMetricsFile {
+                metrics: vec![metric_entry],
+            }
+        };
+
+        let content = serde_json::to_string_pretty(&metrics)
+            .context(format_context!("Failed to serialize metrics"))?;
+
+        std::fs::write(metrics_file.as_str(), content.as_str()).context(format_context!("Failed to write metrics file {metrics_file}"))?;
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -61,7 +104,6 @@ impl Settings {
     }
 }
 
-
 pub fn calculate_digest(modules: &[(Arc<str>, Arc<str>)]) -> Arc<str> {
     let mut hasher = blake3::Hasher::new();
     for (_, content) in modules {
@@ -69,7 +111,6 @@ pub fn calculate_digest(modules: &[(Arc<str>, Arc<str>)]) -> Arc<str> {
     }
     hasher.finalize().to_string().into()
 }
-
 
 pub fn get_current_working_directory() -> anyhow::Result<Arc<str>> {
     let current_working_directory = std::env::current_dir()
@@ -134,21 +175,30 @@ pub fn get_changes_path() -> &'static str {
 #[derive(Debug)]
 pub struct Workspace {
     pub modules: Vec<(Arc<str>, Arc<str>)>,
-    pub absolute_path: Arc<str>, // set at startup
-    pub log_directory: Arc<str>, // always @logs/timestamp
-    pub is_create_lock_file: bool, // set at startup
-    pub digest: Arc<str>, // set at startup
-    pub store_path: Option<Arc<str>>, // set at startup
+    pub absolute_path: Arc<str>,            // set at startup
+    pub log_directory: Arc<str>,            // always @logs/timestamp
+    pub is_create_lock_file: bool,          // set at startup
+    pub digest: Arc<str>,                   // set at startup
+    pub store_path: Option<Arc<str>>,       // set at startup
     pub locks: HashMap<Arc<str>, Arc<str>>, // set during eval
-    pub env: environment::Environment, // set during eval
+    pub env: environment::Environment,      // set during eval
     #[allow(dead_code)]
     pub new_branch_name: Option<Arc<str>>, // set during eval - not used
-    changes: changes::Changes, // modified during run
-    inputs: inputs::Inputs, // modified during run
-    pub updated_assets: HashSet<Arc<str>>, // used by assets to keep track of exclusive access
+    changes: changes::Changes,              // modified during run
+    inputs: inputs::Inputs,                 // modified during run
+    pub updated_assets: HashSet<Arc<str>>,  // used by assets to keep track of exclusive access
+    pub rule_metrics: HashMap<Arc<str>, RuleMetrics>, // used to keep track of rule metrics
 }
 
 impl Workspace {
+    pub fn update_rule_metrics(&mut self, rule_name: &str, elapsed_time: std::time::Duration) {
+        self.rule_metrics.insert(
+            rule_name.into(),
+            RuleMetrics {
+                elapsed_time: elapsed_time.as_secs_f64(),
+            },
+        );
+    }
 
     pub fn set_is_reproducible(&mut self, value: bool) {
         self.env.vars.insert(
@@ -164,7 +214,7 @@ impl Workspace {
     pub fn get_absolute_path(&self) -> Arc<str> {
         self.absolute_path.clone()
     }
-    
+
     pub fn is_reproducible(&self) -> bool {
         if let Some(value) = self.env.vars.get(SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE) {
             return value.as_ref() == "true";
@@ -197,7 +247,10 @@ impl Workspace {
         true
     }
 
-    pub fn new(mut progress: printer::MultiProgressBar, absolute_path_to_workspace: Option<Arc<str>>) -> anyhow::Result<Self> {
+    pub fn new(
+        mut progress: printer::MultiProgressBar,
+        absolute_path_to_workspace: Option<Arc<str>>,
+    ) -> anyhow::Result<Self> {
         let date = chrono::Local::now();
 
         let absolute_path = if let Some(absolute_path) = absolute_path_to_workspace {
@@ -223,10 +276,12 @@ impl Workspace {
         let mut loaded_modules = HashSet::new();
         let mut modules: Vec<(Arc<str>, Arc<str>)> = vec![];
 
-        let env_content: Arc<str> = std::fs::read_to_string(format!("{}/{}", absolute_path, ENV_FILE_NAME))
-            .context(format_context!(
-            "Failed to read workspace file: {ENV_FILE_NAME}"
-        ))?.into();
+        let env_content: Arc<str> =
+            std::fs::read_to_string(format!("{}/{}", absolute_path, ENV_FILE_NAME))
+                .context(format_context!(
+                    "Failed to read workspace file: {ENV_FILE_NAME}"
+                ))?
+                .into();
 
         loaded_modules.insert(ENV_FILE_NAME.into());
         modules.push((ENV_FILE_NAME.into(), env_content));
@@ -244,24 +299,19 @@ impl Workspace {
                     let content = std::fs::read_to_string(path.as_str())
                         .context(format_context!("Failed to read file {}", path))?;
                     if !loaded_modules.contains(&module) {
-                        logger(&mut progress).trace(
-                            format!("Loading module from sync order: {}", module).as_str(),
-                        );
+                        logger(&mut progress)
+                            .trace(format!("Loading module from sync order: {}", module).as_str());
                         loaded_modules.insert(module.clone());
                         original_modules.push((module, content.into()));
                     }
                 }
             }
         } else {
-            logger(&mut progress).trace(
-                format!("No sync order found at {absolute_path}").as_str(),
-            );
+            logger(&mut progress).trace(format!("No sync order found at {absolute_path}").as_str());
         }
 
         for (name, _) in original_modules.iter() {
-            logger(&mut progress).message(
-                format!("Digesting {}", name).as_str(),
-            );
+            logger(&mut progress).message(format!("Digesting {}", name).as_str());
         }
         let workspace_digest = calculate_digest(&original_modules);
         modules.extend(original_modules);
@@ -276,11 +326,16 @@ impl Workspace {
                 {
                     let path: Arc<str> = entry.path().to_string_lossy().into();
                     let content: Arc<str> = std::fs::read_to_string(path.as_ref())
-                        .context(format_context!("Failed to read file {path}"))?.into();
+                        .context(format_context!("Failed to read file {path}"))?
+                        .into();
 
-                    if let Some(stripped_path) = path.strip_prefix(format!("{}/", absolute_path).as_str()) {
-                        if !loaded_modules.contains(stripped_path) {
-                            logger(&mut progress).trace(
+                    if let Some(stripped_path) =
+                        path.strip_prefix(format!("{}/", absolute_path).as_str())
+                    {
+                        if !stripped_path.starts_with(".spaces")
+                            && !loaded_modules.contains(stripped_path)
+                        {
+                            logger(&mut progress).debug(
                                 format!("Loading module from directory: {stripped_path}").as_str(),
                             );
                             loaded_modules.insert(stripped_path.into());
@@ -294,15 +349,15 @@ impl Workspace {
         unordered_modules.sort_by(|a, b| a.0.cmp(&b.0));
         modules.extend(unordered_modules);
 
-        logger(&mut progress).info(
-            format!("Workspace working directory: {absolute_path}").as_str(),
-        );
+        logger(&mut progress)
+            .info(format!("Workspace working directory: {absolute_path}").as_str());
 
         std::env::set_current_dir(std::path::Path::new(absolute_path.as_ref())).context(
             format_context!("Failed to set current directory to {absolute_path}"),
         )?;
 
-        let log_directory: Arc<str> = format!("{SPACES_LOGS_NAME}/logs_{}", date.format("%Y%m%d-%H-%M-%S")).into();
+        let log_directory: Arc<str> =
+            format!("{SPACES_LOGS_NAME}/logs_{}", date.format("%Y%m%d-%H-%M-%S")).into();
 
         std::fs::create_dir_all(log_directory.as_ref()).context(format_context!(
             "Failed to create log folder {log_directory}",
@@ -320,13 +375,10 @@ impl Workspace {
 
         let mut env = environment::Environment::default();
 
-        env.vars.insert(
-            SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE.into(),
-            "true".into(),
-        );
+        env.vars
+            .insert(SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE.into(), "true".into());
 
-        
-        Ok(Self { 
+        Ok(Self {
             modules,
             absolute_path,
             log_directory,
@@ -339,13 +391,14 @@ impl Workspace {
             changes,
             updated_assets: HashSet::new(),
             inputs: inputs::Inputs::new(get_inputs_path()),
-         })
+            rule_metrics: HashMap::new(),
+        })
     }
 
     pub fn set_env(&mut self, env: environment::Environment) {
         self.env = env;
     }
-    
+
     pub fn update_env(&mut self, env: environment::Environment) -> anyhow::Result<()> {
         self.env.vars.extend(env.vars);
         self.env.paths.extend(env.paths);
@@ -356,7 +409,7 @@ impl Workspace {
                 self.env.inherited_vars = Some(inherited_vars);
             }
         }
-    
+
         if let Some(system_paths) = env.system_paths {
             if let Some(existing_system_paths) = self.env.system_paths.as_mut() {
                 existing_system_paths.extend(system_paths.clone());
@@ -366,7 +419,7 @@ impl Workspace {
         }
         Ok(())
     }
-    
+
     pub fn get_env(&self) -> environment::Environment {
         self.env.clone()
     }
@@ -381,11 +434,10 @@ impl Workspace {
         let workspace_file_path = format!("{}/{}", self.absolute_path, ENV_FILE_NAME);
         std::fs::write(workspace_file_path.as_str(), workspace_file_content)
             .context(format_context!("Failed to write workspace file"))?;
-    
+
         Ok(())
     }
-    
-    
+
     pub fn save_lock_file(&self) -> anyhow::Result<()> {
         if !self.is_create_lock_file {
             return Ok(());
@@ -398,25 +450,26 @@ impl Workspace {
             .context(format_context!("Failed to serialize locks"))?;
         workspace_file_content.push_str(locks_str.as_str());
         workspace_file_content.push_str("\n\ninfo.set_locks(locks = workspace_locks) \n");
-    
+
         let workspace_file_path = format!("{}/{}", self.absolute_path, LOCK_FILE_NAME);
         std::fs::write(workspace_file_path.as_str(), workspace_file_content)
             .context(format_context!("Failed to write workspace file"))?;
-    
+
         Ok(())
     }
 
-    pub fn update_changes(&mut self,
+    pub fn update_changes(
+        &mut self,
         progress: &mut printer::MultiProgressBar,
         inputs: &HashSet<Arc<str>>,
     ) -> anyhow::Result<()> {
-            self.changes
-                .update_from_inputs(progress, inputs)
-                .context(format_context!("Failed to update workspace changes"))?;
-        
+        self.changes
+            .update_from_inputs(progress, inputs)
+            .context(format_context!("Failed to update workspace changes"))?;
+
         Ok(())
     }
-    
+
     pub fn save_changes(&mut self) -> anyhow::Result<()> {
         let changes_path = get_changes_path();
         self.changes
@@ -428,8 +481,9 @@ impl Workspace {
     pub fn add_git_commit_lock(&mut self, rule_name: &str, commit: Arc<str>) {
         self.locks.insert(rule_name.into(), commit);
     }
-    
-    pub fn get_rule_inputs_digest(&self,
+
+    pub fn get_rule_inputs_digest(
+        &self,
         progress: &mut printer::MultiProgressBar,
         seed: &str,
         globs: &HashSet<Arc<str>>,
@@ -438,17 +492,19 @@ impl Workspace {
     }
 
     pub fn get_store_path(&self) -> Arc<str> {
-        self.store_path.clone().unwrap_or_else(get_checkout_store_path)
+        self.store_path
+            .clone()
+            .unwrap_or_else(get_checkout_store_path)
     }
 
     pub fn get_spaces_tools_path(&self) -> Arc<str> {
         get_spaces_tools_path(self.get_store_path().as_ref())
     }
-    
+
     pub fn get_cargo_binstall_root(&self) -> Arc<str> {
         format!("{}/cargo_binstall_bin_dir", self.get_spaces_tools_path()).into()
     }
-    
+
     pub fn get_log_file(&self, rule_name: &str) -> Arc<str> {
         let rule_name = rule_name.replace('/', "_");
         let rule_name = rule_name.replace(':', "_");
@@ -462,18 +518,18 @@ impl Workspace {
         seed: &str,
         inputs: &HashSet<Arc<str>>,
     ) -> anyhow::Result<Option<Arc<str>>> {
-        let digest = self.get_rule_inputs_digest(progress, seed, inputs)
+        let digest = self
+            .get_rule_inputs_digest(progress, seed, inputs)
             .context(format_context!("Failed to get digest for rule {rule_name}"))?;
         self.inputs.is_changed(rule_name, digest)
     }
-    
+
     pub fn update_rule_digest(&mut self, rule: &str, digest: Arc<str>) {
         self.inputs.save_digest(rule, digest);
     }
-    
+
     pub fn save_inputs(&self) -> anyhow::Result<()> {
         let inputs_path = get_inputs_path();
         self.inputs.save(inputs_path)
     }
-    
 }
