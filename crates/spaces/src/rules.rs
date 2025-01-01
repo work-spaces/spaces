@@ -79,12 +79,11 @@ pub struct Task {
     pub executor: executor::Task,
     pub phase: Phase,
     pub rule: Rule,
+    pub digest: Arc<str>,
     #[serde(skip)]
     signal: RuleSignal,
     #[serde(skip)]
     deps_signals: Vec<RuleSignal>,
-    #[serde(skip)]
-    digest: Arc<str>,
 }
 
 impl Task {
@@ -100,7 +99,9 @@ impl Task {
     }
 
     pub fn calculate_digest(&self) -> blake3::Hash {
-        let seed = serde_json::to_string(&self.executor).unwrap();
+        let mut self_clone = self.clone();
+        self_clone.digest = "".into();
+        let seed = serde_json::to_string(&self_clone).unwrap();
         let mut digest = blake3::Hasher::new();
         digest.update(seed.as_bytes());
         digest.finalize()
