@@ -54,7 +54,7 @@ impl<'a> Logger<'a> {
         let _ = match &mut self.printer {
             Printer::Printer(printer) => printer.log(level, output.as_str()),
             Printer::Progress(progress) => {
-                let _ = progress.log(level, output.as_str());
+                progress.log(level, output.as_str());
                 Ok(())
             }
         };

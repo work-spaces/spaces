@@ -83,14 +83,21 @@ impl Exec {
             Some(workspace.read().get_log_file(name))
         };
 
+        let working_directory = if let Some(directory) = self.working_directory.as_ref() {
+            if directory.starts_with('/'){
+                Some(directory.clone())
+            } else {
+                Some(format!("{workspace_path}/{directory}").into())
+            }
+        } else {
+            None
+        };
+
         let options = printer::ExecuteOptions {
             label: name.into(),
             arguments,
             environment,
-            working_directory: self
-                .working_directory
-                .clone()
-                .map(|cwd| format!("{workspace_path}/{cwd}").into()),
+            working_directory,
             is_return_stdout: self.redirect_stdout.is_some(),
             log_file_path: log_file_path.clone(),
             clear_environment: true,

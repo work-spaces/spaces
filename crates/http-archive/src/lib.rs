@@ -428,7 +428,7 @@ impl HttpArchive {
     ) -> anyhow::Result<printer::MultiProgressBar> {
         if !self.is_extract_required() {
             label_logger(&mut progress_bar, &self.archive.url)
-                .debug(format!("Extract not required").as_str());
+                .debug("Extract not required");
             return Ok(progress_bar);
         }
 

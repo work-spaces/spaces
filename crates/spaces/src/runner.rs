@@ -27,20 +27,12 @@ pub fn run_starlark_modules_in_workspace(
     match run_workspace {
         RunWorkspace::Target(target) => {
             let modules = workspace_arc.read().modules.clone();
-            evaluator::run_starlark_modules(
-            printer,
-            workspace_arc.clone(),
-            modules,
-            phase,
-            target,
-        )
-        .context(format_context!("while executing workspace rules"))?
-    }
+            evaluator::run_starlark_modules(printer, workspace_arc.clone(), modules, phase, target)
+                .context(format_context!("while executing workspace rules"))?
+        }
         RunWorkspace::Script(scripts) => {
             for (name, _) in scripts.iter() {
-                logger::Logger::new_printer(printer, name.clone()).message(
-                    format!("Digesting").as_str(),
-                );
+                logger::Logger::new_printer(printer, name.clone()).message("Digesting");
             }
 
             workspace_arc.write().is_create_lock_file = is_create_lock_file;
@@ -58,7 +50,6 @@ pub fn run_starlark_modules_in_workspace(
 
     workspace::RuleMetricsFile::update(workspace_arc.clone())
         .context(format_context!("Failed to update rule metrics file"))?;
-    
 
     Ok(())
 }
@@ -83,23 +74,15 @@ pub fn checkout(
         };
 
         let script_as_path = std::path::Path::new(script_path.as_ref());
-        let file_name: Arc<str> = script_as_path
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .into();
+        let file_name: Arc<str> = script_as_path.file_name().unwrap().to_string_lossy().into();
         settings.push(file_name.clone());
 
         let one_script_contents = std::fs::read_to_string(script_path.as_ref())
             .context(format_context!("while reading script file {script_path}"))?;
 
-        std::fs::write(
-            format!("{name}/{file_name}"),
-            one_script_contents.as_str(),
-        )
-        .context(format_context!(
-            "while writing script file {script_path} to workspace"
-        ))?;
+        std::fs::write(format!("{name}/{file_name}"), one_script_contents.as_str()).context(
+            format_context!("while writing script file {script_path} to workspace"),
+        )?;
 
         scripts.push((file_name, one_script_contents.into()));
     }
@@ -123,7 +106,9 @@ pub fn checkout(
         RunWorkspace::Script(scripts),
         create_lock_file,
     )
-    .context(format_context!("while evaulating starklark modules for checkout"))?;
+    .context(format_context!(
+        "while evaulating starklark modules for checkout"
+    ))?;
 
     settings
         .save(absolute_path_to_workspace.as_ref())

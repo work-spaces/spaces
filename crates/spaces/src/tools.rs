@@ -2,7 +2,7 @@ use crate::{builtins, workspace};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 
-fn tools_logger<'a>(printer: &'a mut printer::Printer) -> logger::Logger<'a> {
+fn tools_logger(printer: &mut printer::Printer) -> logger::Logger<'_> {
     logger::Logger::new_printer(printer, "tools".into())
 }
 

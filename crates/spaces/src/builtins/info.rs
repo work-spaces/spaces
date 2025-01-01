@@ -1,4 +1,4 @@
-use crate::{rules, singleton, workspace};
+use crate::{rules, singleton};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use starlark::environment::GlobalsBuilder;
@@ -231,6 +231,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(workspace.digest.clone().to_string())
     }
 
+    fn get_workspace_short_digest() -> anyhow::Result<String> {
+        let workspace_arc =
+            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+        let workspace = workspace_arc.read();
+        Ok(workspace.get_short_digest().to_string())
+    }
+
+
     fn is_ci() -> anyhow::Result<bool> {
         Ok(singleton::get_is_ci())
     }
@@ -288,7 +296,6 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ) -> anyhow::Result<NoneType> {
         let workspace_arc =
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
-        
 
         let mut workspace = workspace_arc.write();
         let env = serde_json::from_value(env.to_json_value()?)
@@ -305,8 +312,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let locks = serde_json::from_value(locks.to_json_value()?)
             .context(format_context!("Failed to parse archive arguments"))?;
 
-        let workspace_arc =
-            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+        let workspace_arc = singleton::get_workspace()
+            .context(format_error!("Internal Error: No active workspace found"))?;
         let mut workspace = workspace_arc.write();
 
         workspace.locks = locks;
@@ -314,8 +321,25 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(NoneType)
     }
 
-    fn get_path_to_capsule_workspace() -> anyhow::Result<String> {
-        Ok(workspace::SPACES_CAPSULES_NAME.to_string())
+    fn get_path_to_capsule_workspaces() -> anyhow::Result<String> {
+        let workspace_arc = singleton::get_workspace()
+            .context(format_error!("Internal Error: No active workspace found"))?;
+        let path = workspace_arc.read().get_path_to_capsule_store_workspaces();
+        Ok(path.to_string())
+    }
+
+    fn get_path_to_capsule_workflows() -> anyhow::Result<String> {
+        let workspace_arc = singleton::get_workspace()
+            .context(format_error!("Internal Error: No active workspace found"))?;
+        let path = workspace_arc.read().get_path_to_workflows();
+        Ok(path.to_string())
+    }
+
+    fn get_path_to_capsule_sysroot() -> anyhow::Result<String> {
+        let workspace_arc = singleton::get_workspace()
+            .context(format_error!("Internal Error: No active workspace found"))?;
+        let path = workspace_arc.read().get_path_to_capsule_store_sysroot();
+        Ok(path.to_string())
     }
 
     fn get_cpu_count() -> anyhow::Result<i64> {

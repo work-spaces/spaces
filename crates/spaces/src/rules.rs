@@ -83,6 +83,8 @@ pub struct Task {
     signal: RuleSignal,
     #[serde(skip)]
     deps_signals: Vec<RuleSignal>,
+    #[serde(skip)]
+    digest: Arc<str>,
 }
 
 impl Task {
@@ -93,8 +95,17 @@ impl Task {
             signal: RuleSignal::new(rule.name.clone()),
             deps_signals: Vec::new(),
             rule,
+            digest: "".into(),
         }
     }
+
+    pub fn calculate_digest(&self) -> blake3::Hash {
+        let seed = serde_json::to_string(&self.executor).unwrap();
+        let mut digest = blake3::Hasher::new();
+        digest.update(seed.as_bytes());
+        digest.finalize()
+    }
+
 
     pub fn update_implicit_dependency(&mut self, other_task: &Task) {
         if let Some(deps) = &self.rule.deps {
@@ -432,6 +443,9 @@ impl State {
             }
 
             // connect the dependencies
+            let mut task_hasher = blake3::Hasher::new();
+            task_hasher.update(task.calculate_digest().as_bytes());
+
             if let Some(deps) = task.rule.deps.clone() {
                 for dep in deps {
                     let dep_task = tasks_copy.get(&dep).ok_or(format_error!(
@@ -470,6 +484,7 @@ impl State {
                         _ => {}
                     }
 
+                    task_hasher.update(dep_task.calculate_digest().as_bytes());
                     task.add_signal_dependency(dep_task);
                     self.graph
                         .add_dependency(&task.rule.name, &dep)
@@ -479,6 +494,7 @@ impl State {
                         ))?;
                 }
             }
+            task.digest = task_hasher.finalize().to_string().into();
         }
 
         let target_is_some = target.is_some();

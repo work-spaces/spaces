@@ -10,7 +10,12 @@ pub const LOCK_FILE_NAME: &str = "lock.spaces.star";
 pub const SPACES_MODULE_NAME: &str = "spaces.star";
 pub const SPACES_STDIN_NAME: &str = "stdin.star";
 pub const SPACES_LOGS_NAME: &str = ".spaces/logs";
-pub const SPACES_CAPSULES_NAME: &str = ".spaces/capsule_workspace";
+const SPACES_CAPSULES_NAME: &str = "capsules";
+const SPACES_CAPSULES_WORKSPACES_NAME: &str = "workspace";
+const SPACES_CAPSULES_WORKFLOWS_NAME: &str = "workflows";
+const SPACES_CAPSULES_STATUS_NAME: &str = "status";
+const SPACES_CAPSULES_SYSROOT_NAME: &str = "sysroot";
+
 pub const SPACES_CAPSULES_INFO_NAME: &str = "capsules.spaces.json";
 const SETTINGS_FILE_NAME: &str = ".spaces/settings.spaces.json";
 const METRICS_FILE_NAME: &str = ".spaces/metrics.spaces.json";
@@ -25,7 +30,7 @@ Spaces Workspace file
 
 pub type WorkspaceArc = std::sync::Arc<lock::StateLock<Workspace>>;
 
-fn logger<'a>(progress: &'a mut printer::MultiProgressBar) -> logger::Logger<'a> {
+fn logger(progress: &mut printer::MultiProgressBar) -> logger::Logger<'_> {
     logger::Logger::new_progress(progress, "workspace".into())
 }
 
@@ -102,6 +107,10 @@ impl Settings {
 
         Ok(())
     }
+}
+
+pub fn get_short_digest(digest: &str) -> Arc<str> {
+    digest[0..8].into()
 }
 
 pub fn calculate_digest(modules: &[(Arc<str>, Arc<str>)]) -> Arc<str> {
@@ -207,6 +216,7 @@ impl Workspace {
         );
     }
 
+    #[allow(dead_code)]
     pub fn get_relative_directory(&self, relative_path: &str) -> Arc<str> {
         format!("{}/{}", self.absolute_path, relative_path).into()
     }
@@ -491,10 +501,38 @@ impl Workspace {
         self.changes.get_digest(progress, seed, globs)
     }
 
+    pub fn get_short_digest(&self) -> Arc<str> {
+        get_short_digest(self.digest.as_ref())
+    }
+
     pub fn get_store_path(&self) -> Arc<str> {
         self.store_path
             .clone()
             .unwrap_or_else(get_checkout_store_path)
+    }
+
+    fn get_path_to_capsule_store(&self) -> Arc<str> {
+        format!("{}/{}", self.get_store_path(), SPACES_CAPSULES_NAME).into()
+    }
+
+    pub fn get_path_to_capsule_store_workspaces(&self) -> Arc<str> {
+        format!("{}/{}", self.get_path_to_capsule_store(), SPACES_CAPSULES_WORKSPACES_NAME).into()
+    }
+
+    pub fn get_path_to_capsule_store_workflows(&self) -> Arc<str> {
+        format!("{}/{}", self.get_path_to_capsule_store(), SPACES_CAPSULES_WORKFLOWS_NAME).into()
+    }
+
+    pub fn get_path_to_workflows(&self) -> Arc<str> {
+        format!("{}/{}", self.get_path_to_capsule_store_workflows(), self.get_short_digest()).into()
+    }
+
+    pub fn get_path_to_capsule_store_status(&self) -> Arc<str> {
+        format!("{}/{}", self.get_path_to_capsule_store(), SPACES_CAPSULES_STATUS_NAME).into()
+    }
+
+    pub fn get_path_to_capsule_store_sysroot(&self) -> Arc<str> {
+        format!("{}/{}", self.get_path_to_capsule_store(), SPACES_CAPSULES_SYSROOT_NAME).into()
     }
 
     pub fn get_spaces_tools_path(&self) -> Arc<str> {

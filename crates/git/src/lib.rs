@@ -47,6 +47,7 @@ pub struct Repo {
     pub clone: Option<Clone>,
     pub is_evaluate_spaces_modules: Option<bool>,
     pub sparse_checkout: Option<SparseCheckout>,
+    pub working_directory: Option<Arc<str>>,
 }
 
 impl Repo {
@@ -134,6 +135,9 @@ pub fn execute_git_command(
         .environment
         .push(("GIT_TERMINAL_PROMPT".into(), "0".into()));
 
+    if let Some(directory) = options.working_directory.as_ref() {
+        url_logger(progress_bar, url).debug(format!("cwd: {directory}").as_str());
+    }
     url_logger(progress_bar, url).debug(format!("git {}", options.arguments.join(" ")).as_str());
 
     let full_command = options.get_full_command_in_working_directory("git");
@@ -646,7 +650,7 @@ impl Repository {
 
         let mut arguments = vec!["sparse-checkout".into(), "set".into()];
 
-        arguments.extend(sparse_checkout.list.iter().map(|e| e.clone()));
+        arguments.extend(sparse_checkout.list.iter().cloned());
 
         self.execute(progress_bar, arguments)
             .context(format_context!(
@@ -677,7 +681,7 @@ impl Repository {
                     .context(format_context!("failed to resolve revision"))?;
 
                 checkout_args.push("checkout".into());
-                checkout_args.push(revision.clone().into());
+                checkout_args.push(revision.clone());
             }
         }
 

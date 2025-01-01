@@ -478,7 +478,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();
 
-        let worktree_path  = workspace.absolute_path.clone();
+        let worktree_path  = if let Some(directory) = repo.working_directory.as_ref(){
+            directory.clone()
+        } else {
+            workspace.get_absolute_path()
+        };
 
         let checkout = repo.get_checkout();
         let spaces_key = rule.name.clone();
@@ -494,6 +498,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 clone: repo.clone.unwrap_or(git::Clone::Default),
                 is_evaluate_spaces_modules: repo.is_evaluate_spaces_modules.unwrap_or(true),
                 sparse_checkout: repo.sparse_checkout,
+                working_directory: repo.working_directory
             }),
         ))
         .context(format_context!("Failed to insert task {rule_name}"))?;

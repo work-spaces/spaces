@@ -4,7 +4,7 @@ use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-fn logger<'a>(progress: &'a mut printer::MultiProgressBar, url: Arc<str>) -> logger::Logger<'a> {
+fn logger(progress: &mut printer::MultiProgressBar, url: Arc<str>) -> logger::Logger<'_> {
     logger::Logger::new_progress(progress, url)
 }
 
@@ -18,9 +18,27 @@ pub struct Git {
     pub clone: git::Clone,
     pub is_evaluate_spaces_modules: bool,
     pub sparse_checkout: Option<git::SparseCheckout>,
+    pub working_directory: Option<Arc<str>>,
 }
 
 impl Git {
+
+    fn get_clone_working_directory(&self, workspace: workspace::WorkspaceArc) -> Arc<str> {
+        if let Some(directory) = self.working_directory.as_ref() {
+            directory.clone()
+        } else {
+            workspace.read().get_absolute_path()
+        }
+    }
+
+    fn get_working_directory_in_repo(&self, workspace: workspace::WorkspaceArc) -> Arc<str> {
+        if let Some(directory) = self.working_directory.as_ref() {
+            format!("{directory}/{}", self.spaces_key).into()
+        } else {
+            format!("{}/{}", self.get_clone_working_directory(workspace), self.spaces_key).into()
+        }
+    }
+
     fn execute_worktree_clone(
         &self,
         progress: &mut printer::MultiProgressBar,
@@ -93,7 +111,7 @@ impl Git {
         clone_arguments.push(self.url.clone());
         clone_arguments.push(self.spaces_key.clone());
 
-        let workspace_directory = workspace.read().get_absolute_path();
+        let workspace_directory = self.get_clone_working_directory(workspace.clone());
         let repo_directory: Arc<str> =
             format!("{}/{}", workspace_directory, self.spaces_key).into();
 
@@ -142,6 +160,8 @@ impl Git {
             git::Checkout::Revision(branch_name) => branch_name.clone(),
         };
 
+        let workspace_directory = self.get_clone_working_directory(workspace.clone());
+
         let clone_options = printer::ExecuteOptions {
             arguments: vec![
                 "clone".into(),
@@ -153,19 +173,17 @@ impl Git {
                 branch.clone(),
                 "--single-branch".into(),
             ],
-            working_directory: Some(workspace.read().get_absolute_path()),
+            working_directory: Some(workspace_directory),
             ..Default::default()
         };
 
         let clone_path = std::path::Path::new(self.spaces_key.as_ref());
         if clone_path.exists() {
-            logger(progress, self.url.clone()).message(
-                format!("{} already exists", self.spaces_key).as_str(),
-            );
+            logger(progress, self.url.clone())
+                .message(format!("{} already exists", self.spaces_key).as_str());
         } else {
-            logger(progress, self.url.clone()).trace(
-                format!("git clone {clone_options:?}").as_str(),
-            );
+            logger(progress, self.url.clone())
+                .trace(format!("git clone {clone_options:?}").as_str());
 
             progress
                 .execute_process("git", clone_options)
@@ -210,10 +228,11 @@ impl Git {
         };
 
         let mut is_locked = false;
+        let working_directory = self.get_working_directory_in_repo(workspace.clone());
         if workspace.read().is_create_lock_file {
             if let Some(commit_hash) =
-                git::get_commit_hash(progress, &self.url, &self.spaces_key).context(
-                    format_context!("Failed to get commit hash for {}", self.spaces_key),
+                git::get_commit_hash(progress, &self.url, working_directory.as_ref()).context(
+                    format_context!("Failed to get commit hash for {working_directory}"),
                 )?
             {
                 let rev: Arc<str> =
@@ -227,18 +246,13 @@ impl Git {
             }
         } else if let Some(commit_hash) = workspace.read().locks.get(name) {
             let options = printer::ExecuteOptions {
-                working_directory: Some(
-                    workspace
-                        .read()
-                        .get_relative_directory(self.spaces_key.as_ref()),
-                ),
+                working_directory: Some(working_directory.clone()),
                 arguments: vec!["checkout".into(), "--detach".into(), commit_hash.clone()],
                 ..Default::default()
             };
 
-            logger(progress, self.url.clone()).debug(
-                format!("{}: git {options:?}", self.spaces_key).as_str(),
-            );
+            logger(progress, self.url.clone())
+                .debug(format!("{}: git {options:?}", self.spaces_key).as_str());
 
             git::execute_git_command(progress, &self.url, options).context(format_context!(
                 "Failed to checkout commit hash from {}",
@@ -251,7 +265,7 @@ impl Git {
         // after possibly applying the lock commit, check for reproducibility
         if !is_locked {
             // check if checkout is on a branch or commiy
-            let is_branch = git::is_branch(progress, &self.url, &self.spaces_key, &ref_name);
+            let is_branch = git::is_branch(progress, &self.url, working_directory.as_ref(), &ref_name);
             if is_branch {
                 logger(progress, self.url.clone()).info(
                     format!(

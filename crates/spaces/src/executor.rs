@@ -3,9 +3,9 @@ pub mod asset;
 pub mod capsule;
 pub mod env;
 pub mod exec;
-pub mod oras;
 pub mod git;
 pub mod http_archive;
+pub mod oras;
 
 use crate::workspace;
 use anyhow::Context;
@@ -78,7 +78,7 @@ impl Task {
             Task::AddAsset(asset) => asset.execute(progress, workspace.clone(), name),
             Task::Capsule(capsule) => capsule.execute(&mut progress, workspace.clone(), name),
             Task::Git(git) => {
-                check_new_modules = git.is_evaluate_spaces_modules;
+                check_new_modules = git.is_evaluate_spaces_modules && git.working_directory.is_none();
                 git.execute(&mut progress, workspace.clone(), name)
             }
             Task::Target => Ok(()),
@@ -94,23 +94,21 @@ impl Task {
             let workspace = workspace.read().absolute_path.to_owned();
             let parts = name.split(':').collect::<Vec<&str>>();
             if let Some(last) = parts.last() {
-                if !last.starts_with(workspace::SPACES_CAPSULES_NAME) {
-                    let workspace_path = std::path::Path::new(workspace.as_ref());
-                    let new_repo_path = workspace_path.join(last);
-                    // add files in the directory that end in spaces.star
-                    let modules = std::fs::read_dir(new_repo_path.clone()).context(
-                        format_context!("Failed to read workspace directory {new_repo_path:?}"),
-                    )?;
+                let workspace_path = std::path::Path::new(workspace.as_ref());
+                let new_repo_path = workspace_path.join(last);
+                // add files in the directory that end in spaces.star
+                let modules = std::fs::read_dir(new_repo_path.clone()).context(format_context!(
+                    "Failed to read workspace directory {new_repo_path:?}"
+                ))?;
 
-                    for module in modules.flatten() {
-                        let path = module.path();
-                        if path.is_file() {
-                            let path = path.to_string_lossy().to_string();
-                            if workspace::is_rules_module(path.as_str()) {
-                                let relative_workspace_path =
-                                    format!("{}/{}", last, module.file_name().to_string_lossy());
-                                result.new_modules.push(relative_workspace_path.into());
-                            }
+                for module in modules.flatten() {
+                    let path = module.path();
+                    if path.is_file() {
+                        let path = path.to_string_lossy().to_string();
+                        if workspace::is_rules_module(path.as_str()) {
+                            let relative_workspace_path =
+                                format!("{}/{}", last, module.file_name().to_string_lossy());
+                            result.new_modules.push(relative_workspace_path.into());
                         }
                     }
                 }

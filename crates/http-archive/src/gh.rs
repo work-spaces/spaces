@@ -2,7 +2,7 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use std::sync::Arc;
 
-fn gh_logger<'a>(progress: &'a mut printer::MultiProgressBar) -> logger::Logger<'a> {
+fn gh_logger(progress: &mut printer::MultiProgressBar) -> logger::Logger<'_> {
     logger::Logger::new_progress(progress, "gh".into())
 }
 

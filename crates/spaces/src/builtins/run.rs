@@ -128,7 +128,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
         let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for repo"))?;
+            .context(format_context!("bad options for add target rule"))?;
 
         let rule_name = rule.name.clone();
         rules::insert_task(rules::Task::new(

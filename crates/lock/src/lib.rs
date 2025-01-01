@@ -170,19 +170,16 @@ impl FileLock {
             let contents_result = std::fs::read_to_string(lock_file_path)
                 .context(format_context!("Failed to read {}", self.path));
 
-            match contents_result {
-                Ok(contents) => {
-                    let lock_info: LockFileContents =
-                        serde_json::from_str(&contents).context(format_context!(
-                            "failed to parse {} - delete the file and try again",
-                            self.path
-                        ))?;
+            if let Ok(contents) = contents_result {
+                let lock_info: LockFileContents =
+                    serde_json::from_str(&contents).context(format_context!(
+                        "failed to parse {} - delete the file and try again",
+                        self.path
+                    ))?;
 
-                    if lock_info.process_group_id != get_process_group_id() {
-                        return Ok(());
-                    }
+                if lock_info.process_group_id != get_process_group_id() {
+                    return Ok(());
                 }
-                Err(_) => {}
             }
 
             progress.increment(1);
