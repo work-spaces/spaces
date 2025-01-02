@@ -221,7 +221,8 @@ fn get_state() -> &'static lock::StateLock<State> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Capsule {
-    pub scripts: Vec<Arc<str>>,   // list of starlark scripts to execute
+    pub scripts: Vec<Arc<str>>, // list of starlark scripts to execute
+    pub globs: Option<HashSet<Arc<str>>>, // list of globs to hardlink to the prefix
     pub prefix: Option<Arc<str>>, // --prefix location where the capsule should be installed in the sysroot (default is none)
 }
 
@@ -392,6 +393,7 @@ impl Capsule {
                     }
 
                     let source_path = entry.path();
+
                     let relative_path =
                         source_path
                             .strip_prefix(capsule_prefix)
@@ -400,6 +402,18 @@ impl Capsule {
                                 capsule_prefix,
                                 source_path
                             ))?;
+
+                    if let Some(globs) = self.globs.as_ref() {
+                        if !changes::glob::match_globs(
+                            globs,
+                            relative_path.to_string_lossy().as_ref(),
+                        ) {
+                            logger(progress, capsule_prefix).debug(
+                                format!("Skipping {relative_path:?} because of globs").as_str(),
+                            );
+                            continue;
+                        }
+                    }
                     let prefix_path = std::path::Path::new(prefix.as_ref());
                     let destination_path = prefix_path.join(relative_path);
 
@@ -507,7 +521,11 @@ impl Capsule {
                 .debug(format!("Updating capsule info {}", capsule_run_info.digest).as_str());
 
             for entry in capsule_info.iter() {
-                let file_path = format!("{}/{}.json", entry.prefix, capsule_run_info.get_short_digest());
+                let file_path = format!(
+                    "{}/{}.json",
+                    entry.prefix,
+                    capsule_run_info.get_short_digest()
+                );
                 std::fs::write(file_path.as_str(), capsule_info_json.as_str()).context(
                     format_context!("Failed to write capsule info to {file_path}"),
                 )?;

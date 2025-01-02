@@ -311,6 +311,24 @@ pub const FUNCTIONS: &[Function] = &[
         example: Some(ADD_CARGO_BIN_EXAMPLE)
     },
     Function {
+        name: "add_capsule",
+        description: "Adds a capsule to the workspace during checkout.",
+        return_type: "None",
+        args: &[
+            get_rule_argument(),
+            Arg{
+                name : "capsule",
+                description: "dict with",
+                dict: &[
+                    ("scripts", "`spaces` scripts that define the capsule"),
+                    ("prefix", "Workspace prefix to install the capsule (`sysroot` for build deps and `build/install` for runtime deps)"),
+                    ("globs", "globs to apply to the capsule for installing at `prefix`"),
+                ]
+            }
+        ],
+        example: None,
+    },
+    Function {
         name: "add_asset",
         description: ADD_ASSET_DESCRIPTION,
         return_type: "None",
@@ -742,6 +760,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let capsule: executor::capsule::Capsule = serde_json::from_value(capsule.to_json_value()?)
             .context(format_context!("Failed to parse capsule arguments"))?;
+
+        if let Some(globs) = capsule.globs.as_ref(){
+            changes::glob::validate(globs).context(format_context!("Failed to validate globs"))?;
+        }
 
         let rule_name = rule.name.clone();
 

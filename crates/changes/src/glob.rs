@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::sync::Arc;
+use anyhow_source_location::format_error;
 
 pub fn is_glob_include(glob: &str) -> Option<Arc<str>> {
     let mut result = glob.to_owned();
@@ -31,4 +32,16 @@ pub fn match_globs(globs: &HashSet<Arc<str>>, input: &str) -> bool {
     }
     
     false
+}
+
+pub fn validate(globs: &HashSet<Arc<str>>) -> anyhow::Result<()> {
+    for values in globs.iter() {
+        let value = values.as_ref();
+        if value.starts_with('+') || value.starts_with('-') {
+            continue;
+        }
+        return Err(format_error!("invalid glob pattern: {value:?}. Must begin with '+' or '-'"));
+    }
+
+    Ok(())
 }

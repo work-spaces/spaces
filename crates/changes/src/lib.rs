@@ -4,7 +4,7 @@ use bincode::{Decode, Encode};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-mod glob;
+pub mod glob;
 
 #[derive(Clone, Debug, Encode, Decode)]
 pub enum ChangeDetailType {
