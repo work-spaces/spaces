@@ -844,6 +844,26 @@ fn add_http_archive(
             archive.sha256
         };
 
+        let mut globs = archive.globs.unwrap_or_default();
+        if let Some(includes) = archive.includes.as_ref() {
+            for include in includes {
+                globs.insert(format!("+{}", include).into());
+            }
+        }
+
+        if let Some(excludes) = archive.excludes.as_ref() {
+            for exclude in excludes {
+                globs.insert(format!("-{}", exclude).into());
+            }
+        }
+
+        if !globs.is_empty() {
+            changes::glob::validate(&globs).context(format_context!("Failed to validate globs"))?;
+            archive.globs = Some(globs);
+        } else {
+            archive.globs = None;
+        }
+
         let workspace_arc =
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();

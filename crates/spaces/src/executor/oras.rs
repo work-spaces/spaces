@@ -3,6 +3,7 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::collections::HashSet;
 
 fn get_oras_command(tools_path: &str) -> Arc<str> {
     format!("{tools_path}/sysroot/bin/oras").into()
@@ -23,7 +24,7 @@ pub struct OrasArchive {
     pub manifest_artifact_path: Arc<str>,
     pub add_prefix: Option<Arc<str>>,
     pub strip_prefix: Option<Arc<str>>,
-    pub globs: Option<Vec<Arc<str>>>,
+    pub globs: Option<HashSet<Arc<str>>>,
 }
 
 impl OrasArchive {

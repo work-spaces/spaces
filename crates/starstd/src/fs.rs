@@ -205,6 +205,23 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(std::path::Path::new(path).is_symlink())
     }
 
+    fn is_text_file(path: &str) -> anyhow::Result<bool> {
+        let file_path = std::path::Path::new(path);
+        if !file_path.is_file() {
+            return Ok(false);
+        }
+
+        let contents = std::fs::read_to_string(file_path).context(format_context!(
+            "Failed to read file {} all paths must be relative to the workspace root",
+            path
+        ))?;
+
+        // Check if the file is a text file by checking if it contains any non-UTF8 characters
+        let is_text = contents.is_char_boundary(contents.len());
+
+        Ok(is_text)
+    }
+
     fn read_toml_to_dict<'v>(path: &str, heap: &'v Heap) -> anyhow::Result<Value<'v>> {
         let content = std::fs::read_to_string(path).context(format_context!(
             "Failed to read file {} all paths must be relative to the workspace root",

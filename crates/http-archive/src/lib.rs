@@ -42,7 +42,7 @@ pub struct Archive {
     pub link: ArchiveLink,
     pub includes: Option<Vec<Arc<str>>>,
     pub excludes: Option<Vec<Arc<str>>>,
-    pub globs: Option<Vec<Arc<str>>>,
+    pub globs: Option<HashSet<Arc<str>>>,
     pub strip_prefix: Option<Arc<str>>,
     pub add_prefix: Option<Arc<str>>,
     pub filename: Option<Arc<str>>,
@@ -230,23 +230,12 @@ impl HttpArchive {
             .context(format_context!("failed to load json files manifest"))?;
         for file in all_files.iter() {
             let mut is_match = true;
-            if let Some(includes) = self.archive.includes.as_ref() {
-                is_match = false;
-                for pattern in includes {
-                    if glob_match::glob_match(pattern, file) {
-                        is_match = true;
-                        break;
-                    }
-                }
+            if let Some(globs) = self.archive.globs.as_ref() {
+                is_match = changes::glob::match_globs(globs, file);
             }
+
             if is_match {
                 files.push(file);
-            }
-        }
-
-        if let Some(excludes) = self.archive.excludes.as_ref() {
-            for pattern in excludes {
-                files.retain(|file| !glob_match::glob_match(pattern, file));
             }
         }
 

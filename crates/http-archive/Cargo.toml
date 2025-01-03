@@ -10,6 +10,7 @@ tokio = { version = "1", features = ["rt-multi-thread"] }
 which = "7"
 
 anyhow-source-location.workspace = true
+changes.workspace = true
 anyhow.workspace = true
 printer.workspace = true
 state.workspace = true

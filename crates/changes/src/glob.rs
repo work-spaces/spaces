@@ -35,12 +35,20 @@ pub fn match_globs(globs: &HashSet<Arc<str>>, input: &str) -> bool {
 }
 
 pub fn validate(globs: &HashSet<Arc<str>>) -> anyhow::Result<()> {
+    let mut has_includes = false;
     for values in globs.iter() {
         let value = values.as_ref();
         if value.starts_with('+') || value.starts_with('-') {
+            if value.starts_with('+') {
+                has_includes = true;
+            }
             continue;
         }
         return Err(format_error!("invalid glob pattern: {value:?}. Must begin with '+' or '-'"));
+    }
+
+    if !has_includes {
+        return Err(format_error!("if globs are specified, at least one must be an include (start with `+`)"));
     }
 
     Ok(())
