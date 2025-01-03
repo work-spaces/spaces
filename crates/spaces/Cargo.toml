@@ -9,6 +9,8 @@ clap_complete = { version = "4" }
 anyhow = "1"
 anyhow-source-location.workspace = true
 
+starlark_syntax = { version = "0.13" }
+
 starlark.workspace = true
 git.workspace = true
 platform.workspace = true

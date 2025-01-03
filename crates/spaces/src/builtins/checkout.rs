@@ -29,8 +29,7 @@ const fn get_archive_dict() -> &'static [(&'static str, &'static str)] {
         ("url", "url to zip|tar.xz|tar.gz|tar.bz2 file (can also be an uncompressed file with no suffix)"),
         ("sha256", "hash of the file"),
         ("link", "None|Hard: create hardlinks of the archive from the spaces store to the workspace"),
-        ("includes", "options list of globs to include"),
-        ("excludes", "optional list of globs to exclude"),
+        ("globs", "optional list of globs prefix with `+` to include and `-` to exclude"),
         ("strip_prefix", "optional prefix to strip from the archive path"),
         ("add_prefix", "optional prefix to add in the workspace (e.g. sysroot/share)"),
     ]
@@ -852,6 +851,9 @@ fn add_http_archive(
         }
 
         if let Some(excludes) = archive.excludes.as_ref() {
+            if globs.is_empty() {
+                globs.insert("+**".into());
+            }
             for exclude in excludes {
                 globs.insert(format!("-{}", exclude).into());
             }

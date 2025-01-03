@@ -262,5 +262,5 @@ enum Commands {
         /// What documentation do you want to see?
         #[arg(value_enum)]
         item: Option<docs::DocItem>,
-    },
+    }
 }

@@ -13,6 +13,7 @@ mod tools;
 mod runner;
 mod workspace;
 mod singleton;
+//mod stardoc;
 
 fn main() -> anyhow::Result<()> {
     match arguments::execute() {

@@ -58,7 +58,7 @@ Abort script evaluation with a message.
 
 **Example**
 ```python
-run.abort("Failed to do something")
+checkout.abort("Failed to do something")
 ```
 #### add_archive
 
@@ -78,8 +78,7 @@ Adds an archive to the workspace.
   - `url`: url to zip|tar.xz|tar.gz|tar.bz2 file (can also be an uncompressed file with no suffix)
   - `sha256`: hash of the file
   - `link`: None|Hard: create hardlinks of the archive from the spaces store to the workspace
-  - `includes`: options list of globs to include
-  - `excludes`: optional list of globs to exclude
+  - `globs`: optional list of globs prefix with `+` to include and `-` to exclude
   - `strip_prefix`: optional prefix to strip from the archive path
   - `add_prefix`: optional prefix to add in the workspace (e.g. sysroot/share)
 
@@ -136,6 +135,25 @@ checkout.add_asset(
     },
 )
 ```
+#### add_capsule
+
+```python
+def add_capsule(rule, capsule) -> None
+```
+Adds a capsule to the workspace during checkout.
+
+- `rule`: dict
+  - `name`: rule name as string
+  - `deps`: list of dependencies
+  - `platforms`: optional list of platforms to run on. If not provided, rule will run on all platforms. See above for details
+  - `type`: Checkout|Optional|Setup|Run: see above for details
+  - `type`: Setup|Run (default)|Optional
+  - `help`: Optional help text show with `spaces evaluate`
+- `capsule`: dict with
+  - `scripts`: `spaces` scripts that define the capsule
+  - `prefix`: Workspace prefix to install the capsule (`sysroot` for build deps and `build/install` for runtime deps)
+  - `globs`: globs to apply to the capsule for installing at `prefix`
+
 #### add_cargo_bin
 
 ```python
@@ -282,7 +300,8 @@ returns the name of the current platform
   - `url`: ssh or https path to repository
   - `rev`: repository revision as a branch, tag or commit
   - `checkout`: Revision: checkout detached at commit or branch|NewBranch: create a new branch based at rev
-  - `clone`: Default|Worktree
+  - `clone`: Default|Worktree|Shallow
+  - `is_evaluate_spaces_modules`: True|False to check the repo for spaces.star files to evaluate
 
 
 **Example**
@@ -295,6 +314,36 @@ checkout.add_repo(
         "rev": "main",
         "checkout": "Revision",
         "clone": "Default",
+        "is_evaluate_spaces_modules": True
+    }
+)
+```
+#### add_soft_link_asset
+
+```python
+def add_soft_link_asset(rule, asset) -> None
+```
+Adds a softlink from anywhere on the system to the workspace
+
+- `rule`: dict
+  - `name`: rule name as string
+  - `deps`: list of dependencies
+  - `platforms`: optional list of platforms to run on. If not provided, rule will run on all platforms. See above for details
+  - `type`: Checkout|Optional|Setup|Run: see above for details
+  - `type`: Setup|Run (default)|Optional
+  - `help`: Optional help text show with `spaces evaluate`
+- `asset`: dict with
+  - `source`: the source of the software link
+  - `destination`: relative path where asset will live in the workspace
+
+
+**Example**
+```python
+checkout.add_hard_link_asset(
+    rule = { "name": "which_pkg_config" },
+    asset = {
+        "source": "<path to asset>",
+        "destination": "sysroot/asset/my_asset"
     }
 )
 ```
@@ -316,7 +365,7 @@ Adds a target. There is no specific action for the target, but this rule can be 
 
 **Example**
 ```python
-run.add_target(
+checkout.add_target(
     rule = {"name": "my_rule", "deps": ["my_other_rule"]},
 )
 ```
@@ -459,10 +508,12 @@ source env
 checkout.update_env(
     rule = {"name": "update_env"},
     env = {
-        "paths": ["/usr/bin", "/bin"],
+        "paths": [],
+        "system_paths": ["/usr/bin", "/bin"],
         "vars": {
             "PS1": '"(spaces) $PS1"',
         },
+        "inherited_vars": ["HOME", "SHELL", "USER"],
     },
 )
 ```
@@ -504,7 +555,8 @@ Adds a rule that will execute a process.
   - `args`: optional list of arguments
   - `env`: optional dict of environment variables
   - `working_directory`: optional working directory (default is the workspace)
-  - `expect`: Failure: expect non-zero return code|Success: expect zero return code
+  - `expect`: Failure: expect non-zero return code|Success: expect zero return code|Any: don't check the return code
+  - `redirect_stdout`: optional file to redirect stdout to
 
 
 **Example**
@@ -561,6 +613,36 @@ run.add_exec_if(
     }
 )
 ```
+#### add_kill_exec
+
+```python
+def add_kill_exec(rule, kill) -> None
+```
+Adds a rule that will kill the execution of another rule.
+
+- `rule`: dict
+  - `name`: rule name as string
+  - `deps`: list of dependencies
+  - `platforms`: optional list of platforms to run on. If not provided, rule will run on all platforms. See above for details
+  - `type`: Checkout|Optional|Setup|Run: see above for details
+  - `type`: Setup|Run (default)|Optional
+  - `help`: Optional help text show with `spaces evaluate`
+- `kill`: dict with
+  - `signal`: Hup|Int|Quit|Abort|Kill|Alarm|Terminate|User1|User2
+  - `target`: the name of the rule to kill
+  - `expect`: Failure: expect non-zero return code|Success: expect zero return code|Any: don't check the return code
+
+
+**Example**
+```python
+run.add_exec(
+    rule = {"name": name, "type": "Setup", "deps": ["sysroot-python:venv"]},
+    exec = {
+        "command": "pip3",
+        "args": ["install"] + packages,
+    },
+)
+```
 #### add_target
 
 ```python
@@ -601,6 +683,16 @@ def get_absolute_path_to_workspace() -> str
 returns the absolute path to the workspace
 
 
+#### get_build_archive_info
+
+```python
+def get_build_archive_info(rule_name, archive) -> dict['archive_path': str, 'sha256_path': str]
+```
+returns the path to where run.create_archive() creates the sha256 txt file
+
+- `rule_name`: The name of the rule used to create the archive
+- `archive`: The archive info used to create the archive
+
 #### get_cpu_count
 
 ```python
@@ -609,13 +701,24 @@ def get_cpu_count() -> int
 returns the number of CPUs on the current machine
 
 
+#### get_env_var
+
+```python
+def get_env_var(var) -> str
+```
+returns the path where the current script is located in the workspace
+
+- `var`: The name of the environment variable
+
 #### get_path_to_build_archive
 
 ```python
-def get_path_to_build_archive() -> str
+def get_path_to_build_archive(rule_name, archive) -> str
 ```
 returns the path to where run.create_archive() creates the output archive
 
+- `rule_name`: The name of the rule used to create the archive
+- `archive`: The archive info used to create the archive
 
 #### get_path_to_build_checkout
 
@@ -649,6 +752,30 @@ def get_platform_name() -> str
 returns the name of the current platform: macos-aarch64|macos-x86_64|linux-x86_64|linux-aarch64|windows-x86_64|windows-aarch64
 
 
+#### get_supported_platforms
+
+```python
+def get_supported_platforms() -> list[str]
+```
+returns a list of the supported platforms
+
+
+#### get_workspace_digest
+
+```python
+def get_workspace_digest() -> str
+```
+returns the digest of the workspace. This is only meaningful if the workspace is reproducible (which can't be known until after checkout)
+
+
+#### is_ci
+
+```python
+def is_ci() -> int
+```
+returns true if `--ci` is passed on the command line
+
+
 #### is_platform_linux
 
 ```python
@@ -673,13 +800,23 @@ def is_platform_windows() -> bool
 returns true if platform is Windows
 
 
+#### set_max_queue_count
+
+```python
+def set_max_queue_count(count) -> int
+```
+sets the maxiumum number of items to queue at one time
+
+- `count`: the maximum number of items to queue at one time
+
 #### set_minimum_version
 
 ```python
-def set_minimum_version() -> int
+def set_minimum_version(version) -> int
 ```
 sets the minimum version of spaces required to run the script
 
+- `version`: the minimum version of spaces required to run the script
 
 
 ## Spaces Starlark Standard Functions
@@ -708,6 +845,33 @@ Appends a string to a file. Creates the file if it doesn't exist.
 def exists(path) -> bool
 ```
 Checks if the file/directory exists
+
+- `path`: path relative to the workspace root
+
+#### is_directory
+
+```python
+def is_directory(path) -> bool
+```
+Checks if a path is a directory
+
+- `path`: path relative to the workspace root
+
+#### is_file
+
+```python
+def is_file(path) -> bool
+```
+Checks a path is a file
+
+- `path`: path relative to the workspace root
+
+#### is_symlink
+
+```python
+def is_symlink(path) -> bool
+```
+Checks if a path is a symlink
 
 - `path`: path relative to the workspace root
 
