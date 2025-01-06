@@ -22,6 +22,7 @@ const METRICS_FILE_NAME: &str = ".spaces/metrics.spaces.json";
 const SPACES_HOME_ENV_VAR: &str = "SPACES_HOME";
 pub const SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE: &str = "SPACES_IS_WORKSPACE_REPRODUCIBLE";
 pub const SPACES_ENV_WORKSPACE_DIGEST: &str = "SPACES_WORKSPACE_DIGEST";
+pub const SPACES_ENV_CAPSULE_WORKFLOWS: &str = "SPACES_CAPSULES_WORKFLOWS";
 pub const WORKSPACE_FILE_HEADER: &str = r#"
 """
 Spaces Workspace file
@@ -524,7 +525,11 @@ impl Workspace {
     }
 
     pub fn get_path_to_workflows(&self) -> Arc<str> {
-        format!("{}/{}", self.get_path_to_capsule_store_workflows(), self.get_short_digest()).into()
+        // capsules will pass SPACES_ENV_CAPSULE_WORKFLOWS to child processes
+        // the top level process will use the digest
+        std::env::var(SPACES_ENV_CAPSULE_WORKFLOWS).unwrap_or_else(|_| {
+            format!("{}/{}", self.get_path_to_capsule_store_workflows(), self.get_short_digest())
+        }).into()
     }
 
     pub fn get_path_to_capsule_store_status(&self) -> Arc<str> {

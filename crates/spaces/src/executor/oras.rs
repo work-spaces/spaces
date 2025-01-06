@@ -29,7 +29,7 @@ pub struct OrasArchive {
 
 impl OrasArchive {
     fn get_artifact_label(&self) -> Arc<str> {
-        format!("{}/{}:{}", self.url, self.artifact, self.tag).into()
+        format!("{}/{}:{}", self.url, self.artifact.to_lowercase(), self.tag).into()
     }
 
     pub fn download(

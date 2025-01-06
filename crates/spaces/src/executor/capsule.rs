@@ -5,20 +5,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-#[derive(Debug, Clone)]
-struct DescriptorAsString(Arc<str>);
-
-impl DescriptorAsString {
-    fn new(rule_name: &str) -> DescriptorAsString {
-        let capsule_descriptor_as_string = rule_name.replace(':', "_").into();
-        DescriptorAsString(capsule_descriptor_as_string)
-    }
-
-    fn get_relative_path(&self, digest: &str) -> Arc<str> {
-        format!("{}/{}", self.0, workspace::get_short_digest(digest)).into()
-    }
-}
-
 fn logger<'a>(progress: &'a mut printer::MultiProgressBar, name: &str) -> logger::Logger<'a> {
     logger::Logger::new_progress(progress, name.into())
 }
@@ -34,6 +20,21 @@ pub struct Descriptor {
     pub domain: Arc<str>, // domain of the capsule
     pub owner: Arc<str>,  // owner of the capsule
     pub repo: Arc<str>,   // repo of the capsule
+}
+
+impl Descriptor {
+    pub fn to_string(&self) -> Arc<str> {
+        format!("{}-{}-{}", self.domain, self.owner, self.repo).into()
+    }
+
+    fn get_relative_path(&self, digest: &str) -> Arc<str> {
+        format!(
+            "{}/{}",
+            self.to_string(),
+            workspace::get_short_digest(digest)
+        )
+        .into()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,7 +69,7 @@ pub struct CapsuleRunInfo {
     workspace: workspace::WorkspaceArc,
     lock_file: lock::FileLock,
     digest: Arc<str>,
-    descriptor: DescriptorAsString,
+    descriptor: Descriptor,
     spaces_command: Arc<str>,
 }
 
@@ -109,7 +110,7 @@ impl CapsuleRunInfo {
 
     fn new(
         workspace: workspace::WorkspaceArc,
-        rule_name: &str,
+        descriptor: Descriptor,
         scripts: &[Arc<str>],
     ) -> anyhow::Result<CapsuleRunInfo> {
         let workflows_path = workspace.read().get_path_to_workflows();
@@ -124,7 +125,7 @@ impl CapsuleRunInfo {
         Ok(CapsuleRunInfo {
             workspace,
             digest: digest.clone(),
-            descriptor: DescriptorAsString::new(rule_name),
+            descriptor,
             lock_file: lock::FileLock::new(lock_file_path.into()),
             spaces_command: get_spaces_command()
                 .context(format_context!("While looking up spaces command"))?,
@@ -159,15 +160,14 @@ impl CapsuleRunInfo {
         self.get_path(base)
     }
 
-    #[allow(dead_code)]
     fn get_path_to_capsule_sysroot(&self) -> Arc<str> {
-        let base = self.workspace.read().get_path_to_capsule_store_workspaces();
+        let base = self.workspace.read().get_path_to_capsule_store_sysroot();
         self.get_path(base)
     }
 
     fn get_path_to_capsule_workspaces(&self) -> Arc<str> {
         let base = self.workspace.read().get_path_to_capsule_store_workspaces();
-        format!("{base}/{}", self.descriptor.0).into()
+        format!("{base}/{}", self.descriptor.to_string()).into()
     }
 
     fn get_path_to_capsule_worflows(&self) -> Arc<str> {
@@ -221,7 +221,8 @@ fn get_state() -> &'static lock::StateLock<State> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Capsule {
-    pub scripts: Vec<Arc<str>>, // list of starlark scripts to execute
+    pub descriptor: Descriptor,           // descriptor of the capsule
+    pub scripts: Vec<Arc<str>>,           // list of starlark scripts to execute
     pub globs: Option<HashSet<Arc<str>>>, // list of globs to hardlink to the prefix
     pub prefix: Option<Arc<str>>, // --prefix location where the capsule should be installed in the sysroot (default is none)
 }
@@ -264,6 +265,11 @@ fn get_spaces_env(
         workspace_env
             .get_inherited_vars()
             .context(format_context!("Failed to get inherited vars"))?,
+    );
+
+    env.insert(
+        workspace::SPACES_ENV_CAPSULE_WORKFLOWS.into(),
+        workspace.read().get_path_to_workflows(),
     );
 
     Ok(env)
@@ -452,8 +458,12 @@ impl Capsule {
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
-        let mut capsule_run_info = CapsuleRunInfo::new(workspace.clone(), name, &self.scripts)
-            .context(format_context!("Failed to create capsule run info"))?;
+        let mut capsule_run_info = CapsuleRunInfo::new(
+            workspace.clone(),
+            self.descriptor.clone(),
+            &self.scripts,
+        )
+        .context(format_context!("Failed to create capsule run info"))?;
         let capsule_workspace_path = capsule_run_info.get_path_to_capsule_workspace();
 
         logger(progress, name)
@@ -472,89 +482,99 @@ impl Capsule {
             .as_str(),
         );
 
-        //let sysroot_path = std::path::Path::new(capsule_run_info.get_path_to_capsule_sysroot());
+        let capsule_sysroot_prefix = capsule_run_info.get_path_to_capsule_sysroot();
 
-        self.checkout_capsule(progress, &capsule_run_info)
-            .context(format_context!("Failed to checkout capsule {name}"))?;
+        // check if capsule already exists the store
+        let capsule_json_file_path = format!(
+            "{capsule_sysroot_prefix}/{}.json",
+            capsule_run_info.get_short_digest()
+        );
 
-        // check capsules.spaces.json for a valid CapsuleCheckoutInfo struct
-        let capsule_info = {
-            let mut state = get_state().write();
+        logger(progress, name)
+            .debug(format!("Does capsule JSON file exist? {}", capsule_json_file_path).as_str());
 
-            let capsule_info = load_file_info(&capsule_workspace_path).context(format_context!(
-                "Failed to load {}",
-                workspace::SPACES_CAPSULES_INFO_NAME
-            ))?;
+        if !std::path::Path::new(capsule_json_file_path.as_str()).exists() {
+            self.checkout_capsule(progress, &capsule_run_info)
+                .context(format_context!("Failed to checkout capsule {name}"))?;
 
-            state.info_file.clone_from(&capsule_info);
-            capsule_info
-        };
+            // check capsules.spaces.json for a valid CapsuleCheckoutInfo struct
+            let capsule_info = {
+                let mut state = get_state().write();
 
-        if run_status == CapsuleRunStatus::StartNow {
-            logger(progress, name).info(
-                format!(
-                    "`spaces run` for capsule {}",
-                    capsule_run_info.get_short_digest()
-                )
-                .as_str(),
-            );
+                let capsule_info = load_file_info(&capsule_workspace_path).context(
+                    format_context!("Failed to load {}", workspace::SPACES_CAPSULES_INFO_NAME),
+                )?;
 
-            self.run_capsule(progress, &capsule_run_info)
-                .context(format_context!("Failed to run capsule {name}"))?;
-
-            logger(progress, name).message(
-                format!(
-                    "Ready to unlock capsule {}",
-                    capsule_run_info.get_short_digest()
-                )
-                .as_str(),
-            );
-
-            let capsule_complete_info = CapsuleCompleteInfo {
-                digest: capsule_run_info.digest.clone(),
+                state.info_file.clone_from(&capsule_info);
+                capsule_info
             };
 
-            let capsule_info_json = serde_json::to_string_pretty(&capsule_complete_info)
-                .context(format_context!("Failed to serialize capsule info"))?;
-
-            logger(progress, name)
-                .debug(format!("Updating capsule info {}", capsule_run_info.digest).as_str());
-
-            for entry in capsule_info.iter() {
-                let file_path = format!(
-                    "{}/{}.json",
-                    entry.prefix,
-                    capsule_run_info.get_short_digest()
+            if run_status == CapsuleRunStatus::StartNow {
+                logger(progress, name).info(
+                    format!(
+                        "`spaces run` for capsule {}",
+                        capsule_run_info.get_short_digest()
+                    )
+                    .as_str(),
                 );
-                std::fs::write(file_path.as_str(), capsule_info_json.as_str()).context(
-                    format_context!("Failed to write capsule info to {file_path}"),
-                )?;
+
+                self.run_capsule(progress, &capsule_run_info)
+                    .context(format_context!("Failed to run capsule {name}"))?;
+
+                logger(progress, name).message(
+                    format!(
+                        "Ready to unlock capsule {}",
+                        capsule_run_info.get_short_digest()
+                    )
+                    .as_str(),
+                );
+
+                let capsule_complete_info = CapsuleCompleteInfo {
+                    digest: capsule_run_info.digest.clone(),
+                };
+
+                let capsule_info_json = serde_json::to_string_pretty(&capsule_complete_info)
+                    .context(format_context!("Failed to serialize capsule info"))?;
+
+                logger(progress, name)
+                    .debug(format!("Updating capsule info {}", capsule_run_info.digest).as_str());
+
+                for entry in capsule_info.iter() {
+                    let file_path = format!(
+                        "{}/{}.json",
+                        entry.prefix,
+                        capsule_run_info.get_short_digest()
+                    );
+
+                    std::fs::write(file_path.as_str(), capsule_info_json.as_str()).context(
+                        format_context!("Failed to write capsule info to {file_path}"),
+                    )?;
+                }
+            } else {
+                logger(progress, name).info(
+                    format!(
+                        "waiting for capsule {}",
+                        capsule_run_info.get_short_digest()
+                    )
+                    .as_str(),
+                );
+
+                capsule_run_info
+                    .wait(progress)
+                    .context(format_context!("Failed to wait for capsule to finish"))?;
             }
         } else {
             logger(progress, name).info(
                 format!(
-                    "waiting for capsule {}",
+                    "{} is already in spaces store",
                     capsule_run_info.get_short_digest()
                 )
                 .as_str(),
             );
-
-            capsule_run_info
-                .wait(progress)
-                .context(format_context!("Failed to wait for capsule to finish"))?;
         }
 
-        if self.prefix.is_some() {
-            let mut capsule_prefix = HashSet::new();
-            for entry in capsule_info.iter() {
-                capsule_prefix.insert(entry.prefix.clone());
-            }
-
-            for prefix in capsule_prefix {
-                self.hard_link_capsule_to_workspace(progress, &prefix)
-                    .context(format_context!("Failed to hard link capsule to workspace"))?;
-            }
-        }
+        self.hard_link_capsule_to_workspace(progress, capsule_sysroot_prefix.as_ref())
+            .context(format_context!("Failed to hard link capsule to workspace"))?;
 
         logger(progress, name)
             .message(format!("Now unlocking {}", capsule_run_info.get_short_digest()).as_str());
