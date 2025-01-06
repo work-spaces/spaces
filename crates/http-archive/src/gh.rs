@@ -22,6 +22,8 @@ pub fn transform_url_to_arguments(
     // Parse the URL
     let parsed_url = url::Url::parse(url).ok()?;
 
+    let domain = parsed_url.domain()?;
+
     // Split the path to extract owner, repo, and tag
     let mut path_segments = parsed_url.path_segments()?;
     let owner = path_segments.next()?;
@@ -47,7 +49,7 @@ pub fn transform_url_to_arguments(
         "release".into(),
         "download".into(),
         tag.into(),
-        format!("--repo={}/{}", owner, repo).into(),
+        format!("--repo={}/{}/{}", domain, owner, repo).into(),
         format!("--pattern={}", pattern).into(),
         format!("--output={full_path_to_archive}").into(),
     ])
