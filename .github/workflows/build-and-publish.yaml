@@ -8,7 +8,7 @@ on:
 jobs:
   build-ubuntu:
     name: Build and Publish Ubuntu Binary
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     permissions:
       contents: write
       pull-requests: write
