@@ -22,11 +22,6 @@ pub fn transform_url_to_arguments(
     // Parse the URL
     let parsed_url = url::Url::parse(url).ok()?;
 
-    // Ensure the URL is for GitHub releases
-    if parsed_url.domain()? != "github.com" {
-        return None;
-    }
-
     // Split the path to extract owner, repo, and tag
     let mut path_segments = parsed_url.path_segments()?;
     let owner = path_segments.next()?;
