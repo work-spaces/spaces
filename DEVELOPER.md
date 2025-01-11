@@ -23,18 +23,14 @@ cargo build
 Publish a release by pushing a tag
 
 ```sh
-export VERSION=0.11.16
+export VERSION=0.11.17
 git tag -a v$VERSION -m "Update version"
 git push origin tag v$VERSION
 ```
 
 # Todo
 
-- When running `spaces run` with a capsule, queue up a single job?
-- Instead of running spaces recursively for capsules, can it be run in the same process?
-  - starlark scripts need some way to track state and know which workspace they are running in
-    - only evaulate one script at a time
-  - or instead of using stdout, pipe all the stdout to a shared printer?
-  - or have a printer server running to work with IO
-  - Put all state in the `Workspace` and then pass that around use state_lock inside an Arc
 - Allow some rules to pass stdout to terminal
+ - this could be added to the rule definition - log stdout - add to info level logging
+- Better cleanup of whitespace in printer
+- reset elapsed time just before job starts

@@ -250,6 +250,7 @@ impl Task {
             // time how long it takes to execute the task
             let start_time = std::time::Instant::now();
 
+            progress.reset_elapsed();
             let task_result = if skip_execute_message.is_none() {
                 executor
                     .execute(progress, workspace.clone(), &rule_name)
