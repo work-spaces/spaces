@@ -54,6 +54,7 @@ pub struct Exec {
     pub working_directory: Option<Arc<str>>,
     pub redirect_stdout: Option<Arc<str>>,
     pub expect: Option<Expect>,
+    pub log_level: Option<printer::Level>,
 }
 
 impl Exec {
@@ -102,6 +103,7 @@ impl Exec {
             log_file_path: log_file_path.clone(),
             clear_environment: true,
             process_started_with_id: Some(handle_process_started),
+            log_level: self.log_level,
         };
 
         logger(progress, name).debug(

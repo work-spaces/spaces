@@ -107,7 +107,6 @@ impl Task {
         digest.finalize()
     }
 
-
     pub fn update_implicit_dependency(&mut self, other_task: &Task) {
         if let Some(deps) = &self.rule.deps {
             if deps.contains(&other_task.rule.name) {
@@ -251,12 +250,13 @@ impl Task {
             let start_time = std::time::Instant::now();
 
             progress.reset_elapsed();
-            let task_result = if skip_execute_message.is_none() {
+            let task_result = if let Some(message) = skip_execute_message {
+                progress.set_ending_message(message.as_str());
+                Ok(executor::TaskResult::new())
+            } else {
                 executor
                     .execute(progress, workspace.clone(), &rule_name)
                     .context(format_context!("Failed to exec {}", name))
-            } else {
-                Ok(executor::TaskResult::new())
             };
 
             let elapsed_time = start_time.elapsed();

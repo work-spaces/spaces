@@ -563,6 +563,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             working_directory: None,
             redirect_stdout: None,
             expect: None,
+            log_level: None,
         };
 
         let rule_name = rule.name.clone();

@@ -23,12 +23,11 @@ cargo build
 Publish a release by pushing a tag
 
 ```sh
-export VERSION=0.11.18
+export VERSION=0.11.19
 git tag -a v$VERSION -m "Update version"
 git push origin tag v$VERSION
 ```
 
 # Todo
 
-- Allow some rules to pass stdout to terminal
- - this could be added to the rule definition - log stdout - add to info level logging
+- ??

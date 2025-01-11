@@ -10,6 +10,7 @@ pub enum Level {
     Debug,
     Message,
     Info,
+    App,
     Warning,
     Error,
 }
@@ -21,6 +22,7 @@ impl From<Level> for printer::Level {
             Level::Debug => printer::Level::Debug,
             Level::Message => printer::Level::Message,
             Level::Info => printer::Level::Info,
+            Level::App => printer::Level::App,
             Level::Warning => printer::Level::Warning,
             Level::Error => printer::Level::Error,
         }
@@ -31,7 +33,7 @@ impl From<Level> for printer::Level {
 #[command(version, about, long_about = None)]
 pub struct Arguments {
     /// The verbosity level of the output.
-    #[arg(short, long, default_value = "warning")]
+    #[arg(short, long, default_value = "app")]
     pub verbosity: Level,
     #[arg(long)]
     /// Dont show progress bars
