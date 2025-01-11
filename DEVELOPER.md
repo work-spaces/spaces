@@ -23,7 +23,7 @@ cargo build
 Publish a release by pushing a tag
 
 ```sh
-export VERSION=0.11.17
+export VERSION=0.11.18
 git tag -a v$VERSION -m "Update version"
 git push origin tag v$VERSION
 ```
@@ -32,5 +32,3 @@ git push origin tag v$VERSION
 
 - Allow some rules to pass stdout to terminal
  - this could be added to the rule definition - log stdout - add to info level logging
-- Better cleanup of whitespace in printer
-- reset elapsed time just before job starts
