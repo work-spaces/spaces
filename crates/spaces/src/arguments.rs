@@ -164,7 +164,7 @@ pub fn execute() -> anyhow::Result<()> {
             verbosity,
             hide_progress_bars,
             ci,
-            commands: Commands::Run { target, forget_inputs },
+            commands: Commands::Run {target, forget_inputs },
         } => {
             handle_verbosity(&mut printer, verbosity.into(), ci, hide_progress_bars);
 
@@ -258,7 +258,6 @@ enum Commands {
     /// Executes the Run phase rules.
     Run {
         /// The name of the target to run (default is all targets).
-        #[arg(long)]
         target: Option<Arc<str>>,
         /// Forces rules to run even if input globs are the same as last time.
         #[arg(long)]
