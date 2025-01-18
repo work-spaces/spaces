@@ -21,24 +21,43 @@ fn get_state() -> &'static lock::StateLock<State> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum WithRules {
+pub enum WithRules {
     No,
     Yes,
 }
 
-fn evaluate_module(
-    workspace_path: Arc<str>,
-    name: Arc<str>,
-    content: String,
-    with_rules: WithRules,
-) -> anyhow::Result<FrozenModule> {
-    if workspace::is_rules_module(name.as_ref()) {
-        rules::set_latest_starlark_module(name.clone());
+pub fn get_dialect() -> Dialect {
+    Dialect {
+        enable_top_level_stmt: true,
+        ..Default::default()
+    }
+}
+
+pub fn get_globals(with_rules: WithRules) -> GlobalsBuilder {
+    let mut builder = GlobalsBuilder::standard()
+        .with(starstd::globals)
+        .with_namespace("fs", starstd::fs::globals)
+        .with_namespace("json", starstd::json::globals)
+        .with_namespace("hash", starstd::hash::globals)
+        .with_namespace("process", starstd::process::globals)
+        .with_namespace("script", starstd::script::globals)
+        .with_namespace("info", builtins::info::globals);
+
+    if with_rules == WithRules::Yes {
+        builder = builder
+            .with_namespace("checkout", builtins::checkout::globals)
+            .with_namespace("run", builtins::run::globals);
     }
 
-    let ast = AstModule::parse(name.as_ref(), content, &Dialect::Standard)
-        .map_err(|e| format_error!("{e:?}"))?;
+    builder
+}
 
+pub fn evaluate_loads(
+    ast: &AstModule,
+    name: Arc<str>,
+    workspace_path: Arc<str>,
+    with_rules: WithRules,
+) -> anyhow::Result<Vec<(String, FrozenModule)>> {
     // We can get the loaded modules from `ast.loads`.
     // And ultimately produce a `loader` capable of giving those modules to Starlark.
     let mut loads = Vec::new();
@@ -66,26 +85,58 @@ fn evaluate_module(
             )?,
         ));
     }
+    Ok(loads)
+}
+
+pub fn evaluate_ast(
+    ast: AstModule,
+    name: Arc<str>,
+    workspace_path: Arc<str>,
+    with_rules: WithRules,
+) -> anyhow::Result<Module> {
+    let loads = evaluate_loads(&ast, name.clone(), workspace_path.clone(), with_rules)
+        .context(format_context!("Failed to process loads"))?;
     let modules = loads.iter().map(|(a, b)| (a.as_str(), b)).collect();
     let loader = ReturnFileLoader { modules: &modules };
 
-    let globals_builder = GlobalsBuilder::standard()
-        .with(starstd::globals)
-        .with_namespace("fs", starstd::fs::globals)
-        .with_namespace("json", starstd::json::globals)
-        .with_namespace("hash", starstd::hash::globals)
-        .with_namespace("process", starstd::process::globals)
-        .with_namespace("script", starstd::script::globals)
-        .with_namespace("info", builtins::info::globals);
+    let globals_builder = get_globals(with_rules);
+    let globals = globals_builder.build();
+    let module = Module::new();
+    {
+        let mut eval = Evaluator::new(&module);
+        eval.set_loader(&loader);
+        eval.eval_module(ast, &globals)
+            .map_err(|e| format_error!("{e:?}"))?;
+    }
 
-    let globals_builder = if with_rules == WithRules::Yes {
-        globals_builder
-            .with_namespace("checkout", builtins::checkout::globals)
-            .with_namespace("run", builtins::run::globals)
-    } else {
-        globals_builder
-    };
+    Ok(module)
+}
 
+pub fn evaluate_module(
+    workspace_path: Arc<str>,
+    name: Arc<str>,
+    content: String,
+    with_rules: WithRules,
+) -> anyhow::Result<FrozenModule> {
+    if workspace::is_rules_module(name.as_ref()) {
+        rules::set_latest_starlark_module(name.clone());
+    }
+
+    let dialect = get_dialect();
+    let ast =
+        AstModule::parse(name.as_ref(), content, &dialect).map_err(|e| format_error!("{e:?}"))?;
+    let module = evaluate_ast(ast, name, workspace_path, with_rules)?;
+    Ok(module.freeze()?)
+
+    /*
+    // We can get the loaded modules from `ast.loads`.
+    // And ultimately produce a `loader` capable of giving those modules to Starlark.
+    let loads = process_loads(&ast, name.clone(), workspace_path.clone(), with_rules)
+        .context(format_context!("Failed to process loads"))?;
+    let modules = loads.iter().map(|(a, b)| (a.as_str(), b)).collect();
+    let loader = ReturnFileLoader { modules: &modules };
+
+    let globals_builder = get_globals(with_rules);
     let globals = globals_builder.build();
 
     let module = Module::new();
@@ -98,6 +149,7 @@ fn evaluate_module(
     // After creating a module we freeze it, preventing further mutation.
     // It can now be used as the input for other Starlark modules.
     Ok(module.freeze()?)
+    */
 }
 
 fn star_logger(printer: &mut printer::Printer) -> logger::Logger {
@@ -208,7 +260,7 @@ pub fn run_starlark_modules(
                 .context(format_context!("Failed to execute tasks"))?;
         }
         rules::Phase::Evaluate => {
-            star_logger(printer).message( "--Evaluate Phase--");
+            star_logger(printer).message("--Evaluate Phase--");
             rules::sort_tasks(target.clone(), phase)
                 .context(format_context!("Failed to sort tasks"))?;
 

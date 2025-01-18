@@ -148,6 +148,20 @@ pub fn execute() -> anyhow::Result<()> {
             .context(format_context!("during runner sync"))?;
         }
 
+        #[cfg(feature = "lsp")]
+        Arguments {
+            verbosity,
+            hide_progress_bars,
+            ci,
+            commands: Commands::RunLsp {},
+        } => {
+            handle_verbosity(&mut printer, verbosity.into(), ci, hide_progress_bars);
+            runner::run_lsp(
+                &mut printer,
+            )
+            .context(format_context!("during runner sync"))?;
+        }
+
         Arguments {
             verbosity,
             hide_progress_bars,
@@ -264,5 +278,8 @@ enum Commands {
         /// What documentation do you want to see?
         #[arg(value_enum)]
         item: Option<docs::DocItem>,
-    }
+    },
+    /// Run the Spaces language server protocol. Not currently functional.
+    #[cfg(feature = "lsp")]
+    RunLsp {}
 }

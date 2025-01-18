@@ -145,16 +145,16 @@ impl Task {
 
         std::thread::spawn(move || -> anyhow::Result<executor::TaskResult> {
             // check inputs/outputs to see if we need to run
-            let mut skip_execute_message = None;
+            let mut skip_execute_message: Option<Arc<str>> = None;
             if let (Some(platforms), Some(current_platform)) =
                 (rule.platforms.as_ref(), platform::Platform::get_platform())
             {
                 if !platforms.contains(&current_platform) {
-                    skip_execute_message = Some(format!("Skipping {name}: platform not enabled"));
+                    skip_execute_message = Some("Skipping: platform not enabled".into());
                 }
             }
 
-            logger::Logger::new_progress(&mut progress, name.clone()).trace(
+            logger::Logger::new_progress(&mut progress, name.clone()).debug(
                 format!("Skip execute message after platform check? {skip_execute_message:?}")
                     .as_str(),
             );
@@ -197,11 +197,11 @@ impl Task {
                     logger::Logger::new_progress(&mut progress, name.clone())
                         .debug(format!("Skipping {name}: cancelled").as_str());
                     skip_execute_message =
-                        Some(format!("Skipping {name} because it was cancelled"));
+                        Some("Skipping because it was cancelled".into());
                 } else if task.rule.type_ == Some(RuleType::Optional) {
                     logger::Logger::new_progress(&mut progress, name.clone())
-                        .debug(format!("Skipping {name} because it is optional").as_str());
-                    skip_execute_message = Some(format!("Skipping {name}: optional"));
+                        .debug("Skipping because it is optional");
+                    skip_execute_message = Some("Skipping: optional".into());
                 }
                 logger::Logger::new_progress(&mut progress, name.clone())
                     .trace(format!("{name} done checking skip cancellation").as_str());
@@ -229,7 +229,7 @@ impl Task {
                     .context(format_context!("Failed to check inputs for {rule_name}"))?;
                 if digest.is_none() {
                     // the digest has not changed - not need to execute
-                    skip_execute_message = Some(format!("Skipping {name}: same inputs"));
+                    skip_execute_message = Some("Skipping: same inputs".into());
                 }
                 logger::Logger::new_progress(&mut progress, name.clone())
                     .debug(format!("New digest for {rule_name}={digest:?}").as_str());
@@ -240,7 +240,7 @@ impl Task {
 
             if let Some(skip_message) = skip_execute_message.as_ref() {
                 logger::Logger::new_progress(&mut progress, name.clone())
-                    .info(skip_message.as_str());
+                    .info(skip_message.as_ref());
                 progress.set_message(skip_message);
             } else {
                 progress.set_message("Running");
@@ -251,7 +251,7 @@ impl Task {
 
             progress.reset_elapsed();
             let task_result = if let Some(message) = skip_execute_message {
-                progress.set_ending_message(message.as_str());
+                progress.set_ending_message(message.as_ref());
                 Ok(executor::TaskResult::new())
             } else {
                 executor

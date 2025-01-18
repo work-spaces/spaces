@@ -34,6 +34,18 @@ pub fn get_exit_code() -> i32 {
 }
 
 pub const FUNCTIONS: &[Function] = &[
+    Function {
+        name: "abort",
+        description: "Abort execution. Exit with a non-zero code. Print a message to stderr",
+        return_type: "None",
+        args: &[Arg {
+            name: "message",
+            description: "str: abort message.",
+            dict: &[],
+        }],
+        example: None,
+
+    },
         Function {
             name: "print",
             description: "Prints a string to the stdout. Only use in a script.",
@@ -88,6 +100,10 @@ This doesn't exit the script."#,
 
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
+    fn abort(message: &str) -> anyhow::Result<NoneType> {
+        Err(anyhow::anyhow!(format!("Aborting: {}", message)))
+    }
+
     fn print(content: &str) -> anyhow::Result<NoneType> {
         println!("{content}");
         Ok(NoneType)

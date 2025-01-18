@@ -3,6 +3,11 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use std::sync::Arc;
 
+#[cfg(feature = "lsp")]
+use crate::{lsp_context, singleton};
+#[cfg(feature = "lsp")]
+use itertools::Itertools;
+
 pub enum RunWorkspace {
     Target(Option<Arc<str>>),
     Script(Vec<(Arc<str>, Arc<str>)>),
@@ -50,6 +55,73 @@ pub fn run_starlark_modules_in_workspace(
 
     workspace::RuleMetricsFile::update(workspace_arc.clone())
         .context(format_context!("Failed to update rule metrics file"))?;
+
+    Ok(())
+}
+
+#[cfg(feature = "lsp")]
+pub fn run_lsp(printer: &mut printer::Printer) -> anyhow::Result<()> {
+    let workspace = {
+        let mut multi_progress = printer::MultiProgress::new(printer);
+        let progress =
+            multi_progress.add_progress("loading workspace", Some(100), Some("Complete"));
+        workspace::Workspace::new(progress, None)
+            .context(format_context!("while running workspace"))?
+    };
+
+    let workspace_arc = workspace::WorkspaceArc::new(lock::StateLock::new(workspace));
+
+    use starlark_lsp::server;
+    let dialect = evaluator::get_dialect();
+    let globals = evaluator::get_globals(evaluator::WithRules::Yes).build();
+    eprintln!("Starting Spaces Starlark server");
+
+    singleton::set_active_workspace(workspace_arc.clone());
+
+    // collect .star files in workspace
+    let workspace_path = workspace_arc.read().absolute_path.to_owned();
+    let mut modules = Vec::new();
+    let walkdir = walkdir::WalkDir::new(workspace_path.as_ref());
+    for entry in walkdir {
+        let entry = entry.context(format_context!("Failed to walk directory"))?;
+        if entry.file_type().is_file() {
+            let path = entry.path();
+            if let Some(ext) = path.extension() {
+                if ext == "star"
+                    && !path
+                        .components()
+                        .contains(&std::path::Component::Normal("script".as_ref()))
+                {
+                    modules.push(path.to_path_buf());
+                }
+            }
+        }
+    }
+
+    let lsp_context = lsp_context::SpacesContext::new(
+        workspace_arc.read().get_absolute_path(),
+        lsp_context::ContextMode::Run,
+        true,
+        &[],
+        true,
+        dialect,
+        globals,
+    )
+    .context(format_context!(
+        "Internal Error: Failed to create spaces lsp context"
+    ))?;
+
+    // Note that  we must have our logging only write out to stderr.
+
+    let (connection, io_threads) = lsp_server::Connection::stdio();
+    server::server_with_connection(connection, lsp_context)
+        .context(format_context!("spaces LSP server exited"))?;
+    // Make sure that the io threads stop properly too.
+    io_threads
+        .join()
+        .context(format_context!("Failed to join io threads"))?;
+
+    eprintln!("Stopping Spaces Starlark server");
 
     Ok(())
 }

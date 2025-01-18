@@ -23,11 +23,13 @@ cargo build
 Publish a release by pushing a tag
 
 ```sh
-export VERSION=0.11.19
+export VERSION=0.11.20
 git tag -a v$VERSION -m "Update version"
 git push origin tag v$VERSION
 ```
 
 # Todo
 
-- ??
+- Add timestamp to log output
+- Enable top level for loops, if statements and f"{}" style formatting
+- Setup tasks should be `inputs = []` be default - just add `run_add_exec_setup` to sdk

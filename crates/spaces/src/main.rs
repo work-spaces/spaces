@@ -7,13 +7,14 @@ mod evaluator;
 mod executor;
 mod builtins;
 mod label;
+#[cfg(feature = "lsp")]
+mod lsp_context;
 mod inputs;
 mod rules;
 mod tools;
 mod runner;
 mod workspace;
 mod singleton;
-//mod stardoc;
 
 fn main() -> anyhow::Result<()> {
     match arguments::execute() {

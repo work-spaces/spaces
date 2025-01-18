@@ -1,6 +1,6 @@
 [package]
 name = "spaces"
-version = "0.11.19"
+version = "0.11.20"
 edition = "2021"
 
 [dependencies]
@@ -10,6 +10,11 @@ anyhow = "1"
 anyhow-source-location.workspace = true
 
 starlark_syntax = { version = "0.13" }
+starlark_lsp = "0.13"
+lsp-server = "0.7"
+itertools = { version = "0.14", optional = true }
+lsp-types = "0.94.1"
+thiserror = "2"
 
 starlark.workspace = true
 git.workspace = true
@@ -50,3 +55,6 @@ cfg-if = "1"
 walkdir = "2"
 globwalk = "0.9"
 maplit = "1"
+
+[features]
+lsp = ["itertools"]
