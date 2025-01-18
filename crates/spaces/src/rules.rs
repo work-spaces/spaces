@@ -196,8 +196,7 @@ impl Task {
                 if task.phase == Phase::Cancelled {
                     logger::Logger::new_progress(&mut progress, name.clone())
                         .debug(format!("Skipping {name}: cancelled").as_str());
-                    skip_execute_message =
-                        Some("Skipping because it was cancelled".into());
+                    skip_execute_message = Some("Skipping because it was cancelled".into());
                 } else if task.rule.type_ == Some(RuleType::Optional) {
                     logger::Logger::new_progress(&mut progress, name.clone())
                         .debug("Skipping because it is optional");
@@ -210,30 +209,34 @@ impl Task {
             let rule_name = rule.name.clone();
 
             let updated_digest = if let Some(inputs) = &rule.inputs {
-                logger::Logger::new_progress(&mut progress, name.clone())
-                    .trace(format!("{name} update workspace changes").as_str());
+                if skip_execute_message.is_some() {
+                    None
+                } else {
+                    logger::Logger::new_progress(&mut progress, name.clone())
+                        .trace(format!("{name} update workspace changes").as_str());
 
-                workspace
-                    .write()
-                    .update_changes(&mut progress, inputs)
-                    .context(format_context!("Failed to update workspace changes"))?;
+                    workspace
+                        .write()
+                        .update_changes(&mut progress, inputs)
+                        .context(format_context!("Failed to update workspace changes"))?;
 
-                logger::Logger::new_progress(&mut progress, name.clone())
-                    .trace(format!("{name} check for new digest").as_str());
+                    logger::Logger::new_progress(&mut progress, name.clone())
+                        .trace(format!("{name} check for new digest").as_str());
 
-                let seed = serde_json::to_string(&executor)
-                    .context(format_context!("Failed to serialize"))?;
-                let digest = workspace
-                    .read()
-                    .is_rule_inputs_changed(&mut progress, &rule_name, seed.as_str(), inputs)
-                    .context(format_context!("Failed to check inputs for {rule_name}"))?;
-                if digest.is_none() {
-                    // the digest has not changed - not need to execute
-                    skip_execute_message = Some("Skipping: same inputs".into());
+                    let seed = serde_json::to_string(&executor)
+                        .context(format_context!("Failed to serialize"))?;
+                    let digest = workspace
+                        .read()
+                        .is_rule_inputs_changed(&mut progress, &rule_name, seed.as_str(), inputs)
+                        .context(format_context!("Failed to check inputs for {rule_name}"))?;
+                    if digest.is_none() {
+                        // the digest has not changed - not need to execute
+                        skip_execute_message = Some("Skipping: same inputs".into());
+                    }
+                    logger::Logger::new_progress(&mut progress, name.clone())
+                        .debug(format!("New digest for {rule_name}={digest:?}").as_str());
+                    digest
                 }
-                logger::Logger::new_progress(&mut progress, name.clone())
-                    .debug(format!("New digest for {rule_name}={digest:?}").as_str());
-                digest
             } else {
                 None
             };

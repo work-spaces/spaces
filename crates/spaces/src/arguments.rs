@@ -142,6 +142,7 @@ pub fn execute() -> anyhow::Result<()> {
                 &mut printer,
                 rules::Phase::Checkout,
                 None,
+                true,
                 runner::RunWorkspace::Target(None),
                 false,
             )
@@ -156,17 +157,14 @@ pub fn execute() -> anyhow::Result<()> {
             commands: Commands::RunLsp {},
         } => {
             handle_verbosity(&mut printer, verbosity.into(), ci, hide_progress_bars);
-            runner::run_lsp(
-                &mut printer,
-            )
-            .context(format_context!("during runner sync"))?;
+            runner::run_lsp(&mut printer).context(format_context!("during runner sync"))?;
         }
 
         Arguments {
             verbosity,
             hide_progress_bars,
             ci,
-            commands: Commands::Run { target },
+            commands: Commands::Run { target, forget_inputs },
         } => {
             handle_verbosity(&mut printer, verbosity.into(), ci, hide_progress_bars);
 
@@ -174,6 +172,7 @@ pub fn execute() -> anyhow::Result<()> {
                 &mut printer,
                 rules::Phase::Run,
                 None,
+                forget_inputs,
                 runner::RunWorkspace::Target(target),
                 false,
             )
@@ -196,6 +195,7 @@ pub fn execute() -> anyhow::Result<()> {
                 &mut printer,
                 rules::Phase::Evaluate,
                 None,
+                false,
                 runner::RunWorkspace::Target(target),
                 false,
             )
@@ -260,6 +260,9 @@ enum Commands {
         /// The name of the target to run (default is all targets).
         #[arg(long)]
         target: Option<Arc<str>>,
+        /// Forces rules to run even if input globs are the same as last time.
+        #[arg(long)]
+        forget_inputs: bool,
     },
     /// List the targets with all details in the workspace.
     Evaluate {
@@ -281,5 +284,5 @@ enum Commands {
     },
     /// Run the Spaces language server protocol. Not currently functional.
     #[cfg(feature = "lsp")]
-    RunLsp {}
+    RunLsp {},
 }

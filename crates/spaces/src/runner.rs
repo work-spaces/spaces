@@ -17,6 +17,7 @@ pub fn run_starlark_modules_in_workspace(
     printer: &mut printer::Printer,
     phase: rules::Phase,
     absolute_path_to_workspace: Option<Arc<str>>,
+    is_clear_inputs: bool,
     run_workspace: RunWorkspace,
     is_create_lock_file: bool,
 ) -> anyhow::Result<()> {
@@ -24,7 +25,7 @@ pub fn run_starlark_modules_in_workspace(
         let mut multi_progress = printer::MultiProgress::new(printer);
         let progress =
             multi_progress.add_progress("loading workspace", Some(100), Some("Complete"));
-        workspace::Workspace::new(progress, absolute_path_to_workspace)
+        workspace::Workspace::new(progress, absolute_path_to_workspace, is_clear_inputs)
             .context(format_context!("while running workspace"))?
     };
 
@@ -175,6 +176,7 @@ pub fn checkout(
         printer,
         rules::Phase::Checkout,
         Some(absolute_path_to_workspace.clone()),
+        false,
         RunWorkspace::Script(scripts),
         create_lock_file,
     )

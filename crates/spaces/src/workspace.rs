@@ -261,6 +261,7 @@ impl Workspace {
     pub fn new(
         mut progress: printer::MultiProgressBar,
         absolute_path_to_workspace: Option<Arc<str>>,
+        is_clear_inputs: bool
     ) -> anyhow::Result<Self> {
         let date = chrono::Local::now();
 
@@ -388,6 +389,13 @@ impl Workspace {
 
         env.vars
             .insert(SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE.into(), "true".into());
+
+        if is_clear_inputs {
+            let inputs_path = get_inputs_path();
+            if std::path::Path::new(inputs_path).exists() {
+                std::fs::remove_file(inputs_path).context(format_context!("Failed to remove inputs file {inputs_path}"))?; 
+            }
+        }
 
         Ok(Self {
             modules,
