@@ -143,7 +143,7 @@ pub fn execute() -> anyhow::Result<()> {
                 rules::Phase::Checkout,
                 None,
                 true,
-                runner::RunWorkspace::Target(None),
+                runner::RunWorkspace::Target(None, vec![]),
                 false,
             )
             .context(format_context!("during runner sync"))?;
@@ -164,16 +164,20 @@ pub fn execute() -> anyhow::Result<()> {
             verbosity,
             hide_progress_bars,
             ci,
-            commands: Commands::Run {target, forget_inputs },
+            commands: Commands::Run {target, forget_inputs, trailing_args },
         } => {
             handle_verbosity(&mut printer, verbosity.into(), ci, hide_progress_bars);
+
+            if target.is_none() && !trailing_args.is_empty() {
+                return Err(format_error!("Trailing arguments are only allowed when a target is specified."));
+            }
 
             runner::run_starlark_modules_in_workspace(
                 &mut printer,
                 rules::Phase::Run,
                 None,
                 forget_inputs,
-                runner::RunWorkspace::Target(target),
+                runner::RunWorkspace::Target(target, trailing_args),
                 false,
             )
             .context(format_context!("while executing run rules"))?;
@@ -196,7 +200,7 @@ pub fn execute() -> anyhow::Result<()> {
                 rules::Phase::Evaluate,
                 None,
                 false,
-                runner::RunWorkspace::Target(target),
+                runner::RunWorkspace::Target(target, vec![]),
                 false,
             )
             .context(format_context!("while executing run rules"))?;
@@ -262,6 +266,8 @@ enum Commands {
         /// Forces rules to run even if input globs are the same as last time.
         #[arg(long)]
         forget_inputs: bool,
+        #[arg(trailing_var_arg = true)]
+        trailing_args: Vec<Arc<str>>,
     },
     /// List the targets with all details in the workspace.
     Evaluate {

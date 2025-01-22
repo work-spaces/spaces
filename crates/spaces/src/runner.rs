@@ -9,7 +9,7 @@ use crate::{lsp_context, singleton};
 use itertools::Itertools;
 
 pub enum RunWorkspace {
-    Target(Option<Arc<str>>),
+    Target(Option<Arc<str>>, Vec<Arc<str>>),
     Script(Vec<(Arc<str>, Arc<str>)>),
 }
 
@@ -31,7 +31,9 @@ pub fn run_starlark_modules_in_workspace(
 
     let workspace_arc = workspace::WorkspaceArc::new(lock::StateLock::new(workspace));
     match run_workspace {
-        RunWorkspace::Target(target) => {
+        RunWorkspace::Target(target, trailing_args) => {
+            workspace_arc.write().trailing_args = trailing_args;
+            workspace_arc.write().target = target.clone();
             let modules = workspace_arc.read().modules.clone();
             evaluator::run_starlark_modules(printer, workspace_arc.clone(), modules, phase, target)
                 .context(format_context!("while executing workspace rules"))?

@@ -64,7 +64,7 @@ impl Exec {
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
-        let arguments = self.args.clone().unwrap_or_default();
+        let mut arguments = self.args.clone().unwrap_or_default();
         let workspace_env = workspace.read().get_env();
 
         let mut environment_map = workspace_env
@@ -73,6 +73,15 @@ impl Exec {
 
         for (key, value) in self.env.clone().unwrap_or_default() {
             environment_map.insert(key, value);
+        }
+
+        let command_line_target = workspace.read().target.clone();
+
+        if let Some(target) = command_line_target {
+            if target.as_ref() == name {
+                let trailing_args = workspace.read().trailing_args.clone();
+                arguments.extend(trailing_args);
+            }
         }
 
         let workspace_path = workspace.read().get_absolute_path();
@@ -85,7 +94,7 @@ impl Exec {
         };
 
         let working_directory = if let Some(directory) = self.working_directory.as_ref() {
-            if directory.starts_with('/'){
+            if directory.starts_with('/') {
                 Some(directory.clone())
             } else {
                 Some(format!("{workspace_path}/{directory}").into())

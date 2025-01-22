@@ -196,6 +196,8 @@ pub struct Workspace {
     pub new_branch_name: Option<Arc<str>>, // set during eval - not used
     changes: changes::Changes,              // modified during run
     inputs: inputs::Inputs,                 // modified during run
+    pub target: Option<Arc<str>>,           // target called from the command line
+    pub trailing_args: Vec<Arc<str>>,       
     pub updated_assets: HashSet<Arc<str>>,  // used by assets to keep track of exclusive access
     pub rule_metrics: HashMap<Arc<str>, RuleMetrics>, // used to keep track of rule metrics
 }
@@ -411,6 +413,8 @@ impl Workspace {
             updated_assets: HashSet::new(),
             inputs: inputs::Inputs::new(get_inputs_path()),
             rule_metrics: HashMap::new(),
+            trailing_args: vec![],
+            target: None,
         })
     }
 
