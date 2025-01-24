@@ -4,6 +4,9 @@ use anyhow_source_location::{format_context, format_error};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
 use std::sync::Arc;
 
+const WORKFLOW_TOML_NAME: &str = "workflows.spaces.toml";
+type WorkflowsToml = std::collections::HashMap<Arc<str>, Vec<Arc<str>>>;
+
 #[derive(ValueEnum, Clone, Copy, Debug)]
 pub enum Level {
     Trace,
@@ -110,24 +113,61 @@ pub fn execute() -> anyhow::Result<()> {
         } => {
             handle_verbosity(&mut printer, verbosity.into(), ci, hide_progress_bars);
 
-            let mut inputs: Vec<Arc<str>> = vec![];
-            inputs.extend(script.clone());
+            let mut script_inputs: Vec<Arc<str>> = vec![];
+            script_inputs.extend(script.clone());
+
             if let Some(workflow) = workflow {
-                let parts: Vec<&str> = workflow.split(':').collect();
+                let parts: Vec<_> = workflow.split(':').collect();
                 if parts.len() != 2 {
                     return Err(format_error!("Invalid workflow format: {}.\n Use --workflow=<directory>:<script>,<script>,...", workflow));
                 }
                 let directory = parts[0];
-                let scripts = parts[1].split(',');
+
+                let inputs: Vec<_> = parts[1].split(',').collect();
+                let mut scripts: Vec<Arc<str>> = vec![];
+
+                let workflows_json_path = format!("{}/{}", directory, WORKFLOW_TOML_NAME);
+                let mut is_workspace_json_input = false;
+                if std::path::Path::new(workflows_json_path.as_str()).exists() {
+                    if inputs.len() == 1 {
+                        let workflows_json: WorkflowsToml = toml::from_str(
+                            std::fs::read_to_string(workflows_json_path.as_str())
+                                .context(format_context!("Failed to read workflows json"))?
+                                .as_str(),
+                        )
+                        .context(format_context!("Failed to parse workflows json"))?;
+
+                        if let Some(workflow_scripts) = workflows_json.get(inputs[0]) {
+                            is_workspace_json_input = true;
+                            scripts.extend(workflow_scripts.clone());
+                        }
+                    }
+                }
+
+                if !is_workspace_json_input {
+                    scripts.extend(inputs.iter().map(|s| (*s).into()));
+                }
+
                 for script in scripts {
-                    inputs.push(format!("{}/{}", directory, script).into());
+                    let long_path = format!("{}/{}", directory, script);
+                    let short_path = format!("{}/{}.spaces.star", directory, script);
+                    if !std::path::Path::new(long_path.as_str()).exists()
+                        && !std::path::Path::new(short_path.as_str()).exists()
+                    {
+                        return Err(format_error!(
+                            "Script file not found: {}/{}",
+                            directory,
+                            script
+                        ));
+                    }
+                    script_inputs.push(format!("{}/{}", directory, script).into());
                 }
             }
 
             tools::install_tools(&mut printer, force_install_tools)
                 .context(format_context!("while installing tools"))?;
 
-            runner::checkout(&mut printer, name, inputs, create_lock_file)
+            runner::checkout(&mut printer, name, script_inputs, create_lock_file)
                 .context(format_context!("during runner checkout"))?;
         }
 
@@ -164,12 +204,19 @@ pub fn execute() -> anyhow::Result<()> {
             verbosity,
             hide_progress_bars,
             ci,
-            commands: Commands::Run {target, forget_inputs, trailing_args },
+            commands:
+                Commands::Run {
+                    target,
+                    forget_inputs,
+                    extra_rule_args,
+                },
         } => {
             handle_verbosity(&mut printer, verbosity.into(), ci, hide_progress_bars);
 
-            if target.is_none() && !trailing_args.is_empty() {
-                return Err(format_error!("Trailing arguments are only allowed when a target is specified."));
+            if target.is_none() && !extra_rule_args.is_empty() {
+                return Err(format_error!(
+                    "Extra rule arguments are only allowed when a target is specified."
+                ));
             }
 
             runner::run_starlark_modules_in_workspace(
@@ -177,7 +224,7 @@ pub fn execute() -> anyhow::Result<()> {
                 rules::Phase::Run,
                 None,
                 forget_inputs,
-                runner::RunWorkspace::Target(target, trailing_args),
+                runner::RunWorkspace::Target(target, extra_rule_args),
                 false,
             )
             .context(format_context!("while executing run rules"))?;
@@ -239,16 +286,28 @@ pub fn execute() -> anyhow::Result<()> {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    /// Executes the Checkout phase rules for the script and its dependencies.
+    #[command(about = r#"
+Executes the checkout rules in the specified scripts."#)]
     Checkout {
-        /// The name of the workspace
+        /// The name of the workspace to create.
         #[arg(long)]
         name: Arc<str>,
-        /// The path(s) to the star file containing checkout rules. Paths are processed in order.
+        /// The path(s) to the `spaces.star`` file containing checkout rules. Paths are processed in order.
         #[arg(long, value_hint = ValueHint::FilePath)]
         script: Vec<Arc<str>>,
-        /// Workflow scripts to process in the format of "--workflow=<directory>:<script>,<script>,...". --script is processed first.
-        #[arg(long)]
+        #[arg(long, help = r#"Scripts to process in the format of `--workflow=<directory>:<script>,<script>,...`.
+`--script` is processed before `--workflow`. 
+
+If <directory> has `workflows.spaces.toml`, it will be parsed for shortcuts if only one <script> is passed.
+- `spaces checkout --workflow=workflows:my-shortcut --name=workspace-name`
+  - run scripts list in `my-shortcut` in `workflows/workflows.spaces.toml`
+- `spaces checkout --workflow=workflows:preload,my-shortcut --name=workspace-name`
+  - run `workflows/preload.spaces.star` then `workflows/my-shortcut.spaces.star`
+
+```toml
+my-shortcut = ["preload", "my-shortcut"]
+```
+"#)]
         workflow: Option<Arc<str>>,
         /// Create a lock file for the workspace. This file can be passed on the next checkout as a script to re-create the exact workspace.
         #[arg(long)]
@@ -259,17 +318,25 @@ enum Commands {
     },
     /// Synchronizes the workspace with the checkout rules.
     Sync {},
-    /// Executes the Run phase rules.
+    #[command(about = r"
+Runs a spaces run rule.
+- `spaces run`: Run all non-optional rules with dependencies
+- `spaces run my-target`: Run a single target plus dependencies
+- `spaces run my-target -- --some-arg --some-other-arg`: pass additional arguments to a rule")]
     Run {
         /// The name of the target to run (default is all targets).
         target: Option<Arc<str>>,
         /// Forces rules to run even if input globs are the same as last time.
         #[arg(long)]
         forget_inputs: bool,
-        #[arg(trailing_var_arg = true)]
-        trailing_args: Vec<Arc<str>>,
+        #[arg(trailing_var_arg = true, help = r"Extra arguments to pass to the rule (passed after `--`)")]
+        extra_rule_args: Vec<Arc<str>>,
     },
-    /// List the targets with all details in the workspace.
+    #[command(about = r"
+Evaluate all the scripts in the workspace without running any rules.
+- `spaces evaluate`: show the rules that have `help` entries: 
+- `spaces --verbosity=message evaluate`: show all rules
+- `spaces --verbosity=debug evaluate`: show all rules in detail")]
     Evaluate {
         /// The name of the target to evaluate (default is all targets).
         #[arg(long)]

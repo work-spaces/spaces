@@ -1,6 +1,6 @@
 [package]
 name = "spaces"
-version = "0.11.23"
+version = "0.11.24"
 edition = "2021"
 
 [dependencies]
@@ -9,11 +9,11 @@ clap_complete = { version = "4" }
 anyhow = "1"
 anyhow-source-location.workspace = true
 
-starlark_syntax = { version = "0.13" }
-starlark_lsp = "0.13"
-lsp-server = "0.7"
+starlark_syntax = { version = "0.13", optional = true }
+starlark_lsp = { version = "0.13", optional = true }
+lsp-server = { version = "0.7", optional = true }
 itertools = { version = "0.14", optional = true }
-lsp-types = "0.94.1"
+lsp-types = { version = "0.94.1", optional = true }
 thiserror = "2"
 
 starlark.workspace = true
@@ -57,4 +57,4 @@ globwalk = "0.9"
 maplit = "1"
 
 [features]
-lsp = ["itertools"]
+lsp = ["itertools", "starlark_syntax", "starlark_lsp", "lsp-server", "lsp-types"]

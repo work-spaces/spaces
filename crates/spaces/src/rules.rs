@@ -454,7 +454,7 @@ impl State {
             if let Some(deps) = task.rule.deps.clone() {
                 for dep in deps {
                     let dep_task = tasks_copy.get(&dep).ok_or(format_error!(
-                        "Task Depedency not found: {dep} specified by {}",
+                        "Task Dependency not found: {dep} specified by {}",
                         task.rule.name
                     ))?;
 

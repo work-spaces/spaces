@@ -441,7 +441,7 @@ pub const FUNCTIONS: &[Function] = &[
         example: Some(r#"checkout.abort("Failed to do something")"#)},
     Function {
         name: "add_target",
-        description: "Adds a target. There is no specific action for the target, but this rule can be useful for organizing depedencies.",
+        description: "Adds a target. There is no specific action for the target, but this rule can be useful for organizing dependencies.",
         return_type: "None",
         args: &[
             get_rule_argument(),

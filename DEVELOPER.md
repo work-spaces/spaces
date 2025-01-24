@@ -23,7 +23,7 @@ cargo build
 Publish a release by pushing a tag
 
 ```sh
-export VERSION=0.11.23
+export VERSION=0.11.24
 git tag -a v$VERSION -m "Update version"
 git push origin tag v$VERSION
 ```
@@ -32,3 +32,5 @@ git push origin tag v$VERSION
 
 - Add timestamp to log output
 - checkout/sync should skip repos that are checkout and and already have changes
+- Add help notes to trailing args
+- Add workflow presets
