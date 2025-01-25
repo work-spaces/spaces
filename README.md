@@ -185,3 +185,8 @@ source ./env
   - All the commonly used spaces built-ins have function wrappers defined in the [SDK](https://github.com/work-spaces/sdk)
 - `load()` statements that import variables or functions from other starlark scripts
   - `load()` paths can either be relative to the current `star` file or prefixed with `//` to refer to the workspace root.
+
+## Uninstall Spaces
+
+- Delete the binary: `rm $HOME/.local/bin/spaces`.
+- Delete the store: `rm -rf $HOME/.spaces`
