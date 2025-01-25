@@ -562,6 +562,7 @@ impl State {
                 } else if printer.verbosity.level <= printer::Level::Message
                     || task.rule.help.is_some()
                     || target.is_some()
+                    || !filter.is_empty()
                 {
                     let type_ = task
                         .rule

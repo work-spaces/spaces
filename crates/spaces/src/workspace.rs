@@ -48,9 +48,7 @@ pub struct RuleMetricsFile {
 }
 
 impl RuleMetricsFile {
-    pub fn update(
-        workspace: WorkspaceArc,
-    ) -> anyhow::Result<()> {
+    pub fn update(workspace: WorkspaceArc) -> anyhow::Result<()> {
         let workspace_path = workspace.read().get_absolute_path();
         let metric_entry = workspace.read().rule_metrics.clone();
         let metrics_file = format!("{workspace_path}/{METRICS_FILE_NAME}");
@@ -59,9 +57,10 @@ impl RuleMetricsFile {
             let content = std::fs::read_to_string(metrics_file.as_str()).context(
                 format_context!("Failed to read metrics file {metrics_file}"),
             )?;
-            let mut metrics_content: RuleMetricsFile = serde_json::from_str(content.as_str()).context(
-                format_context!("Failed to parse metrics file {metrics_file}"),
-            )?;
+            let mut metrics_content: RuleMetricsFile = serde_json::from_str(content.as_str())
+                .context(format_context!(
+                    "Failed to parse metrics file {metrics_file}"
+                ))?;
             metrics_content.metrics.push(metric_entry);
             metrics_content
         } else {
@@ -73,7 +72,9 @@ impl RuleMetricsFile {
         let content = serde_json::to_string_pretty(&metrics)
             .context(format_context!("Failed to serialize metrics"))?;
 
-        std::fs::write(metrics_file.as_str(), content.as_str()).context(format_context!("Failed to write metrics file {metrics_file}"))?;
+        std::fs::write(metrics_file.as_str(), content.as_str()).context(format_context!(
+            "Failed to write metrics file {metrics_file}"
+        ))?;
 
         Ok(())
     }
@@ -199,8 +200,8 @@ pub struct Workspace {
     changes: changes::Changes,              // modified during run
     inputs: inputs::Inputs,                 // modified during run
     pub target: Option<Arc<str>>,           // target called from the command line
-    pub trailing_args: Vec<Arc<str>>,       
-    pub updated_assets: HashSet<Arc<str>>,  // used by assets to keep track of exclusive access
+    pub trailing_args: Vec<Arc<str>>,
+    pub updated_assets: HashSet<Arc<str>>, // used by assets to keep track of exclusive access
     pub rule_metrics: HashMap<Arc<str>, RuleMetrics>, // used to keep track of rule metrics
 }
 
@@ -255,26 +256,32 @@ impl Workspace {
         }
     }
 
-    fn filter_predicate(entry: &walkdir::DirEntry) -> bool {
+    fn filter_predicate(workspace_path: &std::path::Path, entry: &walkdir::DirEntry) -> bool {
+        if entry.path() == workspace_path {
+            return true;
+        }
+
         if entry.file_name() == SPACES_CAPSULES_NAME {
             return false;
         }
+
         let workflows_path = entry.path().join(WORKFLOW_TOML_NAME);
         if workflows_path.exists() {
             return false;
         }
+
         let spaces_env_path = entry.path().join(ENV_FILE_NAME);
         if spaces_env_path.exists() {
             return false;
         }
-        
+
         true
     }
 
     pub fn new(
         mut progress: printer::MultiProgressBar,
         absolute_path_to_workspace: Option<Arc<str>>,
-        is_clear_inputs: bool
+        is_clear_inputs: bool,
     ) -> anyhow::Result<Self> {
         let date = chrono::Local::now();
 
@@ -293,7 +300,9 @@ impl Workspace {
         // walkdir and find all spaces.star files in the workspace
         let walkdir: Vec<_> = walkdir::WalkDir::new(absolute_path.as_ref())
             .into_iter()
-            .filter_entry(Self::filter_predicate)
+            .filter_entry(|entry| {
+                Self::filter_predicate(&std::path::Path::new(absolute_path.as_ref()), entry)
+            })
             .collect();
 
         progress.set_total(walkdir.len() as u64);
@@ -406,7 +415,9 @@ impl Workspace {
         if is_clear_inputs {
             let inputs_path = get_inputs_path();
             if std::path::Path::new(inputs_path).exists() {
-                std::fs::remove_file(inputs_path).context(format_context!("Failed to remove inputs file {inputs_path}"))?; 
+                std::fs::remove_file(inputs_path).context(format_context!(
+                    "Failed to remove inputs file {inputs_path}"
+                ))?;
             }
         }
 
@@ -540,27 +551,53 @@ impl Workspace {
     }
 
     pub fn get_path_to_capsule_store_workspaces(&self) -> Arc<str> {
-        format!("{}/{}", self.get_path_to_capsule_store(), SPACES_CAPSULES_WORKSPACES_NAME).into()
+        format!(
+            "{}/{}",
+            self.get_path_to_capsule_store(),
+            SPACES_CAPSULES_WORKSPACES_NAME
+        )
+        .into()
     }
 
     pub fn get_path_to_capsule_store_workflows(&self) -> Arc<str> {
-        format!("{}/{}", self.get_path_to_capsule_store(), SPACES_CAPSULES_WORKFLOWS_NAME).into()
+        format!(
+            "{}/{}",
+            self.get_path_to_capsule_store(),
+            SPACES_CAPSULES_WORKFLOWS_NAME
+        )
+        .into()
     }
 
     pub fn get_path_to_workflows(&self) -> Arc<str> {
         // capsules will pass SPACES_ENV_CAPSULE_WORKFLOWS to child processes
         // the top level process will use the digest
-        std::env::var(SPACES_ENV_CAPSULE_WORKFLOWS).unwrap_or_else(|_| {
-            format!("{}/{}", self.get_path_to_capsule_store_workflows(), self.get_short_digest())
-        }).into()
+        std::env::var(SPACES_ENV_CAPSULE_WORKFLOWS)
+            .unwrap_or_else(|_| {
+                format!(
+                    "{}/{}",
+                    self.get_path_to_capsule_store_workflows(),
+                    self.get_short_digest()
+                )
+            })
+            .into()
     }
 
     pub fn get_path_to_capsule_store_status(&self) -> Arc<str> {
-        format!("{}/{}", self.get_path_to_capsule_store(), SPACES_CAPSULES_STATUS_NAME).into()
+        format!(
+            "{}/{}",
+            self.get_path_to_capsule_store(),
+            SPACES_CAPSULES_STATUS_NAME
+        )
+        .into()
     }
 
     pub fn get_path_to_capsule_store_sysroot(&self) -> Arc<str> {
-        format!("{}/{}", self.get_path_to_capsule_store(), SPACES_CAPSULES_SYSROOT_NAME).into()
+        format!(
+            "{}/{}",
+            self.get_path_to_capsule_store(),
+            SPACES_CAPSULES_SYSROOT_NAME
+        )
+        .into()
     }
 
     pub fn get_spaces_tools_path(&self) -> Arc<str> {
