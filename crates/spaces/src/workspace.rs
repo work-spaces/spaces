@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+pub const WORKFLOW_TOML_NAME: &str = "workflows.spaces.toml";
+
 pub const ENV_FILE_NAME: &str = "env.spaces.star";
 pub const LOCK_FILE_NAME: &str = "lock.spaces.star";
 pub const SPACES_MODULE_NAME: &str = "spaces.star";
@@ -257,6 +259,15 @@ impl Workspace {
         if entry.file_name() == SPACES_CAPSULES_NAME {
             return false;
         }
+        let workflows_path = entry.path().join(WORKFLOW_TOML_NAME);
+        if workflows_path.exists() {
+            return false;
+        }
+        let spaces_env_path = entry.path().join(ENV_FILE_NAME);
+        if spaces_env_path.exists() {
+            return false;
+        }
+        
         true
     }
 

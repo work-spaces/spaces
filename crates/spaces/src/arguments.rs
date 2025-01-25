@@ -4,7 +4,6 @@ use anyhow_source_location::{format_context, format_error};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
 use std::sync::Arc;
 
-const WORKFLOW_TOML_NAME: &str = "workflows.spaces.toml";
 type WorkflowsToml = std::collections::HashMap<Arc<str>, Vec<Arc<str>>>;
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
@@ -126,21 +125,21 @@ pub fn execute() -> anyhow::Result<()> {
                 let inputs: Vec<_> = parts[1].split(',').collect();
                 let mut scripts: Vec<Arc<str>> = vec![];
 
-                let workflows_json_path = format!("{}/{}", directory, WORKFLOW_TOML_NAME);
+                let workflows_json_path =
+                    format!("{}/{}", directory, workspace::WORKFLOW_TOML_NAME);
                 let mut is_workspace_json_input = false;
-                if std::path::Path::new(workflows_json_path.as_str()).exists() {
-                    if inputs.len() == 1 {
-                        let workflows_json: WorkflowsToml = toml::from_str(
-                            std::fs::read_to_string(workflows_json_path.as_str())
-                                .context(format_context!("Failed to read workflows json"))?
-                                .as_str(),
-                        )
-                        .context(format_context!("Failed to parse workflows json"))?;
+                if std::path::Path::new(workflows_json_path.as_str()).exists() && inputs.len() == 1
+                {
+                    let workflows_json: WorkflowsToml = toml::from_str(
+                        std::fs::read_to_string(workflows_json_path.as_str())
+                            .context(format_context!("Failed to read workflows json"))?
+                            .as_str(),
+                    )
+                    .context(format_context!("Failed to parse workflows json"))?;
 
-                        if let Some(workflow_scripts) = workflows_json.get(inputs[0]) {
-                            is_workspace_json_input = true;
-                            scripts.extend(workflow_scripts.clone());
-                        }
+                    if let Some(workflow_scripts) = workflows_json.get(inputs[0]) {
+                        is_workspace_json_input = true;
+                        scripts.extend(workflow_scripts.clone());
                     }
                 }
 
@@ -246,11 +245,12 @@ pub fn execute() -> anyhow::Result<()> {
             if let Some(filter) = filter {
                 let filter_parts = filter.split(',');
                 for glob_expression in filter_parts {
-                    let effective_expression = if glob_expression.starts_with('-') || glob_expression.starts_with('+'){
-                        glob_expression.to_string()
-                    } else {
-                        format!("+{}", glob_expression)
-                    };
+                    let effective_expression =
+                        if glob_expression.starts_with('-') || glob_expression.starts_with('+') {
+                            glob_expression.to_string()
+                        } else {
+                            format!("+{}", glob_expression)
+                        };
                     filter_globs.insert(effective_expression.into());
                 }
             }
@@ -310,7 +310,9 @@ Executes the checkout rules in the specified scripts."#)]
         /// The path(s) to the `spaces.star`` file containing checkout rules. Paths are processed in order.
         #[arg(long, value_hint = ValueHint::FilePath)]
         script: Vec<Arc<str>>,
-        #[arg(long, help = r#"Scripts to process in the format of `--workflow=<directory>:<script>,<script>,...`.
+        #[arg(
+            long,
+            help = r#"Scripts to process in the format of `--workflow=<directory>:<script>,<script>,...`.
 `--script` is processed before `--workflow`. 
 
 If <directory> has `workflows.spaces.toml`, it will be parsed for shortcuts if only one <script> is passed.
@@ -322,7 +324,8 @@ If <directory> has `workflows.spaces.toml`, it will be parsed for shortcuts if o
 ```toml
 my-shortcut = ["preload", "my-shortcut"]
 ```
-"#)]
+"#
+        )]
         workflow: Option<Arc<str>>,
         /// Create a lock file for the workspace. This file can be passed on the next checkout as a script to re-create the exact workspace.
         #[arg(long)]
@@ -344,7 +347,10 @@ Runs a spaces run rule.
         /// Forces rules to run even if input globs are the same as last time.
         #[arg(long)]
         forget_inputs: bool,
-        #[arg(trailing_var_arg = true, help = r"Extra arguments to pass to the rule (passed after `--`)")]
+        #[arg(
+            trailing_var_arg = true,
+            help = r"Extra arguments to pass to the rule (passed after `--`)"
+        )]
         extra_rule_args: Vec<Arc<str>>,
     },
     #[command(about = r"

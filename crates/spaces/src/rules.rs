@@ -549,10 +549,8 @@ impl State {
         for node_index in self.sorted.iter() {
             let task_name = self.graph.get_task(*node_index);
 
-            if !filter.is_empty() {
-                if !changes::glob::match_globs(filter, task_name.as_ref()) {
-                    continue;
-                }
+            if !filter.is_empty() && !changes::glob::match_globs(filter, task_name) {
+                continue;
             }
 
             let task = tasks
