@@ -1,6 +1,7 @@
 use crate::workspace;
 use anyhow_source_location::format_error;
-
+use std::collections::HashSet;
+use std::sync::Arc;
 
 
 #[derive(Debug)]
@@ -8,7 +9,8 @@ struct State {
     active_workspace: Option<workspace::WorkspaceArc>,
     is_ci: bool,
     max_queue_count: i64,
-    error_chain: Vec<String>
+    error_chain: Vec<String>,
+    inspect_globs: HashSet<Arc<str>>,
 }
 
 static STATE: state::InitCell<lock::StateLock<State>> = state::InitCell::new();
@@ -21,7 +23,8 @@ fn get_state() -> &'static lock::StateLock<State> {
         is_ci: false,
         max_queue_count: 8,
         active_workspace: None,
-        error_chain: Vec::new()
+        error_chain: Vec::new(),
+        inspect_globs: HashSet::new(),
     }));
 
     STATE.get()
@@ -55,6 +58,17 @@ pub fn get_max_queue_count() -> i64 {
     let state = get_state().read();
     state.max_queue_count
 }
+
+pub fn set_inspect_globs(inspect_globs: HashSet<Arc<str>>) {
+    let mut state = get_state().write();
+    state.inspect_globs = inspect_globs;
+}
+
+pub fn get_inspect_globs() -> HashSet<Arc<str>> {
+    let state = get_state().read();
+    state.inspect_globs.clone()
+}
+
 
 pub fn set_max_queue_count(max_queue_count: i64) {
     let mut state = get_state().write();

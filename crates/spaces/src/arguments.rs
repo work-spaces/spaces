@@ -234,7 +234,7 @@ pub fn execute() -> anyhow::Result<()> {
             verbosity,
             hide_progress_bars,
             ci,
-            commands: Commands::Evaluate { target },
+            commands: Commands::Inspect { target, filter },
         } => {
             handle_verbosity(&mut printer, verbosity.into(), ci, hide_progress_bars);
 
@@ -242,9 +242,24 @@ pub fn execute() -> anyhow::Result<()> {
                 printer.verbosity.level = printer::Level::Info;
             }
 
+            let mut filter_globs = std::collections::HashSet::new();
+            if let Some(filter) = filter {
+                let filter_parts = filter.split(',');
+                for glob_expression in filter_parts {
+                    let effective_expression = if glob_expression.starts_with('-') || glob_expression.starts_with('+'){
+                        glob_expression.to_string()
+                    } else {
+                        format!("+{}", glob_expression)
+                    };
+                    filter_globs.insert(effective_expression.into());
+                }
+            }
+
+            singleton::set_inspect_globs(filter_globs);
+
             runner::run_starlark_modules_in_workspace(
                 &mut printer,
-                rules::Phase::Evaluate,
+                rules::Phase::Inspect,
                 None,
                 false,
                 runner::RunWorkspace::Target(target, vec![]),
@@ -316,7 +331,7 @@ my-shortcut = ["preload", "my-shortcut"]
         #[arg(long)]
         force_install_tools: bool,
     },
-    /// Synchronizes the workspace with the checkout rules.
+    /// Runs checkout rules within an existing workspace. This is experimental. Don't use it.
     Sync {},
     #[command(about = r"
 Runs a spaces run rule.
@@ -333,14 +348,17 @@ Runs a spaces run rule.
         extra_rule_args: Vec<Arc<str>>,
     },
     #[command(about = r"
-Evaluate all the scripts in the workspace without running any rules.
-- `spaces evaluate`: show the rules that have `help` entries: 
-- `spaces --verbosity=message evaluate`: show all rules
-- `spaces --verbosity=debug evaluate`: show all rules in detail")]
-    Evaluate {
+Inspect all the scripts in the workspace without running any rules.
+- `spaces inspect`: show the rules that have `help` entries: 
+- `spaces inspect <target-name>`: show target plus dependencies
+- `spaces --verbosity=message inspect`: show all rules
+- `spaces --verbosity=debug inspect`: show all rules in detail")]
+    Inspect {
         /// The name of the target to evaluate (default is all targets).
-        #[arg(long)]
         target: Option<Arc<str>>,
+        // Filter targets with a glob (e.g. `--filter=**/my-target`)
+        #[arg(long)]
+        filter: Option<Arc<str>>,
     },
     /// Generates shell completions for the spaces command.
     Completions {

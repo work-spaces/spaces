@@ -1,29 +1,23 @@
 # For Developers
 
-Clone and develop with just the spaces repo:
-
-```sh
-git clone https://github.com/work-spaces/spaces
-cd spaces
-cargo build
-# install
-cargo install --profile=release
-```
-
 Use `spaces` to develop with `printer` and `easy-archiver` in the same workspace.
+
+> Requires spaces v0.11.24 or greater
 
 ```sh
 git clone https://github.com/work-spaces/workflows
-spaces checkout --script=workflows/preload --script=workflows/spaces-develop --name=spaces-updates
+spaces checkout --workflow=workflows:spaces-develop --name=spaces-updates
 cd spaces
 source env
 cargo build
 ```
 
+# Internal Use Only
+
 Publish a release by pushing a tag
 
 ```sh
-export VERSION=0.11.24
+export VERSION=0.11.25
 git tag -a v$VERSION -m "Update version"
 git push origin tag v$VERSION
 ```
@@ -32,5 +26,3 @@ git push origin tag v$VERSION
 
 - Add timestamp to log output
 - checkout/sync should skip repos that are checkout and and already have changes
-- Add help notes to trailing args
-- Add workflow presets

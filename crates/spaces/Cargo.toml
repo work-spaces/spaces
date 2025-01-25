@@ -1,6 +1,6 @@
 [package]
 name = "spaces"
-version = "0.11.24"
+version = "0.11.25"
 edition = "2021"
 
 [dependencies]
@@ -14,6 +14,7 @@ starlark_lsp = { version = "0.13", optional = true }
 lsp-server = { version = "0.7", optional = true }
 itertools = { version = "0.14", optional = true }
 lsp-types = { version = "0.94.1", optional = true }
+strum = { version = "0.26", features = ["derive"] }
 thiserror = "2"
 
 starlark.workspace = true

@@ -259,15 +259,25 @@ pub fn run_starlark_modules(
             let _new_modules = rules::execute(printer, workspace.clone(), phase)
                 .context(format_context!("Failed to execute tasks"))?;
         }
-        rules::Phase::Evaluate => {
-            star_logger(printer).message("--Evaluate Phase--");
+        rules::Phase::Inspect => {
+            star_logger(printer).message("--Inspect Phase--");
             rules::sort_tasks(target.clone(), phase)
                 .context(format_context!("Failed to sort tasks"))?;
 
             rules::debug_sorted_tasks(printer, rules::Phase::Run)
                 .context(format_context!("Failed to debug sorted tasks"))?;
 
-            rules::show_tasks(printer).context(format_context!("Failed to show tasks"))?;
+            let inspect_globs = singleton::get_inspect_globs();
+
+            rules::show_tasks(
+                printer,
+                rules::Phase::Checkout,
+                target.clone(),
+                &inspect_globs,
+            )
+            .context(format_context!("Failed to show tasks"))?;
+            rules::show_tasks(printer, rules::Phase::Run, target.clone(), &inspect_globs)
+                .context(format_context!("Failed to show tasks"))?;
         }
         rules::Phase::Checkout => {
             star_logger(printer).message("--Post Checkout Phase--");

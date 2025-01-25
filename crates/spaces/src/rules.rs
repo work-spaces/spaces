@@ -6,12 +6,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Condvar, Mutex};
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, ValueEnum, strum::Display)]
 pub enum Phase {
     Checkout,
     PostCheckout,
     Run,
-    Evaluate,
+    Inspect,
     Complete,
     Cancelled,
 }
@@ -327,9 +327,14 @@ pub fn set_latest_starlark_module(name: Arc<str>) {
     state.all_modules.insert(name);
 }
 
-pub fn show_tasks(printer: &mut printer::Printer) -> anyhow::Result<()> {
+pub fn show_tasks(
+    printer: &mut printer::Printer,
+    phase: Phase,
+    target: Option<Arc<str>>,
+    filter: &HashSet<Arc<str>>,
+) -> anyhow::Result<()> {
     let state = get_state().read();
-    state.show_tasks(printer)
+    state.show_tasks(printer, phase, target, filter)
 }
 
 pub fn sort_tasks(target: Option<Arc<str>>, phase: Phase) -> anyhow::Result<()> {
@@ -525,24 +530,60 @@ impl State {
         Ok(())
     }
 
-    pub fn show_tasks(&self, printer: &mut printer::Printer) -> anyhow::Result<()> {
+    pub fn show_tasks(
+        &self,
+        printer: &mut printer::Printer,
+        phase: Phase,
+        target: Option<Arc<str>>,
+        filter: &HashSet<Arc<str>>,
+    ) -> anyhow::Result<()> {
         let tasks = self.tasks.read();
+
+        #[derive(Serialize)]
+        struct TaskInfo {
+            help: String,
+            #[serde(rename = "type")]
+            type_: String,
+        }
         let mut task_info_list = std::collections::HashMap::new();
         for node_index in self.sorted.iter() {
             let task_name = self.graph.get_task(*node_index);
+
+            if !filter.is_empty() {
+                if !changes::glob::match_globs(filter, task_name.as_ref()) {
+                    continue;
+                }
+            }
+
             let task = tasks
                 .get(task_name)
                 .ok_or(format_error!("Task not found {task_name}"))?;
+            if task.phase == phase {
+                if printer.verbosity.level == printer::Level::Debug {
+                    printer.debug(task_name, &task)?;
+                } else if printer.verbosity.level <= printer::Level::Message
+                    || task.rule.help.is_some()
+                    || target.is_some()
+                {
+                    let type_ = task
+                        .rule
+                        .type_
+                        .map(|e| format!("{:?}", e))
+                        .unwrap_or("Run".into());
 
-            if printer.verbosity.level == printer::Level::Debug {
-                printer.debug(task_name, &task)?;
-            } else if printer.verbosity.level <= printer::Level::Message || task.rule.help.is_some()
-            {
-                task_info_list.insert(task.rule.name.clone(), task.rule.help.clone());
+                    let help = task
+                        .rule
+                        .help
+                        .clone()
+                        .map(|e| e.as_ref().to_string())
+                        .unwrap_or("<Not Provided>".to_string());
+
+                    task_info_list.insert(task.rule.name.clone(), TaskInfo { help, type_ });
+                }
             }
         }
 
-        printer.info("targets", &task_info_list)?;
+        printer.info(phase.to_string().as_str(), &task_info_list)?;
 
         Ok(())
     }
