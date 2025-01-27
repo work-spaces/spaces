@@ -16,7 +16,7 @@ pub enum Checkout {
     NewBranch(Arc<str>),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Copy)]
+#[derive(Debug, Clone, Serialize, Deserialize, Copy, PartialEq)]
 pub enum Clone {
     Default,
     Worktree,

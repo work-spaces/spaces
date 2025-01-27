@@ -464,6 +464,21 @@ impl HttpArchive {
             extracted_files.insert(file_name.to_string_lossy().to_string());
             progress_bar
         };
+
+        for file in extracted_files.iter() {
+            let base_path = self.get_path_to_extracted_files();
+            let file_path = std::path::Path::new(base_path.as_str()).join(file);
+            let metadata = std::fs::metadata(file_path.as_path())
+                .context(format_context!("Failed to get metadata for {file_path:?}"))?;
+            
+            // mask out write permissions and allow read and execute
+            let mut permissions: std::fs::Permissions = metadata.permissions();
+            permissions.set_readonly(true);
+            std::fs::set_permissions(file_path.as_path(), permissions)
+                .context(format_context!("Failed to set permissions for {file_path:?}"))?;
+        }
+
+
         self.save_files_json(Files {
             files: extracted_files
                 .into_iter()
