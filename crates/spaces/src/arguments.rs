@@ -148,8 +148,8 @@ pub fn execute() -> anyhow::Result<()> {
                 }
 
                 for script in scripts {
-                    let long_path = format!("{}/{}", directory, script);
-                    let short_path = format!("{}/{}.spaces.star", directory, script);
+                    let short_path = format!("{}/{}", directory, script);
+                    let long_path = format!("{}/{}.spaces.star", directory, script);
                     if !std::path::Path::new(long_path.as_str()).exists()
                         && !std::path::Path::new(short_path.as_str()).exists()
                     {
@@ -159,7 +159,16 @@ pub fn execute() -> anyhow::Result<()> {
                             script
                         ));
                     }
+
                     script_inputs.push(format!("{}/{}", directory, script).into());
+                }
+            }
+
+            for script_path in script_inputs.iter() {
+                if script_path.as_ref().ends_with("env")
+                    || script_path.ends_with(workspace::ENV_FILE_NAME)
+                {
+                    return Err(format_error!("`env.spaces.star` is a reserved script name",));
                 }
             }
 
