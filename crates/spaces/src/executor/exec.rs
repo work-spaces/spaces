@@ -154,7 +154,7 @@ impl Exec {
                                 std::fs::read_to_string(log_file_path.as_ref()).context(
                                     format_context!("Failed to read log file {}", log_file_path),
                                 )?;
-                            if log_contents.len() > 8192 {
+                            if log_contents.len() > 10*1024*1024 {
                                 logger(progress, name).error(
                                     format!("See log file {log_file_path} for details").as_str(),
                                 );
