@@ -1,5 +1,10 @@
 # Spaces Change log
 
+## v0.11.32
+
+- Ignore hidden directories when scanning the workspace
+- If `gh` fails, try using HTTPS. Recommend `gh auth login` if both fail
+
 ## v0.11.31
 
 - Change threshold to dump log to terminal to 10MB

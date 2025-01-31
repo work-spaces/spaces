@@ -17,7 +17,7 @@ cargo build
 Publish a release by pushing a tag
 
 ```sh
-export VERSION=0.11.31
+export VERSION=0.11.32
 git tag -a v$VERSION -m "Update version"
 git push origin tag v$VERSION
 ```
@@ -28,3 +28,5 @@ git push origin tag v$VERSION
 - checkout/sync should skip repos that are checkout and and already have changes
 - Add ways to manage the store. Keep track of when archives are used. Delete old stuff.
   - Show which repos have worktrees checked out -- don't delete those
+- Do faster loading of workspaces - save the workspace status. it takes too long to load larger workspaces
+- soft-links in tools should be link to the sysroot file not the original file

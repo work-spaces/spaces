@@ -348,9 +348,18 @@ impl HttpArchive {
                 &self.full_path_to_archive,
             ) {
                 let gh_command = format!("{}/gh", self.tools_path);
-                gh::download(&gh_command, &self.archive.url, arguments, &mut progress_bar)
-                    .context(format_context!("Failed to download using gh"))?;
-
+                let gh_result =
+                    gh::download(&gh_command, &self.archive.url, arguments, &mut progress_bar);
+                progress_bar = if gh_result.is_err() {
+                    let join_handle =
+                        self.download(&runtime, progress_bar)
+                            .context(format_context!(
+                                "Failed to download using https after trying gh. Use `gh auth login` to authenticate"
+                            ))?;
+                    runtime.block_on(join_handle)??
+                } else {
+                    progress_bar
+                };
                 progress_bar
             } else {
                 label_logger(&mut progress_bar, &self.archive.url)
@@ -416,8 +425,7 @@ impl HttpArchive {
         mut progress_bar: printer::MultiProgressBar,
     ) -> anyhow::Result<printer::MultiProgressBar> {
         if !self.is_extract_required() {
-            label_logger(&mut progress_bar, &self.archive.url)
-                .debug("Extract not required");
+            label_logger(&mut progress_bar, &self.archive.url).debug("Extract not required");
             return Ok(progress_bar);
         }
 
@@ -470,14 +478,14 @@ impl HttpArchive {
             let file_path = std::path::Path::new(base_path.as_str()).join(file);
             let metadata = std::fs::metadata(file_path.as_path())
                 .context(format_context!("Failed to get metadata for {file_path:?}"))?;
-            
+
             // mask out write permissions and allow read and execute
             let mut permissions: std::fs::Permissions = metadata.permissions();
             permissions.set_readonly(true);
-            std::fs::set_permissions(file_path.as_path(), permissions)
-                .context(format_context!("Failed to set permissions for {file_path:?}"))?;
+            std::fs::set_permissions(file_path.as_path(), permissions).context(format_context!(
+                "Failed to set permissions for {file_path:?}"
+            ))?;
         }
-
 
         self.save_files_json(Files {
             files: extracted_files

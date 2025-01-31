@@ -262,6 +262,10 @@ impl Workspace {
         }
 
         if entry.file_type().is_dir() {
+            if entry.path().starts_with(".") {
+                return false;
+            }
+
             let workflows_path = entry.path().join(WORKFLOW_TOML_NAME);
             if workflows_path.exists() {
                 return false;
@@ -308,7 +312,7 @@ impl Workspace {
         let walkdir: Vec<_> = walkdir::WalkDir::new(absolute_path.as_ref())
             .into_iter()
             .filter_entry(|entry| {
-                Self::filter_predicate(&std::path::Path::new(absolute_path.as_ref()), entry)
+                Self::filter_predicate(std::path::Path::new(absolute_path.as_ref()), entry)
             })
             .collect();
 
