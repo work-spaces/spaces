@@ -1,5 +1,10 @@
 # Spaces Change log
 
+## v0.11.33
+
+- Suggest similar target names
+- Save workspace spaces modules in settings file. Rescan using `--rescan`.
+
 ## v0.11.32
 
 - Ignore hidden directories when scanning the workspace

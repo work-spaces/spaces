@@ -37,6 +37,27 @@ impl Graph {
         self.directed_graph[node].as_ref()
     }
 
+    fn get_target_not_found_error(&self, target: Arc<str>) -> anyhow::Error {
+        let targets: Vec<Arc<str>> = self
+            .directed_graph
+            .node_indices()
+            .map(|node| self.directed_graph[node].clone())
+            .collect();
+        let suggestions = suggest::get_suggestions(target.clone(), &targets);
+
+        // get up to 5 suggestions
+        let suggestions = suggestions
+            .iter()
+            .take(5)
+            .map(|(_, suggestion)| suggestion.to_string())
+            .collect::<Vec<String>>();
+
+        format_error!(
+            "{target} not found. Similar targets include:\n{}",
+            suggestions.join("\n")
+        )
+    }
+
     pub fn get_sorted_tasks(
         &self,
         target: Option<Arc<str>>,
@@ -49,7 +70,7 @@ impl Graph {
                     let value = &self.directed_graph[node];
                     value.as_ref() == target.as_ref()
                 })
-                .ok_or(format_error!("Target not found: {target}"))?;
+                .ok_or(self.get_target_not_found_error(target))?;
 
             let mut tasks: Vec<petgraph::prelude::NodeIndex> = Vec::new();
             let mut dfs = petgraph::visit::DfsPostOrder::new(&self.directed_graph, target_node);

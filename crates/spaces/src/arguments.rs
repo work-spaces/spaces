@@ -43,6 +43,9 @@ pub struct Arguments {
     /// If this is passed, info.is_ci() returns true in scripts.
     #[arg(long)]
     ci: bool,
+    /// Rescan the workspace for *spaces.star files
+    #[arg(long)]
+    rescan: bool,
     #[command(subcommand)]
     commands: Commands,
 }
@@ -51,8 +54,10 @@ fn handle_verbosity(
     printer: &mut printer::Printer,
     verbosity: printer::Level,
     is_ci: bool,
+    rescan: bool,   
     is_hide_progress_bars: bool,
 ) {
+    singleton::set_rescan(rescan);
     if is_ci {
         singleton::set_ci(true);
         printer.verbosity.level = printer::Level::Trace;
@@ -101,6 +106,7 @@ pub fn execute() -> anyhow::Result<()> {
             verbosity,
             hide_progress_bars,
             ci,
+            rescan,
             commands:
                 Commands::Checkout {
                     name,
@@ -110,7 +116,7 @@ pub fn execute() -> anyhow::Result<()> {
                     force_install_tools,
                 },
         } => {
-            handle_verbosity(&mut printer, verbosity.into(), ci, hide_progress_bars);
+            handle_verbosity(&mut printer, verbosity.into(), ci, rescan, hide_progress_bars);
 
             let mut script_inputs: Vec<Arc<str>> = vec![];
             script_inputs.extend(script.clone());
@@ -183,9 +189,10 @@ pub fn execute() -> anyhow::Result<()> {
             verbosity,
             hide_progress_bars,
             ci,
+            rescan,
             commands: Commands::Sync {},
         } => {
-            handle_verbosity(&mut printer, verbosity.into(), ci, hide_progress_bars);
+            handle_verbosity(&mut printer, verbosity.into(), ci, rescan, hide_progress_bars);
             runner::run_starlark_modules_in_workspace(
                 &mut printer,
                 rules::Phase::Checkout,
@@ -212,6 +219,7 @@ pub fn execute() -> anyhow::Result<()> {
             verbosity,
             hide_progress_bars,
             ci,
+            rescan,
             commands:
                 Commands::Run {
                     target,
@@ -219,7 +227,7 @@ pub fn execute() -> anyhow::Result<()> {
                     extra_rule_args,
                 },
         } => {
-            handle_verbosity(&mut printer, verbosity.into(), ci, hide_progress_bars);
+            handle_verbosity(&mut printer, verbosity.into(), ci, rescan, hide_progress_bars);
 
             if target.is_none() && !extra_rule_args.is_empty() {
                 return Err(format_error!(
@@ -242,9 +250,10 @@ pub fn execute() -> anyhow::Result<()> {
             verbosity,
             hide_progress_bars,
             ci,
+            rescan,
             commands: Commands::Inspect { target, filter },
         } => {
-            handle_verbosity(&mut printer, verbosity.into(), ci, hide_progress_bars);
+            handle_verbosity(&mut printer, verbosity.into(), ci, rescan, hide_progress_bars);
 
             if printer.verbosity.level > printer::Level::Info {
                 printer.verbosity.level = printer::Level::Info;
@@ -281,9 +290,10 @@ pub fn execute() -> anyhow::Result<()> {
             verbosity,
             hide_progress_bars,
             ci,
+            rescan,
             commands: Commands::Completions { shell },
         } => {
-            handle_verbosity(&mut printer, verbosity.into(), ci, hide_progress_bars);
+            handle_verbosity(&mut printer, verbosity.into(), ci, rescan, hide_progress_bars);
 
             clap_complete::generate(
                 shell,
@@ -297,9 +307,10 @@ pub fn execute() -> anyhow::Result<()> {
             verbosity,
             hide_progress_bars,
             ci,
+            rescan,
             commands: Commands::Docs { item },
         } => {
-            handle_verbosity(&mut printer, verbosity.into(), ci, hide_progress_bars);
+            handle_verbosity(&mut printer, verbosity.into(), ci, rescan, hide_progress_bars);
 
             docs::show(&mut printer, item)?;
         }

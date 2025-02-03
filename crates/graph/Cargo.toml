@@ -8,3 +8,4 @@ edition = "2021"
 petgraph.workspace = true
 anyhow-source-location.workspace = true
 anyhow.workspace = true
+suggest.workspace = true

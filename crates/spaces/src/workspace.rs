@@ -1,4 +1,4 @@
-use crate::inputs;
+use crate::{inputs, singleton};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -84,6 +84,9 @@ impl RuleMetricsFile {
 pub struct Settings {
     pub store_path: Arc<str>,
     order: Vec<Arc<str>>,
+    #[serde(default = "HashSet::new")]
+    scanned_modules: HashSet<Arc<str>>,
+    is_scanned: Option<bool>,
 }
 
 impl Settings {
@@ -92,10 +95,10 @@ impl Settings {
         let content = std::fs::read_to_string(load_path.as_str()).context(format_context!(
             "Failed to read load order file {load_path}"
         ))?;
-        let order: Settings = serde_json::from_str(content.as_str()).context(format_context!(
-            "Failed to parse load order file {load_path}"
-        ))?;
-        Ok(order)
+        let settings: Settings = serde_json::from_str(content.as_str()).context(
+            format_context!("Failed to parse load order file {load_path}"),
+        )?;
+        Ok(settings)
     }
 
     pub fn push(&mut self, module: Arc<str>) {
@@ -107,7 +110,7 @@ impl Settings {
         let content = serde_json::to_string_pretty(&self)
             .context(format_context!("Failed to serialize load order"))?;
         std::fs::write(path.as_str(), content.as_str())
-            .context(format_context!("Failed to write load order file {path}"))?;
+            .context(format_context!("Failed to save settings file {path}"))?;
 
         Ok(())
     }
@@ -308,15 +311,11 @@ impl Workspace {
                 .context(format_context!("While searching for workspace root"))?
         };
 
-        // walkdir and find all spaces.star files in the workspace
-        let walkdir: Vec<_> = walkdir::WalkDir::new(absolute_path.as_ref())
-            .into_iter()
-            .filter_entry(|entry| {
-                Self::filter_predicate(std::path::Path::new(absolute_path.as_ref()), entry)
-            })
-            .collect();
+        logger(&mut progress).message(format!("{absolute_path}").as_str());
 
-        progress.set_total(walkdir.len() as u64);
+        std::env::set_current_dir(std::path::Path::new(absolute_path.as_ref())).context(
+            format_context!("Failed to set current directory to {absolute_path}"),
+        )?;
 
         let mut loaded_modules = HashSet::new();
         let mut modules: Vec<(Arc<str>, Arc<str>)> = vec![];
@@ -333,73 +332,39 @@ impl Workspace {
 
         let mut original_modules: Vec<(Arc<str>, Arc<str>)> = vec![];
 
+        let mut is_run_or_inspect = true;
         let mut store_path = None;
-        if let Ok(load_order) = Settings::load(absolute_path.as_ref()) {
+        let mut settings = if let Ok(settings) = Settings::load(absolute_path.as_ref()) {
             logger(&mut progress).trace("Loading modules from sync order");
-            store_path = Some(load_order.store_path);
-            for module in load_order.order {
+            store_path = Some(settings.store_path.clone());
+            for module in settings.order.iter() {
                 if is_rules_module(module.as_ref()) {
                     progress.increment(1);
                     let path = format!("{}/{}", absolute_path, module);
                     let content = std::fs::read_to_string(path.as_str())
                         .context(format_context!("Failed to read file {}", path))?;
-                    if !loaded_modules.contains(&module) {
+                    if !loaded_modules.contains(module) {
                         logger(&mut progress)
                             .trace(format!("Loading module from sync order: {}", module).as_str());
                         loaded_modules.insert(module.clone());
-                        original_modules.push((module, content.into()));
+                        original_modules.push((module.clone(), content.into()));
                     }
                 }
             }
+            settings
         } else {
-            logger(&mut progress).trace(format!("No sync order found at {absolute_path}").as_str());
-        }
+            logger(&mut progress).debug(format!("No sync order found at {absolute_path}").as_str());
+            is_run_or_inspect = false;
+            Settings::default()
+        };
 
         for (name, _) in original_modules.iter() {
             logger(&mut progress).message(format!("Digesting {}", name).as_str());
         }
         let workspace_digest = calculate_digest(&original_modules);
-        modules.extend(original_modules);
 
-        let mut unordered_modules: Vec<(Arc<str>, Arc<str>)> = vec![];
-
-        for entry in walkdir {
-            progress.increment(1);
-            if let Ok(entry) = entry.context(format_context!("While walking directory")) {
-                if entry.file_type().is_file()
-                    && is_rules_module(entry.file_name().to_string_lossy().as_ref())
-                {
-                    let path: Arc<str> = entry.path().to_string_lossy().into();
-                    let content: Arc<str> = std::fs::read_to_string(path.as_ref())
-                        .context(format_context!("Failed to read file {path}"))?
-                        .into();
-
-                    if let Some(stripped_path) =
-                        path.strip_prefix(format!("{}/", absolute_path).as_str())
-                    {
-                        if !stripped_path.starts_with(".spaces")
-                            && !loaded_modules.contains(stripped_path)
-                        {
-                            logger(&mut progress).debug(
-                                format!("Loading module from directory: {stripped_path}").as_str(),
-                            );
-                            loaded_modules.insert(stripped_path.into());
-                            unordered_modules.push((stripped_path.into(), content));
-                        }
-                    }
-                }
-            }
-        }
-
-        unordered_modules.sort_by(|a, b| a.0.cmp(&b.0));
-        modules.extend(unordered_modules);
-
-        logger(&mut progress)
-            .info(format!("Workspace working directory: {absolute_path}").as_str());
-
-        std::env::set_current_dir(std::path::Path::new(absolute_path.as_ref())).context(
-            format_context!("Failed to set current directory to {absolute_path}"),
-        )?;
+        std::fs::create_dir_all(build_directory())
+            .context(format_context!("Failed to create build directory"))?;
 
         let log_directory: Arc<str> =
             format!("{SPACES_LOGS_NAME}/logs_{}", date.format("%Y%m%d-%H-%M-%S")).into();
@@ -408,8 +373,68 @@ impl Workspace {
             "Failed to create log folder {log_directory}",
         ))?;
 
-        std::fs::create_dir_all(build_directory())
-            .context(format_context!("Failed to create build directory"))?;
+        modules.extend(original_modules);
+
+        let mut scanned_modules = HashSet::new();
+
+        if !settings.is_scanned.unwrap_or(false) || singleton::get_is_rescan() {
+            // not scanned until walkdir runs during run or inspect
+            settings.is_scanned = Some(is_run_or_inspect);
+
+            // walkdir and find all spaces.star files in the workspace
+            let walkdir: Vec<_> = walkdir::WalkDir::new(absolute_path.as_ref())
+                .into_iter()
+                .filter_entry(|entry| {
+                    Self::filter_predicate(std::path::Path::new(absolute_path.as_ref()), entry)
+                })
+                .collect();
+
+            progress.set_total(walkdir.len() as u64);
+
+            for entry in walkdir {
+                progress.increment(1);
+                if let Ok(entry) = entry.context(format_context!("While walking directory")) {
+                    if entry.file_type().is_file()
+                        && is_rules_module(entry.file_name().to_string_lossy().as_ref())
+                    {
+                        let path: Arc<str> = entry.path().to_string_lossy().into();
+                        if let Some(stripped_path) =
+                            path.strip_prefix(format!("{}/", absolute_path).as_str())
+                        {
+                            if !stripped_path.starts_with(".spaces")
+                                && !loaded_modules.contains(stripped_path)
+                            {
+                                logger(&mut progress).debug(
+                                    format!("Loading module from directory: {stripped_path}")
+                                        .as_str(),
+                                );
+                                loaded_modules.insert(stripped_path.into());
+                                scanned_modules.insert(stripped_path.into());
+                            }
+                        }
+                    }
+                }
+            }
+            settings.scanned_modules = scanned_modules.clone();
+            settings
+                .save(absolute_path.as_ref())
+                .context(format_context!(
+                    "Failed to save settings file for {absolute_path}"
+                ))?;
+        } else {
+            progress.set_ending_message("Loaded modules from settings. Use `--rescan` to check for new modules.");
+            scanned_modules = settings.scanned_modules.clone();
+        }
+
+        let mut unordered_modules: Vec<(Arc<str>, Arc<str>)> = vec![];
+        for module_path in scanned_modules {
+            let content: Arc<str> = std::fs::read_to_string(module_path.as_ref())
+                .context(format_context!("Failed to read file {module_path}"))?
+                .into();
+            unordered_modules.push((module_path, content));
+        }
+        unordered_modules.sort_by(|a, b| a.0.cmp(&b.0));
+        modules.extend(unordered_modules);
 
         let changes_path = get_changes_path();
         let skip_folders = vec![SPACES_LOGS_NAME.into()];
@@ -417,11 +442,6 @@ impl Workspace {
 
         #[allow(unused)]
         let unique = get_unique().context(format_context!("failed to get unique marker"))?;
-
-        let mut env = environment::Environment::default();
-
-        env.vars
-            .insert(SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE.into(), "true".into());
 
         if is_clear_inputs {
             let inputs_path = get_inputs_path();
@@ -431,6 +451,11 @@ impl Workspace {
                 ))?;
             }
         }
+
+        let mut env = environment::Environment::default();
+
+        env.vars
+            .insert(SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE.into(), "true".into());
 
         Ok(Self {
             modules,

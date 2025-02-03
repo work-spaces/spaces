@@ -8,6 +8,7 @@ use std::sync::Arc;
 struct State {
     active_workspace: Option<workspace::WorkspaceArc>,
     is_ci: bool,
+    is_rescan: bool,
     max_queue_count: i64,
     error_chain: Vec<String>,
     inspect_globs: HashSet<Arc<str>>,
@@ -21,6 +22,7 @@ fn get_state() -> &'static lock::StateLock<State> {
     }
     STATE.set(lock::StateLock::new(State {
         is_ci: false,
+        is_rescan: false,
         max_queue_count: 8,
         active_workspace: None,
         error_chain: Vec::new(),
@@ -69,6 +71,15 @@ pub fn get_inspect_globs() -> HashSet<Arc<str>> {
     state.inspect_globs.clone()
 }
 
+pub fn get_is_rescan() -> bool {
+    let state = get_state().read();
+    state.is_rescan
+}
+
+pub fn set_rescan(is_rescan: bool) {
+    let mut state = get_state().write();
+    state.is_rescan = is_rescan;
+}
 
 pub fn set_max_queue_count(max_queue_count: i64) {
     let mut state = get_state().write();
