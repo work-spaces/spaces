@@ -1,4 +1,4 @@
-use crate::{builtins, rules, singleton, workspace};
+use crate::{builtins, executor, rules, singleton, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use starlark::environment::{FrozenModule, GlobalsBuilder, Module};
@@ -156,6 +156,36 @@ fn star_logger(printer: &mut printer::Printer) -> logger::Logger {
     logger::Logger::new_printer(printer, "starlark".into())
 }
 
+fn insert_run_all(target: Option<Arc<str>>) -> anyhow::Result<Option<Arc<str>>> {
+    if target.is_none() {
+        let mut deps: Vec<Arc<str>> = Vec::new();
+        for all_target in singleton::get_run_all().iter() {
+            deps.push(all_target.clone());
+        }
+
+        let rule = rules::Rule {
+            name: "all".into(),
+            help: None,
+            inputs: None,
+            outputs: None,
+            type_: Some(rules::RuleType::Run),
+            platforms: None,
+            deps: Some(deps),
+        };
+
+        rules::insert_task(rules::Task::new(
+            rule,
+            rules::Phase::Run,
+            executor::Task::Target,
+        ))
+        .context(format_context!("Failed to insert task `all`"))?;
+
+        Ok(Some(":all".into()))
+    } else {
+        Ok(target)
+    }
+}
+
 pub fn run_starlark_modules(
     printer: &mut printer::Printer,
     workspace: workspace::WorkspaceArc,
@@ -234,6 +264,9 @@ pub fn run_starlark_modules(
             }
         }
     }
+    rules::set_latest_starlark_module("".into());
+
+    let target = insert_run_all(target).context(format_context!("failed to insert run all"))?;
 
     match phase {
         rules::Phase::Run => {

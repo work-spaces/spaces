@@ -4,7 +4,7 @@ use starlark::{environment::GlobalsBuilder, values::none::NoneType};
 use starstd::{get_rule_argument, Arg, Function};
 use std::collections::HashSet;
 
-use crate::{executor, rules, inputs};
+use crate::{executor, inputs, rules, singleton};
 
 const ADD_EXEC_EXAMPLE: &str = r#"run.add_exec(
     rule = {"name": name, "type": "Setup", "deps": ["sysroot-python:venv"]},
@@ -117,6 +117,12 @@ pub const FUNCTIONS: &[Function] = &[
         example: Some(r#"run.abort("Failed to do something")"#)}
 ];
 
+fn add_rule_to_all(rule: &rules::Rule){
+    if let Some(rules::RuleType::Run) = rule.type_.as_ref() {
+        singleton::insert_run_all(rules::get_sanitized_rule_name(rule.name.clone()));
+    }
+}
+
 // This defines the function that is visible to Starlark
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
@@ -129,6 +135,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ) -> anyhow::Result<NoneType> {
         let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for add target rule"))?;
+
+        add_rule_to_all(&rule);
 
         let rule_name = rule.name.clone();
         rules::insert_task(rules::Task::new(
@@ -150,6 +158,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         inputs::validate_input_globs(&rule.inputs)
             .context(format_context!("invalid inputs globs with {}", rule.name))?;
 
+        add_rule_to_all(&rule);
+        
         let mut exec: executor::exec::Exec = serde_json::from_value(exec.to_json_value()?)
             .context(format_context!("bad options for exec"))?;
 
@@ -158,7 +168,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 "{}/{}",
                 rules::get_path_to_build_checkout(rule.name.clone())?,
                 redirect_stdout
-            ).into();
+            )
+            .into();
         }
         let rule_name = rule.name.clone();
         rules::insert_task(rules::Task::new(
@@ -179,6 +190,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         inputs::validate_input_globs(&rule.inputs)
             .context(format_context!("invalid inputs globs with {}", rule.name))?;
+
+        add_rule_to_all(&rule);
 
         let mut kill_exec: executor::exec::Kill = serde_json::from_value(kill.to_json_value()?)
             .context(format_context!("bad options for kill"))?;
@@ -204,6 +217,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         inputs::validate_input_globs(&rule.inputs)
             .context(format_context!("invalid inputs globs with {}", rule.name))?;
 
+        add_rule_to_all(&rule);
+
         let mut exec_if: executor::exec::ExecIf = serde_json::from_value(exec_if.to_json_value()?)
             .context(format_context!("bad options for exec"))?;
 
@@ -212,7 +227,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 "{}/{}",
                 rules::get_path_to_build_checkout(rule.name.clone())?,
                 redirect_stdout
-            ).into();
+            )
+            .into();
         }
 
         for target in exec_if.then_.iter_mut() {
@@ -264,11 +280,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         rule.inputs = Some(inputs);
 
         let mut outputs = HashSet::new();
-        outputs.insert(format!(
-            "build/{}/{}",
-            rules::get_sanitized_rule_name(rule_name.clone()),
-            create_archive.get_output_file()
-        ).into());
+        outputs.insert(
+            format!(
+                "build/{}/{}",
+                rules::get_sanitized_rule_name(rule_name.clone()),
+                create_archive.get_output_file()
+            )
+            .into(),
+        );
         rule.outputs = Some(outputs);
 
         let archive = executor::archive::Archive { create_archive };

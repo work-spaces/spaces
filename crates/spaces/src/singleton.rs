@@ -12,6 +12,7 @@ struct State {
     max_queue_count: i64,
     error_chain: Vec<String>,
     inspect_globs: HashSet<Arc<str>>,
+    run_all: HashSet<Arc<str>>,
 }
 
 static STATE: state::InitCell<lock::StateLock<State>> = state::InitCell::new();
@@ -27,6 +28,7 @@ fn get_state() -> &'static lock::StateLock<State> {
         active_workspace: None,
         error_chain: Vec::new(),
         inspect_globs: HashSet::new(),
+        run_all: HashSet::new(),
     }));
 
     STATE.get()
@@ -54,6 +56,16 @@ pub fn show_error_chain() {
         let show_error = error.to_string().replace('\n', "\n    ");
         eprintln!("  [{offset}]: {show_error}");
     }
+}
+
+pub fn insert_run_all(target_name: Arc<str>) {
+    let mut state = get_state().write();
+    state.run_all.insert(target_name);
+}
+
+pub fn get_run_all() -> HashSet<Arc<str>> {
+    let state = get_state().read();
+    state.run_all.clone()
 }
 
 pub fn get_max_queue_count() -> i64 {

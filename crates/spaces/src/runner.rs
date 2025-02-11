@@ -23,8 +23,7 @@ pub fn run_starlark_modules_in_workspace(
 ) -> anyhow::Result<()> {
     let workspace = {
         let mut multi_progress = printer::MultiProgress::new(printer);
-        let progress =
-            multi_progress.add_progress("workspace", Some(100), Some("Complete"));
+        let progress = multi_progress.add_progress("workspace", Some(100), Some("Complete"));
         workspace::Workspace::new(progress, absolute_path_to_workspace, is_clear_inputs)
             .context(format_context!("while running workspace"))?
     };
@@ -66,8 +65,7 @@ pub fn run_starlark_modules_in_workspace(
 pub fn run_lsp(printer: &mut printer::Printer) -> anyhow::Result<()> {
     let workspace = {
         let mut multi_progress = printer::MultiProgress::new(printer);
-        let progress =
-            multi_progress.add_progress("workspace", Some(100), Some("Complete"));
+        let progress = multi_progress.add_progress("workspace", Some(100), Some("Complete"));
         workspace::Workspace::new(progress, None)
             .context(format_context!("while running workspace"))?
     };

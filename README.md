@@ -11,7 +11,7 @@ git clone https://github.com/work-spaces/workflows/
 spaces checkout --workflow=workflows:lock,preload,python-sdk --name=python-quick-test
 cd python-quick-test
 spaces run
-source env
+source ./env
 python -c "print('hello')"
 ```
 
@@ -27,7 +27,7 @@ Some common options include:
 - Use your build system (e.g. `cmake`) to download and build depedencies
 - Package managers such as `apt`, `brew`, or `choco`.
 
-Finding the one that is right for you is challenging. 
+Finding the right one is challenging. 
 
 `spaces` is a lightweight solution that lets you create a workspace with:
 

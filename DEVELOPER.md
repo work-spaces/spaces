@@ -17,7 +17,7 @@ cargo build
 Publish a release by pushing a tag
 
 ```sh
-export VERSION=0.11.33
+export VERSION=0.12.0
 git tag -a v$VERSION -m "Update version"
 git push origin tag v$VERSION
 ```
@@ -29,3 +29,4 @@ git push origin tag v$VERSION
 - Add ways to manage the store. Keep track of when archives are used. Delete old stuff.
   - Show which repos have worktrees checked out -- don't delete those
 - soft-links in tools should be link to the sysroot file not the original file
+- Make `spaces sync` work as expected to update workflows

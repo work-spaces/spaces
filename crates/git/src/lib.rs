@@ -523,7 +523,7 @@ impl Repository {
         let clone_path = std::path::Path::new(clone_name.as_ref());
         if clone_path.exists() {
             url_logger(progress, url.as_ref())
-                .message(format!("{} already exists", clone_name).as_str());
+                .warning(format!("{} already exists", clone_name).as_str());
         } else {
             url_logger(progress, url.as_ref())
                 .message(format!("{}: git {}", url, arguments.join(" ")).as_str());
