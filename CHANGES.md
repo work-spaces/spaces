@@ -1,5 +1,10 @@
 # Spaces Change log
 
+## v0.12.2
+
+- `redirect_stdout` always writes to `build` folder. Fix bug to create directory structure to `redirect_stdout` files
+- Add `info.get_path_to_log_file()` to get the current log file for any rule.
+
 ## v0.12.1
 
 - Fixes a regression with `inspect` and `checkout` caused by creating run `:all` target.

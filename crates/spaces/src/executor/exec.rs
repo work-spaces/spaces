@@ -55,6 +55,7 @@ pub struct Exec {
     pub redirect_stdout: Option<Arc<str>>,
     pub expect: Option<Expect>,
     pub log_level: Option<printer::Level>,
+    pub timeout: Option<f64>,
 }
 
 impl Exec {
@@ -113,6 +114,9 @@ impl Exec {
             clear_environment: true,
             process_started_with_id: Some(handle_process_started),
             log_level: self.log_level,
+            timeout: self
+                .timeout
+                .map(|timeout| std::time::Duration::from_secs_f64(timeout)),
         };
 
         logger(progress, name).debug(
@@ -154,7 +158,7 @@ impl Exec {
                                 std::fs::read_to_string(log_file_path.as_ref()).context(
                                     format_context!("Failed to read log file {}", log_file_path),
                                 )?;
-                            if log_contents.len() > 10*1024*1024 {
+                            if log_contents.len() > 10 * 1024 * 1024 {
                                 logger(progress, name).error(
                                     format!("See log file {log_file_path} for details").as_str(),
                                 );
@@ -177,6 +181,19 @@ impl Exec {
         if let (Some(stdout_content), Some(stdout_location)) =
             (stdout_content, self.redirect_stdout.as_ref())
         {
+            let parent_path = std::path::Path::new(stdout_location.as_ref())
+                .parent()
+                .context(format_context!(
+                    "Failed to get parent directory of {}",
+                    stdout_location
+                ))?;
+
+            std::fs::create_dir_all(parent_path).context(format_context!(
+                "Failed to create parent directory {:?} for stdout file {}",
+                parent_path,
+                stdout_location
+            ))?;
+
             std::fs::write(stdout_location.as_ref(), stdout_content).context(format_context!(
                 "Failed to write stdout to {}",
                 stdout_location

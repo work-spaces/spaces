@@ -44,6 +44,19 @@ pub const FUNCTIONS: &[Function] = &[
         example: None,
     },
     Function {
+        name: "get_path_to_log_file",
+        description: "returns the relative workspace path to the log file for the target",
+        return_type: "str",
+        args: &[            
+            Arg {
+                name: "name",
+                description: "The name of the target to get the log file",
+                dict: &[],
+            },
+        ],
+        example: None,
+    },
+    Function {
         name: "get_absolute_path_to_workspace",
         description: "returns the absolute path to the workspace",
         return_type: "str",
@@ -238,7 +251,6 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(workspace.get_short_digest().to_string())
     }
 
-
     fn is_ci() -> anyhow::Result<bool> {
         Ok(singleton::get_is_ci())
     }
@@ -344,6 +356,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
     fn get_cpu_count() -> anyhow::Result<i64> {
         Ok(num_cpus::get() as i64)
+    }
+
+    fn get_path_to_log_file(target: &str) -> anyhow::Result<String> {
+        let workspace_arc =
+            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+        let workspace = workspace_arc.read();
+        let rule_name = rules::get_sanitized_rule_name(target.into());
+        Ok(workspace.get_log_file(rule_name.as_ref()).to_string())
     }
 
     fn get_path_to_store() -> anyhow::Result<String> {

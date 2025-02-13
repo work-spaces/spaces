@@ -17,7 +17,7 @@ cargo build
 Publish a release by pushing a tag
 
 ```sh
-export VERSION=0.12.1
+export VERSION=0.12.2
 git tag -a v$VERSION -m "Update version"
 git push origin tag v$VERSION
 ```

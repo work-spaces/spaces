@@ -326,6 +326,7 @@ impl Capsule {
             redirect_stdout: None,
             expect: None,
             log_level: None,
+            timeout: None,
         };
 
         let checkout_name = format!("{}_checkout", capsule_run_info.get_workspace_name());
@@ -364,6 +365,7 @@ impl Capsule {
             redirect_stdout: None,
             expect: None,
             log_level: None,
+            timeout: None,
         };
 
         let run_name = format!("{}_run", capsule_run_info.get_workspace_name());

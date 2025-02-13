@@ -165,8 +165,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         if let Some(redirect_stdout) = exec.redirect_stdout.as_mut() {
             *redirect_stdout = format!(
-                "{}/{}",
-                rules::get_path_to_build_checkout(rule.name.clone())?,
+                "build/{}",
                 redirect_stdout
             )
             .into();
