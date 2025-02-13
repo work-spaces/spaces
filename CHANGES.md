@@ -1,5 +1,9 @@
 # Spaces Change log
 
+## v0.12.3
+
+- Release signal mutex before log bug fix.
+
 ## v0.12.2
 
 - `redirect_stdout` always writes to `build` folder. Fix bug to create directory structure to `redirect_stdout` files

@@ -166,17 +166,19 @@ impl Task {
 
             let mut count = 1;
             for deps_rule_signal in deps_signals {
-                {
+                let signal_name = {
                     let (lock, _) = &*deps_rule_signal.signal;
                     let signal_access = lock.lock().unwrap();
-                    logger::Logger::new_progress(&mut progress, name.clone()).debug(
-                        format!(
-                            "{name} Waiting for dependency {} {count}/{total}",
-                            signal_access.name
-                        )
-                        .as_str(),
-                    );
-                }
+                    signal_access.name.clone()
+                };
+
+                logger::Logger::new_progress(&mut progress, name.clone()).debug(
+                    format!(
+                        "{name} Waiting for dependency {} {count}/{total}",
+                        signal_name
+                    )
+                    .as_str(),
+                );
 
                 deps_rule_signal.wait_is_ready(std::time::Duration::from_millis(100));
                 count += 1;
