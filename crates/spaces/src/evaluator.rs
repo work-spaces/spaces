@@ -165,7 +165,7 @@ fn insert_run_all(target: Option<Arc<str>>) -> anyhow::Result<Option<Arc<str>>> 
 
         let rule = rules::Rule {
             name: "all".into(),
-            help: None,
+            help: Some("Builtin rule to run default targets and dependencies".into()),
             inputs: None,
             outputs: None,
             type_: Some(rules::RuleType::Run),
@@ -266,10 +266,9 @@ pub fn run_starlark_modules(
     }
     rules::set_latest_starlark_module("".into());
 
-    let target = insert_run_all(target).context(format_context!("failed to insert run all"))?;
-
     match phase {
         rules::Phase::Run => {
+            let target = insert_run_all(target).context(format_context!("failed to insert run all"))?;
             star_logger(printer).message("--Run Phase--");
 
             let is_reproducible = workspace.read().is_reproducible();

@@ -1,5 +1,9 @@
 # Spaces Change log
 
+## v0.12.1
+
+- Fixes a regression with `inspect` and `checkout` caused by creating run `:all` target.
+
 ## v0.12.0
 
 - Add phantom `:all` target to run all `Run` targets. In line with recent `@star/sdk` change to make "Optional" the default run type. `spaces run` will run the phantom `:all` target.
