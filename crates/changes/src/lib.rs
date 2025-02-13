@@ -215,6 +215,10 @@ impl Changes {
                     );
                 }
             }
+
+            changes_logger(progress).trace(
+                format!("Done updating {input}").as_str(),
+            );
         }
 
         Ok(())

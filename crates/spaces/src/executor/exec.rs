@@ -116,7 +116,7 @@ impl Exec {
             log_level: self.log_level,
             timeout: self
                 .timeout
-                .map(|timeout| std::time::Duration::from_secs_f64(timeout)),
+                .map(std::time::Duration::from_secs_f64),
         };
 
         logger(progress, name).debug(

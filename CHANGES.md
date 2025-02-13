@@ -1,5 +1,9 @@
 # Spaces Change log
 
+# v0.12.4
+
+- Fix bug where task completion is not signaled on some errors
+
 ## v0.12.3
 
 - Release signal mutex before log bug fix.

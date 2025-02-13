@@ -68,8 +68,10 @@ impl RuleSignal {
 
     fn set_ready_notify_all(&self) {
         let (lock, cvar) = &*self.signal;
-        let mut signal_access = lock.lock().unwrap();
-        signal_access.ready = true;
+        {
+            let mut signal_access = lock.lock().unwrap();
+            signal_access.ready = true;
+        }
         cvar.notify_all();
     }
 }
@@ -141,10 +143,25 @@ impl Task {
         let rule = self.rule.clone();
         let deps_signals = self.deps_signals.clone();
 
+        struct SignalOnDrop {
+            signal: RuleSignal,
+        }
+
+        impl Drop for SignalOnDrop {
+            fn drop(&mut self) {
+                self.signal.set_ready_notify_all();
+            }
+        }
+
         progress.set_message(format!("Waiting for dependencies ({:?})", self.phase).as_str());
 
         std::thread::spawn(move || -> anyhow::Result<executor::TaskResult> {
             // check inputs/outputs to see if we need to run
+
+            let _signal_on_drop = SignalOnDrop {
+                signal: signal.clone(),
+            };
+
             let mut skip_execute_message: Option<Arc<str>> = None;
             if let (Some(platforms), Some(current_platform)) =
                 (rule.platforms.as_ref(), platform::Platform::get_platform())
@@ -215,7 +232,7 @@ impl Task {
                     None
                 } else {
                     logger::Logger::new_progress(&mut progress, name.clone())
-                        .trace(format!("{name} update workspace changes").as_str());
+                        .debug("update workspace changes");
 
                     workspace
                         .write()
@@ -223,7 +240,7 @@ impl Task {
                         .context(format_context!("Failed to update workspace changes"))?;
 
                     logger::Logger::new_progress(&mut progress, name.clone())
-                        .trace(format!("{name} check for new digest").as_str());
+                        .debug("check for new digest");
 
                     let seed = serde_json::to_string(&executor)
                         .context(format_context!("Failed to serialize"))?;
@@ -248,6 +265,8 @@ impl Task {
                     .info(skip_message.as_ref());
                 progress.set_message(skip_message);
             } else {
+                logger::Logger::new_progress(&mut progress, name.clone())
+                    .debug("Running task");
                 progress.set_message("Running");
             }
 
@@ -302,9 +321,10 @@ impl Task {
                 task.phase = Phase::Complete;
             }
 
-            signal.set_ready_notify_all();
 
             task_result
+
+            // _signal_on_drop.drop() notifies the dependents
         })
     }
 
@@ -385,6 +405,7 @@ impl State {
         // update the rule name to have the starlark module name
         let rule_label = label::sanitize_rule(task.rule.name, self.latest_starlark_module.clone());
         task.rule.name = rule_label.clone();
+        task.signal = RuleSignal::new(rule_label.clone());
 
         // update deps that refer to rules in the same starlark module
         if let Some(deps) = task.rule.deps.as_mut() {
