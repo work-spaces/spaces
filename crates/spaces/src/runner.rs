@@ -32,6 +32,7 @@ pub fn run_starlark_modules_in_workspace(
     match run_workspace {
         RunWorkspace::Target(target, trailing_args) => {
             workspace_arc.write().trailing_args = trailing_args;
+            let target = target.map(|e| workspace_arc.read().transform_target_path(e));
             workspace_arc.write().target = target.clone();
             let modules = workspace_arc.read().modules.clone();
             evaluator::run_starlark_modules(printer, workspace_arc.clone(), modules, phase, target)

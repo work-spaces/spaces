@@ -192,6 +192,7 @@ pub fn get_changes_path() -> &'static str {
 pub struct Workspace {
     pub modules: Vec<(Arc<str>, Arc<str>)>,
     pub absolute_path: Arc<str>,            // set at startup
+    pub relative_invoked_path: Arc<str>,    // workspace relative path where spaces was invoked
     pub log_directory: Arc<str>,            // always @logs/timestamp
     pub is_create_lock_file: bool,          // set at startup
     pub digest: Arc<str>,                   // set at startup
@@ -232,6 +233,22 @@ impl Workspace {
 
     pub fn get_absolute_path(&self) -> Arc<str> {
         self.absolute_path.clone()
+    }
+
+    pub fn transform_target_path(&self, target: Arc<str>) -> Arc<str> {
+        if target.starts_with("//") {
+            target.strip_prefix("//").unwrap().into()
+        } else {
+            if self.relative_invoked_path.is_empty() {
+                target
+            } else {
+                if target.starts_with(':') {
+                    return format!("{}{}", self.relative_invoked_path, target).into();
+                } else {
+                    format!("{}/{}", self.relative_invoked_path, target).into()
+                }
+            }
+        }
     }
 
     pub fn is_reproducible(&self) -> bool {
@@ -299,19 +316,33 @@ impl Workspace {
     ) -> anyhow::Result<Self> {
         let date = chrono::Local::now();
 
+        let current_working_directory = get_current_working_directory().context(
+            format_context!("Failed to get current working directory in new workspace"),
+        )?;
+
         let absolute_path = if let Some(absolute_path) = absolute_path_to_workspace {
             absolute_path
         } else {
-            let current_working_directory = get_current_working_directory().context(
-                format_context!("Failed to get current working directory in new workspace"),
-            )?;
-
             // search the current directory and all parent directories for the workspace file
             Self::find_workspace_root(current_working_directory.as_ref())
                 .context(format_context!("While searching for workspace root"))?
         };
 
+        let mut relative_invoked_path: Arc<str> = current_working_directory
+            .strip_prefix(absolute_path.as_ref())
+            .unwrap_or("".into()).into();
+
+        if relative_invoked_path.ends_with('/') {
+            relative_invoked_path = relative_invoked_path.strip_suffix('/').unwrap().into();
+        }
+
+        if relative_invoked_path.starts_with('/') {
+            relative_invoked_path = relative_invoked_path.strip_prefix('/').unwrap().into();
+        }
+
         logger(&mut progress).message(format!("{absolute_path}").as_str());
+
+        logger(&mut progress).info(format!("Invoked at: {relative_invoked_path}").as_str());
 
         std::env::set_current_dir(std::path::Path::new(absolute_path.as_ref())).context(
             format_context!("Failed to set current directory to {absolute_path}"),
@@ -422,7 +453,9 @@ impl Workspace {
                     "Failed to save settings file for {absolute_path}"
                 ))?;
         } else {
-            progress.set_ending_message("Loaded modules from settings. Use `--rescan` to check for new modules.");
+            progress.set_ending_message(
+                "Loaded modules from settings. Use `--rescan` to check for new modules.",
+            );
             scanned_modules = settings.scanned_modules.clone();
         }
 
@@ -473,6 +506,7 @@ impl Workspace {
             rule_metrics: HashMap::new(),
             trailing_args: vec![],
             target: None,
+            relative_invoked_path,
         })
     }
 

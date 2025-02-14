@@ -1,5 +1,10 @@
 # Spaces Change log
 
+# v0.12.5
+
+- Fix bug where exclude glob of single file is treated as include
+- Allow omitting relative path to current directory in workspace with `run` and `inspect`
+
 # v0.12.4
 
 - Fix bug where task completion is not signaled on some errors

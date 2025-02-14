@@ -157,7 +157,8 @@ impl Changes {
 
             let mut count = 0usize;
             // convert input from a glob expression to a parent directory
-            if input.find('*').is_none() {
+            if input.starts_with('+') && input.find('*').is_none() {
+
                 let path = std::path::Path::new(input.as_ref());
                 if path.exists() && path.is_file() {
                     let change_detail = Self::process_entry(progress, path)

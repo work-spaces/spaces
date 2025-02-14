@@ -17,7 +17,7 @@ cargo build
 Publish a release by pushing a tag
 
 ```sh
-export VERSION=0.12.4
+export VERSION=0.12.5
 git tag -a v$VERSION -m "Update version"
 git push origin tag v$VERSION
 ```
@@ -30,3 +30,5 @@ git push origin tag v$VERSION
   - Show which repos have worktrees checked out -- don't delete those
 - soft-links in tools should be link to the sysroot file not the original file
 - Make `spaces sync` work as expected to update workflows
+- `spaces run <target>` should strip the relative path to make it easier to run rules
+- Should all paths require `//...` to be at the workspace level and everything is relative to the rule directory?
