@@ -65,6 +65,11 @@ pub struct LogEntry {
     pub description: Arc<str>,
 }
 
+pub struct ResolveRevision {
+    pub latest_semver_tag: Option<Arc<str>>,
+    pub commit: Arc<str>,
+}
+
 struct State {
     active_repos: HashSet<Arc<str>>,
     log_directory: Option<Arc<str>>,
@@ -108,20 +113,24 @@ pub fn execute_git_command(
 
     let mut log_file_path = None;
 
-    while !is_ready {
-        let mut state_lock = get_state().write().unwrap();
-        let state = state_lock.deref_mut();
+    url_logger(progress_bar, url).debug("Waiting for lock");
 
-        if state.active_repos.contains(url) {
-            is_ready = false;
-        } else {
-            state.active_repos.insert(url.into());
-            is_ready = true;
+    while !is_ready {
+        {
+            let mut state_lock = get_state().write().unwrap();
+            let state = state_lock.deref_mut();
+
+            if state.active_repos.contains(url) {
+                is_ready = false;
+            } else {
+                state.active_repos.insert(url.into());
+                is_ready = true;
+            }
+            log_file_path = state
+                .log_directory
+                .as_ref()
+                .map(|e| format!("{e}/{log_file_name}").into());
         }
-        log_file_path = state
-            .log_directory
-            .as_ref()
-            .map(|e| format!("{e}/{log_file_name}").into());
 
         if !is_ready {
             std::thread::sleep(std::time::Duration::from_millis(500));
@@ -175,6 +184,19 @@ pub fn get_commit_hash(
     Ok(commit_hash)
 }
 
+pub fn is_head_branch(
+    progress_bar: &mut printer::MultiProgressBar,
+    url: &str,
+    directory: &str,
+) -> bool {
+    let options = printer::ExecuteOptions {
+        working_directory: Some(directory.into()),
+        arguments: vec!["symbolic-ref".into(), "--quiet".into(), "HEAD".into()],
+        ..Default::default()
+    };
+    execute_git_command(progress_bar, url, options).is_ok()
+}
+
 pub fn is_branch(
     progress_bar: &mut printer::MultiProgressBar,
     url: &str,
@@ -192,6 +214,27 @@ pub fn is_branch(
         ..Default::default()
     };
     execute_git_command(progress_bar, url, options).is_ok()
+}
+
+pub fn get_latest_tag(
+    progress_bar: &mut printer::MultiProgressBar,
+    url: &str,
+    directory: &str,
+) -> anyhow::Result<Option<Arc<str>>> {
+    if !is_head_branch(progress_bar, url, directory) {
+        return Ok(None);
+    }
+
+    let logs = get_branch_log(progress_bar, url, directory, "HEAD")
+        .context(format_context!("Failed to read git logs for {}", directory))?;
+
+    for log in logs.iter().rev() {
+        if let Some(tag) = log.tag.as_ref() {
+            return Ok(Some(tag.clone()));
+        }
+    }
+
+    Ok(None)
 }
 
 pub fn get_commit_tag(
@@ -214,7 +257,7 @@ pub fn get_commit_tag(
     }
 }
 
-pub fn get_branch_log(
+fn get_branch_log(
     progress_bar: &mut printer::MultiProgressBar,
     url: &str,
     directory: &str,
@@ -244,13 +287,17 @@ pub fn get_branch_log(
             let line = line.trim_matches('"');
             let parts: Vec<&str> = line.split(';').collect();
             if parts.len() == 3 {
-                let tag = parts[1].strip_prefix("tag: ").map(|tag| tag.into());
-
-                log_entries.push(LogEntry {
-                    commit: parts[0].into(),
-                    tag,
-                    description: parts[2].into(),
-                });
+                let sections = parts[1].split(", ").collect::<Vec<&str>>();
+                for section in sections {
+                    if section.starts_with("tag: ") {
+                        let tag = section.strip_prefix("tag: ").map(|tag| tag.into());
+                        log_entries.push(LogEntry {
+                            commit: parts[0].into(),
+                            tag,
+                            description: parts[2].into(),
+                        });
+                    }
+                }
             }
         }
         Ok(log_entries)
@@ -526,7 +573,7 @@ impl Repository {
                 .warning(format!("{} already exists", clone_name).as_str());
         } else {
             url_logger(progress, url.as_ref())
-                .message(format!("{}: git {}", url, arguments.join(" ")).as_str());
+                .message(format!("git {}", arguments.join(" ")).as_str());
 
             let clone_options = printer::ExecuteOptions {
                 arguments,
@@ -547,8 +594,11 @@ impl Repository {
         &self,
         progress: &mut printer::MultiProgressBar,
         revision: &str,
-    ) -> anyhow::Result<Arc<str>> {
-        let mut result = revision.to_string();
+    ) -> anyhow::Result<ResolveRevision> {
+        let mut result = ResolveRevision {
+            commit: revision.into(),
+            latest_semver_tag: None,
+        };
         let parts = revision.split(':').collect::<Vec<&str>>();
         if parts.len() == 2 {
             let branch = parts[0];
@@ -568,17 +618,20 @@ impl Repository {
             for log in logs {
                 let current_commit = log.commit.clone();
                 if let Some(tag) = log.tag.as_ref() {
-                    let tag = tag.trim_matches('v');
-                    if let Ok(version) = semver::Version::parse(tag) {
+                    url_logger(progress, self.url.as_ref())
+                        .debug(format!("Found tag:{}", tag).as_str());
+                    let stripped_tag = tag.trim_matches('v');
+                    if let Ok(version) = semver::Version::parse(stripped_tag) {
                         if required.matches(&version) {
                             url_logger(progress, self.url.as_ref()).debug(
                                 format!(
                                     "Found tag {} for branch {} that satisfies semver requirement",
-                                    tag, branch
+                                    stripped_tag, branch
                                 )
                                 .as_str(),
                             );
                             is_semver_satisfied = true;
+                            result.latest_semver_tag = Some(tag.clone());
                         } else if is_semver_satisfied {
                             url_logger(progress, self.url.as_ref()).debug(
                             format!("Using commit {commit:?} for branch {branch} as it is the newest commit that satisfies semver requirement").as_str());
@@ -593,21 +646,21 @@ impl Repository {
             }
 
             if let Some(commit) = commit {
-                result = commit.to_string();
+                result.commit = commit;
             }
         } else if parts.len() != 1 {
             return Err(format_error!(
                 "Invalid revision format. Use `<branch>:<semver requirement>`"
             ));
         }
-        url_logger(progress, self.url.as_ref()).debug(
+        url_logger(progress, self.url.as_ref()).message(
             format!(
-                "Resolved revision {} to {} for {}",
-                revision, result, self.url
+                "Resolved revision {} to latest tag:{:?}, commit:{}",
+                revision, result.latest_semver_tag, result.commit
             )
             .as_str(),
         );
-        Ok(result.into())
+        Ok(result)
     }
 
     pub fn execute(
@@ -622,7 +675,7 @@ impl Repository {
         };
 
         url_logger(progress_bar, self.url.as_ref())
-            .message(format!("{}: git {}", self.url, options.arguments.join(" ")).as_str());
+            .message(format!("git {}", options.arguments.join(" ")).as_str());
 
         execute_git_command(progress_bar, &self.url, options)
             .context(format_context!("while executing git command"))?;
@@ -665,14 +718,18 @@ impl Repository {
         &self,
         progress_bar: &mut printer::MultiProgressBar,
         checkout: &Checkout,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<ResolveRevision> {
         let mut checkout_args = Vec::new();
-        match checkout {
+        let revision = match checkout {
             Checkout::NewBranch(branch_name) => {
                 checkout_args.push("switch".into());
                 checkout_args.push("-c".into());
                 checkout_args.push(branch_name.clone());
                 // TODO: switch to a new branch
+                ResolveRevision {
+                    commit: branch_name.clone(),
+                    latest_semver_tag: None,
+                }
             }
             Checkout::Revision(revision) => {
                 // if revision of the format "branch:semver" then get the tags on the branch
@@ -681,13 +738,14 @@ impl Repository {
                     .context(format_context!("failed to resolve revision"))?;
 
                 checkout_args.push("checkout".into());
-                checkout_args.push(revision.clone());
+                checkout_args.push(revision.commit.clone());
+                revision
             }
-        }
+        };
 
         self.execute(progress_bar, checkout_args)
             .context(format_context!("while checking out {}", self.full_path))?;
 
-        Ok(())
+        Ok(revision)
     }
 }

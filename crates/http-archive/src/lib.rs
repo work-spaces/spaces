@@ -46,6 +46,7 @@ pub struct Archive {
     pub strip_prefix: Option<Arc<str>>,
     pub add_prefix: Option<Arc<str>>,
     pub filename: Option<Arc<str>>,
+    pub version: Option<Arc<str>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -116,7 +117,7 @@ pub fn download_string(url: &str) -> anyhow::Result<Arc<str>> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpArchive {
-    pub spaces_key: String,
+    pub spaces_key: Arc<str>,
     archive: Archive,
     archive_driver: Option<easy_archiver::driver::Driver>,
     pub full_path_to_archive: String,
@@ -191,10 +192,19 @@ impl HttpArchive {
             archive,
             archive_driver,
             full_path_to_archive,
-            spaces_key: spaces_key.to_string(),
+            spaces_key: spaces_key.into(),
             allow_gh_for_download: true,
             tools_path: tools_path.to_owned(),
         })
+    }
+
+    pub fn get_member(&self) -> ws::Member {
+        ws::Member{
+            path: self.spaces_key.clone(),
+            url: self.archive.url.clone(),
+            rev: self.archive.sha256.clone(),
+            version: self.archive.version.clone(),
+        }
     }
 
     pub fn allow_gh_for_download(&mut self, value: bool) {

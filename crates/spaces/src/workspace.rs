@@ -6,12 +6,10 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 pub const WORKFLOW_TOML_NAME: &str = "workflows.spaces.toml";
-
 pub const ENV_FILE_NAME: &str = "env.spaces.star";
 pub const LOCK_FILE_NAME: &str = "lock.spaces.star";
 pub const SPACES_MODULE_NAME: &str = "spaces.star";
 pub const SPACES_STDIN_NAME: &str = "stdin.star";
-pub const SPACES_LOGS_NAME: &str = ".spaces/logs";
 const SPACES_CAPSULES_NAME: &str = "capsules";
 const SPACES_CAPSULES_WORKSPACES_NAME: &str = "workspace";
 const SPACES_CAPSULES_WORKFLOWS_NAME: &str = "workflows";
@@ -19,9 +17,6 @@ const SPACES_CAPSULES_STATUS_NAME: &str = "status";
 const SPACES_CAPSULES_SYSROOT_NAME: &str = "sysroot";
 
 pub const SPACES_CAPSULES_INFO_NAME: &str = "capsules.spaces.json";
-const SETTINGS_FILE_NAME: &str = ".spaces/settings.spaces.json";
-const METRICS_FILE_NAME: &str = ".spaces/metrics.spaces.json";
-const SPACES_HOME_ENV_VAR: &str = "SPACES_HOME";
 pub const SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE: &str = "SPACES_IS_WORKSPACE_REPRODUCIBLE";
 pub const SPACES_ENV_WORKSPACE_DIGEST: &str = "SPACES_WORKSPACE_DIGEST";
 pub const SPACES_ENV_CAPSULE_WORKFLOWS: &str = "SPACES_CAPSULES_WORKFLOWS";
@@ -51,7 +46,7 @@ impl RuleMetricsFile {
     pub fn update(workspace: WorkspaceArc) -> anyhow::Result<()> {
         let workspace_path = workspace.read().get_absolute_path();
         let metric_entry = workspace.read().rule_metrics.clone();
-        let metrics_file = format!("{workspace_path}/{METRICS_FILE_NAME}");
+        let metrics_file = format!("{workspace_path}/{}", ws::METRICS_FILE_NAME);
         let metrics_path = std::path::Path::new(metrics_file.as_str());
         let metrics = if metrics_path.exists() {
             let content = std::fs::read_to_string(metrics_file.as_str()).context(
@@ -75,42 +70,6 @@ impl RuleMetricsFile {
         std::fs::write(metrics_file.as_str(), content.as_str()).context(format_context!(
             "Failed to write metrics file {metrics_file}"
         ))?;
-
-        Ok(())
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Default)]
-pub struct Settings {
-    pub store_path: Arc<str>,
-    order: Vec<Arc<str>>,
-    #[serde(default = "HashSet::new")]
-    scanned_modules: HashSet<Arc<str>>,
-    is_scanned: Option<bool>,
-}
-
-impl Settings {
-    pub fn load(path: &str) -> anyhow::Result<Self> {
-        let load_path = format!("{path}/{SETTINGS_FILE_NAME}");
-        let content = std::fs::read_to_string(load_path.as_str()).context(format_context!(
-            "Failed to read load order file {load_path}"
-        ))?;
-        let settings: Settings = serde_json::from_str(content.as_str()).context(
-            format_context!("Failed to parse load order file {load_path}"),
-        )?;
-        Ok(settings)
-    }
-
-    pub fn push(&mut self, module: Arc<str>) {
-        self.order.push(module);
-    }
-
-    pub fn save(&self, workspace_path: &str) -> anyhow::Result<()> {
-        let path = format!("{workspace_path}/{SETTINGS_FILE_NAME}");
-        let content = serde_json::to_string_pretty(&self)
-            .context(format_context!("Failed to serialize load order"))?;
-        std::fs::write(path.as_str(), content.as_str())
-            .context(format_context!("Failed to save settings file {path}"))?;
 
         Ok(())
     }
@@ -153,16 +112,6 @@ pub fn get_workspace_path(workspace_path: &str, current_path: &str, target_path:
     }
 }
 
-pub fn get_checkout_store_path() -> Arc<str> {
-    if let Ok(spaces_home) = std::env::var(SPACES_HOME_ENV_VAR) {
-        return format!("{}/.spaces/store", spaces_home).into();
-    }
-    if let Ok(Some(home_path)) = homedir::my_home() {
-        return format!("{}/.spaces/store", home_path.to_string_lossy()).into();
-    }
-    panic!("Failed to get home directory");
-}
-
 pub fn get_spaces_tools_path(store_path: &str) -> Arc<str> {
     format!("{store_path}/spaces_tools").into()
 }
@@ -196,7 +145,6 @@ pub struct Workspace {
     pub log_directory: Arc<str>,            // always @logs/timestamp
     pub is_create_lock_file: bool,          // set at startup
     pub digest: Arc<str>,                   // set at startup
-    pub store_path: Option<Arc<str>>,       // set at startup
     pub locks: HashMap<Arc<str>, Arc<str>>, // set during eval
     pub env: environment::Environment,      // set during eval
     #[allow(dead_code)]
@@ -207,6 +155,7 @@ pub struct Workspace {
     pub trailing_args: Vec<Arc<str>>,
     pub updated_assets: HashSet<Arc<str>>, // used by assets to keep track of exclusive access
     pub rule_metrics: HashMap<Arc<str>, RuleMetrics>, // used to keep track of rule metrics
+    pub settings: ws::Settings
 }
 
 impl Workspace {
@@ -229,6 +178,18 @@ impl Workspace {
     #[allow(dead_code)]
     pub fn get_relative_directory(&self, relative_path: &str) -> Arc<str> {
         format!("{}/{}", self.absolute_path, relative_path).into()
+    }
+
+    pub fn clear_members(&mut self) {
+        self.settings.members.clear();
+    }
+
+    pub fn add_member(&mut self, member: ws::Member) {
+        self.settings.push_member(member);
+    }
+
+    pub fn save_settings(&self) -> anyhow::Result<()> {
+        self.settings.save(self.absolute_path.as_ref())
     }
 
     pub fn get_absolute_path(&self) -> Arc<str> {
@@ -313,6 +274,7 @@ impl Workspace {
         mut progress: printer::MultiProgressBar,
         absolute_path_to_workspace: Option<Arc<str>>,
         is_clear_inputs: bool,
+        input_script_names: Option<Vec<Arc<str>>>
     ) -> anyhow::Result<Self> {
         let date = chrono::Local::now();
 
@@ -330,7 +292,8 @@ impl Workspace {
 
         let mut relative_invoked_path: Arc<str> = current_working_directory
             .strip_prefix(absolute_path.as_ref())
-            .unwrap_or("".into()).into();
+            .unwrap_or("".into())
+            .into();
 
         if relative_invoked_path.ends_with('/') {
             relative_invoked_path = relative_invoked_path.strip_suffix('/').unwrap().into();
@@ -364,10 +327,8 @@ impl Workspace {
         let mut original_modules: Vec<(Arc<str>, Arc<str>)> = vec![];
 
         let mut is_run_or_inspect = true;
-        let mut store_path = None;
-        let mut settings = if let Ok(settings) = Settings::load(absolute_path.as_ref()) {
-            logger(&mut progress).trace("Loading modules from sync order");
-            store_path = Some(settings.store_path.clone());
+        let mut settings = if let Ok(settings) = ws::Settings::load(absolute_path.as_ref()) {
+            logger(&mut progress).debug("Loading modules from sync order");
             for module in settings.order.iter() {
                 if is_rules_module(module.as_ref()) {
                     progress.increment(1);
@@ -386,7 +347,12 @@ impl Workspace {
         } else {
             logger(&mut progress).debug(format!("No sync order found at {absolute_path}").as_str());
             is_run_or_inspect = false;
-            Settings::default()
+            logger(&mut progress).debug("New Settings");
+            let mut settings = ws::Settings::new();
+            if let Some(scripts) = input_script_names {
+                settings.order = scripts;
+            }
+            settings
         };
 
         for (name, _) in original_modules.iter() {
@@ -397,8 +363,12 @@ impl Workspace {
         std::fs::create_dir_all(build_directory())
             .context(format_context!("Failed to create build directory"))?;
 
-        let log_directory: Arc<str> =
-            format!("{SPACES_LOGS_NAME}/logs_{}", date.format("%Y%m%d-%H-%M-%S")).into();
+        let log_directory: Arc<str> = format!(
+            "{}/logs_{}",
+            ws::SPACES_LOGS_NAME,
+            date.format("%Y%m%d-%H-%M-%S")
+        )
+        .into();
 
         std::fs::create_dir_all(log_directory.as_ref()).context(format_context!(
             "Failed to create log folder {log_directory}",
@@ -446,6 +416,7 @@ impl Workspace {
                     }
                 }
             }
+
             settings.scanned_modules = scanned_modules.clone();
             settings
                 .save(absolute_path.as_ref())
@@ -470,7 +441,7 @@ impl Workspace {
         modules.extend(unordered_modules);
 
         let changes_path = get_changes_path();
-        let skip_folders = vec![SPACES_LOGS_NAME.into()];
+        let skip_folders = vec![ws::SPACES_LOGS_NAME.into()];
         let changes = changes::Changes::new(changes_path, skip_folders);
 
         #[allow(unused)]
@@ -496,7 +467,6 @@ impl Workspace {
             log_directory,
             is_create_lock_file: false,
             digest: workspace_digest,
-            store_path,
             locks: HashMap::new(),
             env,
             new_branch_name: None,
@@ -507,6 +477,7 @@ impl Workspace {
             trailing_args: vec![],
             target: None,
             relative_invoked_path,
+            settings
         })
     }
 
@@ -611,9 +582,7 @@ impl Workspace {
     }
 
     pub fn get_store_path(&self) -> Arc<str> {
-        self.store_path
-            .clone()
-            .unwrap_or_else(get_checkout_store_path)
+        self.settings.store_path.clone()
     }
 
     fn get_path_to_capsule_store(&self) -> Arc<str> {

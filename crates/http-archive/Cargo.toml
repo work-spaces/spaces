@@ -20,3 +20,4 @@ easy-archiver.workspace = true
 glob-match.workspace = true
 url.workspace = true
 logger.workspace = true
+ws.workspace = true

@@ -1,5 +1,13 @@
 # Spaces Change log
 
+# v0.12.6
+
+- Fix bug when checking out the same repo at different paths
+- Add workspace members to workspace settings file
+- Add info.abort() 
+- Add info.get_path_to_workspace_member() and info.is_path_to_workspace_member_available()
+- create `ws` sub-crate to simplify `workspace.rs`
+
 # v0.12.5
 
 - Fix bug where exclude glob of single file is treated as include

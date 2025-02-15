@@ -205,6 +205,10 @@ pub fn run_starlark_modules(
         }
     }
 
+    if phase == rules::Phase::Checkout {
+        workspace.write().clear_members();
+    }
+
     let mut module_queue = std::collections::VecDeque::new();
     module_queue.extend(modules);
 
@@ -345,10 +349,14 @@ pub fn run_starlark_modules(
                 .context(format_context!("failed to finalize env"))?;
             let env_str = serde_json::to_string_pretty(&env)?;
 
+            star_logger(printer).debug("saving workspace env");
             workspace
                 .read()
                 .save_env_file(env_str.as_str())
                 .context(format_context!("Failed to save env file"))?;
+
+            star_logger(printer).debug("saving workspace setings");
+            workspace.read().save_settings().context(format_context!("Failed to save settings"))?;
         }
         _ => {}
     }

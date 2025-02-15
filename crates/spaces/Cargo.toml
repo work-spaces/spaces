@@ -1,6 +1,6 @@
 [package]
 name = "spaces"
-version = "0.12.5"
+version = "0.12.6"
 edition = "2021"
 
 [dependencies]
@@ -37,10 +37,10 @@ changes.workspace = true
 environment.workspace = true
 lock.workspace = true
 logger.workspace = true
+ws.workspace = true
 
 semver = "1"
 num_cpus = "1"
-homedir = "0.3"
 home = "0.5"
 sha256 = "1"
 chrono = "0.4"

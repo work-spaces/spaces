@@ -57,6 +57,38 @@ pub const FUNCTIONS: &[Function] = &[
         example: None,
     },
     Function {
+        name: "get_path_to_workspace_member",
+        description: "returns a string to the workspace member matching the specified requirement (error if not found)",
+        return_type: "str",
+        args: &[            
+            Arg {
+                name: "member",
+                description: "The requirements for the member",
+                dict: &[
+                    ("url:str", "The url of the member"),
+                    ("required:dict", "{'Revision': <git/sha256 hash>}|{'SemVer': <semver requirement>}"),
+                ],
+            },
+        ],
+        example: None,
+    },
+    Function {
+        name: "is_path_to_workspace_member_available",
+        description: "returns true if the workspace satisfies the requirments",
+        return_type: "bool",
+        args: &[            
+            Arg {
+                name: "member",
+                description: "The requirements for the member",
+                dict: &[
+                    ("url:str", "The url of the member"),
+                    ("required:dict", "{'Revision': <git/sha256 hash>}|{'SemVer': <semver requirement>}"),
+                ],
+            },
+        ],
+        example: None,
+    },
+    Function {
         name: "get_absolute_path_to_workspace",
         description: "returns the absolute path to the workspace",
         return_type: "str",
@@ -275,6 +307,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(platform::Platform::is_aarch64())
     }
 
+    fn abort(message: &str) -> anyhow::Result<NoneType> {
+        Err(format_error!("Info Aborting: {}", message))
+    }
+
     fn is_env_var_set(var_name: &str) -> anyhow::Result<bool> {
         if var_name == "PATH" {
             return Ok(true);
@@ -338,6 +374,38 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .context(format_error!("Internal Error: No active workspace found"))?;
         let path = workspace_arc.read().get_path_to_capsule_store_workspaces();
         Ok(path.to_string())
+    }
+
+    fn get_path_to_workspace_member(
+        #[starlark(require = named)] member: starlark::values::Value,
+    )-> anyhow::Result<String>{
+        let workspace_arc = singleton::get_workspace()
+        .context(format_error!("Internal Error: No active workspace found"))?;
+        let member_requirement_json = member.to_json_value()?;
+        let member_requirement: ws::MemberRequirement = serde_json::from_value(member_requirement_json.clone())
+            .context(format_context!("bad options for workspace member"))?;
+
+        let path = workspace_arc.read().settings.get_path_to_member(&member_requirement);
+        match path {
+            Some(p) => Ok(p.to_string()),
+            None => Err(format_error!("`{}` not found in workspace matching {:?}", member_requirement.url, member_requirement.required)),
+        }
+    }
+
+    fn is_path_to_workspace_member_available(
+        #[starlark(require = named)] member: starlark::values::Value,
+    )-> anyhow::Result<bool>{
+        let workspace_arc = singleton::get_workspace()
+        .context(format_error!("Internal Error: No active workspace found"))?;
+        let member_requirement_json = member.to_json_value()?;
+        let member_requirement: ws::MemberRequirement = serde_json::from_value(member_requirement_json.clone())
+            .context(format_context!("bad options for workspace member"))?;
+
+        let path = workspace_arc.read().settings.get_path_to_member(&member_requirement);
+        match path {
+            Some(_) => Ok(true),
+            None => Ok(false),
+        }
     }
 
     fn get_path_to_capsule_workflows() -> anyhow::Result<String> {

@@ -22,7 +22,7 @@ fn download_and_install(
         platform::Platform::WindowsX86_64 => platform_archive.windows_x86_64,
         platform::Platform::WindowsAarch64 => platform_archive.windows_aarch64,
     };
-    let store_path = workspace::get_checkout_store_path();
+    let store_path = ws::get_checkout_store_path();
     let spaces_tools = workspace::get_spaces_tools_path(store_path.as_ref());
 
     if let Some(archive) = archive.as_ref() {
@@ -67,7 +67,7 @@ fn download_and_install(
 
 pub fn install_tools(printer: &mut printer::Printer, is_force_link: bool) -> anyhow::Result<()> {
     // install gh in the store bin if it does not exist
-    let store_path = workspace::get_checkout_store_path();
+    let store_path = ws::get_checkout_store_path();
     let store_sysroot_bin = workspace::get_spaces_tools_path(store_path.as_ref());
     std::fs::create_dir_all(store_sysroot_bin.as_ref()).context(format_context!(
         "Failed to create directory {store_sysroot_bin}"

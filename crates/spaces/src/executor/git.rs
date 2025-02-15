@@ -22,6 +22,37 @@ pub struct Git {
 }
 
 impl Git {
+    fn rev_to_version(rev: Option<Arc<str>>) -> Option<Arc<str>> {
+        if let Some(rev) = rev {
+            // many projects use name-v1.2.3 as the tag
+            let split_rev = rev.as_ref().split('-').last().unwrap_or(rev.as_ref());
+            // if rev is semver parse-able, set the version
+            let stripped_rev = split_rev.strip_prefix("v").unwrap_or(split_rev.as_ref());
+            let version: Option<Arc<str>> = match semver::Version::parse(stripped_rev).ok() {
+                Some(version) => Some(version.to_string().into()),
+                None => None,
+            };
+            version
+        } else {
+            None
+        }
+    }
+
+    pub fn get_member(&self) -> anyhow::Result<ws::Member> {
+        let rev = match &self.checkout {
+            git::Checkout::NewBranch(branch_name) => branch_name.clone(),
+            git::Checkout::Revision(revision) => revision.clone(),
+        };
+
+        let version = Self::rev_to_version(Some(rev.clone()));
+
+        Ok(ws::Member {
+            path: self.spaces_key.clone(),
+            url: self.url.clone(),
+            rev,
+            version,
+        })
+    }
 
     fn get_clone_working_directory(&self, workspace: workspace::WorkspaceArc) -> Arc<str> {
         if let Some(directory) = self.working_directory.as_ref() {
@@ -35,7 +66,12 @@ impl Git {
         if let Some(directory) = self.working_directory.as_ref() {
             format!("{directory}/{}", self.spaces_key).into()
         } else {
-            format!("{}/{}", self.get_clone_working_directory(workspace), self.spaces_key).into()
+            format!(
+                "{}/{}",
+                self.get_clone_working_directory(workspace),
+                self.spaces_key
+            )
+            .into()
         }
     }
 
@@ -45,6 +81,8 @@ impl Git {
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
+        logger(progress, self.url.clone()).debug("execute worktree clone");
+
         let (relative_bare_store_path, name_dot_git) =
             git::BareRepository::url_to_relative_path_and_name(&self.url)
                 .context(format_context!("Failed to parse {name} url: {}", self.url))?;
@@ -74,7 +112,7 @@ impl Git {
                     .context(format_context!("failed to resolve revision"))?;
 
                 worktree
-                    .switch_new_branch(progress, branch_name, &revision)
+                    .switch_new_branch(progress, branch_name, &revision.commit)
                     .context(format_context!("{name} - Failed to checkout new branch"))?;
             }
             git::Checkout::Revision(revision) => {
@@ -84,10 +122,10 @@ impl Git {
                     .context(format_context!("failed to resolve revision"))?;
 
                 worktree
-                    .checkout(progress, &revision)
+                    .checkout(progress, &revision.commit)
                     .context(format_context!("{name} - Failed to switch branch"))?;
             }
-        }
+        };
 
         Ok(())
     }
@@ -99,6 +137,8 @@ impl Git {
         name: &str,
         filter: Option<String>,
     ) -> anyhow::Result<()> {
+        logger(progress, self.url.clone())
+            .debug(format!("execute default clone with filter {filter:?}").as_str());
         let mut clone_arguments: Vec<Arc<str>> = vec!["clone".into()];
         if let Some(filter) = filter {
             clone_arguments.push(format!("--filter={}", filter).into());
@@ -151,6 +191,8 @@ impl Git {
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
+        logger(progress, self.url.clone()).debug("execute shallow clone");
+
         let branch = match &self.checkout {
             git::Checkout::NewBranch(branch_name) => {
                 return Err(format_error!(
@@ -226,10 +268,28 @@ impl Git {
             git::Checkout::NewBranch(branch_name) => branch_name.clone(),
             git::Checkout::Revision(branch_name) => branch_name.clone(),
         };
+        logger(progress, self.url.clone()).debug(format!("using ref {ref_name}").as_str());
 
         let mut is_locked = false;
         let working_directory = self.get_working_directory_in_repo(workspace.clone());
+
+        let mut member = match self.get_member() {
+            Ok(mut member) => {
+                let latest_tag = git::get_latest_tag(progress, &self.url, &self.spaces_key).context(
+                    format_context!("Failed to get latest tag for {}", self.spaces_key),
+                )?;
+                member.version = Self::rev_to_version(latest_tag.clone());
+                Some(member)
+            }
+            Err(_) => {
+                logger(progress, self.url.clone())
+                    .warning(format!("Failed to member to settings for: {}", self.url).as_str());
+                None
+            }
+        };
+
         if workspace.read().is_create_lock_file {
+            logger(progress, self.url.clone()).debug("creating lock file");
             if let Some(commit_hash) =
                 git::get_commit_hash(progress, &self.url, working_directory.as_ref()).context(
                     format_context!("Failed to get commit hash for {working_directory}"),
@@ -245,11 +305,19 @@ impl Git {
                 workspace.write().add_git_commit_lock(name, rev);
             }
         } else if let Some(commit_hash) = workspace.read().locks.get(name) {
+            logger(progress, self.url.clone())
+                .info(format!("applying {commit_hash} from lock file at {name}").as_str());
+
             let options = printer::ExecuteOptions {
                 working_directory: Some(working_directory.clone()),
                 arguments: vec!["checkout".into(), "--detach".into(), commit_hash.clone()],
                 ..Default::default()
             };
+
+            if let Some(member) = member.as_mut() {
+                member.rev = commit_hash.clone();
+                member.version = Self::rev_to_version(Some(commit_hash.clone()));
+            }
 
             logger(progress, self.url.clone())
                 .debug(format!("{}: git {options:?}", self.spaces_key).as_str());
@@ -265,7 +333,8 @@ impl Git {
         // after possibly applying the lock commit, check for reproducibility
         if !is_locked {
             // check if checkout is on a branch or commiy
-            let is_branch = git::is_branch(progress, &self.url, working_directory.as_ref(), &ref_name);
+            let is_branch =
+                git::is_branch(progress, &self.url, working_directory.as_ref(), &ref_name);
             if is_branch {
                 logger(progress, self.url.clone()).info(
                     format!(
@@ -275,7 +344,14 @@ impl Git {
                     .as_str(),
                 );
                 workspace.write().set_is_reproducible(false);
+
+                // try to pull the latest version from the branch
             }
+        }
+
+        if let Some(member) = member {
+            logger(progress, self.url.clone()).debug("Adding member to workspace");
+            workspace.write().add_member(member);
         }
 
         Ok(())

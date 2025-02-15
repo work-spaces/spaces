@@ -29,6 +29,8 @@ impl HttpArchive {
                 name
             ))?;
 
+        workspace.write().add_member(self.http_archive.get_member());
+
         Ok(())
     }
 }

@@ -22,9 +22,14 @@ pub fn run_starlark_modules_in_workspace(
     is_create_lock_file: bool,
 ) -> anyhow::Result<()> {
     let workspace = {
+        let checkout_scripts: Option<Vec<Arc<str>>> = match &run_workspace {
+            RunWorkspace::Target(_, _) => None,
+            RunWorkspace::Script(scripts) => Some(scripts.iter().map(|e| e.0.clone()).collect())
+        };
+
         let mut multi_progress = printer::MultiProgress::new(printer);
         let progress = multi_progress.add_progress("workspace", Some(100), Some("Complete"));
-        workspace::Workspace::new(progress, absolute_path_to_workspace, is_clear_inputs)
+        workspace::Workspace::new(progress, absolute_path_to_workspace, is_clear_inputs, checkout_scripts)
             .context(format_context!("while running workspace"))?
     };
 
@@ -137,7 +142,6 @@ pub fn checkout(
     std::fs::create_dir_all(name.as_ref())
         .context(format_context!("while creating workspace directory {name}"))?;
 
-    let mut settings = workspace::Settings::default();
     let mut scripts = Vec::new();
 
     for one_script in script {
@@ -149,7 +153,6 @@ pub fn checkout(
 
         let script_as_path = std::path::Path::new(script_path.as_ref());
         let file_name: Arc<str> = script_as_path.file_name().unwrap().to_string_lossy().into();
-        settings.push(file_name.clone());
 
         let one_script_contents = std::fs::read_to_string(script_path.as_ref())
             .context(format_context!("while reading script file {script_path}"))?;
@@ -160,8 +163,6 @@ pub fn checkout(
 
         scripts.push((file_name, one_script_contents.into()));
     }
-
-    settings.store_path = workspace::get_checkout_store_path();
 
     std::fs::write(format!("{}/{}", name, workspace::ENV_FILE_NAME), "").context(
         format_context!("while creating {} file", workspace::ENV_FILE_NAME),
@@ -184,10 +185,6 @@ pub fn checkout(
     .context(format_context!(
         "while evaulating starklark modules for checkout"
     ))?;
-
-    settings
-        .save(absolute_path_to_workspace.as_ref())
-        .context(format_context!("while saving settings"))?;
 
     Ok(())
 }

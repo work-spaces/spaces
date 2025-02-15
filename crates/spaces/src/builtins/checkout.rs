@@ -485,11 +485,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] repo: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
-        let repo: git::Repo = serde_json::from_value(repo.to_json_value()?)
-            .context(format_context!("bad options for repo"))?;
-
         let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for repo rule"))?;
+
+        let repo: git::Repo = serde_json::from_value(repo.to_json_value()?)
+            .context(format_context!("bad options for repo"))?;
 
         let workspace_arc =
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
