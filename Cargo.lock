@@ -1130,12 +1130,12 @@ dependencies = [
  "anyhow-source-location",
  "lock",
  "logger",
- "petgraph",
  "printer",
  "semver",
  "serde",
  "state",
  "url",
+ "ws",
 ]
 
 [[package]]
@@ -1175,6 +1175,7 @@ dependencies = [
  "anyhow",
  "anyhow-source-location",
  "petgraph",
+ "suggest",
 ]
 
 [[package]]
@@ -1295,6 +1296,7 @@ dependencies = [
  "tokio",
  "url",
  "which",
+ "ws",
 ]
 
 [[package]]
@@ -1750,6 +1752,12 @@ name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
+
+[[package]]
+name = "levenshtein"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db13adb97ab515a3691f56e4dbab09283d0b86cb45abd991d8634a9d6f501760"
 
 [[package]]
 name = "libc"
@@ -2959,7 +2967,7 @@ dependencies = [
 
 [[package]]
 name = "spaces"
-version = "0.11.27"
+version = "0.12.7"
 dependencies = [
  "anyhow",
  "anyhow-source-location",
@@ -2979,7 +2987,6 @@ dependencies = [
  "globwalk",
  "graph",
  "home",
- "homedir",
  "http-archive",
  "itertools 0.14.0",
  "json_value_merge",
@@ -3009,6 +3016,7 @@ dependencies = [
  "url",
  "walkdir",
  "which",
+ "ws",
 ]
 
 [[package]]
@@ -3219,6 +3227,13 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
+
+[[package]]
+name = "suggest"
+version = "0.1.0"
+dependencies = [
+ "levenshtein",
+]
 
 [[package]]
 name = "supports-color"
@@ -4189,6 +4204,18 @@ name = "writeable"
 version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e9df38ee2d2c3c5948ea468a8406ff0db0b29ae1ffde1bcf20ef305bcc95c51"
+
+[[package]]
+name = "ws"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "anyhow-source-location",
+ "homedir",
+ "semver",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "xattr"

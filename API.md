@@ -135,25 +135,6 @@ checkout.add_asset(
     },
 )
 ```
-#### add_capsule
-
-```python
-def add_capsule(rule, capsule) -> None
-```
-Adds a capsule to the workspace during checkout.
-
-- `rule`: dict
-  - `name`: rule name as string
-  - `deps`: list of dependencies
-  - `platforms`: optional list of platforms to run on. If not provided, rule will run on all platforms. See above for details
-  - `type`: Checkout|Optional|Setup|Run: see above for details
-  - `type`: Setup|Run (default)|Optional
-  - `help`: Optional help text show with `spaces evaluate`
-- `capsule`: dict with
-  - `scripts`: `spaces` scripts that define the capsule
-  - `prefix`: Workspace prefix to install the capsule (`sysroot` for build deps and `build/install` for runtime deps)
-  - `globs`: globs to apply to the capsule for installing at `prefix`
-
 #### add_cargo_bin
 
 ```python
@@ -352,7 +333,7 @@ checkout.add_hard_link_asset(
 ```python
 def add_target(rule) -> None
 ```
-Adds a target. There is no specific action for the target, but this rule can be useful for organizing depedencies.
+Adds a target. There is no specific action for the target, but this rule can be useful for organizing dependencies.
 
 - `rule`: dict
   - `name`: rule name as string
@@ -648,7 +629,7 @@ run.add_exec(
 ```python
 def add_target(rule) -> None
 ```
-Adds a target. There is no specific action for the target, but this rule can be useful for organizing depedencies.
+Adds a target. There is no specific action for the target, but this rule can be useful for organizing dependencies.
 
 - `rule`: dict
   - `name`: rule name as string
@@ -736,6 +717,15 @@ def get_path_to_checkout() -> str
 returns the path where the current script is located in the workspace
 
 
+#### get_path_to_log_file
+
+```python
+def get_path_to_log_file(name) -> str
+```
+returns the relative workspace path to the log file for the target
+
+- `name`: The name of the target to get the log file
+
 #### get_path_to_store
 
 ```python
@@ -743,6 +733,17 @@ def get_path_to_store() -> str
 ```
 returns the path to the spaces store (typically $HOME/.spaces/store)
 
+
+#### get_path_to_workspace_member
+
+```python
+def get_path_to_workspace_member(member) -> str
+```
+returns a string to the workspace member matching the specified requirement (error if not found)
+
+- `member`: The requirements for the member
+  - `url:str`: The url of the member
+  - `required:dict`: {'Revision': <git/sha256 hash>}|{'SemVer': <semver requirement>}
 
 #### get_platform_name
 
@@ -775,6 +776,17 @@ def is_ci() -> int
 ```
 returns true if `--ci` is passed on the command line
 
+
+#### is_path_to_workspace_member_available
+
+```python
+def is_path_to_workspace_member_available(member) -> bool
+```
+returns true if the workspace satisfies the requirments
+
+- `member`: The requirements for the member
+  - `url:str`: The url of the member
+  - `required:dict`: {'Revision': <git/sha256 hash>}|{'SemVer': <semver requirement>}
 
 #### is_platform_linux
 
@@ -987,6 +999,15 @@ Executes a process
   - `stdin`: optional string to pipe to the process stdin
 
 ### `script` Functions
+
+#### abort
+
+```python
+def abort(message) -> None
+```
+Abort execution. Exit with a non-zero code. Print a message to stderr
+
+- `message`: str: abort message.
 
 #### get_arg
 

@@ -132,11 +132,11 @@ impl Exec {
 
         handle_process_ended(name);
 
-        logger(progress, name).message(format!("log file for {name}: {log_file_path:?}").as_str());
+        logger(progress, name).message(format!("log file: {log_file_path:?}").as_str());
 
         let stdout_content = match result {
             Ok(content) => {
-                logger(progress, name).info(format!("exec {name} succeeded").as_str());
+                logger(progress, name).info(format!("succeeded").as_str());
 
                 if let Some(Expect::Failure) = self.expect.as_ref() {
                     return Err(format_error!("Expected failure but task succeeded"));
@@ -145,7 +145,7 @@ impl Exec {
                 }
             }
             Err(exec_error) => {
-                logger(progress, name).info(format!("exec {name} failed").as_str());
+                logger(progress, name).info(format!("Failed").as_str());
                 if let Some(Expect::Failure) = self.expect.as_ref() {
                     None
                 } else if let Some(Expect::Any) = self.expect.as_ref() {
@@ -306,12 +306,12 @@ impl ExecIf {
         match condition_result {
             Ok(_) => {
                 logger(&mut progress, name)
-                    .trace(format!("exec {name} condition succeeded").as_str());
+                    .trace(format!("exec condition succeeded").as_str());
                 result.clone_from(&self.then_);
             }
             Err(_) => {
                 logger(&mut progress, name)
-                    .trace(format!("exec {name} condition failed running").as_str());
+                    .trace(format!("exec condition failed running").as_str());
                 if let Some(else_) = self.else_.as_ref() {
                     result.clone_from(else_);
                 }

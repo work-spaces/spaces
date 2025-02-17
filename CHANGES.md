@@ -1,5 +1,11 @@
 # Spaces Change log
 
+# v0.12.7
+
+- Remove `capsules` in rust. Starlark implements capsules in SDK v0.2.0
+- Allow checkout rules to be optional (skipped). This supports starlark capsules
+- Cargo clippy fixes
+
 # v0.12.6
 
 - Fix bug when checking out the same repo at different paths

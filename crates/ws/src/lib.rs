@@ -78,6 +78,12 @@ pub struct Settings {
     pub members: HashMap<Arc<str>, Vec<Member>>,
 }
 
+impl Default for Settings {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Settings {
     pub fn new() -> Self {
         Self {
@@ -108,7 +114,7 @@ impl Settings {
         let entry = self
             .members
             .entry(member.get_hash_key().clone())
-            .or_insert(Vec::new());
+            .or_default();
         entry.push(member);
     }
 

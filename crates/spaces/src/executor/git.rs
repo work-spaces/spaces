@@ -28,10 +28,9 @@ impl Git {
             let split_rev = rev.as_ref().split('-').last().unwrap_or(rev.as_ref());
             // if rev is semver parse-able, set the version
             let stripped_rev = split_rev.strip_prefix("v").unwrap_or(split_rev.as_ref());
-            let version: Option<Arc<str>> = match semver::Version::parse(stripped_rev).ok() {
-                Some(version) => Some(version.to_string().into()),
-                None => None,
-            };
+            let version: Option<Arc<str>> = semver::Version::parse(stripped_rev)
+                .ok()
+                .map(|version| version.to_string().into());
             version
         } else {
             None
@@ -275,9 +274,10 @@ impl Git {
 
         let mut member = match self.get_member() {
             Ok(mut member) => {
-                let latest_tag = git::get_latest_tag(progress, &self.url, &self.spaces_key).context(
-                    format_context!("Failed to get latest tag for {}", self.spaces_key),
-                )?;
+                let latest_tag =
+                    git::get_latest_tag(progress, &self.url, &self.spaces_key).context(
+                        format_context!("Failed to get latest tag for {}", self.spaces_key),
+                    )?;
                 member.version = Self::rev_to_version(latest_tag.clone());
                 Some(member)
             }

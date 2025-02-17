@@ -115,7 +115,7 @@ impl FileLock {
                                 process_group_id: get_process_group_id(),
                             };
                             let lock_contents = serde_json::to_string(&contents)
-                                .context(format_context!("Failed to serialize capsule run info"))?;
+                                .context(format_context!("Failed to serialize run info"))?;
 
                             // over write the file
                             std::fs::write(self.path.as_ref(), lock_contents.as_str())
@@ -158,7 +158,7 @@ impl FileLock {
     }
 
     pub fn wait(&self, progress: &mut printer::MultiProgressBar) -> anyhow::Result<()> {
-        progress.set_message("Capsule already started, waiting for it to finish");
+        progress.set_message("already started, waiting for it to finish");
         let lock_file_path = std::path::Path::new(self.path.as_ref());
         let mut log_count = 0;
         while lock_file_path.exists() {
@@ -187,7 +187,7 @@ impl FileLock {
             log_count += 1;
             if log_count == 10 {
                 logger::Logger::new_progress(progress, "lock".into()).debug(
-                    format!("Still waiting for capsule to finish at {}", self.path).as_str(),
+                    format!("Still waiting for to finish at {}", self.path).as_str(),
                 );
                 log_count = 0;
             }

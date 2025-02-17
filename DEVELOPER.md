@@ -17,7 +17,7 @@ cargo build
 Publish a release by pushing a tag
 
 ```sh
-export VERSION=0.12.6
+export VERSION=0.13.0
 git tag -a v$VERSION -m "Update version"
 git push origin tag v$VERSION
 ```
@@ -31,13 +31,10 @@ git push origin tag v$VERSION
   - Show which repos have worktrees checked out -- don't delete those
 - soft-links in tools should be link to the sysroot file not the original file
 - Make `spaces sync` work as expected to update workflows
-- `spaces run <target>` should strip the relative path to make it easier to run rules
+  - This seems to be working. Could pull default/blobless clones if no changes have been made
 - Should all paths require `//...` to be at the workspace level and everything is relative to the rule directory?
   - should rules be allowed to be relative within a repo?
-- Inspect needs to be better and more intuitive
-- Inspect checkout workflows to get all URL dependencies
-- How to skip reproducible workflows (capsules)
 - How to build rules that concatenate compile commands? she-bang script in sdk?
-- Checkout rules (Post Checkout) that requires a dependency at semver but doesn't check it out
-  - This will be used for `@star/sdk` etc.
-  - Can also be used to have parent project specify dependencies
+- Inspect needs to be better and more intuitive
+  - Inspect checkout workflows to get all URL dependencies
+  - `spaces inspect` should be limited to the current folder

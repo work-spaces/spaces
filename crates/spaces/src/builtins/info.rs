@@ -369,13 +369,6 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(NoneType)
     }
 
-    fn get_path_to_capsule_workspaces() -> anyhow::Result<String> {
-        let workspace_arc = singleton::get_workspace()
-            .context(format_error!("Internal Error: No active workspace found"))?;
-        let path = workspace_arc.read().get_path_to_capsule_store_workspaces();
-        Ok(path.to_string())
-    }
-
     fn get_path_to_workspace_member(
         #[starlark(require = named)] member: starlark::values::Value,
     )-> anyhow::Result<String>{
@@ -406,20 +399,6 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             Some(_) => Ok(true),
             None => Ok(false),
         }
-    }
-
-    fn get_path_to_capsule_workflows() -> anyhow::Result<String> {
-        let workspace_arc = singleton::get_workspace()
-            .context(format_error!("Internal Error: No active workspace found"))?;
-        let path = workspace_arc.read().get_path_to_workflows();
-        Ok(path.to_string())
-    }
-
-    fn get_path_to_capsule_sysroot() -> anyhow::Result<String> {
-        let workspace_arc = singleton::get_workspace()
-            .context(format_error!("Internal Error: No active workspace found"))?;
-        let path = workspace_arc.read().get_path_to_capsule_store_sysroot();
-        Ok(path.to_string())
     }
 
     fn get_cpu_count() -> anyhow::Result<i64> {

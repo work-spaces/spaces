@@ -10,16 +10,10 @@ pub const ENV_FILE_NAME: &str = "env.spaces.star";
 pub const LOCK_FILE_NAME: &str = "lock.spaces.star";
 pub const SPACES_MODULE_NAME: &str = "spaces.star";
 pub const SPACES_STDIN_NAME: &str = "stdin.star";
-const SPACES_CAPSULES_NAME: &str = "capsules";
-const SPACES_CAPSULES_WORKSPACES_NAME: &str = "workspace";
-const SPACES_CAPSULES_WORKFLOWS_NAME: &str = "workflows";
-const SPACES_CAPSULES_STATUS_NAME: &str = "status";
-const SPACES_CAPSULES_SYSROOT_NAME: &str = "sysroot";
+const SPACES_SYSROOT_NAME: &str = "sysroot";
 
-pub const SPACES_CAPSULES_INFO_NAME: &str = "capsules.spaces.json";
 pub const SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE: &str = "SPACES_IS_WORKSPACE_REPRODUCIBLE";
 pub const SPACES_ENV_WORKSPACE_DIGEST: &str = "SPACES_WORKSPACE_DIGEST";
-pub const SPACES_ENV_CAPSULE_WORKFLOWS: &str = "SPACES_CAPSULES_WORKFLOWS";
 pub const WORKSPACE_FILE_HEADER: &str = r#"
 """
 Spaces Workspace file
@@ -155,7 +149,7 @@ pub struct Workspace {
     pub trailing_args: Vec<Arc<str>>,
     pub updated_assets: HashSet<Arc<str>>, // used by assets to keep track of exclusive access
     pub rule_metrics: HashMap<Arc<str>, RuleMetrics>, // used to keep track of rule metrics
-    pub settings: ws::Settings
+    pub settings: ws::Settings,
 }
 
 impl Workspace {
@@ -199,16 +193,12 @@ impl Workspace {
     pub fn transform_target_path(&self, target: Arc<str>) -> Arc<str> {
         if target.starts_with("//") {
             target.strip_prefix("//").unwrap().into()
+        } else if self.relative_invoked_path.is_empty() {
+            target
+        } else if target.starts_with(':') {
+            format!("{}{}", self.relative_invoked_path, target).into()
         } else {
-            if self.relative_invoked_path.is_empty() {
-                target
-            } else {
-                if target.starts_with(':') {
-                    return format!("{}{}", self.relative_invoked_path, target).into();
-                } else {
-                    format!("{}/{}", self.relative_invoked_path, target).into()
-                }
-            }
+            format!("{}/{}", self.relative_invoked_path, target).into()
         }
     }
 
@@ -257,12 +247,8 @@ impl Workspace {
                 return false;
             }
 
-            let sysroot = workspace_path.join(SPACES_CAPSULES_SYSROOT_NAME);
+            let sysroot = workspace_path.join(SPACES_SYSROOT_NAME);
             if entry.path() == sysroot {
-                return false;
-            }
-
-            if entry.file_name() == SPACES_CAPSULES_NAME {
                 return false;
             }
         }
@@ -274,7 +260,7 @@ impl Workspace {
         mut progress: printer::MultiProgressBar,
         absolute_path_to_workspace: Option<Arc<str>>,
         is_clear_inputs: bool,
-        input_script_names: Option<Vec<Arc<str>>>
+        input_script_names: Option<Vec<Arc<str>>>,
     ) -> anyhow::Result<Self> {
         let date = chrono::Local::now();
 
@@ -292,7 +278,7 @@ impl Workspace {
 
         let mut relative_invoked_path: Arc<str> = current_working_directory
             .strip_prefix(absolute_path.as_ref())
-            .unwrap_or("".into())
+            .unwrap_or("")
             .into();
 
         if relative_invoked_path.ends_with('/') {
@@ -348,7 +334,7 @@ impl Workspace {
             logger(&mut progress).debug(format!("No sync order found at {absolute_path}").as_str());
             is_run_or_inspect = false;
             logger(&mut progress).debug("New Settings");
-            let mut settings = ws::Settings::new();
+            let mut settings = ws::Settings::default();
             if let Some(scripts) = input_script_names {
                 settings.order = scripts;
             }
@@ -381,6 +367,8 @@ impl Workspace {
         if !settings.is_scanned.unwrap_or(false) || singleton::get_is_rescan() {
             // not scanned until walkdir runs during run or inspect
             settings.is_scanned = Some(is_run_or_inspect);
+
+            logger(&mut progress).message(format!("Scanning {}", absolute_path).as_str());
 
             // walkdir and find all spaces.star files in the workspace
             let walkdir: Vec<_> = walkdir::WalkDir::new(absolute_path.as_ref())
@@ -477,7 +465,7 @@ impl Workspace {
             trailing_args: vec![],
             target: None,
             relative_invoked_path,
-            settings
+            settings,
         })
     }
 
@@ -583,60 +571,6 @@ impl Workspace {
 
     pub fn get_store_path(&self) -> Arc<str> {
         self.settings.store_path.clone()
-    }
-
-    fn get_path_to_capsule_store(&self) -> Arc<str> {
-        format!("{}/{}", self.get_store_path(), SPACES_CAPSULES_NAME).into()
-    }
-
-    pub fn get_path_to_capsule_store_workspaces(&self) -> Arc<str> {
-        format!(
-            "{}/{}",
-            self.get_path_to_capsule_store(),
-            SPACES_CAPSULES_WORKSPACES_NAME
-        )
-        .into()
-    }
-
-    pub fn get_path_to_capsule_store_workflows(&self) -> Arc<str> {
-        format!(
-            "{}/{}",
-            self.get_path_to_capsule_store(),
-            SPACES_CAPSULES_WORKFLOWS_NAME
-        )
-        .into()
-    }
-
-    pub fn get_path_to_workflows(&self) -> Arc<str> {
-        // capsules will pass SPACES_ENV_CAPSULE_WORKFLOWS to child processes
-        // the top level process will use the digest
-        std::env::var(SPACES_ENV_CAPSULE_WORKFLOWS)
-            .unwrap_or_else(|_| {
-                format!(
-                    "{}/{}",
-                    self.get_path_to_capsule_store_workflows(),
-                    self.get_short_digest()
-                )
-            })
-            .into()
-    }
-
-    pub fn get_path_to_capsule_store_status(&self) -> Arc<str> {
-        format!(
-            "{}/{}",
-            self.get_path_to_capsule_store(),
-            SPACES_CAPSULES_STATUS_NAME
-        )
-        .into()
-    }
-
-    pub fn get_path_to_capsule_store_sysroot(&self) -> Arc<str> {
-        format!(
-            "{}/{}",
-            self.get_path_to_capsule_store(),
-            SPACES_CAPSULES_SYSROOT_NAME
-        )
-        .into()
     }
 
     pub fn get_spaces_tools_path(&self) -> Arc<str> {

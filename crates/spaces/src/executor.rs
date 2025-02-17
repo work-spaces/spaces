@@ -1,6 +1,5 @@
 pub mod archive;
 pub mod asset;
-pub mod capsule;
 pub mod env;
 pub mod exec;
 pub mod git;
@@ -47,7 +46,6 @@ pub enum Task {
     UpdateAsset(asset::UpdateAsset),
     UpdateEnv(env::UpdateEnv),
     AddAsset(asset::AddAsset),
-    Capsule(capsule::Capsule),
     Git(git::Git),
 }
 
@@ -76,7 +74,6 @@ impl Task {
             Task::AddSoftLink(asset) => asset.execute(progress, workspace.clone(), name),
             Task::UpdateEnv(update_env) => update_env.execute(progress, workspace.clone(), name),
             Task::AddAsset(asset) => asset.execute(progress, workspace.clone(), name),
-            Task::Capsule(capsule) => capsule.execute(&mut progress, workspace.clone(), name),
             Task::Git(git) => {
                 check_new_modules =
                     git.is_evaluate_spaces_modules && git.working_directory.is_none();
