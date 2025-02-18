@@ -35,6 +35,3 @@ git push origin tag v$VERSION
 - Should all paths require `//...` to be at the workspace level and everything is relative to the rule directory?
   - should rules be allowed to be relative within a repo?
 - How to build rules that concatenate compile commands? she-bang script in sdk?
-- Inspect needs to be better and more intuitive
-  - Inspect checkout workflows to get all URL dependencies
-  - `spaces inspect` should be limited to the current folder

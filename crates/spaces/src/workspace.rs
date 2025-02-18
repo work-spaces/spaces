@@ -200,7 +200,7 @@ impl Workspace {
         } else {
             format!("{}/{}", self.relative_invoked_path, target).into()
         }
-    }
+    } 
 
     pub fn is_reproducible(&self) -> bool {
         if let Some(value) = self.env.vars.get(SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE) {
@@ -291,7 +291,17 @@ impl Workspace {
 
         logger(&mut progress).message(format!("{absolute_path}").as_str());
 
-        logger(&mut progress).info(format!("Invoked at: {relative_invoked_path}").as_str());
+        logger(&mut progress).info(
+            format!(
+                "Invoked at: {}",
+                if relative_invoked_path.is_empty() {
+                    "<workspace>".into()
+                } else {
+                    relative_invoked_path.clone()
+                }
+            )
+            .as_str(),
+        );
 
         std::env::set_current_dir(std::path::Path::new(absolute_path.as_ref())).context(
             format_context!("Failed to set current directory to {absolute_path}"),

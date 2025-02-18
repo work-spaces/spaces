@@ -265,8 +265,7 @@ impl Task {
                     .info(skip_message.as_ref());
                 progress.set_message(skip_message);
             } else {
-                logger::Logger::new_progress(&mut progress, name.clone())
-                    .debug("Running task");
+                logger::Logger::new_progress(&mut progress, name.clone()).debug("Running task");
                 progress.set_message("Running");
             }
 
@@ -321,7 +320,6 @@ impl Task {
                 task.phase = Phase::Complete;
             }
 
-
             task_result
 
             // _signal_on_drop.drop() notifies the dependents
@@ -354,9 +352,10 @@ pub fn show_tasks(
     phase: Phase,
     target: Option<Arc<str>>,
     filter: &HashSet<Arc<str>>,
+    strip_prefix: Option<Arc<str>>,
 ) -> anyhow::Result<()> {
     let state = get_state().read();
-    state.show_tasks(printer, phase, target, filter)
+    state.show_tasks(printer, phase, target, filter, strip_prefix)
 }
 
 pub fn sort_tasks(target: Option<Arc<str>>, phase: Phase) -> anyhow::Result<()> {
@@ -476,8 +475,6 @@ impl State {
             }
 
             // connect the dependencies
-            let mut task_hasher = blake3::Hasher::new();
-            task_hasher.update(task.calculate_digest().as_bytes());
 
             if let Some(deps) = task.rule.deps.clone() {
                 for dep in deps {
@@ -517,7 +514,6 @@ impl State {
                         _ => {}
                     }
 
-                    task_hasher.update(dep_task.calculate_digest().as_bytes());
                     task.add_signal_dependency(dep_task);
                     self.graph
                         .add_dependency(&task.rule.name, &dep)
@@ -527,10 +523,34 @@ impl State {
                         ))?;
                 }
             }
-            task.digest = task_hasher.finalize().to_string().into();
         }
 
         let target_is_some = target.is_some();
+
+        let topo_sorted = self.graph.get_sorted_tasks(None).context(format_context!(
+            "Failed to sort tasks for phase {:?}",
+            phase
+        ))?;
+
+        for node in topo_sorted.iter() {
+            let task_name = self.graph.get_task(*node);
+            let task = tasks.get(task_name).cloned();
+            if let Some(task) = task {
+                let mut task_hasher = blake3::Hasher::new();
+                task_hasher.update(task.calculate_digest().as_bytes());
+                let mut deps = task.rule.deps.clone().unwrap_or_default();
+                deps.sort();
+                for dep in deps {
+                    if let Some(dep_task) = tasks.get(&dep) {
+                        task_hasher.update(dep_task.digest.as_bytes());
+                    }
+                }
+
+                if let Some(task_mut) = tasks.get_mut(task_name) {
+                    task_mut.digest = task_hasher.finalize().to_string().into();
+                }
+            }
+        }
 
         self.sorted = self
             .graph
@@ -559,16 +579,15 @@ impl State {
         phase: Phase,
         target: Option<Arc<str>>,
         filter: &HashSet<Arc<str>>,
+        strip_prefix: Option<Arc<str>>,
     ) -> anyhow::Result<()> {
         let tasks = self.tasks.read();
 
         #[derive(Serialize)]
         struct TaskInfo {
             help: String,
-            #[serde(rename = "type")]
-            type_: String,
         }
-        let mut task_info_list = std::collections::HashMap::new();
+        let mut task_info_list: HashMap<Arc<str>, _> = std::collections::HashMap::new();
         for node_index in self.sorted.iter() {
             let task_name = self.graph.get_task(*node_index);
 
@@ -586,13 +605,8 @@ impl State {
                     || task.rule.help.is_some()
                     || target.is_some()
                     || !filter.is_empty()
+                    || strip_prefix.is_some()
                 {
-                    let type_ = task
-                        .rule
-                        .type_
-                        .map(|e| format!("{:?}", e))
-                        .unwrap_or("Run".into());
-
                     let help = task
                         .rule
                         .help
@@ -600,7 +614,19 @@ impl State {
                         .map(|e| e.as_ref().to_string())
                         .unwrap_or("<Not Provided>".to_string());
 
-                    task_info_list.insert(task.rule.name.clone(), TaskInfo { help, type_ });
+                    let mut task_name = task.rule.name.as_ref();
+                    let mut prefix = "//";
+                    if let Some(strip_prefix) = strip_prefix.as_ref() {
+                        if let Some(stripped) = task_name.strip_prefix(strip_prefix.as_ref()) {
+                            task_name = stripped;
+                            prefix = "";
+                        }
+                    }
+
+                    task_info_list.insert(
+                        format!("{}{}", prefix, task_name).into(),
+                        TaskInfo { help },
+                    );
                 }
             }
         }

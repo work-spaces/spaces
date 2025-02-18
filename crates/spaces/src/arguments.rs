@@ -267,7 +267,11 @@ pub fn execute() -> anyhow::Result<()> {
                         if glob_expression.starts_with('-') || glob_expression.starts_with('+') {
                             glob_expression.to_string()
                         } else {
-                            format!("+{}", glob_expression)
+                            if glob_expression.contains('*') {
+                                format!("+{}", glob_expression)
+                            } else {
+                                format!("+**{}**", glob_expression)
+                            }
                         };
                     filter_globs.insert(effective_expression.into());
                 }

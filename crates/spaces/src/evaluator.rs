@@ -272,7 +272,8 @@ pub fn run_starlark_modules(
 
     match phase {
         rules::Phase::Run => {
-            let target = insert_run_all(target).context(format_context!("failed to insert run all"))?;
+            let target =
+                insert_run_all(target).context(format_context!("failed to insert run all"))?;
             star_logger(printer).message("--Run Phase--");
 
             let is_reproducible = workspace.read().is_reproducible();
@@ -305,15 +306,34 @@ pub fn run_starlark_modules(
 
             let inspect_globs = singleton::get_inspect_globs();
 
+            // if not filters and called from a relative path, filter on the relative path
+            let mut globs = inspect_globs;
+            let relative_path = workspace.read().relative_invoked_path.clone();
+            let mut strip_prefix = None;
+            if globs.is_empty() && !relative_path.is_empty() {
+                globs.insert(format!("+{}**", relative_path).into());
+                strip_prefix = Some(relative_path);
+            }
+
+            //only show checkout if log level is message or higher
+            if printer.verbosity.level <= printer::Level::Message {
+                rules::show_tasks(
+                    printer,
+                    rules::Phase::Checkout,
+                    target.clone(),
+                    &globs,
+                    strip_prefix.clone(),
+                )
+                .context(format_context!("Failed to show tasks"))?;
+            }
             rules::show_tasks(
                 printer,
-                rules::Phase::Checkout,
+                rules::Phase::Run,
                 target.clone(),
-                &inspect_globs,
+                &globs,
+                strip_prefix,
             )
             .context(format_context!("Failed to show tasks"))?;
-            rules::show_tasks(printer, rules::Phase::Run, target.clone(), &inspect_globs)
-                .context(format_context!("Failed to show tasks"))?;
         }
         rules::Phase::Checkout => {
             star_logger(printer).message("--Post Checkout Phase--");
@@ -356,7 +376,10 @@ pub fn run_starlark_modules(
                 .context(format_context!("Failed to save env file"))?;
 
             star_logger(printer).debug("saving workspace setings");
-            workspace.read().save_settings().context(format_context!("Failed to save settings"))?;
+            workspace
+                .read()
+                .save_settings()
+                .context(format_context!("Failed to save settings"))?;
         }
         _ => {}
     }
