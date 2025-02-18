@@ -1,15 +1,18 @@
 # Spaces Change log
 
-# v0.13.0
+# v0.13.1
 
-- API breaking change: Remove `capsules` in rust. Starlark implements capsules in SDK v0.2.0
-- Allow checkout rules to be optional (skipped). This supports starlark capsules
-- Cargo clippy fixes
 - Improve `spaces inspect`
   - limit to the current folder by default when not at root
   - `--filter=spaces` transforms to `--filter="*spaces*"` so it works more like grep
 - Update task hashing to go over the topograph and incorporate digest of deps
   - Currently only used for informational purposes - not available to rules
+
+# v0.13.0
+
+- API breaking change: Remove `capsules` in rust. Starlark implements capsules in SDK v0.2.0
+- Allow checkout rules to be optional (skipped). This supports starlark capsules
+- Cargo clippy fixes
 
 # v0.12.6
 
