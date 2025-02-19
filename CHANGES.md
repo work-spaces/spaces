@@ -1,5 +1,9 @@
 # Spaces Change log
 
+## v0.14.2
+
+- Update printer hash to fix build break
+
 ## v0.14.1
 
 - Use ... on with rule progress if rule name is too long
