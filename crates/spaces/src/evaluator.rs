@@ -390,7 +390,7 @@ pub fn run_starlark_modules(
 
 pub fn run_starlark_script(name: Arc<str>, script: Arc<str>) -> anyhow::Result<()> {
     // load SPACES_WORKSPACE from env
-    let workspace = std::env::var("SPACES_WORKSPACE")
+    let workspace = std::env::var(ws::SPACES_WORKSPACE_ENV_VAR)
         .unwrap_or(".".to_string())
         .into();
 

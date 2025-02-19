@@ -1,5 +1,13 @@
 # Spaces Change log
 
+## v0.14.1
+
+- Use ... on with rule progress if rule name is too long
+- Format the log header as yaml
+- Add a `=======...` divider to the top of the log to denote header vs content
+- Add `info.get_log_divider_string()` to return the string used to divide the log header and content
+- Add `info.parse_log_file(path)` to parse the log into a starlark dict
+
 ## v0.14.0
 
 - All load statements, `working_directory` and rule names use:

@@ -682,7 +682,7 @@ impl State {
                 };
 
                 let mut progress_bar = multi_progress.add_progress(
-                    task.rule.name.as_ref(),
+                    &label::sanitize_rule_for_display(task.rule.name.clone()),
                     Some(100),
                     Some(message.as_str()),
                 );

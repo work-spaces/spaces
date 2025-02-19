@@ -7,7 +7,9 @@ use std::sync::Arc;
 pub const SPACES_LOGS_NAME: &str = ".spaces/logs";
 pub const METRICS_FILE_NAME: &str = ".spaces/metrics.spaces.json";
 const SETTINGS_FILE_NAME: &str = ".spaces/settings.spaces.json";
+pub const SPACES_WORKSPACE_ENV_VAR: &str = "SPACES_WORKSPACE";
 const SPACES_HOME_ENV_VAR: &str = "SPACES_HOME";
+
 
 pub fn get_checkout_store_path() -> Arc<str> {
     if let Ok(spaces_home) = std::env::var(SPACES_HOME_ENV_VAR) {

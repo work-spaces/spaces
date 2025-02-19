@@ -15,7 +15,7 @@ pub const FUNCTIONS: &[Function] = &[
         args: &[            
             Arg {
                 name: "name",
-                description: "The name of the target to get the log file",
+                description: "The name of the rule to get the log file",
                 dict: &[],
             },
         ],
@@ -267,11 +267,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         }
     }
 
-    fn get_path_to_log_file(target: &str) -> anyhow::Result<String> {
+    fn get_path_to_log_file(rule: &str) -> anyhow::Result<String> {
         let workspace_arc =
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();
-        let rule_name = rules::get_sanitized_rule_name(target.into());
+        let rule_name = rules::get_sanitized_rule_name(rule.into());
         Ok(workspace.get_log_file(rule_name.as_ref()).to_string())
     }
 

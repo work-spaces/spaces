@@ -1,6 +1,27 @@
 use crate::workspace;
 use std::sync::Arc;
 
+pub fn sanitize_rule_for_display(rule_name: Arc<str>) -> Arc<str> {
+    // if length > MAX_RULE_NAME_LENGTH show firtst INTRO_LENGTH chars, then ... then the rest
+    const MAX_RULE_NAME_LENGTH: usize = 64;
+    const INTRO_LENGTH: usize = 16;
+    if rule_name.len() < MAX_RULE_NAME_LENGTH {
+        return rule_name;
+    }
+
+    let mut result = String::new();
+    for (i, c) in rule_name.chars().enumerate() {
+        if i < INTRO_LENGTH {
+            result.push(c);
+        } else if i == INTRO_LENGTH {
+            result.push_str("...");
+        } else if i > rule_name.len() - INTRO_LENGTH {
+            result.push(c);
+        }
+    }
+    result.into()
+}
+
 pub fn sanitize_rule(rule_name: Arc<str>, starlark_module: Option<Arc<str>>) -> Arc<str> {
     if rule_name.starts_with("//") {
         return rule_name;
@@ -35,11 +56,7 @@ pub fn sanitize_working_directory(
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        let separator = if path_prefix.is_empty() {
-            ""
-        } else {
-            "/"
-        };
+        let separator = if path_prefix.is_empty() { "" } else { "/" };
         format!("//{path_prefix}{separator}{working_directory}").into()
     } else {
         working_directory

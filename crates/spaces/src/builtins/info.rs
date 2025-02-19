@@ -4,6 +4,9 @@ use anyhow_source_location::{format_context, format_error};
 use starlark::environment::GlobalsBuilder;
 use starlark::values::none::NoneType;
 use starstd::{Arg, Function};
+use starlark::values::{Heap, Value};
+use std::sync::Arc;
+
 
 pub const FUNCTIONS: &[Function] = &[
     Function {
@@ -67,6 +70,26 @@ pub const FUNCTIONS: &[Function] = &[
         description: "returns true if `--ci` is passed on the command line",
         return_type: "int",
         args: &[],
+        example: None,
+    },
+    Function {
+        name: "get_log_divider_string",
+        description: "returns a string representing the end of the log header",
+        return_type: "str",
+        args: &[],
+        example: None,
+    },
+    Function {
+        name: "parse_log_file",
+        description: "Parses the log file header from yaml and puts the lines into an array",
+        return_type: "dict['header': dict, 'lines': list[str]]",
+        args: &[            
+            Arg {
+                name: "path",
+                description: "The path to the spaces log file",
+                dict: &[],
+            },
+        ],
         example: None,
     },
     Function {
@@ -144,6 +167,49 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(num_cpus::get() as i64)
     }
 
+    fn parse_log_file<'v>(path: &str, heap: &'v Heap) -> anyhow::Result<Value<'v>> {
+        #[derive(serde::Serialize, serde::Deserialize)]
+        struct Log {
+            header: printer::LogHeader,
+            lines: Vec<Arc<str>>
+        }
+
+        let content = std::fs::read_to_string(path).context(format_context!(
+            "Failed to read file {} all paths must be relative to the workspace root",
+            path
+        ))?;
+
+        let mut header = String::new();
+        let mut lines = Vec::new();
+        let log_divider = printer::Printer::get_log_divider();
+        let mut collect_header = true;
+        for line in content.lines() {
+            if line == log_divider.as_ref() {
+                collect_header = false;
+                continue;
+            }
+            if collect_header {
+                header.push_str(line);
+                header.push('\n');
+            } else {
+                lines.push(line.to_string().into());
+            }
+        }
+
+        let log_header: printer::LogHeader = serde_yaml::from_str(&header)
+            .context(format_context!("Failed to parse (yaml) Log Header file {}", path))?;
+
+        let json_value = serde_json::to_value(&Log {
+            header: log_header,
+            lines: lines,
+        }).context(format_context!("Internal Error: Failed to convert Log to JSON {}", path))?;
+
+        // Convert the JSON value to a Starlark value
+        let alloc_value = heap.alloc(json_value);
+        Ok(alloc_value)
+
+    }
+
     fn get_path_to_store() -> anyhow::Result<String> {
         let workspace_arc =
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
@@ -156,6 +222,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();
         Ok(workspace.get_spaces_tools_path().to_string())
+    }
+
+    fn get_log_divider_string() -> anyhow::Result<String> {
+        Ok(printer::Printer::get_log_divider().to_string())
     }
 
     fn set_minimum_version(version: &str) -> anyhow::Result<NoneType> {
