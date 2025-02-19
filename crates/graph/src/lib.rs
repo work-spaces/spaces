@@ -37,7 +37,7 @@ impl Graph {
         self.directed_graph[node].as_ref()
     }
 
-    fn get_target_not_found_error(&self, target: Arc<str>) -> anyhow::Error {
+    pub fn get_target_not_found(&self, target: Arc<str>) -> Arc<str> {
         let targets: Vec<Arc<str>> = self
             .directed_graph
             .node_indices()
@@ -48,14 +48,18 @@ impl Graph {
         // get up to 5 suggestions
         let suggestions = suggestions
             .iter()
-            .take(5)
+            .take(10)
             .map(|(_, suggestion)| suggestion.to_string())
             .collect::<Vec<String>>();
 
-        format_error!(
+        format!(
             "{target} not found. Similar targets include:\n{}",
             suggestions.join("\n")
-        )
+        ).into()
+    }
+
+    fn get_target_not_found_error(&self, target: Arc<str>) -> anyhow::Error {
+        format_error!("{}", self.get_target_not_found(target).as_ref())
     }
 
     pub fn get_sorted_tasks(

@@ -117,7 +117,7 @@ pub const FUNCTIONS: &[Function] = &[
         example: Some(r#"run.abort("Failed to do something")"#)}
 ];
 
-fn add_rule_to_all(rule: &rules::Rule){
+fn add_rule_to_all(rule: &rules::Rule) {
     if let Some(rules::RuleType::Run) = rule.type_.as_ref() {
         singleton::insert_run_all(rules::get_sanitized_rule_name(rule.name.clone()));
     }
@@ -159,16 +159,16 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .context(format_context!("invalid inputs globs with {}", rule.name))?;
 
         add_rule_to_all(&rule);
-        
+
         let mut exec: executor::exec::Exec = serde_json::from_value(exec.to_json_value()?)
             .context(format_context!("bad options for exec"))?;
 
+        if let Some(working_directory) = exec.working_directory.as_mut() {
+            *working_directory = rules::get_sanitized_working_directory(working_directory.clone());
+        }
+
         if let Some(redirect_stdout) = exec.redirect_stdout.as_mut() {
-            *redirect_stdout = format!(
-                "build/{}",
-                redirect_stdout
-            )
-            .into();
+            *redirect_stdout = format!("build/{}", redirect_stdout).into();
         }
         let rule_name = rule.name.clone();
         rules::insert_task(rules::Task::new(

@@ -336,6 +336,11 @@ pub fn get_sanitized_rule_name(rule_name: Arc<str>) -> Arc<str> {
     state.get_sanitized_rule_name(rule_name)
 }
 
+pub fn get_sanitized_working_directory(rule_name: Arc<str>) -> Arc<str> {
+    let state = get_state().read();
+    state.get_sanitized_working_directory(rule_name)
+}
+
 pub fn insert_task(task: Task) -> anyhow::Result<()> {
     let state = get_state().read();
     state.insert_task(task)
@@ -400,6 +405,10 @@ impl State {
         label::sanitize_rule(rule_name, self.latest_starlark_module.clone())
     }
 
+    pub fn get_sanitized_working_directory(&self, rule_name: Arc<str>) -> Arc<str> {
+        label::sanitize_working_directory(rule_name, self.latest_starlark_module.clone())
+    }
+
     pub fn insert_task(&self, mut task: Task) -> anyhow::Result<()> {
         // update the rule name to have the starlark module name
         let rule_label = label::sanitize_rule(task.rule.name, self.latest_starlark_module.clone());
@@ -412,6 +421,7 @@ impl State {
                 if label::is_rule_sanitized(dep) {
                     continue;
                 }
+                // sanitize the rule by prepending the current module location
                 *dep = label::sanitize_rule(dep.clone(), self.latest_starlark_module.clone());
             }
         }
@@ -475,12 +485,13 @@ impl State {
             }
 
             // connect the dependencies
-
             if let Some(deps) = task.rule.deps.clone() {
                 for dep in deps {
                     let dep_task = tasks_copy.get(&dep).ok_or(format_error!(
-                        "Task Dependency not found: {dep} specified by {}",
-                        task.rule.name
+                        "Task Dependency {} not found for {}: {}",
+                        dep,
+                        task.rule.name,
+                        self.graph.get_target_not_found(dep.clone())
                     ))?;
 
                     match task_phase {
@@ -577,7 +588,7 @@ impl State {
         &self,
         printer: &mut printer::Printer,
         phase: Phase,
-        target: Option<Arc<str>>,
+        _target: Option<Arc<str>>,
         filter: &HashSet<Arc<str>>,
         strip_prefix: Option<Arc<str>>,
     ) -> anyhow::Result<()> {
@@ -591,22 +602,29 @@ impl State {
         for node_index in self.sorted.iter() {
             let task_name = self.graph.get_task(*node_index);
 
-            if !filter.is_empty() && !changes::glob::match_globs(filter, task_name) {
+            if !filter.is_empty()
+                && !changes::glob::match_globs(
+                    filter,
+                    task_name.strip_prefix("//").unwrap_or(task_name),
+                )
+            {
+                logger::Logger::new_printer(printer, "glob".into())
+                    .debug(format!("Filtering {task_name} with {filter:?}").as_str());
                 continue;
             }
 
             let task = tasks
                 .get(task_name)
                 .ok_or(format_error!("Task not found {task_name}"))?;
+
+            if singleton::get_has_help() && task.rule.help.is_none() {
+                continue;
+            }
+
             if task.phase == phase {
                 if printer.verbosity.level == printer::Level::Debug {
                     printer.debug(task_name, &task)?;
-                } else if printer.verbosity.level <= printer::Level::Message
-                    || task.rule.help.is_some()
-                    || target.is_some()
-                    || !filter.is_empty()
-                    || strip_prefix.is_some()
-                {
+                } else {
                     let help = task
                         .rule
                         .help
@@ -615,18 +633,13 @@ impl State {
                         .unwrap_or("<Not Provided>".to_string());
 
                     let mut task_name = task.rule.name.as_ref();
-                    let mut prefix = "//";
                     if let Some(strip_prefix) = strip_prefix.as_ref() {
                         if let Some(stripped) = task_name.strip_prefix(strip_prefix.as_ref()) {
-                            task_name = stripped;
-                            prefix = "";
+                            task_name = stripped.strip_prefix("/").unwrap_or(stripped);
                         }
                     }
 
-                    task_info_list.insert(
-                        format!("{}{}", prefix, task_name).into(),
-                        TaskInfo { help },
-                    );
+                    task_info_list.insert(task_name.into(), TaskInfo { help });
                 }
             }
         }
@@ -762,7 +775,7 @@ pub fn get_checkout_path() -> anyhow::Result<Arc<str>> {
             .unwrap_or_default();
         Ok(parent.into())
     } else {
-        Err(format_error!("No starlark module set"))
+        Err(format_error!("Internal Error: No starlark module set"))
     }
 }
 

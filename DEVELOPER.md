@@ -17,7 +17,7 @@ cargo build
 Publish a release by pushing a tag
 
 ```sh
-export VERSION=0.13.1
+export VERSION=0.14.0
 git tag -a v$VERSION -m "Update version"
 git push origin tag v$VERSION
 ```
@@ -32,6 +32,9 @@ git push origin tag v$VERSION
 - soft-links in tools should be link to the sysroot file not the original file
 - Make `spaces sync` work as expected to update workflows
   - This seems to be working. Could pull default/blobless clones if no changes have been made
-- Should all paths require `//...` to be at the workspace level and everything is relative to the rule directory?
-  - should rules be allowed to be relative within a repo?
-- How to build rules that concatenate compile commands? she-bang script in sdk?
+- How to build rules that concatenate compile commands? she-bang script in sdk? 
+- Format multi-line help info
+- Use ellises in progress bar for names that exceed a length
+- Add a `.star` she-bang script to watch a file for some content
+  - have a sampling period and a timeout
+- Capsules should install to sysroot, not the build folder

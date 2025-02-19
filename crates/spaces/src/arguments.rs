@@ -54,7 +54,7 @@ fn handle_verbosity(
     printer: &mut printer::Printer,
     verbosity: printer::Level,
     is_ci: bool,
-    rescan: bool,   
+    rescan: bool,
     is_hide_progress_bars: bool,
 ) {
     singleton::set_rescan(rescan);
@@ -116,7 +116,13 @@ pub fn execute() -> anyhow::Result<()> {
                     force_install_tools,
                 },
         } => {
-            handle_verbosity(&mut printer, verbosity.into(), ci, rescan, hide_progress_bars);
+            handle_verbosity(
+                &mut printer,
+                verbosity.into(),
+                ci,
+                rescan,
+                hide_progress_bars,
+            );
 
             let mut script_inputs: Vec<Arc<str>> = vec![];
             script_inputs.extend(script.clone());
@@ -192,7 +198,13 @@ pub fn execute() -> anyhow::Result<()> {
             rescan,
             commands: Commands::Sync {},
         } => {
-            handle_verbosity(&mut printer, verbosity.into(), ci, rescan, hide_progress_bars);
+            handle_verbosity(
+                &mut printer,
+                verbosity.into(),
+                ci,
+                rescan,
+                hide_progress_bars,
+            );
             runner::run_starlark_modules_in_workspace(
                 &mut printer,
                 rules::Phase::Checkout,
@@ -227,7 +239,13 @@ pub fn execute() -> anyhow::Result<()> {
                     extra_rule_args,
                 },
         } => {
-            handle_verbosity(&mut printer, verbosity.into(), ci, rescan, hide_progress_bars);
+            handle_verbosity(
+                &mut printer,
+                verbosity.into(),
+                ci,
+                rescan,
+                hide_progress_bars,
+            );
 
             if target.is_none() && !extra_rule_args.is_empty() {
                 return Err(format_error!(
@@ -251,9 +269,20 @@ pub fn execute() -> anyhow::Result<()> {
             hide_progress_bars,
             ci,
             rescan,
-            commands: Commands::Inspect { target, filter },
+            commands:
+                Commands::Inspect {
+                    target,
+                    filter,
+                    has_help,
+                },
         } => {
-            handle_verbosity(&mut printer, verbosity.into(), ci, rescan, hide_progress_bars);
+            handle_verbosity(
+                &mut printer,
+                verbosity.into(),
+                ci,
+                rescan,
+                hide_progress_bars,
+            );
 
             if printer.verbosity.level > printer::Level::Info {
                 printer.verbosity.level = printer::Level::Info;
@@ -266,18 +295,17 @@ pub fn execute() -> anyhow::Result<()> {
                     let effective_expression =
                         if glob_expression.starts_with('-') || glob_expression.starts_with('+') {
                             glob_expression.to_string()
+                        } else if glob_expression.contains('*') {
+                            format!("+{}", glob_expression)
                         } else {
-                            if glob_expression.contains('*') {
-                                format!("+{}", glob_expression)
-                            } else {
-                                format!("+**{}**", glob_expression)
-                            }
+                            format!("+**{}**", glob_expression)
                         };
                     filter_globs.insert(effective_expression.into());
                 }
             }
 
             singleton::set_inspect_globs(filter_globs);
+            singleton::set_has_help(has_help);
 
             runner::run_starlark_modules_in_workspace(
                 &mut printer,
@@ -297,7 +325,13 @@ pub fn execute() -> anyhow::Result<()> {
             rescan,
             commands: Commands::Completions { shell },
         } => {
-            handle_verbosity(&mut printer, verbosity.into(), ci, rescan, hide_progress_bars);
+            handle_verbosity(
+                &mut printer,
+                verbosity.into(),
+                ci,
+                rescan,
+                hide_progress_bars,
+            );
 
             clap_complete::generate(
                 shell,
@@ -314,7 +348,13 @@ pub fn execute() -> anyhow::Result<()> {
             rescan,
             commands: Commands::Docs { item },
         } => {
-            handle_verbosity(&mut printer, verbosity.into(), ci, rescan, hide_progress_bars);
+            handle_verbosity(
+                &mut printer,
+                verbosity.into(),
+                ci,
+                rescan,
+                hide_progress_bars,
+            );
 
             docs::show(&mut printer, item)?;
         }
@@ -389,6 +429,9 @@ Inspect all the scripts in the workspace without running any rules.
         // Filter targets with a glob (e.g. `--filter=**/my-target`)
         #[arg(long)]
         filter: Option<Arc<str>>,
+        // Only show rules with the help entry populated
+        #[arg(long)]
+        has_help: bool,
     },
     /// Generates shell completions for the spaces command.
     Completions {

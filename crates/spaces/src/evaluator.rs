@@ -45,6 +45,7 @@ pub fn get_globals(with_rules: WithRules) -> GlobalsBuilder {
 
     if with_rules == WithRules::Yes {
         builder = builder
+            .with_namespace("workspace", builtins::workspace::globals)
             .with_namespace("checkout", builtins::checkout::globals)
             .with_namespace("run", builtins::run::globals);
     }
@@ -180,7 +181,7 @@ fn insert_run_all(target: Option<Arc<str>>) -> anyhow::Result<Option<Arc<str>>> 
         ))
         .context(format_context!("Failed to insert task `all`"))?;
 
-        Ok(Some(":all".into()))
+        Ok(Some("//:all".into()))
     } else {
         Ok(target)
     }
@@ -312,7 +313,7 @@ pub fn run_starlark_modules(
             let mut strip_prefix = None;
             if globs.is_empty() && !relative_path.is_empty() {
                 globs.insert(format!("+{}**", relative_path).into());
-                strip_prefix = Some(relative_path);
+                strip_prefix = Some(format!("//{}", relative_path).into());
             }
 
             //only show checkout if log level is message or higher

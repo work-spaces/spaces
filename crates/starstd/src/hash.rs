@@ -18,6 +18,20 @@ pub const FUNCTIONS: &[Function] = &[
         ],
         example: None,
     },
+    Function {
+        name: "compute_sha256_from_string",
+        description:
+            "Computes the sha256 checksum of the given string.",
+        return_type: "String",
+        args: &[
+            Arg {
+                name: "input",
+                description: "input string to hash",
+                dict: &[],
+            },
+        ],
+        example: None,
+    },
 ];
 
 // This defines the function that is visible to Starlark
@@ -27,5 +41,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let file_contents = std::fs::read(file_path).context(format_context!("{file_path}"))?;
         let digest = sha256::digest(file_contents);
         Ok(digest)
+    }
+
+    fn compute_sha256_from_string(input: &str) -> anyhow::Result<String> {
+        Ok(sha256::digest(input.as_bytes()))
     }
 }

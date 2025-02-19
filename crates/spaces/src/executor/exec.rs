@@ -78,10 +78,15 @@ impl Exec {
 
         let command_line_target = workspace.read().target.clone();
 
+        let mut log_level = self.log_level;
         if let Some(target) = command_line_target {
             if target.as_ref() == name {
                 let trailing_args = workspace.read().trailing_args.clone();
+                let is_trailing_args_empty = trailing_args.is_empty();
                 arguments.extend(trailing_args);
+                if log_level.is_none() && !is_trailing_args_empty {
+                    log_level = Some(printer::Level::App);
+                }
             }
         }
 
@@ -95,10 +100,11 @@ impl Exec {
         };
 
         let working_directory = if let Some(directory) = self.working_directory.as_ref() {
-            if directory.starts_with('/') {
-                Some(directory.clone())
+            if let Some(relative_path) = directory.strip_prefix("//") {
+                Some(format!("{workspace_path}/{relative_path}").into())
             } else {
-                Some(format!("{workspace_path}/{directory}").into())
+                // sanitize means this path never gets taken
+                Some(directory.clone())
             }
         } else {
             None
@@ -113,10 +119,8 @@ impl Exec {
             log_file_path: log_file_path.clone(),
             clear_environment: true,
             process_started_with_id: Some(handle_process_started),
-            log_level: self.log_level,
-            timeout: self
-                .timeout
-                .map(std::time::Duration::from_secs_f64),
+            log_level,
+            timeout: self.timeout.map(std::time::Duration::from_secs_f64),
         };
 
         logger(progress, name).debug(
@@ -136,7 +140,7 @@ impl Exec {
 
         let stdout_content = match result {
             Ok(content) => {
-                logger(progress, name).info(format!("succeeded").as_str());
+                logger(progress, name).info("succeeded");
 
                 if let Some(Expect::Failure) = self.expect.as_ref() {
                     return Err(format_error!("Expected failure but task succeeded"));
@@ -145,7 +149,7 @@ impl Exec {
                 }
             }
             Err(exec_error) => {
-                logger(progress, name).info(format!("Failed").as_str());
+                logger(progress, name).info("Failed");
                 if let Some(Expect::Failure) = self.expect.as_ref() {
                     None
                 } else if let Some(Expect::Any) = self.expect.as_ref() {
@@ -305,13 +309,11 @@ impl ExecIf {
         let mut result = Vec::new();
         match condition_result {
             Ok(_) => {
-                logger(&mut progress, name)
-                    .trace(format!("exec condition succeeded").as_str());
+                logger(&mut progress, name).trace("exec condition succeeded");
                 result.clone_from(&self.then_);
             }
             Err(_) => {
-                logger(&mut progress, name)
-                    .trace(format!("exec condition failed running").as_str());
+                logger(&mut progress, name).trace("exec condition failed running");
                 if let Some(else_) = self.else_.as_ref() {
                     result.clone_from(else_);
                 }

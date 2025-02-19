@@ -1,4 +1,4 @@
-use crate::builtins::{checkout, info, run};
+use crate::builtins::{checkout, info, run, workspace};
 use clap::ValueEnum;
 use starstd::Function;
 
@@ -90,12 +90,28 @@ fn show_info(level: u8, markdown: &mut printer::markdown::Markdown) -> anyhow::R
     markdown.heading(level + 1, "Description")?;
 
     markdown.paragraph(
-        r#"The `info` functions provide information about the workspace
-during checkout and run. Info functions are executed immediately. They are not rule definitions."#,
+        r#"The `info` functions provide information about spaces and the platform. 
+Info functions are executed immediately. They are not rule definitions."#,
     )?;
 
     markdown.heading(level + 1, "Functions")?;
     show_sorted_functions(info::FUNCTIONS, level + 2, markdown)?;
+
+    Ok(())
+}
+
+fn show_workspace(level: u8, markdown: &mut printer::markdown::Markdown) -> anyhow::Result<()> {
+    markdown.heading(level, "Info Functions")?;
+
+    markdown.heading(level + 1, "Description")?;
+
+    markdown.paragraph(
+        r#"The `workspace` functions provide information about the workspace
+during checkout and run. Workspaces functions are executed immediately. They are not rule definitions."#,
+    )?;
+
+    markdown.heading(level + 1, "Functions")?;
+    show_sorted_functions(workspace::FUNCTIONS, level + 2, markdown)?;
 
     Ok(())
 }
@@ -219,6 +235,8 @@ spaces --verbosity=debug evaluate
     show_checkout(2, markdown)?;
     markdown.printer.newline()?;
     show_run(2, markdown)?;
+    markdown.printer.newline()?;
+    show_workspace(2, markdown)?;
     markdown.printer.newline()?;
     show_info(2, markdown)?;
     markdown.printer.newline()?;

@@ -12,6 +12,7 @@ struct State {
     max_queue_count: i64,
     error_chain: Vec<String>,
     inspect_globs: HashSet<Arc<str>>,
+    has_help: bool,
     run_all: HashSet<Arc<str>>,
 }
 
@@ -29,6 +30,7 @@ fn get_state() -> &'static lock::StateLock<State> {
         error_chain: Vec::new(),
         inspect_globs: HashSet::new(),
         run_all: HashSet::new(),
+        has_help: false,
     }));
 
     STATE.get()
@@ -61,6 +63,16 @@ pub fn show_error_chain() {
 pub fn insert_run_all(target_name: Arc<str>) {
     let mut state = get_state().write();
     state.run_all.insert(target_name);
+}
+
+pub fn get_has_help() -> bool {
+    let state = get_state().read();
+    state.has_help
+}
+
+pub fn set_has_help(has_help: bool) {
+    let mut state = get_state().write();
+    state.has_help = has_help;
 }
 
 pub fn get_run_all() -> HashSet<Arc<str>> {

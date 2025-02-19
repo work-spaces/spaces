@@ -186,6 +186,87 @@ source ./env
 - `load()` statements that import variables or functions from other starlark scripts
   - `load()` paths can either be relative to the current `star` file or prefixed with `//` to refer to the workspace root.
 
+### Understanding Paths in spaces
+
+Paths for `load()`, `working_directory` and rule names can be either relative to the spaces file where they are declared or relative to the workspace root. Paths prefixed with `//` are always relative to the workspace.
+
+#### `load()` Paths
+
+By convention, the [SDK](https://github.com/work-spaces/sdk) is loaded into the workspace at `@star/sdk`. Files can be loaded from the SDK using, for example:
+
+```python
+load("//@star/sdk/star/info.star", "info_set_minimum_version")
+```
+
+Within `run.star` which is a sibling of `info.star`:
+
+```python
+load("info.star", "info_set_minimum_version")
+```
+
+#### `working_directory` Paths
+
+The example below shows how `spaces` treats the `working_directory` value in run rules.
+
+```python
+load("//@star/sdk/star/run.star", "run_add_exec")
+
+# Run in the same directory as the containing file
+run_add_exec(
+  "list_directory",
+  command = "ls",
+  working_directory = "."
+)
+
+# To execute in the workspace build folder:
+run_add_exec(
+  "list_build_directory",
+  command = "ls",
+  working_directory = "//build"
+)
+
+# The default behavior is to execute in the workspace root
+run_add_exec(
+  "list_workspace_directory",
+  command = "ls",
+)
+```
+
+#### Rule Paths
+
+If the above rules are defined in the workspace at `my-project/spaces.star`, they are run using the commands below. `[.]spaces.star` is converted to `:`.
+
+```sh
+# from workspace root
+spaces run //my-project:list_directory
+cd my-project
+spaces run :list_directory
+```
+
+If the rules are in `my-project/show.spaces.star`, they are run using:
+
+```sh
+# from workspace root
+spaces run //my-project/show:list_directory
+cd my-project
+spaces run show:list_directory
+```
+
+### Adding Checkout Rules
+
+The most common way to add source code is using `checkout_add_repo()`. Here is an example:
+
+```python
+load("//@star/sdk/star/checkout.star", "checkout_add_repo")
+
+checkout_add_repo(
+  "spaces",
+  url = "https://github.com/work-spaces/spaces",
+  clone = "Blobless"
+)
+
+### Adding Run Rules
+
 ## Uninstall Spaces
 
 - Delete the binary: `rm $HOME/.local/bin/spaces`.

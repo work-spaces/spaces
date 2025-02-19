@@ -1,6 +1,17 @@
 # Spaces Change log
 
-# v0.13.1
+## v0.14.0
+
+- All load statements, `working_directory` and rule names use:
+  - `//` to denote a workspace path
+  - `some/path` to denote a relative path from the directory location
+- Move workspace related built-ins from `info` to `workspace`
+- Add built-in: `hash.compute_sha256_from_string()`
+- Add `--has-help` option to inspect to only show rules with `help` provided
+- Fix issues with `inspect` filtering `//`
+- Generate lock files and env file with `CONSTANTS` convention
+
+## v0.13.1
 
 - Improve `spaces inspect`
   - limit to the current folder by default when not at root
@@ -8,13 +19,13 @@
 - Update task hashing to go over the topograph and incorporate digest of deps
   - Currently only used for informational purposes - not available to rules
 
-# v0.13.0
+## v0.13.0
 
 - API breaking change: Remove `capsules` in rust. Starlark implements capsules in SDK v0.2.0
 - Allow checkout rules to be optional (skipped). This supports starlark capsules
 - Cargo clippy fixes
 
-# v0.12.6
+## v0.12.6
 
 - Fix bug when checking out the same repo at different paths
 - Add workspace members to workspace settings file
@@ -22,12 +33,12 @@
 - Add info.get_path_to_workspace_member() and info.is_path_to_workspace_member_available()
 - create `ws` sub-crate to simplify `workspace.rs`
 
-# v0.12.5
+## v0.12.5
 
 - Fix bug where exclude glob of single file is treated as include
 - Allow omitting relative path to current directory in workspace with `run` and `inspect`
 
-# v0.12.4
+## v0.12.4
 
 - Fix bug where task completion is not signaled on some errors
 

@@ -192,13 +192,13 @@ impl Workspace {
 
     pub fn transform_target_path(&self, target: Arc<str>) -> Arc<str> {
         if target.starts_with("//") {
-            target.strip_prefix("//").unwrap().into()
-        } else if self.relative_invoked_path.is_empty() {
             target
+        } else if self.relative_invoked_path.is_empty() {
+            format!("//{target}").into()
         } else if target.starts_with(':') {
-            format!("{}{}", self.relative_invoked_path, target).into()
+            format!("//{}{}", self.relative_invoked_path, target).into()
         } else {
-            format!("{}/{}", self.relative_invoked_path, target).into()
+            format!("//{}/{}", self.relative_invoked_path, target).into()
         }
     } 
 
@@ -512,9 +512,9 @@ impl Workspace {
         let mut workspace_file_content = String::new();
         workspace_file_content.push_str(WORKSPACE_FILE_HEADER);
         workspace_file_content.push('\n');
-        workspace_file_content.push_str("workspace_env = ");
+        workspace_file_content.push_str("WORKSPACE_ENV = ");
         workspace_file_content.push_str(env);
-        workspace_file_content.push_str("\n\ninfo.set_env(env = workspace_env) \n");
+        workspace_file_content.push_str("\n\nworkspace.set_env(env = WORKSPACE_ENV) \n");
         let workspace_file_path = format!("{}/{}", self.absolute_path, ENV_FILE_NAME);
         std::fs::write(workspace_file_path.as_str(), workspace_file_content)
             .context(format_context!("Failed to write workspace file"))?;
@@ -529,11 +529,11 @@ impl Workspace {
         let mut workspace_file_content = String::new();
         workspace_file_content.push_str(WORKSPACE_FILE_HEADER);
         workspace_file_content.push('\n');
-        workspace_file_content.push_str("workspace_locks = ");
+        workspace_file_content.push_str("WORKSPACE_LOCKS = ");
         let locks_str = serde_json::to_string_pretty(&self.locks)
             .context(format_context!("Failed to serialize locks"))?;
         workspace_file_content.push_str(locks_str.as_str());
-        workspace_file_content.push_str("\n\ninfo.set_locks(locks = workspace_locks) \n");
+        workspace_file_content.push_str("\n\nworkspace.set_locks(locks = WORKSPACE_LOCKS) \n");
 
         let workspace_file_path = format!("{}/{}", self.absolute_path, LOCK_FILE_NAME);
         std::fs::write(workspace_file_path.as_str(), workspace_file_content)
