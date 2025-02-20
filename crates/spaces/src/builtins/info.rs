@@ -201,7 +201,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let json_value = serde_json::to_value(&Log {
             header: log_header,
-            lines: lines,
+            lines,
         }).context(format_context!("Internal Error: Failed to convert Log to JSON {}", path))?;
 
         // Convert the JSON value to a Starlark value

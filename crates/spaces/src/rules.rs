@@ -363,9 +363,14 @@ pub fn show_tasks(
     state.show_tasks(printer, phase, target, filter, strip_prefix)
 }
 
-pub fn sort_tasks(target: Option<Arc<str>>, phase: Phase) -> anyhow::Result<()> {
+pub fn sort_tasks(
+    printer: &mut printer::Printer,
+    workspace: workspace::WorkspaceArc,
+    target: Option<Arc<str>>,
+    phase: Phase,
+) -> anyhow::Result<()> {
     let mut state = get_state().write();
-    state.sort_tasks(target, phase)
+    state.sort_tasks(printer, workspace, target, phase)
 }
 
 pub fn execute(
@@ -439,8 +444,16 @@ impl State {
         Ok(())
     }
 
-    pub fn sort_tasks(&mut self, target: Option<Arc<str>>, phase: Phase) -> anyhow::Result<()> {
+    pub fn sort_tasks(
+        &mut self,
+        printer: &mut printer::Printer,
+        workspace: workspace::WorkspaceArc,
+        target: Option<Arc<str>>,
+        phase: Phase,
+    ) -> anyhow::Result<()> {
         let mut tasks = self.tasks.write();
+
+        let mut progress = printer::MultiProgress::new(printer);
 
         let setup_tasks = tasks
             .values()
@@ -448,15 +461,21 @@ impl State {
             .cloned()
             .collect::<Vec<Task>>();
 
+        let mut progress_bar =
+            progress.add_progress("sorting", Some(tasks.len() as u64), Some("Complete"));
+
         self.graph.clear();
         // add all tasks to the graph
         for task in tasks.values() {
+            progress_bar.increment(1);
             self.graph.add_task(task.rule.name.clone());
         }
 
         let tasks_copy = tasks.clone();
 
+        progress_bar.set_total(tasks.len() as u64);
         for task in tasks.values_mut() {
+            progress_bar.increment(1);
             // capture implicit dependencies based on inputs/outputs
             for other_task in tasks_copy.values() {
                 // can't create a dependency on itself
@@ -538,29 +557,38 @@ impl State {
 
         let target_is_some = target.is_some();
 
-        let topo_sorted = self.graph.get_sorted_tasks(None).context(format_context!(
-            "Failed to sort tasks for phase {:?}",
-            phase
-        ))?;
+        let is_sort_tasks = workspace.read().is_sort_tasks;
+        if is_sort_tasks {
+            logger::Logger::new_printer(printer, "tasks".into()).info("sorting and hashing");
+            let topo_sorted = self.graph.get_sorted_tasks(None).context(format_context!(
+                "Failed to sort tasks for phase {:?}",
+                phase
+            ))?;
 
-        for node in topo_sorted.iter() {
-            let task_name = self.graph.get_task(*node);
-            let task = tasks.get(task_name).cloned();
-            if let Some(task) = task {
-                let mut task_hasher = blake3::Hasher::new();
-                task_hasher.update(task.calculate_digest().as_bytes());
-                let mut deps = task.rule.deps.clone().unwrap_or_default();
-                deps.sort();
-                for dep in deps {
-                    if let Some(dep_task) = tasks.get(&dep) {
-                        task_hasher.update(dep_task.digest.as_bytes());
+            let mut tasks_to_save = Vec::new();
+            for node in topo_sorted.iter() {
+                let task_name = self.graph.get_task(*node);
+                let task = tasks.get(task_name).cloned();
+                if let Some(task) = task {
+                    let mut task_hasher = blake3::Hasher::new();
+                    task_hasher.update(task.calculate_digest().as_bytes());
+                    let mut deps = task.rule.deps.clone().unwrap_or_default();
+                    deps.sort();
+                    for dep in deps {
+                        if let Some(dep_task) = tasks.get(&dep) {
+                            task_hasher.update(dep_task.digest.as_bytes());
+                        }
+                    }
+                    if let Some(task_mut) = tasks.get_mut(task_name) {
+                        task_mut.digest = task_hasher.finalize().to_string().into();
+                        tasks_to_save.push(ws::Task {
+                            name: task_name.into(),
+                            hash: task_mut.digest.clone(),
+                        });
                     }
                 }
-
-                if let Some(task_mut) = tasks.get_mut(task_name) {
-                    task_mut.digest = task_hasher.finalize().to_string().into();
-                }
             }
+            workspace.write().settings.bin_settings.tasks = tasks_to_save;
         }
 
         self.sorted = self

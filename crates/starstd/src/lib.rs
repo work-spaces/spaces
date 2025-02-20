@@ -6,6 +6,7 @@ pub mod hash;
 pub mod json;
 pub mod process;
 pub mod script;
+pub mod time;
 
 use starlark::environment::GlobalsBuilder;
 use starlark::values::none::NoneType;

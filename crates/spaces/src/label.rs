@@ -5,6 +5,7 @@ pub fn sanitize_rule_for_display(rule_name: Arc<str>) -> Arc<str> {
     // if length > MAX_RULE_NAME_LENGTH show firtst INTRO_LENGTH chars, then ... then the rest
     const MAX_RULE_NAME_LENGTH: usize = 64;
     const INTRO_LENGTH: usize = 16;
+    const RULE_NAME_REST: usize = MAX_RULE_NAME_LENGTH - INTRO_LENGTH;
     if rule_name.len() < MAX_RULE_NAME_LENGTH {
         return rule_name;
     }
@@ -15,7 +16,7 @@ pub fn sanitize_rule_for_display(rule_name: Arc<str>) -> Arc<str> {
             result.push(c);
         } else if i == INTRO_LENGTH {
             result.push_str("...");
-        } else if i > rule_name.len() - INTRO_LENGTH {
+        } else if i > rule_name.len() - RULE_NAME_REST {
             result.push(c);
         }
     }
@@ -23,7 +24,7 @@ pub fn sanitize_rule_for_display(rule_name: Arc<str>) -> Arc<str> {
 }
 
 pub fn sanitize_rule(rule_name: Arc<str>, starlark_module: Option<Arc<str>>) -> Arc<str> {
-    if rule_name.starts_with("//") {
+    if is_rule_sanitized(rule_name.as_ref()) {
         return rule_name;
     }
 
@@ -35,8 +36,10 @@ pub fn sanitize_rule(rule_name: Arc<str>, starlark_module: Option<Arc<str>>) -> 
             .strip_suffix(slash_suffix.as_str())
             .or_else(|| latest_module.strip_suffix(dot_suffix.as_str()))
             .unwrap_or("");
+    
+        let separator = if rule_name.contains(':') { '/' } else { ':' };
+        format!("//{rule_prefix}{separator}{rule_name}").into()
 
-        format!("//{rule_prefix}:{rule_name}").into()
     } else {
         rule_name
     }

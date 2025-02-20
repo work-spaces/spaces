@@ -41,6 +41,7 @@ pub fn get_globals(with_rules: WithRules) -> GlobalsBuilder {
         .with_namespace("hash", starstd::hash::globals)
         .with_namespace("process", starstd::process::globals)
         .with_namespace("script", starstd::script::globals)
+        .with_namespace("time", starstd::time::globals)
         .with_namespace("info", builtins::info::globals);
 
     if with_rules == WithRules::Yes {
@@ -223,7 +224,7 @@ pub fn run_starlark_modules(
         if let Some((name, content)) = module_queue.pop_front() {
             let mut _workspace_lock = get_state().write();
             singleton::set_active_workspace(workspace.clone());
-            star_logger(printer).message(format!("Evaluating module {}", name).as_str());
+            star_logger(printer).message(format!("evaluating {}", name).as_str());
             let _ = evaluate_module(
                 workspace_path.clone(),
                 name.clone(),
@@ -236,7 +237,8 @@ pub fn run_starlark_modules(
         // During checkout phase, additional modules may be added to the queue
         // if the repo contains more spaces.star files
         if phase == rules::Phase::Checkout {
-            rules::sort_tasks(None, phase).context(format_context!("Failed to sort tasks"))?;
+            rules::sort_tasks(printer, workspace.clone(), None, phase)
+                .context(format_context!("Failed to sort tasks"))?;
             star_logger(printer).debug("--Checkout Phase--");
             rules::debug_sorted_tasks(printer, phase)
                 .context(format_context!("Failed to debug sorted tasks"))?;
@@ -288,7 +290,7 @@ pub fn run_starlark_modules(
                 star_logger(printer).info(repro_message.as_str());
             }
 
-            rules::sort_tasks(target.clone(), phase)
+            rules::sort_tasks(printer, workspace.clone(), target.clone(), phase)
                 .context(format_context!("Failed to sort tasks"))?;
 
             rules::debug_sorted_tasks(printer, phase)
@@ -299,7 +301,7 @@ pub fn run_starlark_modules(
         }
         rules::Phase::Inspect => {
             star_logger(printer).message("--Inspect Phase--");
-            rules::sort_tasks(target.clone(), phase)
+            rules::sort_tasks(printer, workspace.clone(), target.clone(), phase)
                 .context(format_context!("Failed to sort tasks"))?;
 
             rules::debug_sorted_tasks(printer, rules::Phase::Run)
@@ -340,8 +342,13 @@ pub fn run_starlark_modules(
             star_logger(printer).message("--Post Checkout Phase--");
 
             // at this point everything should be preset, sort tasks as if in run phase
-            rules::sort_tasks(target.clone(), rules::Phase::Run)
-                .context(format_context!("Failed to sort tasks"))?;
+            rules::sort_tasks(
+                printer,
+                workspace.clone(),
+                target.clone(),
+                rules::Phase::Run,
+            )
+            .context(format_context!("Failed to sort tasks"))?;
             rules::debug_sorted_tasks(printer, rules::Phase::PostCheckout)
                 .context(format_context!("Failed to debug sorted tasks"))?;
 
@@ -375,14 +382,16 @@ pub fn run_starlark_modules(
                 .read()
                 .save_env_file(env_str.as_str())
                 .context(format_context!("Failed to save env file"))?;
-
-            star_logger(printer).debug("saving workspace setings");
-            workspace
-                .read()
-                .save_settings()
-                .context(format_context!("Failed to save settings"))?;
         }
         _ => {}
+    }
+
+    if phase == rules::Phase::Checkout || singleton::get_is_rescan() || workspace.read().is_sort_tasks {
+        star_logger(printer).debug("saving workspace setings");
+        workspace
+            .read()
+            .save_settings()
+            .context(format_context!("Failed to save settings"))?;
     }
 
     Ok(())

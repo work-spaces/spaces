@@ -17,7 +17,7 @@ cargo build
 Publish a release by pushing a tag
 
 ```sh
-export VERSION=0.14.2
+export VERSION=0.14.3
 git tag -a v$VERSION -m "Update version"
 git push origin tag v$VERSION
 ```
@@ -33,7 +33,9 @@ git push origin tag v$VERSION
 - Make `spaces sync` work as expected to update workflows
   - This seems to be working. Could pull default/blobless clones if no changes have been made
 - How to build rules that concatenate compile commands? she-bang script in sdk? 
-- Add a `.star` she-bang script to watch a file for some content
-  - have a sampling period and a timeout
-  - log has the divider between content and header
 - Capsules should install to sysroot, not the build folder
+- There is a long delay between - something in how the graph is evaluated is taking too long
+  - --Inspect Phase-- AND
+  - Queued Task
+- Save the spaces version used to create the workspace. Auto launch that version when running
+  - do `spaces_add` with the correct version. softlink from `sysroot/bin/spaces` to the workspace root `spaces` then use `./spaces` to execute

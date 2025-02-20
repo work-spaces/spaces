@@ -141,6 +141,7 @@ pub struct Workspace {
     pub digest: Arc<str>,                   // set at startup
     pub locks: HashMap<Arc<str>, Arc<str>>, // set during eval
     pub env: environment::Environment,      // set during eval
+    pub is_sort_tasks: bool,                // set during eval
     #[allow(dead_code)]
     pub new_branch_name: Option<Arc<str>>, // set during eval - not used
     changes: changes::Changes,              // modified during run
@@ -200,7 +201,7 @@ impl Workspace {
         } else {
             format!("//{}/{}", self.relative_invoked_path, target).into()
         }
-    } 
+    }
 
     pub fn is_reproducible(&self) -> bool {
         if let Some(value) = self.env.vars.get(SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE) {
@@ -343,7 +344,6 @@ impl Workspace {
         } else {
             logger(&mut progress).debug(format!("No sync order found at {absolute_path}").as_str());
             is_run_or_inspect = false;
-            logger(&mut progress).debug("New Settings");
             let mut settings = ws::Settings::default();
             if let Some(scripts) = input_script_names {
                 settings.order = scripts;
@@ -372,10 +372,9 @@ impl Workspace {
 
         modules.extend(original_modules);
 
-        let mut scanned_modules = HashSet::new();
-
         if !settings.is_scanned.unwrap_or(false) || singleton::get_is_rescan() {
-            // not scanned until walkdir runs during run or inspect
+            singleton::set_rescan(true); // save the settings on exit
+                                         // not scanned until walkdir runs during run or inspect
             settings.is_scanned = Some(is_run_or_inspect);
 
             logger(&mut progress).message(format!("Scanning {}", absolute_path).as_str());
@@ -389,7 +388,7 @@ impl Workspace {
                 .collect();
 
             progress.set_total(walkdir.len() as u64);
-
+            settings.bin_settings.scanned_modules.clear();
             for entry in walkdir {
                 progress.increment(1);
                 if let Ok(entry) = entry.context(format_context!("While walking directory")) {
@@ -400,41 +399,51 @@ impl Workspace {
                         if let Some(stripped_path) =
                             path.strip_prefix(format!("{}/", absolute_path).as_str())
                         {
-                            if !stripped_path.starts_with(".spaces")
-                                && !loaded_modules.contains(stripped_path)
-                            {
+                            if !stripped_path.starts_with(".spaces") {
                                 logger(&mut progress).debug(
                                     format!("Loading module from directory: {stripped_path}")
                                         .as_str(),
                                 );
-                                loaded_modules.insert(stripped_path.into());
-                                scanned_modules.insert(stripped_path.into());
+                                settings
+                                    .bin_settings
+                                    .scanned_modules
+                                    .insert(stripped_path.into(), "".into());
+                                settings.scanned_modules.insert(stripped_path.into());
                             }
                         }
                     }
                 }
             }
-
-            settings.scanned_modules = scanned_modules.clone();
-            settings
-                .save(absolute_path.as_ref())
-                .context(format_context!(
-                    "Failed to save settings file for {absolute_path}"
-                ))?;
         } else {
             progress.set_ending_message(
                 "Loaded modules from settings. Use `--rescan` to check for new modules.",
             );
-            scanned_modules = settings.scanned_modules.clone();
         }
 
         let mut unordered_modules: Vec<(Arc<str>, Arc<str>)> = vec![];
-        for module_path in scanned_modules {
+
+        let mut is_sort_tasks = false;
+        for (module_path, item_hash) in settings.bin_settings.scanned_modules.iter_mut() {
             let content: Arc<str> = std::fs::read_to_string(module_path.as_ref())
                 .context(format_context!("Failed to read file {module_path}"))?
                 .into();
-            unordered_modules.push((module_path, content));
+            let content_hash = blake3::hash(content.as_bytes()).to_string();
+            if content_hash != item_hash.as_ref() {
+                logger(&mut progress).info(
+                    format!(
+                        "{module_path} changed"
+                    )
+                    .as_str(),
+                );
+                is_sort_tasks = true;
+            }
+            *item_hash = content_hash.into();
+            if !loaded_modules.contains(module_path) {
+                loaded_modules.insert(module_path.clone());
+                unordered_modules.push((module_path.clone(), content));
+            }
         }
+
         unordered_modules.sort_by(|a, b| a.0.cmp(&b.0));
         modules.extend(unordered_modules);
 
@@ -476,6 +485,7 @@ impl Workspace {
             target: None,
             relative_invoked_path,
             settings,
+            is_sort_tasks,
         })
     }
 

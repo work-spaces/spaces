@@ -1,15 +1,16 @@
 use anyhow::Context;
 use anyhow_source_location::format_context;
+use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashSet, HashMap};
 use std::sync::Arc;
 
 pub const SPACES_LOGS_NAME: &str = ".spaces/logs";
 pub const METRICS_FILE_NAME: &str = ".spaces/metrics.spaces.json";
 const SETTINGS_FILE_NAME: &str = ".spaces/settings.spaces.json";
+const BIN_SETTINGS_FILE_NAME: &str = ".spaces/settings.spaces";
 pub const SPACES_WORKSPACE_ENV_VAR: &str = "SPACES_WORKSPACE";
 const SPACES_HOME_ENV_VAR: &str = "SPACES_HOME";
-
 
 pub fn get_checkout_store_path() -> Arc<str> {
     if let Ok(spaces_home) = std::env::var(SPACES_HOME_ENV_VAR) {
@@ -30,7 +31,7 @@ pub enum RequiredType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MemberRequirement {
-    pub url: Arc<str>,               // Full url used to reference the member
+    pub url: Arc<str>,                  // Full url used to reference the member
     pub required: Option<RequiredType>, // git rev, tag, or branch, if provided, it is used
 }
 
@@ -44,7 +45,7 @@ impl MemberRequirement {
 #[serde(deny_unknown_fields)]
 pub struct Member {
     pub path: Arc<str>,            // relative workspace path to the member
-    pub url: Arc<str>,               // Full url used to reference the member
+    pub url: Arc<str>,             // Full url used to reference the member
     pub rev: Arc<str>,             // git tag or rev or sha256
     pub version: Option<Arc<str>>, // version e.g. 1.0.0
 }
@@ -69,15 +70,35 @@ impl Member {
     }
 }
 
+#[derive(Debug, Encode, Decode)]
+pub struct Task {
+    pub name: Arc<str>,
+    pub hash: Arc<str>,
+}
+
+#[derive(Debug, Encode, Decode, Default)]
+pub struct BinSettings {
+    pub tasks: Vec<Task>,
+    pub scanned_modules: HashMap<Arc<str>, Arc<str>>,
+}
+
+fn get_unknown_version() -> Arc<str> {
+    "unknown".into()
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Settings {
     pub store_path: Arc<str>,
-    pub order: Vec<Arc<str>>,
-    #[serde(default = "HashSet::new")]
+    #[serde(default = "get_unknown_version")]
+    pub spaces_version: Arc<str>,
+    #[serde(default)]
     pub scanned_modules: HashSet<Arc<str>>,
+    pub order: Vec<Arc<str>>,
     pub is_scanned: Option<bool>,
     #[serde(default = "HashMap::new")]
     pub members: HashMap<Arc<str>, Vec<Member>>,
+    #[serde(skip)]
+    pub bin_settings: BinSettings,
 }
 
 impl Default for Settings {
@@ -91,20 +112,31 @@ impl Settings {
         Self {
             store_path: get_checkout_store_path(),
             order: Vec::new(),
-            scanned_modules: HashSet::new(),
+            spaces_version: env!("CARGO_PKG_VERSION").into(),
             is_scanned: None,
+            scanned_modules: HashSet::new(),
             members: HashMap::new(),
+            bin_settings: Default::default(),
         }
     }
 
-    pub fn load(path: &str) -> anyhow::Result<Self> {
-        let load_path = format!("{path}/{SETTINGS_FILE_NAME}");
-        let content = std::fs::read_to_string(load_path.as_str()).context(format_context!(
-            "Failed to read load order file {load_path}"
-        ))?;
-        let settings: Settings = serde_json::from_str(content.as_str()).context(
-            format_context!("Failed to parse load order file {load_path}"),
-        )?;
+    pub fn load(workspace_path: &str) -> anyhow::Result<Self> {
+        let path = format!("{workspace_path}/{SETTINGS_FILE_NAME}");
+        let content = std::fs::read_to_string(path.as_str())
+            .context(format_context!("Failed to read load order file {path}"))?;
+        let mut settings: Settings = serde_json::from_str(content.as_str())
+            .context(format_context!("Failed to parse load order file {path}"))?;
+
+        let path = format!("{workspace_path}/{BIN_SETTINGS_FILE_NAME}");
+        if std::path::Path::new(path.as_str()).exists() {
+            let file = std::fs::File::open(path.as_str())
+                .context(format_context!("Failed to open {path:?}"))?;
+            let reader = std::io::BufReader::new(file);
+            settings.bin_settings =
+                bincode::decode_from_reader(reader, bincode::config::standard())
+                    .context(format_context!("Failed to deserialize {path:?}"))?;
+        }
+
         Ok(settings)
     }
 
@@ -121,18 +153,25 @@ impl Settings {
     }
 
     pub fn save(&self, workspace_path: &str) -> anyhow::Result<()> {
+
+        std::fs::create_dir_all(workspace_path)
+            .context(format_context!("Failed to create workspace directory {workspace_path}"))?;
+
         let path = format!("{workspace_path}/{SETTINGS_FILE_NAME}");
         let content = serde_json::to_string_pretty(&self)
             .context(format_context!("Failed to serialize load order"))?;
         std::fs::write(path.as_str(), content.as_str())
             .context(format_context!("Failed to save settings file {path}"))?;
+
+        let path = format!("{workspace_path}/{BIN_SETTINGS_FILE_NAME}");
+        let encoded = bincode::encode_to_vec(&self.bin_settings, bincode::config::standard())
+            .context(format_context!("Failed to encode bin settings"))?;
+        std::fs::write(path.as_str(), encoded)
+            .context(format_context!("Failed to write to {path:?}"))?;
         Ok(())
     }
 
-    pub fn get_path_to_member(
-        &self,
-        member_requirment: &MemberRequirement,
-    ) -> Option<Arc<str>> {
+    pub fn get_path_to_member(&self, member_requirment: &MemberRequirement) -> Option<Arc<str>> {
         let entry_option = self.members.get(&member_requirment.get_hash_key());
         let path_option = entry_option.map(|member_entries| {
             let mut path_option = None;

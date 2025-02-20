@@ -1,5 +1,13 @@
 # Spaces Change log
 
+## v0.14.3
+
+- Add `time` builtins with `now()` and `sleep()`
+- Cache task hashes to a binary file
+- Add `spaces_version` to workspace settings
+- Fix bug where a `dep` to a relative path wasn't being resolved
+- Add logging/progress to task sorting
+
 ## v0.14.2
 
 - Update printer hash to fix build break
