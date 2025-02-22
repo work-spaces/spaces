@@ -9,6 +9,7 @@ pub const WORKFLOW_TOML_NAME: &str = "workflows.spaces.toml";
 pub const ENV_FILE_NAME: &str = "env.spaces.star";
 pub const LOCK_FILE_NAME: &str = "lock.spaces.star";
 pub const SPACES_MODULE_NAME: &str = "spaces.star";
+pub const STAR_FILE_SUFFIX: &str = ".star";
 pub const SPACES_STDIN_NAME: &str = "stdin.star";
 const SPACES_SYSROOT_NAME: &str = "sysroot";
 
@@ -93,6 +94,10 @@ pub fn is_rules_module(path: &str) -> bool {
     path.ends_with(SPACES_MODULE_NAME)
 }
 
+pub fn is_star_file(path: &str) -> bool {
+    path.ends_with(STAR_FILE_SUFFIX)
+}
+
 pub fn get_workspace_path(workspace_path: &str, current_path: &str, target_path: &str) -> Arc<str> {
     if target_path.starts_with("//") {
         format!("{workspace_path}/{target_path}").into()
@@ -131,6 +136,7 @@ pub fn get_changes_path() -> &'static str {
     "build/workspace.changes.spaces"
 }
 
+
 #[derive(Debug)]
 pub struct Workspace {
     pub modules: Vec<(Arc<str>, Arc<str>)>,
@@ -141,7 +147,7 @@ pub struct Workspace {
     pub digest: Arc<str>,                   // set at startup
     pub locks: HashMap<Arc<str>, Arc<str>>, // set during eval
     pub env: environment::Environment,      // set during eval
-    pub is_sort_tasks: bool,                // set during eval
+    pub is_dirty: bool,                     // true if any star files have changed
     #[allow(dead_code)]
     pub new_branch_name: Option<Arc<str>>, // set during eval - not used
     changes: changes::Changes,              // modified during run
@@ -228,6 +234,39 @@ impl Workspace {
         }
     }
 
+    fn get_relative_invoked_path(
+        progress: &mut printer::MultiProgressBar,
+        current_working_directory: &str,
+        absolute_path_to_workspace: &str,
+    ) -> Arc<str> {
+        let mut relative_invoked_path: Arc<str> = current_working_directory
+            .strip_prefix(absolute_path_to_workspace)
+            .unwrap_or("")
+            .into();
+
+        if relative_invoked_path.ends_with('/') {
+            relative_invoked_path = relative_invoked_path.strip_suffix('/').unwrap().into();
+        }
+
+        if relative_invoked_path.starts_with('/') {
+            relative_invoked_path = relative_invoked_path.strip_prefix('/').unwrap().into();
+        }
+
+        logger(progress).info(
+            format!(
+                "Invoked at: {}",
+                if relative_invoked_path.is_empty() {
+                    "<workspace>".into()
+                } else {
+                    relative_invoked_path.clone()
+                }
+            )
+            .as_str(),
+        );
+
+        relative_invoked_path.into()
+    }
+
     fn filter_predicate(workspace_path: &std::path::Path, entry: &walkdir::DirEntry) -> bool {
         if entry.path() == workspace_path {
             return true;
@@ -277,38 +316,22 @@ impl Workspace {
                 .context(format_context!("While searching for workspace root"))?
         };
 
-        let mut relative_invoked_path: Arc<str> = current_working_directory
-            .strip_prefix(absolute_path.as_ref())
-            .unwrap_or("")
-            .into();
-
-        if relative_invoked_path.ends_with('/') {
-            relative_invoked_path = relative_invoked_path.strip_suffix('/').unwrap().into();
-        }
-
-        if relative_invoked_path.starts_with('/') {
-            relative_invoked_path = relative_invoked_path.strip_prefix('/').unwrap().into();
-        }
-
-        logger(&mut progress).message(format!("{absolute_path}").as_str());
-
-        logger(&mut progress).info(
-            format!(
-                "Invoked at: {}",
-                if relative_invoked_path.is_empty() {
-                    "<workspace>".into()
-                } else {
-                    relative_invoked_path.clone()
-                }
-            )
-            .as_str(),
+        logger(&mut progress).message(absolute_path.as_ref());
+        let relative_invoked_path = Self::get_relative_invoked_path(
+            &mut progress,
+            current_working_directory.as_ref(),
+            absolute_path.as_ref(),
         );
 
+        // From here on all, paths are relative to the workspace root
         std::env::set_current_dir(std::path::Path::new(absolute_path.as_ref())).context(
             format_context!("Failed to set current directory to {absolute_path}"),
         )?;
 
+        // hash set to prevent loading the same module twice
         let mut loaded_modules = HashSet::new();
+
+        // populate all modules that need to be processed - has order can't be a hash map
         let mut modules: Vec<(Arc<str>, Arc<str>)> = vec![];
 
         let env_content: Arc<str> =
@@ -321,22 +344,21 @@ impl Workspace {
         loaded_modules.insert(ENV_FILE_NAME.into());
         modules.push((ENV_FILE_NAME.into(), env_content));
 
-        let mut original_modules: Vec<(Arc<str>, Arc<str>)> = vec![];
-
         let mut is_run_or_inspect = true;
         let mut settings = if let Ok(settings) = ws::Settings::load(absolute_path.as_ref()) {
             logger(&mut progress).debug("Loading modules from sync order");
             for module in settings.order.iter() {
                 if is_rules_module(module.as_ref()) {
                     progress.increment(1);
-                    let path = format!("{}/{}", absolute_path, module);
-                    let content = std::fs::read_to_string(path.as_str())
-                        .context(format_context!("Failed to read file {}", path))?;
                     if !loaded_modules.contains(module) {
+                        let path = format!("{}/{}", absolute_path, module);
+                        let content = std::fs::read_to_string(path.as_str())
+                            .context(format_context!("Failed to read file {}", path))?;
+
                         logger(&mut progress)
                             .trace(format!("Loading module from sync order: {}", module).as_str());
                         loaded_modules.insert(module.clone());
-                        original_modules.push((module.clone(), content.into()));
+                        modules.push((module.clone(), content.into()));
                     }
                 }
             }
@@ -351,10 +373,13 @@ impl Workspace {
             settings
         };
 
-        for (name, _) in original_modules.iter() {
+        // workspace digest is calculated using the original modules passed on the
+        // command line. If any repos are on tip of branch, the workspace
+        // is marked as not-reproducible
+        for (name, _) in modules.iter() {
             logger(&mut progress).message(format!("Digesting {}", name).as_str());
         }
-        let workspace_digest = calculate_digest(&original_modules);
+        let workspace_digest = calculate_digest(&modules);
 
         std::fs::create_dir_all(build_directory())
             .context(format_context!("Failed to create build directory"))?;
@@ -370,16 +395,20 @@ impl Workspace {
             "Failed to create log folder {log_directory}",
         ))?;
 
-        modules.extend(original_modules);
-
+        // The workspace is not scanned on every run, only on the first run or when --rescan is passed
+        // For large workspaces, this can be a significant time saver
+        // is_scanned starts as None then Some(false) then Some(true) to finish the state machine
         if !settings.is_scanned.unwrap_or(false) || singleton::get_is_rescan() {
-            singleton::set_rescan(true); // save the settings on exit
-                                         // not scanned until walkdir runs during run or inspect
+            // if the workspace is scanned, this will save settings on exit
+            singleton::set_rescan(true);
+
+            // if this is a checkout, we need to scan on first run/inspect
             settings.is_scanned = Some(is_run_or_inspect);
 
             logger(&mut progress).message(format!("Scanning {}", absolute_path).as_str());
 
-            // walkdir and find all spaces.star files in the workspace
+            // walkdir and find all .star files in the workspace
+            // skip sysroot/build/logs directories
             let walkdir: Vec<_> = walkdir::WalkDir::new(absolute_path.as_ref())
                 .into_iter()
                 .filter_entry(|entry| {
@@ -388,28 +417,44 @@ impl Workspace {
                 .collect();
 
             progress.set_total(walkdir.len() as u64);
-            settings.bin_settings.scanned_modules.clear();
+            settings.bin_settings.star_files.clear();
+            settings.scanned_modules.clear();
             for entry in walkdir {
                 progress.increment(1);
-                if let Ok(entry) = entry.context(format_context!("While walking directory")) {
-                    if entry.file_type().is_file()
-                        && is_rules_module(entry.file_name().to_string_lossy().as_ref())
+                if let Ok(entry) = entry {
+                    if !entry.file_type().is_file() {
+                        continue;
+                    }
+
+                    let entry_name = entry.file_name().to_string_lossy().to_string();
+                    if !is_star_file(entry_name.as_str()) {
+                        continue;
+                    }
+
+                    let path: Arc<str> = entry.path().to_string_lossy().into();
+                    if let Some(stripped_path) =
+                        path.strip_prefix(format!("{}/", absolute_path).as_str())
                     {
-                        let path: Arc<str> = entry.path().to_string_lossy().into();
-                        if let Some(stripped_path) =
-                            path.strip_prefix(format!("{}/", absolute_path).as_str())
+                        logger(&mut progress)
+                            .message(format!("star file {stripped_path}").as_str());
+
+                        // all star files are hashed and tracked when modified
+                        settings.bin_settings.star_files.insert(
+                            stripped_path.into(),
+                            ws::BinDetail {
+                                modified: None,
+                                ..Default::default()
+                            },
+                        );
+
+                        // spaces.star files are added to the modules to be processed
+                        // no need to grab original command line modules
+                        // they are stored in settings.order
+                        if is_rules_module(entry_name.as_str()) && !loaded_modules.contains(stripped_path)
                         {
-                            if !stripped_path.starts_with(".spaces") {
-                                logger(&mut progress).debug(
-                                    format!("Loading module from directory: {stripped_path}")
-                                        .as_str(),
-                                );
-                                settings
-                                    .bin_settings
-                                    .scanned_modules
-                                    .insert(stripped_path.into(), "".into());
-                                settings.scanned_modules.insert(stripped_path.into());
-                            }
+                            logger(&mut progress)
+                                .debug(format!("Loading module: {stripped_path}").as_str());
+                            settings.scanned_modules.insert(stripped_path.into());
                         }
                     }
                 }
@@ -420,33 +465,40 @@ impl Workspace {
             );
         }
 
-        let mut unordered_modules: Vec<(Arc<str>, Arc<str>)> = vec![];
+        // checks if any of the modules have changed
+        // checks modified time then hashes
+        let updated_modules =
+            settings
+                .bin_settings
+                .update_hashes(&mut progress)
+                .context(format_context!(
+                    "Failed to update hashes for modules in workspace"
+                ))?;
 
-        let mut is_sort_tasks = false;
-        for (module_path, item_hash) in settings.bin_settings.scanned_modules.iter_mut() {
-            let content: Arc<str> = std::fs::read_to_string(module_path.as_ref())
-                .context(format_context!("Failed to read file {module_path}"))?
-                .into();
-            let content_hash = blake3::hash(content.as_bytes()).to_string();
-            if content_hash != item_hash.as_ref() {
-                logger(&mut progress).info(
-                    format!(
-                        "{module_path} changed"
-                    )
-                    .as_str(),
-                );
-                is_sort_tasks = true;
-            }
-            *item_hash = content_hash.into();
+        // if any star files have changed, workspace is dirty - need to re-run starlark
+        let is_dirty = !updated_modules.is_empty();
+
+        // inform the user of changed modules
+        for updated in updated_modules {
+            logger(&mut progress).info(format!("dirty {updated}").as_str());
+        }
+
+        // load the modules scanned from the workspace
+        for module_path in settings.scanned_modules.iter() {
             if !loaded_modules.contains(module_path) {
+                let content: Arc<str> = std::fs::read_to_string(module_path.as_ref())
+                    .context(format_context!("Failed to read file {module_path}"))?
+                    .into();
+
                 loaded_modules.insert(module_path.clone());
-                unordered_modules.push((module_path.clone(), content));
+                modules.push((module_path.clone(), content));
             }
         }
 
-        unordered_modules.sort_by(|a, b| a.0.cmp(&b.0));
-        modules.extend(unordered_modules);
-
+        // the changes track the files in the workspace that are changed
+        // this change tracking mechanism is shared between all rules
+        // if two rules watch the same file for changes, the file
+        // is only hashed once.
         let changes_path = get_changes_path();
         let skip_folders = vec![ws::SPACES_LOGS_NAME.into()];
         let changes = changes::Changes::new(changes_path, skip_folders);
@@ -454,6 +506,8 @@ impl Workspace {
         #[allow(unused)]
         let unique = get_unique().context(format_context!("failed to get unique marker"))?;
 
+        // The inputs use the hashes calculated by Changes to keep
+        // track of file hashes at the time a rule is executed
         if is_clear_inputs {
             let inputs_path = get_inputs_path();
             if std::path::Path::new(inputs_path).exists() {
@@ -463,8 +517,9 @@ impl Workspace {
             }
         }
 
+        // Workspace is assumed to reproducible until a rule is processed
+        // that is not reproducible - such as a repo on tip of branch
         let mut env = environment::Environment::default();
-
         env.vars
             .insert(SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE.into(), "true".into());
 
@@ -478,6 +533,7 @@ impl Workspace {
             env,
             new_branch_name: None,
             changes,
+            is_dirty,
             updated_assets: HashSet::new(),
             inputs: inputs::Inputs::new(get_inputs_path()),
             rule_metrics: HashMap::new(),
@@ -485,7 +541,6 @@ impl Workspace {
             target: None,
             relative_invoked_path,
             settings,
-            is_sort_tasks,
         })
     }
 

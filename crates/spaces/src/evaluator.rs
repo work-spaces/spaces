@@ -386,7 +386,7 @@ pub fn run_starlark_modules(
         _ => {}
     }
 
-    if phase == rules::Phase::Checkout || singleton::get_is_rescan() || workspace.read().is_sort_tasks {
+    if phase == rules::Phase::Checkout || singleton::get_is_rescan() || workspace.read().is_dirty {
         star_logger(printer).debug("saving workspace setings");
         workspace
             .read()
