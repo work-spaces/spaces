@@ -16,10 +16,10 @@ members = [
 version = "0.14.3"
 
 [workspace.dependencies]
-anyhow-source-location = { git = "https://github.com/work-spaces/anyhow-source-location", rev = "019b7804e35a72f945b3b4b3a96520cdbaa77f70" }
+anyhow-source-location = { git = "https://github.com/work-spaces/anyhow-source-location", rev = "v0.1.0" }
 anyhow = "1"
-printer = { git = "https://github.com/work-spaces/printer-rs", rev = "d43708ce769ae50b2b7770f87c9f08d1f25631c9" }
-easy-archiver = { git = "https://github.com/work-spaces/easy-archiver", rev = "0c6b4dd2d85d3f044d1ecc18dffbc0f877697cdb", features = [
+printer = { git = "https://github.com/work-spaces/printer-rs", rev = "v0.1.3" }
+easy-archiver = { git = "https://github.com/work-spaces/easy-archiver", rev = "v0.1.0", features = [
     "printer",
 ] }
 starlark = "0.13"
