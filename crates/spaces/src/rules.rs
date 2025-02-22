@@ -9,7 +9,7 @@ fn rules_printer_logger(printer: &mut printer::Printer) -> logger::Logger {
     logger::Logger::new_printer(printer, "rules".into())
 }
 
-fn rules_progress_logger(progress: &mut printer::MultiProgressBar) -> logger::Logger {
+fn _rules_progress_logger(progress: &mut printer::MultiProgressBar) -> logger::Logger {
     logger::Logger::new_progress(progress, "rules".into())
 }
 
@@ -412,30 +412,21 @@ impl State {
     ) -> anyhow::Result<()> {
         let mut tasks = self.tasks.write();
 
-        let mut progress = printer::MultiProgress::new(printer);
-
-        let mut progress_bar =
-            progress.add_progress("sorting", Some(tasks.len() as u64), Some("Complete"));
-
         self.graph.clear();
         // add all tasks to the graph
-        rules_progress_logger(&mut progress_bar)
+        rules_printer_logger(printer)
             .debug(format!("Adding {} tasks to graph", tasks.len()).as_str());
         for task in tasks.values() {
-            progress_bar.increment(1);
             self.graph.add_task(task.rule.name.clone());
         }
 
-        rules_progress_logger(&mut progress_bar).debug("Adding deps to graph tasks");
+        rules_printer_logger(printer).debug("Adding deps to graph tasks");
 
-        progress_bar.set_total(tasks.len() as u64);
         for task in tasks.values_mut() {
-            progress_bar.increment(1);
-
             let task_phase = task.phase;
             if phase == task::Phase::Checkout && task_phase != task::Phase::Checkout {
                 // skip evaluating non-checkout tasks during checkout
-                rules_progress_logger(&mut progress_bar).debug(
+                rules_printer_logger(printer).debug(
                     format!(
                         "Skipping additional checks for {} during checkout",
                         task.rule.name
@@ -461,7 +452,7 @@ impl State {
         let target_is_some = target.is_some();
         let is_sort_tasks = workspace.read().is_dirty;
         if is_sort_tasks {
-            rules_progress_logger(&mut progress_bar).info("sorting and hashing");
+            rules_printer_logger(printer).info("sorting and hashing");
             let topo_sorted = self.graph.get_sorted_tasks(None).context(format_context!(
                 "Failed to sort tasks for phase {:?}",
                 phase
@@ -493,14 +484,14 @@ impl State {
             workspace.write().settings.bin_settings.tasks = tasks_to_save;
         }
 
-        rules_progress_logger(&mut progress_bar)
+        rules_printer_logger(printer)
             .debug(format!("sorting graph with for {target:?}...").as_str());
         self.sorted = self
             .graph
             .get_sorted_tasks(target)
             .context(format_context!("Failed to sort tasks"))?;
 
-        rules_progress_logger(&mut progress_bar)
+        rules_printer_logger(printer)
             .debug(format!("done with {} nodes", self.sorted.len()).as_str());
 
         if target_is_some {
