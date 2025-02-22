@@ -1,4 +1,4 @@
-use crate::{builtins, executor, rules, singleton, workspace};
+use crate::{builtins, executor, rule, rules, singleton, task, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use starlark::environment::{FrozenModule, GlobalsBuilder, Module};
@@ -158,31 +158,55 @@ fn star_logger(printer: &mut printer::Printer) -> logger::Logger {
     logger::Logger::new_printer(printer, "starlark".into())
 }
 
-fn insert_run_all(target: Option<Arc<str>>) -> anyhow::Result<Option<Arc<str>>> {
+fn insert_setup_and_all_rules(target: Option<Arc<str>>) -> anyhow::Result<Option<Arc<str>>> {
+    // insert the //:setup rule
+
+    rules::add_setup_dep_to_run_rules()
+        .context(format_context!("Failed to add setup dep to run rules"))?;
+
+    let setup_rule = rule::Rule {
+        name: "setup".into(),
+        help: Some("Builtin rule to run setup rules first".into()),
+        inputs: None,
+        outputs: None,
+        type_: Some(rule::RuleType::Run),
+        platforms: None,
+        deps: Some(rules::get_setup_rules()),
+    };
+
+    rules::insert_task(task::Task::new(
+        setup_rule,
+        task::Phase::Run,
+        executor::Task::Target,
+    ))
+    .context(format_context!("Failed to insert task `all`"))?;
+
     if target.is_none() {
         let mut deps: Vec<Arc<str>> = Vec::new();
         for all_target in singleton::get_run_all().iter() {
             deps.push(all_target.clone());
         }
 
-        let rule = rules::Rule {
+        deps.push(rule::SETUP_RULE_NAME.into());
+
+        let rule = rule::Rule {
             name: "all".into(),
             help: Some("Builtin rule to run default targets and dependencies".into()),
             inputs: None,
             outputs: None,
-            type_: Some(rules::RuleType::Run),
+            type_: Some(rule::RuleType::Run),
             platforms: None,
             deps: Some(deps),
         };
 
-        rules::insert_task(rules::Task::new(
+        rules::insert_task(task::Task::new(
             rule,
-            rules::Phase::Run,
+            task::Phase::Run,
             executor::Task::Target,
         ))
         .context(format_context!("Failed to insert task `all`"))?;
 
-        Ok(Some("//:all".into()))
+        Ok(Some(rule::ALL_RULE_NAME.into()))
     } else {
         Ok(target)
     }
@@ -192,7 +216,7 @@ pub fn run_starlark_modules(
     printer: &mut printer::Printer,
     workspace: workspace::WorkspaceArc,
     modules: Vec<(Arc<str>, Arc<str>)>,
-    phase: rules::Phase,
+    phase: task::Phase,
     target: Option<Arc<str>>,
 ) -> anyhow::Result<()> {
     star_logger(printer).message("--Run Starlark Modules--");
@@ -207,7 +231,7 @@ pub fn run_starlark_modules(
         }
     }
 
-    if phase == rules::Phase::Checkout {
+    if phase == task::Phase::Checkout {
         workspace.write().clear_members();
     }
 
@@ -236,7 +260,7 @@ pub fn run_starlark_modules(
 
         // During checkout phase, additional modules may be added to the queue
         // if the repo contains more spaces.star files
-        if phase == rules::Phase::Checkout {
+        if phase == task::Phase::Checkout {
             rules::sort_tasks(printer, workspace.clone(), None, phase)
                 .context(format_context!("Failed to sort tasks"))?;
             star_logger(printer).debug("--Checkout Phase--");
@@ -273,10 +297,12 @@ pub fn run_starlark_modules(
     }
     rules::set_latest_starlark_module("".into());
 
+    star_logger(printer).debug("Inserting //:setup and //:all");
+    let run_target =
+        insert_setup_and_all_rules(target.clone()).context(format_context!("failed to insert run all"))?;
+
     match phase {
-        rules::Phase::Run => {
-            let target =
-                insert_run_all(target).context(format_context!("failed to insert run all"))?;
+        task::Phase::Run => {
             star_logger(printer).message("--Run Phase--");
 
             let is_reproducible = workspace.read().is_reproducible();
@@ -290,7 +316,7 @@ pub fn run_starlark_modules(
                 star_logger(printer).info(repro_message.as_str());
             }
 
-            rules::sort_tasks(printer, workspace.clone(), target.clone(), phase)
+            rules::sort_tasks(printer, workspace.clone(), run_target.clone(), phase)
                 .context(format_context!("Failed to sort tasks"))?;
 
             rules::debug_sorted_tasks(printer, phase)
@@ -299,12 +325,18 @@ pub fn run_starlark_modules(
             let _new_modules = rules::execute(printer, workspace.clone(), phase)
                 .context(format_context!("Failed to execute tasks"))?;
         }
-        rules::Phase::Inspect => {
+        task::Phase::Inspect => {
             star_logger(printer).message("--Inspect Phase--");
+
+
             rules::sort_tasks(printer, workspace.clone(), target.clone(), phase)
                 .context(format_context!("Failed to sort tasks"))?;
 
-            rules::debug_sorted_tasks(printer, rules::Phase::Run)
+            rules::debug_sorted_tasks(printer, task::Phase::Checkout)
+                .context(format_context!("Failed to debug sorted tasks"))?;
+            rules::debug_sorted_tasks(printer, task::Phase::PostCheckout)
+                .context(format_context!("Failed to debug sorted tasks"))?;
+            rules::debug_sorted_tasks(printer, task::Phase::Run)
                 .context(format_context!("Failed to debug sorted tasks"))?;
 
             let inspect_globs = singleton::get_inspect_globs();
@@ -322,7 +354,7 @@ pub fn run_starlark_modules(
             if printer.verbosity.level <= printer::Level::Message {
                 rules::show_tasks(
                     printer,
-                    rules::Phase::Checkout,
+                    task::Phase::Checkout,
                     target.clone(),
                     &globs,
                     strip_prefix.clone(),
@@ -331,28 +363,23 @@ pub fn run_starlark_modules(
             }
             rules::show_tasks(
                 printer,
-                rules::Phase::Run,
+                task::Phase::Run,
                 target.clone(),
                 &globs,
                 strip_prefix,
             )
             .context(format_context!("Failed to show tasks"))?;
         }
-        rules::Phase::Checkout => {
+        task::Phase::Checkout => {
             star_logger(printer).message("--Post Checkout Phase--");
 
-            // at this point everything should be preset, sort tasks as if in run phase
-            rules::sort_tasks(
-                printer,
-                workspace.clone(),
-                target.clone(),
-                rules::Phase::Run,
-            )
-            .context(format_context!("Failed to sort tasks"))?;
-            rules::debug_sorted_tasks(printer, rules::Phase::PostCheckout)
+            // at this point everything should be set, sort tasks as if in run phase
+            rules::sort_tasks(printer, workspace.clone(), None, task::Phase::Run)
+                .context(format_context!("Failed to sort tasks"))?;
+            rules::debug_sorted_tasks(printer, task::Phase::PostCheckout)
                 .context(format_context!("Failed to debug sorted tasks"))?;
 
-            rules::execute(printer, workspace.clone(), rules::Phase::PostCheckout)
+            rules::execute(printer, workspace.clone(), task::Phase::PostCheckout)
                 .context(format_context!("failed to execute post checkout phase"))?;
 
             // prepend PATH with sysroot/bin if sysroot/bin is not already in the PATH
@@ -386,7 +413,7 @@ pub fn run_starlark_modules(
         _ => {}
     }
 
-    if phase == rules::Phase::Checkout || singleton::get_is_rescan() || workspace.read().is_dirty {
+    if phase == task::Phase::Checkout || singleton::get_is_rescan() || workspace.read().is_dirty {
         star_logger(printer).debug("saving workspace setings");
         workspace
             .read()

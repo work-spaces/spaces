@@ -4,7 +4,7 @@ use starlark::{environment::GlobalsBuilder, values::none::NoneType};
 use starstd::{get_rule_argument, Arg, Function};
 use std::collections::HashSet;
 
-use crate::{executor, inputs, rules, singleton};
+use crate::{executor, inputs, rules, task, rule, singleton};
 
 const ADD_EXEC_EXAMPLE: &str = r#"run.add_exec(
     rule = {"name": name, "type": "Setup", "deps": ["sysroot-python:venv"]},
@@ -117,8 +117,8 @@ pub const FUNCTIONS: &[Function] = &[
         example: Some(r#"run.abort("Failed to do something")"#)}
 ];
 
-fn add_rule_to_all(rule: &rules::Rule) {
-    if let Some(rules::RuleType::Run) = rule.type_.as_ref() {
+fn add_rule_to_all(rule: &rule::Rule) {
+    if let Some(rule::RuleType::Run) = rule.type_.as_ref() {
         singleton::insert_run_all(rules::get_sanitized_rule_name(rule.name.clone()));
     }
 }
@@ -133,15 +133,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     fn add_target(
         #[starlark(require = named)] rule: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
-        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for add target rule"))?;
 
         add_rule_to_all(&rule);
 
         let rule_name = rule.name.clone();
-        rules::insert_task(rules::Task::new(
+        rules::insert_task(task::Task::new(
             rule,
-            rules::Phase::Run,
+            task::Phase::Run,
             executor::Task::Target,
         ))
         .context(format_context!("Failed to insert task {rule_name}"))?;
@@ -152,7 +152,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] exec: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
-        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for exec rule"))?;
 
         inputs::validate_input_globs(&rule.inputs)
@@ -171,9 +171,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             *redirect_stdout = format!("build/{}", redirect_stdout).into();
         }
         let rule_name = rule.name.clone();
-        rules::insert_task(rules::Task::new(
+        rules::insert_task(task::Task::new(
             rule,
-            rules::Phase::Run,
+            task::Phase::Run,
             executor::Task::Exec(exec),
         ))
         .context(format_context!("Failed to insert task {rule_name}"))?;
@@ -184,7 +184,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] kill: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
-        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for kill rule"))?;
 
         inputs::validate_input_globs(&rule.inputs)
@@ -197,9 +197,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         kill_exec.target = rules::get_sanitized_rule_name(kill_exec.target.clone());
 
         let rule_name = rule.name.clone();
-        rules::insert_task(rules::Task::new(
+        rules::insert_task(task::Task::new(
             rule,
-            rules::Phase::Run,
+            task::Phase::Run,
             executor::Task::Kill(kill_exec),
         ))
         .context(format_context!("Failed to insert task {rule_name}"))?;
@@ -210,7 +210,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] exec_if: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
-        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for exec_if rule"))?;
 
         inputs::validate_input_globs(&rule.inputs)
@@ -241,9 +241,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         }
 
         let rule_name = rule.name.clone();
-        rules::insert_task(rules::Task::new(
+        rules::insert_task(task::Task::new(
             rule,
-            rules::Phase::Run,
+            task::Phase::Run,
             executor::Task::ExecIf(exec_if),
         ))
         .context(format_context!("Failed to insert task {rule_name}"))?;
@@ -254,7 +254,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] archive: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
-        let mut rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+        let mut rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for add_archive rule"))?;
 
         if rule.inputs.is_some() {
@@ -291,9 +291,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let archive = executor::archive::Archive { create_archive };
 
-        rules::insert_task(rules::Task::new(
+        rules::insert_task(task::Task::new(
             rule,
-            rules::Phase::Run,
+            task::Phase::Run,
             executor::Task::CreateArchive(archive),
         ))
         .context(format_context!("Failed to insert task {rule_name}"))?;

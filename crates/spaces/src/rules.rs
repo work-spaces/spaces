@@ -1,334 +1,20 @@
-use crate::{executor, label, singleton, workspace};
+use crate::{executor, label, rule, singleton, task, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
-use clap::ValueEnum;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::Arc;
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, ValueEnum, strum::Display)]
-pub enum Phase {
-    Checkout,
-    PostCheckout,
-    Run,
-    Inspect,
-    Complete,
-    Cancelled,
+fn rules_printer_logger(printer: &mut printer::Printer) -> logger::Logger {
+    logger::Logger::new_printer(printer, "rules".into())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum RuleType {
-    Setup,
-    Run,
-    Optional,
+fn rules_progress_logger(progress: &mut printer::MultiProgressBar) -> logger::Logger {
+    logger::Logger::new_progress(progress, "rules".into())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Rule {
-    pub name: Arc<str>,
-    pub deps: Option<Vec<Arc<str>>>,
-    pub help: Option<Arc<str>>,
-    pub inputs: Option<HashSet<Arc<str>>>,
-    pub outputs: Option<HashSet<Arc<str>>>,
-    pub platforms: Option<Vec<platform::Platform>>,
-    #[serde(rename = "type")]
-    pub type_: Option<RuleType>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct Signal {
-    ready: bool,
-    name: Arc<str>,
-}
-
-#[derive(Default, Debug, Clone)]
-struct RuleSignal {
-    signal: Arc<(Mutex<Signal>, Condvar)>,
-}
-
-impl RuleSignal {
-    fn new(name: Arc<str>) -> Self {
-        RuleSignal {
-            signal: Arc::new((Mutex::new(Signal { ready: false, name }), Condvar::new())),
-        }
-    }
-
-    fn wait_is_ready(&self, duration: std::time::Duration) {
-        loop {
-            let (lock, cvar) = &*self.signal;
-            let signal_access = lock.lock().unwrap();
-            if !signal_access.ready {
-                let _ = cvar.wait_timeout(signal_access, duration).unwrap();
-            } else {
-                break;
-            }
-        }
-    }
-
-    fn set_ready_notify_all(&self) {
-        let (lock, cvar) = &*self.signal;
-        {
-            let mut signal_access = lock.lock().unwrap();
-            signal_access.ready = true;
-        }
-        cvar.notify_all();
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Task {
-    pub executor: executor::Task,
-    pub phase: Phase,
-    pub rule: Rule,
-    pub digest: Arc<str>,
-    #[serde(skip)]
-    signal: RuleSignal,
-    #[serde(skip)]
-    deps_signals: Vec<RuleSignal>,
-}
-
-impl Task {
-    pub fn new(rule: Rule, phase: Phase, executor: executor::Task) -> Self {
-        Task {
-            executor,
-            phase,
-            signal: RuleSignal::new(rule.name.clone()),
-            deps_signals: Vec::new(),
-            rule,
-            digest: "".into(),
-        }
-    }
-
-    pub fn calculate_digest(&self) -> blake3::Hash {
-        let mut self_clone = self.clone();
-        self_clone.digest = "".into();
-        let seed = serde_json::to_string(&self_clone).unwrap();
-        let mut digest = blake3::Hasher::new();
-        digest.update(seed.as_bytes());
-        digest.finalize()
-    }
-
-    pub fn update_implicit_dependency(&mut self, other_task: &Task) {
-        if let Some(deps) = &self.rule.deps {
-            if deps.contains(&other_task.rule.name) {
-                return;
-            }
-        }
-
-        if let Some(inputs) = &self.rule.inputs {
-            for input in inputs {
-                if let Some(other_outputs) = &other_task.rule.outputs {
-                    if other_outputs.contains(input) {
-                        if let Some(deps) = self.rule.deps.as_mut() {
-                            deps.push(other_task.rule.name.clone());
-                        } else {
-                            self.rule.deps = Some(vec![other_task.rule.name.clone()]);
-                        }
-                        return;
-                    }
-                }
-            }
-        }
-    }
-
-    pub fn execute(
-        &self,
-        mut progress: printer::MultiProgressBar,
-        workspace: workspace::WorkspaceArc,
-    ) -> std::thread::JoinHandle<anyhow::Result<executor::TaskResult>> {
-        let name = self.rule.name.clone();
-        let executor = self.executor.clone();
-        let signal = self.signal.clone();
-        let rule = self.rule.clone();
-        let deps_signals = self.deps_signals.clone();
-
-        struct SignalOnDrop {
-            signal: RuleSignal,
-        }
-
-        impl Drop for SignalOnDrop {
-            fn drop(&mut self) {
-                self.signal.set_ready_notify_all();
-            }
-        }
-
-        progress.set_message(format!("Waiting for dependencies ({:?})", self.phase).as_str());
-
-        std::thread::spawn(move || -> anyhow::Result<executor::TaskResult> {
-            // check inputs/outputs to see if we need to run
-
-            let _signal_on_drop = SignalOnDrop {
-                signal: signal.clone(),
-            };
-
-            let mut skip_execute_message: Option<Arc<str>> = None;
-            if let (Some(platforms), Some(current_platform)) =
-                (rule.platforms.as_ref(), platform::Platform::get_platform())
-            {
-                if !platforms.contains(&current_platform) {
-                    skip_execute_message = Some("Skipping: platform not enabled".into());
-                }
-            }
-
-            logger::Logger::new_progress(&mut progress, name.clone()).debug(
-                format!("Skip execute message after platform check? {skip_execute_message:?}")
-                    .as_str(),
-            );
-
-            let total = deps_signals.len();
-
-            logger::Logger::new_progress(&mut progress, name.clone())
-                .trace(format!("{name} has {} dependencies", total).as_str());
-
-            let mut count = 1;
-            for deps_rule_signal in deps_signals {
-                let signal_name = {
-                    let (lock, _) = &*deps_rule_signal.signal;
-                    let signal_access = lock.lock().unwrap();
-                    signal_access.name.clone()
-                };
-
-                logger::Logger::new_progress(&mut progress, name.clone()).debug(
-                    format!(
-                        "{name} Waiting for dependency {} {count}/{total}",
-                        signal_name
-                    )
-                    .as_str(),
-                );
-
-                deps_rule_signal.wait_is_ready(std::time::Duration::from_millis(100));
-                count += 1;
-            }
-
-            logger::Logger::new_progress(&mut progress, name.clone())
-                .debug(format!("{name} All dependencies are done").as_str());
-
-            {
-                logger::Logger::new_progress(&mut progress, name.clone())
-                    .debug(format!("{name} check for skipping/cancelation").as_str());
-                let state = get_state().read();
-                let tasks = state.tasks.read();
-                let task = tasks
-                    .get(name.as_ref())
-                    .context(format_context!("Task not found {name}"))?;
-                if task.phase == Phase::Cancelled {
-                    logger::Logger::new_progress(&mut progress, name.clone())
-                        .debug(format!("Skipping {name}: cancelled").as_str());
-                    skip_execute_message = Some("Skipping because it was cancelled".into());
-                } else if task.rule.type_ == Some(RuleType::Optional) {
-                    logger::Logger::new_progress(&mut progress, name.clone())
-                        .debug("Skipping because it is optional");
-                    skip_execute_message = Some("Skipping: optional".into());
-                }
-                logger::Logger::new_progress(&mut progress, name.clone())
-                    .trace(format!("{name} done checking skip cancellation").as_str());
-            }
-
-            let rule_name = rule.name.clone();
-
-            let updated_digest = if let Some(inputs) = &rule.inputs {
-                if skip_execute_message.is_some() {
-                    None
-                } else {
-                    logger::Logger::new_progress(&mut progress, name.clone())
-                        .debug("update workspace changes");
-
-                    workspace
-                        .write()
-                        .update_changes(&mut progress, inputs)
-                        .context(format_context!("Failed to update workspace changes"))?;
-
-                    logger::Logger::new_progress(&mut progress, name.clone())
-                        .debug("check for new digest");
-
-                    let seed = serde_json::to_string(&executor)
-                        .context(format_context!("Failed to serialize"))?;
-                    let digest = workspace
-                        .read()
-                        .is_rule_inputs_changed(&mut progress, &rule_name, seed.as_str(), inputs)
-                        .context(format_context!("Failed to check inputs for {rule_name}"))?;
-                    if digest.is_none() {
-                        // the digest has not changed - not need to execute
-                        skip_execute_message = Some("Skipping: same inputs".into());
-                    }
-                    logger::Logger::new_progress(&mut progress, name.clone())
-                        .debug(format!("New digest for {rule_name}={digest:?}").as_str());
-                    digest
-                }
-            } else {
-                None
-            };
-
-            if let Some(skip_message) = skip_execute_message.as_ref() {
-                logger::Logger::new_progress(&mut progress, name.clone())
-                    .info(skip_message.as_ref());
-                progress.set_message(skip_message);
-            } else {
-                logger::Logger::new_progress(&mut progress, name.clone()).debug("Running task");
-                progress.set_message("Running");
-            }
-
-            // time how long it takes to execute the task
-            let start_time = std::time::Instant::now();
-
-            progress.reset_elapsed();
-            let task_result = if let Some(message) = skip_execute_message {
-                progress.set_ending_message(message.as_ref());
-                Ok(executor::TaskResult::new())
-            } else {
-                executor
-                    .execute(progress, workspace.clone(), &rule_name)
-                    .context(format_context!("Failed to exec {}", name))
-            };
-
-            let elapsed_time = start_time.elapsed();
-            workspace
-                .write()
-                .update_rule_metrics(&rule_name, elapsed_time);
-
-            if task_result.is_ok() {
-                if let Some(digest) = updated_digest {
-                    workspace.write().update_rule_digest(&rule_name, digest);
-                }
-            }
-
-            // before notifying dependents process the enabled_targets list
-            {
-                let state = get_state().read();
-                let mut tasks = state.tasks.write();
-                if let Ok(task_result) = &task_result {
-                    for enabled_target in task_result.enabled_targets.iter() {
-                        let task = tasks
-                            .get_mut(enabled_target)
-                            .ok_or(format_error!("Task not found {enabled_target}"))
-                            .unwrap_or_else(|_| {
-                                panic!("Internal Error: Task not found {enabled_target}")
-                            });
-                        task.rule.type_ = Some(RuleType::Run);
-                    }
-                } else {
-                    // Cancel all pending tasks - exit gracefully
-                    for task in tasks.values_mut() {
-                        task.phase = Phase::Cancelled;
-                    }
-                }
-
-                let task = tasks
-                    .get_mut(name.as_ref())
-                    .context(format_context!("Task not found {name}"))?;
-                task.phase = Phase::Complete;
-            }
-
-            task_result
-
-            // _signal_on_drop.drop() notifies the dependents
-        })
-    }
-
-    pub fn add_signal_dependency(&mut self, task: &Task) {
-        self.deps_signals.push(task.signal.clone());
-    }
+fn task_logger(progress: &mut printer::MultiProgressBar, name: Arc<str>) -> logger::Logger {
+    logger::Logger::new_progress(progress, name)
 }
 
 pub fn get_sanitized_rule_name(rule_name: Arc<str>) -> Arc<str> {
@@ -341,7 +27,7 @@ pub fn get_sanitized_working_directory(rule_name: Arc<str>) -> Arc<str> {
     state.get_sanitized_working_directory(rule_name)
 }
 
-pub fn insert_task(task: Task) -> anyhow::Result<()> {
+pub fn insert_task(task: task::Task) -> anyhow::Result<()> {
     let state = get_state().read();
     state.insert_task(task)
 }
@@ -354,7 +40,7 @@ pub fn set_latest_starlark_module(name: Arc<str>) {
 
 pub fn show_tasks(
     printer: &mut printer::Printer,
-    phase: Phase,
+    phase: task::Phase,
     target: Option<Arc<str>>,
     filter: &HashSet<Arc<str>>,
     strip_prefix: Option<Arc<str>>,
@@ -367,7 +53,7 @@ pub fn sort_tasks(
     printer: &mut printer::Printer,
     workspace: workspace::WorkspaceArc,
     target: Option<Arc<str>>,
-    phase: Phase,
+    phase: task::Phase,
 ) -> anyhow::Result<()> {
     let mut state = get_state().write();
     state.sort_tasks(printer, workspace, target, phase)
@@ -376,29 +62,244 @@ pub fn sort_tasks(
 pub fn execute(
     printer: &mut printer::Printer,
     workspace: workspace::WorkspaceArc,
-    phase: Phase,
+    phase: task::Phase,
 ) -> anyhow::Result<executor::TaskResult> {
     let state: std::sync::RwLockReadGuard<'_, State> = get_state().read();
     state.execute(printer, workspace, phase)
 }
 
-pub fn debug_sorted_tasks(printer: &mut printer::Printer, phase: Phase) -> anyhow::Result<()> {
+pub fn add_setup_dep_to_run_rules() -> anyhow::Result<()> {
+    let state = get_state().read();
+    let mut tasks = state.tasks.write();
+    for task in tasks.values_mut() {
+        if task.rule.type_ != Some(rule::RuleType::Setup) && task.phase == task::Phase::Run {
+            task.rule
+                .deps
+                .get_or_insert_with(Vec::new)
+                .push(rule::SETUP_RULE_NAME.into());
+        }
+    }
+    Ok(())
+}
+
+pub fn get_setup_rules() -> Vec<Arc<str>> {
+    let state = get_state().read();
+    let tasks = state.tasks.read();
+    tasks
+        .values()
+        .filter(|task| task.rule.type_ == Some(rule::RuleType::Setup))
+        .map(|task| task.rule.name.clone())
+        .collect()
+}
+
+pub fn debug_sorted_tasks(
+    printer: &mut printer::Printer,
+    phase: task::Phase,
+) -> anyhow::Result<()> {
     let state = get_state().read();
     for node_index in state.sorted.iter() {
         let task_name = state.graph.get_task(*node_index);
         if let Some(task) = state.tasks.read().get(task_name) {
             if task.phase == phase {
-                logger::Logger::new_printer(printer, "phase".into())
-                    .debug(format!("Queued task {task_name}").as_str());
+                rules_printer_logger(printer).debug(format!("Queued task {task_name}").as_str());
             }
         }
     }
     Ok(())
 }
 
+pub fn execute_task(
+    mut progress: printer::MultiProgressBar,
+    workspace: workspace::WorkspaceArc,
+    task: &task::Task,
+) -> std::thread::JoinHandle<anyhow::Result<executor::TaskResult>> {
+    let name = task.rule.name.clone();
+    let executor = task.executor.clone();
+    let signal = task.signal.clone();
+    let rule = task.rule.clone();
+    let deps_signals = task.deps_signals.clone();
+
+    struct SignalOnDrop {
+        signal: task::SignalArc,
+    }
+
+    impl Drop for SignalOnDrop {
+        fn drop(&mut self) {
+            self.signal.set_ready_notify_all();
+        }
+    }
+
+    progress.set_message(format!("Waiting for dependencies ({:?})", task.phase).as_str());
+
+    std::thread::spawn(move || -> anyhow::Result<executor::TaskResult> {
+        // check inputs/outputs to see if we need to run
+
+        let _signal_on_drop = SignalOnDrop {
+            signal: signal.clone(),
+        };
+
+        let mut skip_execute_message: Option<Arc<str>> = None;
+        if let (Some(platforms), Some(current_platform)) =
+            (rule.platforms.as_ref(), platform::Platform::get_platform())
+        {
+            if !platforms.contains(&current_platform) {
+                skip_execute_message = Some("Skipping: platform not enabled".into());
+            }
+        }
+
+        task_logger(&mut progress, name.clone()).debug(
+            format!("Skip execute message after platform check? {skip_execute_message:?}").as_str(),
+        );
+
+        let total = deps_signals.len();
+
+        task_logger(&mut progress, name.clone())
+            .trace(format!("{name} has {} dependencies", total).as_str());
+
+        let mut count = 1;
+        for deps_rule_signal in deps_signals {
+            let signal_name = {
+                let (lock, _) = &*deps_rule_signal.signal;
+                let signal_access = lock.lock().unwrap();
+                signal_access.name.clone()
+            };
+
+            task_logger(&mut progress, name.clone()).debug(
+                format!(
+                    "{name} Waiting for dependency {} {count}/{total}",
+                    signal_name
+                )
+                .as_str(),
+            );
+
+            deps_rule_signal.wait_is_ready(std::time::Duration::from_millis(100));
+            count += 1;
+        }
+
+        task_logger(&mut progress, name.clone())
+            .debug(format!("{name} All dependencies are done").as_str());
+
+        {
+            task_logger(&mut progress, name.clone())
+                .debug(format!("{name} check for skipping/cancelation").as_str());
+            let state = get_state().read();
+            let tasks = state.tasks.read();
+            let task = tasks
+                .get(name.as_ref())
+                .context(format_context!("Task not found {name}"))?;
+            if task.phase == task::Phase::Cancelled {
+                task_logger(&mut progress, name.clone())
+                    .debug(format!("Skipping {name}: cancelled").as_str());
+                skip_execute_message = Some("Skipping because it was cancelled".into());
+            } else if task.rule.type_ == Some(rule::RuleType::Optional) {
+                task_logger(&mut progress, name.clone()).debug("Skipping because it is optional");
+                skip_execute_message = Some("Skipping: optional".into());
+            }
+            task_logger(&mut progress, name.clone())
+                .trace(format!("{name} done checking skip cancellation").as_str());
+        }
+
+        let rule_name = rule.name.clone();
+
+        let updated_digest = if let Some(inputs) = &rule.inputs {
+            if skip_execute_message.is_some() {
+                None
+            } else {
+                task_logger(&mut progress, name.clone()).debug("update workspace changes");
+
+                workspace
+                    .write()
+                    .update_changes(&mut progress, inputs)
+                    .context(format_context!("Failed to update workspace changes"))?;
+
+                task_logger(&mut progress, name.clone()).debug("check for new digest");
+
+                let seed = serde_json::to_string(&executor)
+                    .context(format_context!("Failed to serialize"))?;
+                let digest = workspace
+                    .read()
+                    .is_rule_inputs_changed(&mut progress, &rule_name, seed.as_str(), inputs)
+                    .context(format_context!("Failed to check inputs for {rule_name}"))?;
+                if digest.is_none() {
+                    // the digest has not changed - not need to execute
+                    skip_execute_message = Some("Skipping: same inputs".into());
+                }
+                task_logger(&mut progress, name.clone())
+                    .debug(format!("New digest for {rule_name}={digest:?}").as_str());
+                digest
+            }
+        } else {
+            None
+        };
+
+        if let Some(skip_message) = skip_execute_message.as_ref() {
+            task_logger(&mut progress, name.clone()).info(skip_message.as_ref());
+            progress.set_message(skip_message);
+        } else {
+            task_logger(&mut progress, name.clone()).debug("Running task");
+            progress.set_message("Running");
+        }
+
+        // time how long it takes to execute the task
+        let start_time = std::time::Instant::now();
+
+        progress.reset_elapsed();
+        let task_result = if let Some(message) = skip_execute_message {
+            progress.set_ending_message(message.as_ref());
+            Ok(executor::TaskResult::new())
+        } else {
+            executor
+                .execute(progress, workspace.clone(), &rule_name)
+                .context(format_context!("Failed to exec {}", name))
+        };
+
+        let elapsed_time = start_time.elapsed();
+        workspace
+            .write()
+            .update_rule_metrics(&rule_name, elapsed_time);
+
+        if task_result.is_ok() {
+            if let Some(digest) = updated_digest {
+                workspace.write().update_rule_digest(&rule_name, digest);
+            }
+        }
+
+        // before notifying dependents process the enabled_targets list
+        {
+            let state = get_state().read();
+            let mut tasks = state.tasks.write();
+            if let Ok(task_result) = &task_result {
+                for enabled_target in task_result.enabled_targets.iter() {
+                    let task = tasks
+                        .get_mut(enabled_target)
+                        .ok_or(format_error!("Task not found {enabled_target}"))
+                        .unwrap_or_else(|_| {
+                            panic!("Internal Error: Task not found {enabled_target}")
+                        });
+                    task.rule.type_ = Some(rule::RuleType::Run);
+                }
+            } else {
+                // Cancel all pending tasks - exit gracefully
+                for task in tasks.values_mut() {
+                    task.phase = task::Phase::Cancelled;
+                }
+            }
+
+            let task = tasks
+                .get_mut(name.as_ref())
+                .context(format_context!("Task not found {name}"))?;
+            task.phase = task::Phase::Complete;
+        }
+
+        task_result
+
+        // _signal_on_drop.drop() notifies the dependents
+    })
+}
+
 #[derive(Debug)]
 pub struct State {
-    pub tasks: lock::StateLock<HashMap<Arc<str>, Task>>,
+    pub tasks: lock::StateLock<HashMap<Arc<str>, task::Task>>,
     pub graph: graph::Graph,
     pub sorted: Vec<petgraph::prelude::NodeIndex>,
     pub latest_starlark_module: Option<Arc<str>>,
@@ -414,11 +315,11 @@ impl State {
         label::sanitize_working_directory(rule_name, self.latest_starlark_module.clone())
     }
 
-    pub fn insert_task(&self, mut task: Task) -> anyhow::Result<()> {
+    pub fn insert_task(&self, mut task: task::Task) -> anyhow::Result<()> {
         // update the rule name to have the starlark module name
         let rule_label = label::sanitize_rule(task.rule.name, self.latest_starlark_module.clone());
         task.rule.name = rule_label.clone();
-        task.signal = RuleSignal::new(rule_label.clone());
+        task.signal = task::SignalArc::new(rule_label.clone());
 
         // update deps that refer to rules in the same starlark module
         if let Some(deps) = task.rule.deps.as_mut() {
@@ -449,23 +350,19 @@ impl State {
         printer: &mut printer::Printer,
         workspace: workspace::WorkspaceArc,
         target: Option<Arc<str>>,
-        phase: Phase,
+        phase: task::Phase,
     ) -> anyhow::Result<()> {
         let mut tasks = self.tasks.write();
 
         let mut progress = printer::MultiProgress::new(printer);
-
-        let setup_tasks = tasks
-            .values()
-            .filter(|task| task.rule.type_ == Some(RuleType::Setup))
-            .cloned()
-            .collect::<Vec<Task>>();
 
         let mut progress_bar =
             progress.add_progress("sorting", Some(tasks.len() as u64), Some("Complete"));
 
         self.graph.clear();
         // add all tasks to the graph
+        rules_progress_logger(&mut progress_bar)
+            .debug(format!("Adding {} tasks to graph", tasks.len()).as_str());
         for task in tasks.values() {
             progress_bar.increment(1);
             self.graph.add_task(task.rule.name.clone());
@@ -476,36 +373,25 @@ impl State {
         progress_bar.set_total(tasks.len() as u64);
         for task in tasks.values_mut() {
             progress_bar.increment(1);
-            // capture implicit dependencies based on inputs/outputs
-            for other_task in tasks_copy.values() {
-                // can't create a dependency on itself
-                if task.rule.name == other_task.rule.name {
-                    continue;
-                }
-                task.update_implicit_dependency(other_task);
-            }
-
-            // all non-setup tasks need to depend on the Setup tasks
-            if task.rule.type_ != Some(RuleType::Setup) {
-                for setup_task in setup_tasks.iter() {
-                    if task.phase == setup_task.phase {
-                        task.rule
-                            .deps
-                            .get_or_insert_with(Vec::new)
-                            .push(setup_task.rule.name.clone());
-                    }
-                }
-            }
 
             let task_phase = task.phase;
-            if phase == Phase::Checkout && task_phase != Phase::Checkout {
+            if phase == task::Phase::Checkout && task_phase != task::Phase::Checkout {
                 // skip evaluating non-checkout tasks during checkout
+                rules_progress_logger(&mut progress_bar).debug(
+                    format!(
+                        "Skipping additional checks for {} during checkout",
+                        task.rule.name
+                    )
+                    .as_str(),
+                );
                 continue;
             }
 
             // connect the dependencies
             if let Some(deps) = task.rule.deps.clone() {
                 for dep in deps {
+                    // # tasks * # deps + hashmap access is EXPENSIVE
+                    // this causes a substantial delay when starting spaces
                     let dep_task = tasks_copy.get(&dep).ok_or(format_error!(
                         "Task Dependency {} not found for {}: {}",
                         dep,
@@ -514,16 +400,16 @@ impl State {
                     ))?;
 
                     match task_phase {
-                        Phase::Run => {
-                            if dep_task.phase != Phase::Run {
+                        task::Phase::Run => {
+                            if dep_task.phase != task::Phase::Run {
                                 return Err(format_error!(
                                     "Run task {} cannot depend on non-run task {}",
                                     task.rule.name,
                                     dep_task.rule.name
                                 ));
                             }
-                            if task.rule.type_ == Some(RuleType::Setup)
-                                && dep_task.rule.type_ != Some(RuleType::Setup)
+                            if task.rule.type_ == Some(rule::RuleType::Setup)
+                                && dep_task.rule.type_ != Some(rule::RuleType::Setup)
                             {
                                 return Err(format_error!(
                                     "Setup task {} cannot depend on non-setup task {}",
@@ -532,8 +418,8 @@ impl State {
                                 ));
                             }
                         }
-                        Phase::Checkout => {
-                            if dep_task.phase != Phase::Checkout {
+                        task::Phase::Checkout => {
+                            if dep_task.phase != task::Phase::Checkout {
                                 return Err(format_error!(
                                     "Checkout task {} cannot depend on non-checkout task {}",
                                     task.rule.name,
@@ -559,7 +445,7 @@ impl State {
 
         let is_sort_tasks = workspace.read().is_dirty;
         if is_sort_tasks {
-            logger::Logger::new_printer(printer, "tasks".into()).info("sorting and hashing");
+            rules_progress_logger(&mut progress_bar).info("sorting and hashing");
             let topo_sorted = self.graph.get_sorted_tasks(None).context(format_context!(
                 "Failed to sort tasks for phase {:?}",
                 phase
@@ -591,10 +477,15 @@ impl State {
             workspace.write().settings.bin_settings.tasks = tasks_to_save;
         }
 
+        rules_progress_logger(&mut progress_bar)
+            .debug(format!("sorting graph with for {target:?}...").as_str());
         self.sorted = self
             .graph
             .get_sorted_tasks(target)
             .context(format_context!("Failed to sort tasks"))?;
+
+        rules_progress_logger(&mut progress_bar)
+            .debug(format!("done with {} nodes", self.sorted.len()).as_str());
 
         if target_is_some {
             // enable any optional tasks in the graph
@@ -603,8 +494,8 @@ impl State {
                 let task = tasks
                     .get_mut(task_name)
                     .ok_or(format_error!("Task not found {task_name}"))?;
-                if task.rule.type_ == Some(RuleType::Optional) {
-                    task.rule.type_ = Some(RuleType::Run);
+                if task.rule.type_ == Some(rule::RuleType::Optional) {
+                    task.rule.type_ = Some(rule::RuleType::Run);
                 }
             }
         }
@@ -615,7 +506,7 @@ impl State {
     pub fn show_tasks(
         &self,
         printer: &mut printer::Printer,
-        phase: Phase,
+        phase: task::Phase,
         _target: Option<Arc<str>>,
         filter: &HashSet<Arc<str>>,
         strip_prefix: Option<Arc<str>>,
@@ -681,7 +572,7 @@ impl State {
         &self,
         printer: &mut printer::Printer,
         workspace: workspace::WorkspaceArc,
-        phase: Phase,
+        phase: task::Phase,
     ) -> anyhow::Result<executor::TaskResult> {
         let mut task_result = executor::TaskResult::new();
         let mut multi_progress = printer::MultiProgress::new(printer);
@@ -698,7 +589,7 @@ impl State {
             };
 
             if task.phase == phase {
-                let message = if task.rule.type_ == Some(RuleType::Optional) {
+                let message = if task.rule.type_ == Some(rule::RuleType::Optional) {
                     "Skipped (Optional)".to_string()
                 } else {
                     let message = if let Some(rule_type) = task.rule.type_ {
@@ -715,9 +606,10 @@ impl State {
                     Some(message.as_str()),
                 );
 
-                logger::Logger::new_progress(&mut progress_bar, task_name.into())
+                task_logger(&mut progress_bar, task_name.into())
                     .debug(format!("Staging task {}", task.rule.name).as_str());
-                handle_list.push(task.execute(progress_bar, workspace.clone()));
+
+                handle_list.push(execute_task(progress_bar, workspace.clone(), &task));
 
                 loop {
                     let mut number_running = 0;

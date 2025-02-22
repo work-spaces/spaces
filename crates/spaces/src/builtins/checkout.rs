@@ -1,5 +1,5 @@
 use crate::executor::asset;
-use crate::{executor, rules, singleton};
+use crate::{executor, rules, singleton, task, rule};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -450,13 +450,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     fn add_target(
         #[starlark(require = named)] rule: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
-        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for add target rule"))?;
 
         let rule_name = rule.name.clone();
-        rules::insert_task(rules::Task::new(
+        rules::insert_task(task::Task::new(
             rule,
-            rules::Phase::Checkout,
+            task::Phase::Checkout,
             executor::Task::Target,
         ))
         .context(format_context!("Failed to insert task {rule_name}"))?;
@@ -467,7 +467,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] repo: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
-        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for repo rule"))?;
 
         let repo: git::Repo = serde_json::from_value(repo.to_json_value()?)
@@ -492,9 +492,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let checkout = repo.get_checkout();
         let spaces_key = rule.name.clone();
         let rule_name = rule.name.clone();
-        rules::insert_task(rules::Task::new(
+        rules::insert_task(task::Task::new(
             rule,
-            rules::Phase::Checkout,
+            task::Phase::Checkout,
             executor::Task::Git(executor::git::Git {
                 url: repo.url,
                 spaces_key,
@@ -517,7 +517,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let cargo_bin: CargoBin = serde_json::from_value(cargo_bin.to_json_value()?)
             .context(format_context!("bad options for cargo_bin"))?;
 
-        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for cargo_bin rule"))?;
 
         let workspace_arc =
@@ -556,9 +556,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         };
 
         let rule_name = rule.name.clone();
-        rules::insert_task(rules::Task::new(
+        rules::insert_task(task::Task::new(
             rule,
-            rules::Phase::Checkout,
+            task::Phase::Checkout,
             executor::Task::Exec(exec),
         ))
         .context(format_context!("Failed to insert task {rule_name}"))?;
@@ -571,9 +571,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             let output_file = format!("{}/bin/{}", output_directory, bin);
 
             let rule_name = hard_link_rule.name.clone();
-            rules::insert_task(rules::Task::new(
+            rules::insert_task(task::Task::new(
                 bin_rule,
-                rules::Phase::PostCheckout,
+                task::Phase::PostCheckout,
                 executor::Task::AddHardLink(asset::AddHardLink {
                     source: output_file,
                     destination: format!("sysroot/bin/{}", bin),
@@ -589,7 +589,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] platforms: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
-        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for add platform archive rule"))?;
         //convert platforms to starlark value
 
@@ -622,16 +622,16 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] asset: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
-        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for which asset rule"))?;
 
         let asset: asset::AddWhichAsset = serde_json::from_value(asset.to_json_value()?)
             .context(format_context!("Failed to parse which asset arguments"))?;
 
         let rule_name = rule.name.clone();
-        rules::insert_task(rules::Task::new(
+        rules::insert_task(task::Task::new(
             rule,
-            rules::Phase::Checkout,
+            task::Phase::Checkout,
             executor::Task::AddWhichAsset(asset),
         ))
         .context(format_context!("Failed to insert task {rule_name}"))?;
@@ -643,16 +643,16 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] asset: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
-        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for which asset rule"))?;
 
         let asset: asset::AddHardLink = serde_json::from_value(asset.to_json_value()?)
             .context(format_context!("Failed to parse which asset arguments"))?;
 
         let rule_name = rule.name.clone();
-        rules::insert_task(rules::Task::new(
+        rules::insert_task(task::Task::new(
             rule,
-            rules::Phase::Checkout,
+            task::Phase::Checkout,
             executor::Task::AddHardLink(asset),
         ))
         .context(format_context!("Failed to insert task {rule_name}"))?;
@@ -664,16 +664,16 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] asset: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
-        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for which asset rule"))?;
 
         let asset: asset::AddSoftLink = serde_json::from_value(asset.to_json_value()?)
             .context(format_context!("Failed to parse which asset arguments"))?;
 
         let rule_name = rule.name.clone();
-        rules::insert_task(rules::Task::new(
+        rules::insert_task(task::Task::new(
             rule,
-            rules::Phase::Checkout,
+            task::Phase::Checkout,
             executor::Task::AddSoftLink(asset),
         ))
         .context(format_context!("Failed to insert task {rule_name}"))?;
@@ -686,7 +686,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] archive: starlark::values::Value,
         // includes, excludes, strip_prefix
     ) -> anyhow::Result<NoneType> {
-        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for add archive rule"))?;
 
         let archive: http_archive::Archive = serde_json::from_value(archive.to_json_value()?)
@@ -701,7 +701,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] oras_archive: starlark::values::Value,
         // includes, excludes, strip_prefix
     ) -> anyhow::Result<NoneType> {
-        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for oras rule"))?;
 
         let oras_archive: executor::oras::OrasArchive =
@@ -709,9 +709,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 .context(format_context!("Failed to parse oras archive arguments"))?;
 
         let rule_name = rule.name.clone();
-        rules::insert_task(rules::Task::new(
+        rules::insert_task(task::Task::new(
             rule,
-            rules::Phase::Checkout,
+            task::Phase::Checkout,
             executor::Task::OrasArchive(oras_archive),
         ))
         .context(format_context!("Failed to insert task {rule_name}"))?;
@@ -723,7 +723,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] asset: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
-        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for add asset rule"))?;
 
         let add_asset: executor::asset::AddAsset =
@@ -731,9 +731,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 .context(format_context!("Failed to parse asset arguments"))?;
 
         let rule_name = rule.name.clone();
-        rules::insert_task(rules::Task::new(
+        rules::insert_task(task::Task::new(
             rule,
-            rules::Phase::Checkout,
+            task::Phase::Checkout,
             executor::Task::AddAsset(add_asset),
         ))
         .context(format_context!("Failed to insert task {rule_name}"))?;
@@ -744,7 +744,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] asset: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
-        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for update asset rule"))?;
         // support JSON, yaml, and toml
         let update_asset: executor::asset::UpdateAsset =
@@ -752,9 +752,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 .context(format_context!("Failed to parse archive arguments"))?;
 
         let rule_name = rule.name.clone();
-        rules::insert_task(rules::Task::new(
+        rules::insert_task(task::Task::new(
             rule,
-            rules::Phase::PostCheckout,
+            task::Phase::PostCheckout,
             executor::Task::UpdateAsset(update_asset),
         ))
         .context(format_context!("Failed to insert task {rule_name}"))?;
@@ -766,7 +766,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] env: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
-        let rule: rules::Rule = serde_json::from_value(rule.to_json_value()?)
+        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for update env rule"))?;
 
         // support JSON, yaml, and toml
@@ -776,9 +776,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let update_env = executor::env::UpdateEnv { environment };
 
         let rule_name = rule.name.clone();
-        rules::insert_task(rules::Task::new(
+        rules::insert_task(task::Task::new(
             rule,
-            rules::Phase::Checkout,
+            task::Phase::Checkout,
             executor::Task::UpdateEnv(update_env),
         ))
         .context(format_context!("Failed to insert task {rule_name}"))?;
@@ -788,7 +788,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 }
 
 fn add_http_archive(
-    rule: rules::Rule,
+    rule: rule::Rule,
     archive_option: Option<http_archive::Archive>,
 ) -> anyhow::Result<()> {
     if let Some(mut archive) = archive_option {
@@ -844,9 +844,9 @@ fn add_http_archive(
         ))?;
 
         let rule_name = rule.name.clone();
-        rules::insert_task(rules::Task::new(
+        rules::insert_task(task::Task::new(
             rule,
-            rules::Phase::Checkout,
+            task::Phase::Checkout,
             executor::Task::HttpArchive(executor::http_archive::HttpArchive { http_archive }),
         ))
         .context(format_context!("Failed to insert task {rule_name}"))?;
