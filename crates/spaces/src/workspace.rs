@@ -478,9 +478,9 @@ impl Workspace {
         // if any star files have changed, workspace is dirty - need to re-run starlark
         let is_dirty = !updated_modules.is_empty();
 
-        // inform the user of changed modules
+        // message the user of changed modules
         for updated in updated_modules {
-            logger(&mut progress).info(format!("dirty {updated}").as_str());
+            logger(&mut progress).message(format!("dirty {updated}").as_str());
         }
 
         // load the modules scanned from the workspace

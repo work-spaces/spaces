@@ -66,9 +66,6 @@ pub struct Task {
     /// signal to notify dependents that the task is complete
     #[serde(skip)]
     pub signal: SignalArc,
-    /// list of signals that must be received before starting the task
-    #[serde(skip)]
-    pub deps_signals: Vec<SignalArc>,
 }
 
 impl Task {
@@ -77,7 +74,6 @@ impl Task {
             executor,
             phase,
             signal: SignalArc::new(rule.name.clone()),
-            deps_signals: Vec::new(),
             rule,
             digest: "".into(),
         }
@@ -115,7 +111,7 @@ impl Task {
         }
     }
 
-    pub fn add_signal_dependency(&mut self, task: &Task) {
-        self.deps_signals.push(task.signal.clone());
-    }
+    //pub fn add_signal_dependency(&mut self, task: &Task) {
+    //    self.deps_signals.push(task.signal.clone());
+    //}
 }

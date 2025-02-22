@@ -2989,7 +2989,7 @@ dependencies = [
 
 [[package]]
 name = "spaces"
-version = "0.14.3"
+version = "0.14.4"
 dependencies = [
  "anyhow",
  "anyhow-source-location",
@@ -4246,7 +4246,7 @@ checksum = "1e9df38ee2d2c3c5948ea468a8406ff0db0b29ae1ffde1bcf20ef305bcc95c51"
 
 [[package]]
 name = "ws"
-version = "0.14.3"
+version = "0.14.4"
 dependencies = [
  "anyhow",
  "anyhow-source-location",

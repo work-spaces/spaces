@@ -108,16 +108,71 @@ pub fn debug_sorted_tasks(
     Ok(())
 }
 
+fn get_task_signal_deps(task: &task::Task) -> anyhow::Result<Vec<task::SignalArc>> {
+    let state = get_state().read();
+    let tasks = state.tasks.read();
+
+    let mut result = Vec::new();
+    if let Some(deps) = task.rule.deps.as_ref() {
+        for dep in deps {
+            // # tasks * # deps + hashmap access is EXPENSIVE
+            // this causes a substantial delay when starting spaces
+            let dep_task = tasks.get(dep).ok_or(format_error!(
+                "Task Dependency {} not found for {}",
+                dep,
+                task.rule.name
+            ))?;
+
+            if dep_task.phase == task::Phase::Complete || task::Phase::Cancelled == dep_task.phase {
+                continue;
+            }
+
+            match task.phase {
+                task::Phase::Run => {
+                    if dep_task.phase != task::Phase::Run {
+                        return Err(format_error!(
+                            "Run task {} cannot depend on non-run task {} -> {}",
+                            task.rule.name,
+                            dep_task.rule.name,
+                            dep_task.phase
+                        ));
+                    }
+                    if task.rule.type_ == Some(rule::RuleType::Setup)
+                        && dep_task.rule.type_ != Some(rule::RuleType::Setup)
+                    {
+                        return Err(format_error!(
+                            "Setup task {} cannot depend on non-setup task {} -> {}",
+                            task.rule.name,
+                            dep_task.rule.name,
+                            dep_task.phase
+                        ));
+                    }
+                }
+                task::Phase::Checkout => {
+                    if dep_task.phase != task::Phase::Checkout {
+                        return Err(format_error!(
+                            "Checkout task {} cannot depend on non-checkout task {} -> {}",
+                            task.rule.name,
+                            dep_task.rule.name,
+                            dep_task.phase
+                        ));
+                    }
+                }
+                _ => {}
+            }
+
+            result.push(dep_task.signal.clone());
+        }
+    }
+    Ok(result)
+}
+
 pub fn execute_task(
     mut progress: printer::MultiProgressBar,
     workspace: workspace::WorkspaceArc,
     task: &task::Task,
 ) -> std::thread::JoinHandle<anyhow::Result<executor::TaskResult>> {
-    let name = task.rule.name.clone();
-    let executor = task.executor.clone();
-    let signal = task.signal.clone();
-    let rule = task.rule.clone();
-    let deps_signals = task.deps_signals.clone();
+    let task = task.clone();
 
     struct SignalOnDrop {
         signal: task::SignalArc,
@@ -133,15 +188,17 @@ pub fn execute_task(
 
     std::thread::spawn(move || -> anyhow::Result<executor::TaskResult> {
         // check inputs/outputs to see if we need to run
+        let name = task.rule.name.clone();
 
         let _signal_on_drop = SignalOnDrop {
-            signal: signal.clone(),
+            signal: task.signal.clone(),
         };
 
         let mut skip_execute_message: Option<Arc<str>> = None;
-        if let (Some(platforms), Some(current_platform)) =
-            (rule.platforms.as_ref(), platform::Platform::get_platform())
-        {
+        if let (Some(platforms), Some(current_platform)) = (
+            task.rule.platforms.as_ref(),
+            platform::Platform::get_platform(),
+        ) {
             if !platforms.contains(&current_platform) {
                 skip_execute_message = Some("Skipping: platform not enabled".into());
             }
@@ -151,10 +208,11 @@ pub fn execute_task(
             format!("Skip execute message after platform check? {skip_execute_message:?}").as_str(),
         );
 
+        let deps_signals =
+            get_task_signal_deps(&task).context(format_context!("Failed to get signal deps"))?;
         let total = deps_signals.len();
 
-        task_logger(&mut progress, name.clone())
-            .trace(format!("{name} has {} dependencies", total).as_str());
+        task_logger(&mut progress, name.clone()).trace(format!("{} dependencies", total).as_str());
 
         let mut count = 1;
         for deps_rule_signal in deps_signals {
@@ -199,9 +257,9 @@ pub fn execute_task(
                 .trace(format!("{name} done checking skip cancellation").as_str());
         }
 
-        let rule_name = rule.name.clone();
+        let rule_name = name.clone();
 
-        let updated_digest = if let Some(inputs) = &rule.inputs {
+        let updated_digest = if let Some(inputs) = &task.rule.inputs {
             if skip_execute_message.is_some() {
                 None
             } else {
@@ -214,7 +272,7 @@ pub fn execute_task(
 
                 task_logger(&mut progress, name.clone()).debug("check for new digest");
 
-                let seed = serde_json::to_string(&executor)
+                let seed = serde_json::to_string(&task.executor)
                     .context(format_context!("Failed to serialize"))?;
                 let digest = workspace
                     .read()
@@ -248,7 +306,7 @@ pub fn execute_task(
             progress.set_ending_message(message.as_ref());
             Ok(executor::TaskResult::new())
         } else {
-            executor
+            task.executor
                 .execute(progress, workspace.clone(), &rule_name)
                 .context(format_context!("Failed to exec {}", name))
         };
@@ -368,7 +426,7 @@ impl State {
             self.graph.add_task(task.rule.name.clone());
         }
 
-        let tasks_copy = tasks.clone();
+        rules_progress_logger(&mut progress_bar).debug("Adding deps to graph tasks");
 
         progress_bar.set_total(tasks.len() as u64);
         for task in tasks.values_mut() {
@@ -390,47 +448,6 @@ impl State {
             // connect the dependencies
             if let Some(deps) = task.rule.deps.clone() {
                 for dep in deps {
-                    // # tasks * # deps + hashmap access is EXPENSIVE
-                    // this causes a substantial delay when starting spaces
-                    let dep_task = tasks_copy.get(&dep).ok_or(format_error!(
-                        "Task Dependency {} not found for {}: {}",
-                        dep,
-                        task.rule.name,
-                        self.graph.get_target_not_found(dep.clone())
-                    ))?;
-
-                    match task_phase {
-                        task::Phase::Run => {
-                            if dep_task.phase != task::Phase::Run {
-                                return Err(format_error!(
-                                    "Run task {} cannot depend on non-run task {}",
-                                    task.rule.name,
-                                    dep_task.rule.name
-                                ));
-                            }
-                            if task.rule.type_ == Some(rule::RuleType::Setup)
-                                && dep_task.rule.type_ != Some(rule::RuleType::Setup)
-                            {
-                                return Err(format_error!(
-                                    "Setup task {} cannot depend on non-setup task {}",
-                                    task.rule.name,
-                                    dep_task.rule.name
-                                ));
-                            }
-                        }
-                        task::Phase::Checkout => {
-                            if dep_task.phase != task::Phase::Checkout {
-                                return Err(format_error!(
-                                    "Checkout task {} cannot depend on non-checkout task {}",
-                                    task.rule.name,
-                                    dep_task.rule.name
-                                ));
-                            }
-                        }
-                        _ => {}
-                    }
-
-                    task.add_signal_dependency(dep_task);
                     self.graph
                         .add_dependency(&task.rule.name, &dep)
                         .context(format_context!(
@@ -442,7 +459,6 @@ impl State {
         }
 
         let target_is_some = target.is_some();
-
         let is_sort_tasks = workspace.read().is_dirty;
         if is_sort_tasks {
             rules_progress_logger(&mut progress_bar).info("sorting and hashing");
