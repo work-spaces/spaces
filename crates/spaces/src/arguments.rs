@@ -37,9 +37,12 @@ pub struct Arguments {
     /// The verbosity level of the output.
     #[arg(short, long, default_value = "app")]
     pub verbosity: Level,
-    #[arg(long)]
     /// Dont show progress bars
+    #[arg(long)]
     pub hide_progress_bars: bool,
+    /// Show elapsed time - use with --verbosity=debug to instrument spaces performance
+    #[arg(long)]
+    pub show_elapsed_time: bool,
     /// If this is passed, info.is_ci() returns true in scripts.
     #[arg(long)]
     ci: bool,
@@ -56,15 +59,19 @@ fn handle_verbosity(
     is_ci: bool,
     rescan: bool,
     is_hide_progress_bars: bool,
+    show_elapsed_time: bool
+
 ) {
     singleton::set_rescan(rescan);
     if is_ci {
         singleton::set_ci(true);
         printer.verbosity.level = printer::Level::Trace;
         printer.verbosity.is_show_progress_bars = false;
+        printer.verbosity.is_show_elapsed_time = true;  
     } else {
         printer.verbosity.level = verbosity;
         printer.verbosity.is_show_progress_bars = !is_hide_progress_bars;
+        printer.verbosity.is_show_elapsed_time = show_elapsed_time;  
     }
 }
 
@@ -105,6 +112,7 @@ pub fn execute() -> anyhow::Result<()> {
         Arguments {
             verbosity,
             hide_progress_bars,
+            show_elapsed_time,
             ci,
             rescan,
             commands:
@@ -122,6 +130,7 @@ pub fn execute() -> anyhow::Result<()> {
                 ci,
                 rescan,
                 hide_progress_bars,
+                show_elapsed_time,
             );
 
             let mut script_inputs: Vec<Arc<str>> = vec![];
@@ -194,6 +203,7 @@ pub fn execute() -> anyhow::Result<()> {
         Arguments {
             verbosity,
             hide_progress_bars,
+            show_elapsed_time,
             ci,
             rescan,
             commands: Commands::Sync {},
@@ -204,6 +214,7 @@ pub fn execute() -> anyhow::Result<()> {
                 ci,
                 rescan,
                 hide_progress_bars,
+                show_elapsed_time
             );
             runner::run_starlark_modules_in_workspace(
                 &mut printer,
@@ -230,6 +241,7 @@ pub fn execute() -> anyhow::Result<()> {
         Arguments {
             verbosity,
             hide_progress_bars,
+            show_elapsed_time,
             ci,
             rescan,
             commands:
@@ -245,6 +257,7 @@ pub fn execute() -> anyhow::Result<()> {
                 ci,
                 rescan,
                 hide_progress_bars,
+                show_elapsed_time
             );
 
             if target.is_none() && !extra_rule_args.is_empty() {
@@ -267,6 +280,7 @@ pub fn execute() -> anyhow::Result<()> {
         Arguments {
             verbosity,
             hide_progress_bars,
+            show_elapsed_time,
             ci,
             rescan,
             commands:
@@ -282,6 +296,7 @@ pub fn execute() -> anyhow::Result<()> {
                 ci,
                 rescan,
                 hide_progress_bars,
+                show_elapsed_time
             );
 
             if printer.verbosity.level > printer::Level::Info {
@@ -321,6 +336,7 @@ pub fn execute() -> anyhow::Result<()> {
         Arguments {
             verbosity,
             hide_progress_bars,
+            show_elapsed_time,
             ci,
             rescan,
             commands: Commands::Completions { shell },
@@ -331,6 +347,7 @@ pub fn execute() -> anyhow::Result<()> {
                 ci,
                 rescan,
                 hide_progress_bars,
+                show_elapsed_time
             );
 
             clap_complete::generate(
@@ -344,6 +361,7 @@ pub fn execute() -> anyhow::Result<()> {
         Arguments {
             verbosity,
             hide_progress_bars,
+            show_elapsed_time,
             ci,
             rescan,
             commands: Commands::Docs { item },
@@ -354,6 +372,7 @@ pub fn execute() -> anyhow::Result<()> {
                 ci,
                 rescan,
                 hide_progress_bars,
+                show_elapsed_time
             );
 
             docs::show(&mut printer, item)?;
