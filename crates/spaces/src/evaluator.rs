@@ -212,6 +212,45 @@ fn insert_setup_and_all_rules(target: Option<Arc<str>>) -> anyhow::Result<Option
     }
 }
 
+fn show_eval_progress(
+    printer: &mut printer::Printer,
+    name: &str,
+    handle: std::thread::JoinHandle<anyhow::Result<()>>,
+) -> anyhow::Result<()> {
+    // show a progress bar if the evaluation takes more than 100ms
+    let mut multi_progress = printer::MultiProgress::new(printer);
+    let mut progress_bar = None;
+    let mut count = 0;
+    loop {
+        if handle.is_finished() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        count += 1;
+        if count == 10 {
+            progress_bar = Some(multi_progress.add_progress(
+                "evaluating",
+                Some(200),
+                Some(format!("Complete ({})", name).as_str()),
+            ));
+            progress_bar.as_mut().unwrap().set_message(name);
+        }
+        if let Some(progress_bar) = progress_bar.as_mut() {
+            progress_bar.increment_with_overflow(1);
+        }
+    }
+
+    match handle.join() {
+        Ok(result) => {
+            result.context(format_context!("Failed to evaluate module {}", name))?;
+        }
+        Err(_) => {
+            return Err(format_error!("Failed to evaluate module {name}"));
+        }
+    }
+    Ok(())
+}
+
 pub fn run_starlark_modules(
     printer: &mut printer::Printer,
     workspace: workspace::WorkspaceArc,
@@ -249,13 +288,23 @@ pub fn run_starlark_modules(
             let mut _workspace_lock = get_state().write();
             singleton::set_active_workspace(workspace.clone());
             star_logger(printer).message(format!("evaluating {}", name).as_str());
-            let _ = evaluate_module(
-                workspace_path.clone(),
-                name.clone(),
-                content.to_string(),
-                WithRules::Yes,
-            )
-            .context(format_context!("Failed to evaluate module {}", name))?;
+
+            let eval_workspace_path = workspace_path.clone();
+            let eval_name = name.clone();
+
+            let handle = std::thread::spawn(move || -> anyhow::Result<()> {
+                let _ = evaluate_module(
+                    eval_workspace_path.clone(),
+                    eval_name.clone(),
+                    content.to_string(),
+                    WithRules::Yes,
+                )
+                .context(format_context!("Failed to evaluate module {}", eval_name))?;
+                Ok(())
+            });
+
+            show_eval_progress(printer, &name, handle)
+                .context(format_context!("Failed to show eval progress"))?;
         }
 
         // During checkout phase, additional modules may be added to the queue
@@ -263,6 +312,7 @@ pub fn run_starlark_modules(
         if phase == task::Phase::Checkout {
             rules::sort_tasks(printer, workspace.clone(), None, phase)
                 .context(format_context!("Failed to sort tasks"))?;
+
             star_logger(printer).debug("--Checkout Phase--");
             rules::debug_sorted_tasks(printer, phase)
                 .context(format_context!("Failed to debug sorted tasks"))?;
@@ -298,8 +348,8 @@ pub fn run_starlark_modules(
     rules::set_latest_starlark_module("".into());
 
     star_logger(printer).debug("Inserting //:setup and //:all");
-    let run_target =
-        insert_setup_and_all_rules(target.clone()).context(format_context!("failed to insert run all"))?;
+    let run_target = insert_setup_and_all_rules(target.clone())
+        .context(format_context!("failed to insert run all"))?;
 
     match phase {
         task::Phase::Run => {
@@ -327,7 +377,6 @@ pub fn run_starlark_modules(
         }
         task::Phase::Inspect => {
             star_logger(printer).message("--Inspect Phase--");
-
 
             rules::sort_tasks(printer, workspace.clone(), target.clone(), phase)
                 .context(format_context!("Failed to sort tasks"))?;
