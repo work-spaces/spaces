@@ -1,4 +1,4 @@
-use crate::{docs, evaluator, rules, runner, singleton, tools, workspace};
+use crate::{docs, evaluator, task, runner, singleton, tools, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
@@ -218,7 +218,7 @@ pub fn execute() -> anyhow::Result<()> {
             );
             runner::run_starlark_modules_in_workspace(
                 &mut printer,
-                rules::Phase::Checkout,
+                task::Phase::Checkout,
                 None,
                 true,
                 runner::RunWorkspace::Target(None, vec![]),
@@ -268,7 +268,7 @@ pub fn execute() -> anyhow::Result<()> {
 
             runner::run_starlark_modules_in_workspace(
                 &mut printer,
-                rules::Phase::Run,
+                task::Phase::Run,
                 None,
                 forget_inputs,
                 runner::RunWorkspace::Target(target, extra_rule_args),
@@ -324,7 +324,7 @@ pub fn execute() -> anyhow::Result<()> {
 
             runner::run_starlark_modules_in_workspace(
                 &mut printer,
-                rules::Phase::Inspect,
+                task::Phase::Inspect,
                 None,
                 false,
                 runner::RunWorkspace::Target(target, vec![]),

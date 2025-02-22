@@ -1,4 +1,4 @@
-use crate::{evaluator, rules, workspace};
+use crate::{evaluator, task, workspace};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use std::sync::Arc;
@@ -15,7 +15,7 @@ pub enum RunWorkspace {
 
 pub fn run_starlark_modules_in_workspace(
     printer: &mut printer::Printer,
-    phase: rules::Phase,
+    phase: task::Phase,
     absolute_path_to_workspace: Option<Arc<str>>,
     is_clear_inputs: bool,
     run_workspace: RunWorkspace,
@@ -176,7 +176,7 @@ pub fn checkout(
 
     run_starlark_modules_in_workspace(
         printer,
-        rules::Phase::Checkout,
+        task::Phase::Checkout,
         Some(absolute_path_to_workspace.clone()),
         false,
         RunWorkspace::Script(scripts),
