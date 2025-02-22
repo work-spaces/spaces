@@ -2,7 +2,7 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 pub const SPACES_LOGS_NAME: &str = ".spaces/logs";
@@ -77,10 +77,41 @@ pub struct Task {
 }
 
 #[derive(Debug, Encode, Decode, Default)]
+pub struct BinDetail {
+    pub hash: [u8; blake3::OUT_LEN],
+    pub modified: Option<std::time::SystemTime>,
+}
+
+#[derive(Debug, Encode, Decode, Default)]
 pub struct BinSettings {
     pub tasks: Vec<Task>,
-    pub scanned_modules: HashMap<Arc<str>, Arc<str>>,
+    pub star_files: HashMap<Arc<str>, BinDetail>, // modules and hashes to detect changes
 }
+
+impl BinSettings {
+    pub fn update_hashes(&mut self, progress: &mut printer::MultiProgressBar) -> anyhow::Result<Vec<Arc<str>>> {
+        let mut result = Vec::new();
+        for (module_path, bin_detail) in self.star_files.iter_mut() {
+            progress.increment(1);
+            let mod_path = std::path::Path::new(module_path.as_ref());
+            let modified = changes::get_modified_time(mod_path.metadata());
+            if changes::is_modified(modified, bin_detail.modified) {
+                let content: Arc<str> = std::fs::read_to_string(module_path.as_ref())
+                    .context(format_context!("Failed to read file {module_path}"))?
+                    .into();
+                let content_hash = blake3::hash(content.as_bytes());
+                if content_hash.as_bytes() != &bin_detail.hash {
+                    bin_detail.hash = content_hash.into();
+                    bin_detail.modified = modified;
+                    result.push(module_path.clone());
+                }
+            }
+        }
+        Ok(result)
+    }
+}
+
+
 
 fn get_unknown_version() -> Arc<str> {
     "unknown".into()
@@ -201,3 +232,4 @@ impl Settings {
         path_option.flatten()
     }
 }
+

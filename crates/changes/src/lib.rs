@@ -23,6 +23,26 @@ fn changes_logger(progress: &mut printer::MultiProgressBar) -> logger::Logger {
     logger::Logger::new_progress(progress, "Changes".into())
 }
 
+pub fn get_modified_time<ErrorType>(
+    metadata_result: Result<std::fs::Metadata, ErrorType>,
+) -> Option<std::time::SystemTime> {
+    metadata_result
+        .ok()
+        .map(|metadata| metadata.modified().ok())
+        .flatten()
+}
+
+pub fn is_modified(
+    metadata_modified: Option<std::time::SystemTime>,
+    last_modified: Option<std::time::SystemTime>,
+) -> bool {
+    metadata_modified
+        .map(|metadata_modified| {
+            metadata_modified != last_modified.unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+        })
+        .unwrap_or(true)
+}
+
 #[derive(Clone, Debug, Encode, Decode)]
 pub struct Changes {
     path: Arc<str>,
@@ -99,16 +119,8 @@ impl Changes {
         }
 
         if let Some(change_detail) = entries.get(file_path.as_ref()) {
-            let modified = match entry.metadata() {
-                Ok(metadata) => metadata
-                    .modified()
-                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH),
-                Err(_) => return true,
-            };
-
-            if modified == change_detail.modified {
-                return false;
-            }
+            let modified_time = get_modified_time(entry.metadata());
+            return is_modified(modified_time, Some(change_detail.modified));
         }
 
         true
@@ -122,17 +134,12 @@ impl Changes {
     ) -> bool {
         let sane_path = Self::sanitize_path(&path);
         let mut logger = logger::Logger::new_progress(progress, "Changes".into());
-        if let Some(previous_entry) = self
-            .entries
-            .insert(sane_path.into(), change_detail.clone())
-        {
+        if let Some(previous_entry) = self.entries.insert(sane_path.into(), change_detail.clone()) {
             if let (ChangeDetailType::File(previous_hash), ChangeDetailType::File(new_hash)) =
                 (&previous_entry.detail_type, &change_detail.detail_type)
             {
                 if previous_hash != new_hash {
-                    logger.debug(
-                        format!("{path} hash changed").as_str(),
-                    );
+                    logger.debug(format!("{path} hash changed").as_str());
 
                     return true;
                 }
@@ -151,14 +158,11 @@ impl Changes {
         inputs: &HashSet<Arc<str>>,
     ) -> anyhow::Result<()> {
         for input in inputs {
-            changes_logger(progress).trace(
-                format!("Update changes for {input}").as_str(),
-            );
+            changes_logger(progress).trace(format!("Update changes for {input}").as_str());
 
             let mut count = 0usize;
             // convert input from a glob expression to a parent directory
             if input.starts_with('+') && input.find('*').is_none() {
-
                 let path = std::path::Path::new(input.as_ref());
                 if path.exists() && path.is_file() {
                     let change_detail = Self::process_entry(progress, path)
@@ -182,9 +186,7 @@ impl Changes {
             };
 
             if let Some(glob_include_path) = glob::is_glob_include(input_path.as_ref()) {
-                changes_logger(progress).trace(
-                    format!("Update glob {glob_include_path}").as_str(),
-                );
+                changes_logger(progress).trace(format!("Update glob {glob_include_path}").as_str());
 
                 let walk_dir: Vec<_> = walkdir::WalkDir::new(glob_include_path.as_ref())
                     .into_iter()
@@ -199,11 +201,7 @@ impl Changes {
                     let change_detail = Self::process_entry(progress, path)
                         .context(format_context!("Failed to process entry"))?;
 
-                    if self.update_entry(
-                        progress,
-                        path.to_string_lossy().into(),
-                        change_detail,
-                    ) {
+                    if self.update_entry(progress, path.to_string_lossy().into(), change_detail) {
                         count += 1;
                     }
 
@@ -211,15 +209,12 @@ impl Changes {
                 }
 
                 if count > 0 {
-                    changes_logger(progress).message(
-                        format!("Updated {count} items from {input}").as_str(),
-                    );
+                    changes_logger(progress)
+                        .message(format!("Updated {count} items from {input}").as_str());
                 }
             }
 
-            changes_logger(progress).trace(
-                format!("Done updating {input}").as_str(),
-            );
+            changes_logger(progress).trace(format!("Done updating {input}").as_str());
         }
 
         Ok(())
@@ -251,9 +246,7 @@ impl Changes {
         for input in inputs.iter() {
             if let Some(change_detail) = self.entries.get(*input) {
                 if let ChangeDetailType::File(hash) = &change_detail.detail_type {
-                    changes_logger(progress).trace( 
-                        format!("Hashing {input}:{hash}").as_str(),
-                    );
+                    changes_logger(progress).trace(format!("Hashing {input}:{hash}").as_str());
                     count += 1;
                     hasher.update(hash.as_bytes());
                 }
@@ -261,9 +254,7 @@ impl Changes {
         }
 
         if count > 0 {
-            changes_logger(progress).message( 
-                format!("Hashed {count} items").as_str(),
-            );
+            changes_logger(progress).message(format!("Hashed {count} items").as_str());
         }
 
         Ok(hasher.finalize().to_string().into())

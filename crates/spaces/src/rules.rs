@@ -557,7 +557,7 @@ impl State {
 
         let target_is_some = target.is_some();
 
-        let is_sort_tasks = workspace.read().is_sort_tasks;
+        let is_sort_tasks = workspace.read().is_dirty;
         if is_sort_tasks {
             logger::Logger::new_printer(printer, "tasks".into()).info("sorting and hashing");
             let topo_sorted = self.graph.get_sorted_tasks(None).context(format_context!(
