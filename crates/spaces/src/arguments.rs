@@ -1,4 +1,4 @@
-use crate::{docs, evaluator, task, runner, singleton, tools, workspace};
+use crate::{docs, evaluator, runner, singleton, task, tools, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
@@ -59,19 +59,18 @@ fn handle_verbosity(
     is_ci: bool,
     rescan: bool,
     is_hide_progress_bars: bool,
-    show_elapsed_time: bool
-
+    show_elapsed_time: bool,
 ) {
     singleton::set_rescan(rescan);
     if is_ci {
         singleton::set_ci(true);
         printer.verbosity.level = printer::Level::Trace;
         printer.verbosity.is_show_progress_bars = false;
-        printer.verbosity.is_show_elapsed_time = true;  
+        printer.verbosity.is_show_elapsed_time = true;
     } else {
         printer.verbosity.level = verbosity;
         printer.verbosity.is_show_progress_bars = !is_hide_progress_bars;
-        printer.verbosity.is_show_elapsed_time = show_elapsed_time;  
+        printer.verbosity.is_show_elapsed_time = show_elapsed_time;
     }
 }
 
@@ -214,7 +213,7 @@ pub fn execute() -> anyhow::Result<()> {
                 ci,
                 rescan,
                 hide_progress_bars,
-                show_elapsed_time
+                show_elapsed_time,
             );
             runner::run_starlark_modules_in_workspace(
                 &mut printer,
@@ -257,7 +256,7 @@ pub fn execute() -> anyhow::Result<()> {
                 ci,
                 rescan,
                 hide_progress_bars,
-                show_elapsed_time
+                show_elapsed_time,
             );
 
             if target.is_none() && !extra_rule_args.is_empty() {
@@ -296,7 +295,7 @@ pub fn execute() -> anyhow::Result<()> {
                 ci,
                 rescan,
                 hide_progress_bars,
-                show_elapsed_time
+                show_elapsed_time,
             );
 
             if printer.verbosity.level > printer::Level::Info {
@@ -307,15 +306,22 @@ pub fn execute() -> anyhow::Result<()> {
             if let Some(filter) = filter {
                 let filter_parts = filter.split(',');
                 for glob_expression in filter_parts {
-                    let effective_expression =
+                    let effective_expressions =
                         if glob_expression.starts_with('-') || glob_expression.starts_with('+') {
-                            glob_expression.to_string()
+                            vec![glob_expression.to_string()]
                         } else if glob_expression.contains('*') {
-                            format!("+{}", glob_expression)
+                            vec![format!("+{}", glob_expression)]
                         } else {
-                            format!("+**{}**", glob_expression)
+                            vec![
+                                format!("+**/*:*{}*", glob_expression),
+                                format!("+**/*{}*:*", glob_expression),
+                                format!("+**/{}*:*", glob_expression),
+                                format!("+**/*{}*/*:*", glob_expression),
+                            ]
                         };
-                    filter_globs.insert(effective_expression.into());
+                    for exp in effective_expressions {
+                        filter_globs.insert(exp.into());
+                    }
                 }
             }
 
@@ -347,7 +353,7 @@ pub fn execute() -> anyhow::Result<()> {
                 ci,
                 rescan,
                 hide_progress_bars,
-                show_elapsed_time
+                show_elapsed_time,
             );
 
             clap_complete::generate(
@@ -372,7 +378,7 @@ pub fn execute() -> anyhow::Result<()> {
                 ci,
                 rescan,
                 hide_progress_bars,
-                show_elapsed_time
+                show_elapsed_time,
             );
 
             docs::show(&mut printer, item)?;
