@@ -1,3 +1,4 @@
+use crate::workspace::WorkspaceArc;
 use crate::{executor, label, rule, singleton, task, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
@@ -15,97 +16,6 @@ fn _rules_progress_logger(progress: &mut printer::MultiProgressBar) -> logger::L
 
 fn task_logger(progress: &mut printer::MultiProgressBar, name: Arc<str>) -> logger::Logger {
     logger::Logger::new_progress(progress, name)
-}
-
-pub fn get_sanitized_rule_name(rule_name: Arc<str>) -> Arc<str> {
-    let state = get_state().read();
-    state.get_sanitized_rule_name(rule_name)
-}
-
-pub fn get_sanitized_working_directory(rule_name: Arc<str>) -> Arc<str> {
-    let state = get_state().read();
-    state.get_sanitized_working_directory(rule_name)
-}
-
-pub fn insert_task(task: task::Task) -> anyhow::Result<()> {
-    let state = get_state().read();
-    state.insert_task(task)
-}
-
-pub fn set_latest_starlark_module(name: Arc<str>) {
-    let mut state = get_state().write();
-    state.latest_starlark_module = Some(name.clone());
-    state.all_modules.insert(name);
-}
-
-pub fn show_tasks(
-    printer: &mut printer::Printer,
-    phase: task::Phase,
-    target: Option<Arc<str>>,
-    filter: &HashSet<Arc<str>>,
-    strip_prefix: Option<Arc<str>>,
-) -> anyhow::Result<()> {
-    let state = get_state().read();
-    state.show_tasks(printer, phase, target, filter, strip_prefix)
-}
-
-pub fn sort_tasks(
-    printer: &mut printer::Printer,
-    workspace: workspace::WorkspaceArc,
-    target: Option<Arc<str>>,
-    phase: task::Phase,
-) -> anyhow::Result<()> {
-    let mut state = get_state().write();
-    state.sort_tasks(printer, workspace, target, phase)
-}
-
-pub fn execute(
-    printer: &mut printer::Printer,
-    workspace: workspace::WorkspaceArc,
-    phase: task::Phase,
-) -> anyhow::Result<executor::TaskResult> {
-    let state: std::sync::RwLockReadGuard<'_, State> = get_state().read();
-    state.execute(printer, workspace, phase)
-}
-
-pub fn add_setup_dep_to_run_rules() -> anyhow::Result<()> {
-    let state = get_state().read();
-    let mut tasks = state.tasks.write();
-    for task in tasks.values_mut() {
-        if task.rule.type_ != Some(rule::RuleType::Setup) && task.phase == task::Phase::Run {
-            task.rule
-                .deps
-                .get_or_insert_with(Vec::new)
-                .push(rule::SETUP_RULE_NAME.into());
-        }
-    }
-    Ok(())
-}
-
-pub fn get_setup_rules() -> Vec<Arc<str>> {
-    let state = get_state().read();
-    let tasks = state.tasks.read();
-    tasks
-        .values()
-        .filter(|task| task.rule.type_ == Some(rule::RuleType::Setup))
-        .map(|task| task.rule.name.clone())
-        .collect()
-}
-
-pub fn debug_sorted_tasks(
-    printer: &mut printer::Printer,
-    phase: task::Phase,
-) -> anyhow::Result<()> {
-    let state = get_state().read();
-    for node_index in state.sorted.iter() {
-        let task_name = state.graph.get_task(*node_index);
-        if let Some(task) = state.tasks.read().get(task_name) {
-            if task.phase == phase {
-                rules_printer_logger(printer).debug(format!("Queued task {task_name}").as_str());
-            }
-        }
-    }
-    Ok(())
 }
 
 fn get_task_signal_deps(task: &task::Task) -> anyhow::Result<Vec<task::SignalArc>> {
@@ -263,7 +173,8 @@ pub fn execute_task(
             if skip_execute_message.is_some() {
                 None
             } else {
-                task_logger(&mut progress, name.clone()).debug("update workspace changes");
+                task_logger(&mut progress, name.clone())
+                    .debug(format!("update workspace changes {} inputs", inputs.len()).as_str());
 
                 workspace
                     .write()
@@ -403,10 +314,9 @@ impl State {
         Ok(())
     }
 
-    pub fn sort_tasks(
+    pub fn update_dependency_graph(
         &mut self,
         printer: &mut printer::Printer,
-        workspace: workspace::WorkspaceArc,
         target: Option<Arc<str>>,
         phase: task::Phase,
     ) -> anyhow::Result<()> {
@@ -422,67 +332,44 @@ impl State {
 
         rules_printer_logger(printer).debug("Adding deps to graph tasks");
 
-        for task in tasks.values_mut() {
-            let task_phase = task.phase;
-            if phase == task::Phase::Checkout && task_phase != task::Phase::Checkout {
-                // skip evaluating non-checkout tasks during checkout
-                rules_printer_logger(printer).debug(
-                    format!(
-                        "Skipping additional checks for {} during checkout",
-                        task.rule.name
-                    )
-                    .as_str(),
-                );
-                continue;
-            }
+        {
+            let mut multiprogress = printer::MultiProgress::new(printer);
+            let start_time = std::time::Instant::now();
+            let mut progress: Option<printer::MultiProgressBar> = None;
+            for task in tasks.values_mut() {
+                let now = std::time::Instant::now();
+                if now.duration_since(start_time).as_millis() > 100 {
+                    if let Some(progress) = progress.as_mut() {
+                        progress.increment_with_overflow(1);
+                        progress.set_message("populating dependency graph");
+                    } else {
+                        progress =
+                            Some(multiprogress.add_progress("workspace", Some(200), Some("Populated Graph")));
+                    }
+                }
 
-            // connect the dependencies
-            if let Some(deps) = task.rule.deps.clone() {
-                for dep in deps {
-                    self.graph
-                        .add_dependency(&task.rule.name, &dep)
-                        .context(format_context!(
-                            "Failed to add dependency {dep} to task {}",
-                            task.rule.name
-                        ))?;
+                let task_phase = task.phase;
+                if phase == task::Phase::Checkout && task_phase != task::Phase::Checkout {
+                    // skip evaluating non-checkout tasks during checkout
+                    continue;
+                }
+
+                // connect the dependencies
+                if let Some(deps) = task.rule.deps.as_ref() {
+                    for dep in deps {
+                        self.graph.add_dependency(&task.rule.name, dep).context(
+                            format_context!(
+                                "Failed to add dependency {dep} to task {}: {}",
+                                task.rule.name,
+                                self.graph.get_target_not_found(dep.clone())
+                            ),
+                        )?;
+                    }
                 }
             }
         }
 
         let target_is_some = target.is_some();
-        let is_sort_tasks = workspace.read().is_dirty;
-        if is_sort_tasks {
-            rules_printer_logger(printer).info("sorting and hashing");
-            let topo_sorted = self.graph.get_sorted_tasks(None).context(format_context!(
-                "Failed to sort tasks for phase {:?}",
-                phase
-            ))?;
-
-            let mut tasks_to_save = Vec::new();
-            for node in topo_sorted.iter() {
-                let task_name = self.graph.get_task(*node);
-                let task = tasks.get(task_name).cloned();
-                if let Some(task) = task {
-                    let mut task_hasher = blake3::Hasher::new();
-                    task_hasher.update(task.calculate_digest().as_bytes());
-                    let mut deps = task.rule.deps.clone().unwrap_or_default();
-                    deps.sort();
-                    for dep in deps {
-                        if let Some(dep_task) = tasks.get(&dep) {
-                            task_hasher.update(dep_task.digest.as_bytes());
-                        }
-                    }
-                    if let Some(task_mut) = tasks.get_mut(task_name) {
-                        task_mut.digest = task_hasher.finalize().to_string().into();
-                        tasks_to_save.push(ws::Task {
-                            name: task_name.into(),
-                            hash: task_mut.digest.clone(),
-                        });
-                    }
-                }
-            }
-            workspace.write().settings.bin_settings.tasks = tasks_to_save;
-        }
 
         rules_printer_logger(printer)
             .debug(format!("sorting graph with for {target:?}...").as_str());
@@ -506,6 +393,72 @@ impl State {
                 }
             }
         }
+
+        Ok(())
+    }
+
+    pub fn import_tasks_from_workspace_settings(
+        &mut self,
+        workspace: workspace::WorkspaceArc,
+    ) -> anyhow::Result<()> {
+        {
+            let workspace = workspace.read();
+            let mut tasks = self.tasks.write();
+            *tasks = serde_json::from_str(&workspace.settings.bin.tasks_json)
+                .context(format_context!("Failed to parse tasks"))?;
+
+            for task in tasks.values_mut() {
+                task.signal = task::SignalArc::new(task.rule.name.clone());
+            }
+        }
+        {
+            let mut workspace = workspace.write();
+            let env: environment::Environment =
+                serde_json::from_str(&workspace.settings.bin.env_json)
+                    .context(format_context!("Failed to parse env"))?;
+            workspace.set_env(env);
+        }
+        Ok(())
+    }
+
+    pub fn update_tasks_digests(
+        &self,
+        printer: &mut printer::Printer,
+        workspace: WorkspaceArc,
+    ) -> anyhow::Result<()> {
+        if !workspace.read().is_dirty {
+            return Ok(());
+        }
+        rules_printer_logger(printer).info("sorting and hashing");
+        let topo_sorted = self
+            .graph
+            .get_sorted_tasks(None)
+            .context(format_context!("Failed to sort tasks for phase digesting",))?;
+
+        let mut tasks = self.tasks.write();
+        for node in topo_sorted.iter() {
+            let task_name = self.graph.get_task(*node);
+            let task = tasks.get(task_name).cloned();
+            if let Some(task) = task {
+                let mut task_hasher = blake3::Hasher::new();
+                task_hasher.update(task.calculate_digest().as_bytes());
+                let mut deps = task.rule.deps.clone().unwrap_or_default();
+                deps.sort();
+                for dep in deps {
+                    if let Some(dep_task) = tasks.get(&dep) {
+                        task_hasher.update(dep_task.digest.as_bytes());
+                    }
+                }
+                if let Some(task_mut) = tasks.get_mut(task_name) {
+                    task_mut.digest = task_hasher.finalize().to_string().into();
+                }
+            }
+        }
+
+        let serde_tasks = tasks.clone();
+        workspace.write().settings.bin.tasks_json = serde_json::to_string(&serde_tasks)
+            .map_err(|e| format_error!("Failed to encode {e}"))?
+            .into();
 
         Ok(())
     }
@@ -658,15 +611,6 @@ impl State {
             }
         }
 
-        workspace
-            .read()
-            .save_inputs()
-            .context(format_context!("Failed to save inputs"))?;
-        workspace
-            .write()
-            .save_changes()
-            .context(format_context!("while saving changes"))?;
-
         if let Some(err) = first_error {
             return Err(err);
         }
@@ -710,4 +654,116 @@ pub fn get_path_to_build_checkout(rule_name: Arc<str>) -> anyhow::Result<Arc<str
     let state = get_state().read();
     let rule_name = state.get_sanitized_rule_name(rule_name);
     Ok(format!("build/{}", rule_name).into())
+}
+
+pub fn get_sanitized_rule_name(rule_name: Arc<str>) -> Arc<str> {
+    let state = get_state().read();
+    state.get_sanitized_rule_name(rule_name)
+}
+
+pub fn get_sanitized_working_directory(rule_name: Arc<str>) -> Arc<str> {
+    let state = get_state().read();
+    state.get_sanitized_working_directory(rule_name)
+}
+
+pub fn insert_task(task: task::Task) -> anyhow::Result<()> {
+    let state = get_state().read();
+    state.insert_task(task)
+}
+
+pub fn set_latest_starlark_module(name: Arc<str>) {
+    let mut state = get_state().write();
+    state.latest_starlark_module = Some(name.clone());
+    state.all_modules.insert(name);
+}
+
+pub fn show_tasks(
+    printer: &mut printer::Printer,
+    phase: task::Phase,
+    target: Option<Arc<str>>,
+    filter: &HashSet<Arc<str>>,
+    strip_prefix: Option<Arc<str>>,
+) -> anyhow::Result<()> {
+    let state = get_state().read();
+    state.show_tasks(printer, phase, target, filter, strip_prefix)
+}
+
+pub fn update_tasks_digests(
+    printer: &mut printer::Printer,
+    workspace: workspace::WorkspaceArc,
+) -> anyhow::Result<()> {
+    let state = get_state().read();
+    state.update_tasks_digests(printer, workspace)
+}
+
+pub fn update_depedency_graph(
+    printer: &mut printer::Printer,
+    target: Option<Arc<str>>,
+    phase: task::Phase,
+) -> anyhow::Result<()> {
+    let mut state = get_state().write();
+    state.update_dependency_graph(printer, target, phase)
+}
+
+pub fn import_tasks_from_workspace_settings(
+    workspace: workspace::WorkspaceArc,
+) -> anyhow::Result<()> {
+    let mut state = get_state().write();
+    state.import_tasks_from_workspace_settings(workspace)
+}
+
+pub fn get_pretty_tasks() -> String {
+    let state = get_state().read();
+    let tasks = state.tasks.read();
+    let tasks = tasks.clone();
+    serde_json::to_string_pretty(&tasks).unwrap()
+}
+
+pub fn execute(
+    printer: &mut printer::Printer,
+    workspace: workspace::WorkspaceArc,
+    phase: task::Phase,
+) -> anyhow::Result<executor::TaskResult> {
+    let state: std::sync::RwLockReadGuard<'_, State> = get_state().read();
+    state.execute(printer, workspace, phase)
+}
+
+pub fn add_setup_dep_to_run_rules() -> anyhow::Result<()> {
+    let state = get_state().read();
+    let mut tasks = state.tasks.write();
+    for task in tasks.values_mut() {
+        if task.rule.type_ != Some(rule::RuleType::Setup) && task.phase == task::Phase::Run {
+            task.rule
+                .deps
+                .get_or_insert_with(Vec::new)
+                .push(rule::SETUP_RULE_NAME.into());
+        }
+    }
+    Ok(())
+}
+
+pub fn get_setup_rules() -> Vec<Arc<str>> {
+    let state = get_state().read();
+    let tasks = state.tasks.read();
+    tasks
+        .values()
+        .filter(|task| task.rule.type_ == Some(rule::RuleType::Setup))
+        .map(|task| task.rule.name.clone())
+        .collect()
+}
+
+pub fn debug_sorted_tasks(
+    printer: &mut printer::Printer,
+    phase: task::Phase,
+) -> anyhow::Result<()> {
+    let state = get_state().read();
+    for node_index in state.sorted.iter() {
+        let task_name = state.graph.get_task(*node_index);
+        if let Some(task) = state.tasks.read().get(task_name) {
+            if task.phase == phase {
+                rules_printer_logger(printer).debug(format!("Queued task {task_name}").as_str());
+            }
+        }
+    }
+    Ok(())
 }

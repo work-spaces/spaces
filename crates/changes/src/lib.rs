@@ -6,21 +6,22 @@ use std::sync::Arc;
 
 pub mod glob;
 
-#[derive(Clone, Debug, Encode, Decode)]
+#[derive(Clone, Debug, Encode, Decode, Default)]
 pub enum ChangeDetailType {
+    #[default]
     None,
     File(Arc<str>),
     Directory,
 }
 
-#[derive(Clone, Debug, Encode, Decode)]
+#[derive(Clone, Debug, Encode, Decode, Default)]
 pub struct ChangeDetail {
-    pub modified: std::time::SystemTime,
+    pub modified: Option<std::time::SystemTime>,
     pub detail_type: ChangeDetailType,
 }
 
 fn changes_logger(progress: &mut printer::MultiProgressBar) -> logger::Logger {
-    logger::Logger::new_progress(progress, "Changes".into())
+    logger::Logger::new_progress(progress, "changes".into())
 }
 
 pub fn get_modified_time<ErrorType>(
@@ -43,10 +44,10 @@ pub fn is_modified(
         .unwrap_or(true)
 }
 
-#[derive(Clone, Debug, Encode, Decode)]
+#[derive(Clone, Debug, Encode, Decode, Default)]
 pub struct Changes {
-    path: Arc<str>,
-    skip_folders: Vec<Arc<str>>,
+    pub path: Arc<str>,
+    pub skip_folders: Vec<Arc<str>>,
     pub entries: HashMap<Arc<str>, ChangeDetail>,
 }
 
@@ -81,21 +82,10 @@ impl Changes {
 
         let change_detail = ChangeDetail {
             detail_type,
-            modified,
+            modified: Some(modified),
         };
 
         Ok(change_detail)
-    }
-
-    pub fn new(path: &str, skip_folders: Vec<Arc<str>>) -> Changes {
-        match Self::load(path) {
-            Ok(changes) => changes,
-            Err(_) => Changes {
-                path: path.into(),
-                entries: HashMap::new(),
-                skip_folders,
-            },
-        }
     }
 
     fn filter_update(
@@ -120,7 +110,7 @@ impl Changes {
 
         if let Some(change_detail) = entries.get(file_path.as_ref()) {
             let modified_time = get_modified_time(entry.metadata());
-            return is_modified(modified_time, Some(change_detail.modified));
+            return is_modified(modified_time, change_detail.modified);
         }
 
         true
@@ -231,6 +221,7 @@ impl Changes {
         globs: &HashSet<Arc<str>>,
     ) -> anyhow::Result<Arc<str>> {
         let mut inputs = Vec::new();
+        
         for path in self.entries.keys() {
             let sane_path = Self::sanitize_path(path);
             if glob::match_globs(globs, sane_path) {
@@ -260,33 +251,4 @@ impl Changes {
         Ok(hasher.finalize().to_string().into())
     }
 
-    pub fn save(&self, path: &str) -> anyhow::Result<()> {
-        let encoded = bincode::encode_to_vec(self, bincode::config::standard())
-            .context(format_context!("Failed to serialize"))?;
-        std::fs::write(path, encoded).context(format_context!("Failed to write to {path:?}"))?;
-        Ok(())
-    }
-
-    fn load(path: &str) -> anyhow::Result<Changes> {
-        let file = std::fs::File::open(path).context(format_context!("Failed to open {path:?}"))?;
-        let reader = std::io::BufReader::new(file);
-        let changes: Changes = bincode::decode_from_reader(reader, bincode::config::standard())
-            .context(format_context!("Failed to deserialize {path:?}"))?;
-        Ok(changes)
-    }
-}
-
-pub fn add(left: usize, right: usize) -> usize {
-    left + right
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
 }

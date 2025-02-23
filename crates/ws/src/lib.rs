@@ -8,7 +8,7 @@ use std::sync::Arc;
 pub const SPACES_LOGS_NAME: &str = ".spaces/logs";
 pub const METRICS_FILE_NAME: &str = ".spaces/metrics.spaces.json";
 const SETTINGS_FILE_NAME: &str = ".spaces/settings.spaces.json";
-const BIN_SETTINGS_FILE_NAME: &str = ".spaces/settings.spaces";
+const BIN_SETTINGS_FILE_NAME: &str = "build/workspace.settings.spaces";
 pub const SPACES_WORKSPACE_ENV_VAR: &str = "SPACES_WORKSPACE";
 const SPACES_HOME_ENV_VAR: &str = "SPACES_HOME";
 
@@ -70,27 +70,57 @@ impl Member {
     }
 }
 
-#[derive(Debug, Encode, Decode)]
-pub struct Task {
-    pub name: Arc<str>,
-    pub hash: Arc<str>,
-}
-
 #[derive(Debug, Encode, Decode, Default)]
 pub struct BinDetail {
     pub hash: [u8; blake3::OUT_LEN],
     pub modified: Option<std::time::SystemTime>,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum IsDirty {
+    No,
+    Yes,
+}
+
 #[derive(Debug, Encode, Decode, Default)]
 pub struct BinSettings {
-    pub tasks: Vec<Task>,
+    pub tasks_json: Arc<str>,
+    pub env_json: Arc<str>,
+    pub run_all: HashSet<Arc<str>>,
     pub star_files: HashMap<Arc<str>, BinDetail>, // modules and hashes to detect changes
+    pub changes: changes::Changes,
+    pub inputs: inputs::Inputs,
 }
 
 impl BinSettings {
-    pub fn update_hashes(&mut self, progress: &mut printer::MultiProgressBar) -> anyhow::Result<Vec<Arc<str>>> {
-        let mut result = Vec::new();
+    fn new(path: &str) -> Self {
+        match Self::load(path) {
+            Ok(settings) => settings,
+            Err(_) => Default::default(),
+        }
+    }
+
+    fn save(&self, path: &str) -> anyhow::Result<()> {
+        let encoded = bincode::encode_to_vec(&self, bincode::config::standard())
+            .context(format_context!("Failed to encode bin settings"))?;
+        std::fs::write(path, encoded).context(format_context!("Failed to write to {path:?}"))?;
+        Ok(())
+    }
+
+    fn load(path: &str) -> anyhow::Result<Self> {
+        let file = std::fs::File::open(path).context(format_context!("Failed to open {path:?}"))?;
+        let reader = std::io::BufReader::new(file);
+        let bin_settings = bincode::decode_from_reader(reader, bincode::config::standard())
+            .context(format_context!("Failed to deserialize {path:?}"))?;
+        Ok(bin_settings)
+    }
+
+    pub fn update_hashes(
+        &mut self,
+        progress: &mut printer::MultiProgressBar,
+    ) -> anyhow::Result<(Vec<Arc<str>>, IsDirty)> {
+        let mut result = IsDirty::No;
+        let mut updated_modules = Vec::new();
         for (module_path, bin_detail) in self.star_files.iter_mut() {
             progress.increment(1);
             let mod_path = std::path::Path::new(module_path.as_ref());
@@ -103,22 +133,26 @@ impl BinSettings {
                 if content_hash.as_bytes() != &bin_detail.hash {
                     bin_detail.hash = content_hash.into();
                     bin_detail.modified = modified;
-                    result.push(module_path.clone());
+                    result = IsDirty::Yes;
+                    updated_modules.push(module_path.clone());
                 }
             }
         }
-        Ok(result)
+
+        if self.env_json.is_empty() || self.tasks_json.is_empty()  {
+            result = IsDirty::Yes
+        }
+
+        Ok((updated_modules, result))
     }
 }
-
-
 
 fn get_unknown_version() -> Arc<str> {
     "unknown".into()
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Settings {
+pub struct JsonSettings {
     pub store_path: Arc<str>,
     #[serde(default = "get_unknown_version")]
     pub spaces_version: Arc<str>,
@@ -132,14 +166,14 @@ pub struct Settings {
     pub bin_settings: BinSettings,
 }
 
-impl Default for Settings {
+impl Default for JsonSettings {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Settings {
-    pub fn new() -> Self {
+impl JsonSettings {
+    fn new() -> Self {
         Self {
             store_path: get_checkout_store_path(),
             order: Vec::new(),
@@ -151,23 +185,11 @@ impl Settings {
         }
     }
 
-    pub fn load(workspace_path: &str) -> anyhow::Result<Self> {
-        let path = format!("{workspace_path}/{SETTINGS_FILE_NAME}");
-        let content = std::fs::read_to_string(path.as_str())
+    fn load(path: &str) -> anyhow::Result<Self> {
+        let content = std::fs::read_to_string(path)
             .context(format_context!("Failed to read load order file {path}"))?;
-        let mut settings: Settings = serde_json::from_str(content.as_str())
+        let settings: JsonSettings = serde_json::from_str(content.as_str())
             .context(format_context!("Failed to parse load order file {path}"))?;
-
-        let path = format!("{workspace_path}/{BIN_SETTINGS_FILE_NAME}");
-        if std::path::Path::new(path.as_str()).exists() {
-            let file = std::fs::File::open(path.as_str())
-                .context(format_context!("Failed to open {path:?}"))?;
-            let reader = std::io::BufReader::new(file);
-            settings.bin_settings =
-                bincode::decode_from_reader(reader, bincode::config::standard())
-                    .context(format_context!("Failed to deserialize {path:?}"))?;
-        }
-
         Ok(settings)
     }
 
@@ -183,22 +205,21 @@ impl Settings {
         entry.push(member);
     }
 
-    pub fn save(&self, workspace_path: &str) -> anyhow::Result<()> {
+    pub fn save(&self, path: &str) -> anyhow::Result<()> {
+        let path = std::path::Path::new(path);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).context(format_context!(
+                "Failed to create parent directory {}",
+                parent.display()
+            ))?;
+        }
 
-        std::fs::create_dir_all(workspace_path)
-            .context(format_context!("Failed to create workspace directory {workspace_path}"))?;
-
-        let path = format!("{workspace_path}/{SETTINGS_FILE_NAME}");
         let content = serde_json::to_string_pretty(&self)
             .context(format_context!("Failed to serialize load order"))?;
-        std::fs::write(path.as_str(), content.as_str())
-            .context(format_context!("Failed to save settings file {path}"))?;
-
-        let path = format!("{workspace_path}/{BIN_SETTINGS_FILE_NAME}");
-        let encoded = bincode::encode_to_vec(&self.bin_settings, bincode::config::standard())
-            .context(format_context!("Failed to encode bin settings"))?;
-        std::fs::write(path.as_str(), encoded)
-            .context(format_context!("Failed to write to {path:?}"))?;
+        std::fs::write(path, content.as_str()).context(format_context!(
+            "Failed to save settings file {}",
+            path.display()
+        ))?;
         Ok(())
     }
 
@@ -233,3 +254,61 @@ impl Settings {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub enum IsJsonAvailable {
+    No,
+    Yes,
+}
+
+#[derive(Debug)]
+pub struct Settings {
+    pub json: JsonSettings,
+    pub bin: BinSettings,
+}
+
+impl Settings {
+    pub fn load() -> (Self, IsJsonAvailable) {
+        let mut is_json_available = IsJsonAvailable::No;
+        let json_settings = {
+            match JsonSettings::load(SETTINGS_FILE_NAME) {
+                Ok(settings) => {
+                    is_json_available = IsJsonAvailable::Yes;
+                    settings
+                }
+                Err(_) => JsonSettings::default(),
+            }
+        };
+
+        let mut bin_settings = BinSettings::new(BIN_SETTINGS_FILE_NAME);
+        if bin_settings.changes.skip_folders.is_empty() {
+            bin_settings.changes.skip_folders = vec![SPACES_LOGS_NAME.into()];
+        }
+
+        (
+            Self {
+                json: json_settings,
+                bin: bin_settings,
+            },
+            is_json_available,
+        )
+    }
+
+    pub fn save_bin(&self) -> anyhow::Result<()> {
+        self.bin
+            .save(BIN_SETTINGS_FILE_NAME)
+            .context(format_context!("Bin settings"))?;
+        Ok(())
+    }
+
+    pub fn save_json(&self) -> anyhow::Result<()> {
+        self.json
+            .save(SETTINGS_FILE_NAME)
+            .context(format_context!("Bin settings"))?;
+        Ok(())
+    }
+
+    pub fn clear_inputs(&mut self) -> anyhow::Result<()> {
+        self.bin.inputs.clear();
+        Ok(())
+    }
+}

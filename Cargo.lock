@@ -1631,6 +1631,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "inputs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "anyhow-source-location",
+ "bincode",
+ "blake3",
+ "logger",
+ "printer",
+ "walkdir",
+]
+
+[[package]]
 name = "inventory"
 version = "0.3.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3010,6 +3023,7 @@ dependencies = [
  "graph",
  "home",
  "http-archive",
+ "inputs",
  "itertools 0.14.0",
  "json_value_merge",
  "lock",
@@ -4253,7 +4267,9 @@ dependencies = [
  "bincode",
  "blake3",
  "changes",
+ "environment",
  "homedir",
+ "inputs",
  "printer",
  "semver",
  "serde",

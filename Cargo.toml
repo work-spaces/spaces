@@ -12,6 +12,7 @@ members = [
     "crates/logger",
     "crates/suggest",
     "crates/ws",
+    "crates/inputs",
 ]
 
 [workspace.dependencies]
@@ -31,15 +32,16 @@ url = "2"
 toml = "0.8"
 serde_yaml = "0.9"
 
-git.path = "crates/git"
-graph.path = "crates/graph"
-platform.path = "crates/platform"
-http-archive.path = "crates/http-archive"
-starstd.path = "crates/starstd"
 changes.path = "crates/changes"
 environment.path = "crates/environment"
+git.path = "crates/git"
+graph.path = "crates/graph"
+http-archive.path = "crates/http-archive"
+inputs.path = "crates/inputs"
 lock.path = "crates/lock"
 logger.path = "crates/logger"
+platform.path = "crates/platform"
+starstd.path = "crates/starstd"
 suggest.path = "crates/suggest"
 ws.path = "crates/ws"
 

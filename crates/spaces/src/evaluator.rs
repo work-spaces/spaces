@@ -158,14 +158,17 @@ fn star_logger(printer: &mut printer::Printer) -> logger::Logger {
     logger::Logger::new_printer(printer, "starlark".into())
 }
 
-fn insert_setup_and_all_rules(target: Option<Arc<str>>) -> anyhow::Result<Option<Arc<str>>> {
+fn insert_setup_and_all_rules(
+    workspace: workspace::WorkspaceArc,
+    target: Option<Arc<str>>,
+) -> anyhow::Result<Option<Arc<str>>> {
     // insert the //:setup rule
 
     rules::add_setup_dep_to_run_rules()
         .context(format_context!("Failed to add setup dep to run rules"))?;
 
     let setup_rule = rule::Rule {
-        name: "setup".into(),
+        name: rule::SETUP_RULE_NAME.into(),
         help: Some("Builtin rule to run setup rules first".into()),
         inputs: None,
         outputs: None,
@@ -181,31 +184,32 @@ fn insert_setup_and_all_rules(target: Option<Arc<str>>) -> anyhow::Result<Option
     ))
     .context(format_context!("Failed to insert task `all`"))?;
 
+    let mut deps: Vec<Arc<str>> = Vec::new();
+    let all_deps = workspace.read().settings.bin.run_all.clone();
+    for all_target in all_deps {
+        deps.push(all_target.clone());
+    }
+
+    deps.push(rule::SETUP_RULE_NAME.into());
+
+    let rule = rule::Rule {
+        name: rule::ALL_RULE_NAME.into(),
+        help: Some("Builtin rule to run default targets and dependencies".into()),
+        inputs: None,
+        outputs: None,
+        type_: Some(rule::RuleType::Run),
+        platforms: None,
+        deps: Some(deps),
+    };
+
+    rules::insert_task(task::Task::new(
+        rule,
+        task::Phase::Run,
+        executor::Task::Target,
+    ))
+    .context(format_context!("Failed to insert task `all`"))?;
+
     if target.is_none() {
-        let mut deps: Vec<Arc<str>> = Vec::new();
-        for all_target in singleton::get_run_all().iter() {
-            deps.push(all_target.clone());
-        }
-
-        deps.push(rule::SETUP_RULE_NAME.into());
-
-        let rule = rule::Rule {
-            name: "all".into(),
-            help: Some("Builtin rule to run default targets and dependencies".into()),
-            inputs: None,
-            outputs: None,
-            type_: Some(rule::RuleType::Run),
-            platforms: None,
-            deps: Some(deps),
-        };
-
-        rules::insert_task(task::Task::new(
-            rule,
-            task::Phase::Run,
-            executor::Task::Target,
-        ))
-        .context(format_context!("Failed to insert task `all`"))?;
-
         Ok(Some(rule::ALL_RULE_NAME.into()))
     } else {
         Ok(target)
@@ -251,12 +255,11 @@ fn show_eval_progress(
     Ok(())
 }
 
-pub fn run_starlark_modules(
+pub fn evaluate_starlark_modules(
     printer: &mut printer::Printer,
     workspace: workspace::WorkspaceArc,
     modules: Vec<(Arc<str>, Arc<str>)>,
     phase: task::Phase,
-    target: Option<Arc<str>>,
 ) -> anyhow::Result<()> {
     star_logger(printer).message("--Run Starlark Modules--");
     let workspace_path = workspace.read().absolute_path.to_owned();
@@ -310,7 +313,7 @@ pub fn run_starlark_modules(
         // During checkout phase, additional modules may be added to the queue
         // if the repo contains more spaces.star files
         if phase == task::Phase::Checkout {
-            rules::sort_tasks(printer, workspace.clone(), None, phase)
+            rules::update_depedency_graph(printer, None, phase)
                 .context(format_context!("Failed to sort tasks"))?;
 
             star_logger(printer).debug("--Checkout Phase--");
@@ -347,10 +350,18 @@ pub fn run_starlark_modules(
     }
     rules::set_latest_starlark_module("".into());
 
-    star_logger(printer).debug("Inserting //:setup and //:all");
-    let run_target = insert_setup_and_all_rules(target.clone())
-        .context(format_context!("failed to insert run all"))?;
+    Ok(())
+}
 
+pub fn execute_tasks(
+    printer: &mut printer::Printer,
+    workspace: workspace::WorkspaceArc,
+    phase: task::Phase,
+    target: Option<Arc<str>>,
+) -> anyhow::Result<()> {
+    star_logger(printer).debug("Inserting //:setup and //:all");
+    let run_target = insert_setup_and_all_rules(workspace.clone(), target.clone())
+        .context(format_context!("failed to insert run all"))?;
     match phase {
         task::Phase::Run => {
             star_logger(printer).message("--Run Phase--");
@@ -366,7 +377,7 @@ pub fn run_starlark_modules(
                 star_logger(printer).info(repro_message.as_str());
             }
 
-            rules::sort_tasks(printer, workspace.clone(), run_target.clone(), phase)
+            rules::update_depedency_graph(printer, run_target.clone(), phase)
                 .context(format_context!("Failed to sort tasks"))?;
 
             rules::debug_sorted_tasks(printer, phase)
@@ -378,7 +389,7 @@ pub fn run_starlark_modules(
         task::Phase::Inspect => {
             star_logger(printer).message("--Inspect Phase--");
 
-            rules::sort_tasks(printer, workspace.clone(), target.clone(), phase)
+            rules::update_depedency_graph(printer, target.clone(), phase)
                 .context(format_context!("Failed to sort tasks"))?;
 
             rules::debug_sorted_tasks(printer, task::Phase::Checkout)
@@ -423,7 +434,7 @@ pub fn run_starlark_modules(
             star_logger(printer).message("--Post Checkout Phase--");
 
             // at this point everything should be set, sort tasks as if in run phase
-            rules::sort_tasks(printer, workspace.clone(), None, task::Phase::Run)
+            rules::update_depedency_graph(printer, None, task::Phase::Run)
                 .context(format_context!("Failed to sort tasks"))?;
             rules::debug_sorted_tasks(printer, task::Phase::PostCheckout)
                 .context(format_context!("Failed to debug sorted tasks"))?;
@@ -463,13 +474,48 @@ pub fn run_starlark_modules(
     }
 
     if phase == task::Phase::Checkout || singleton::get_is_rescan() || workspace.read().is_dirty {
-        star_logger(printer).debug("saving workspace setings");
+        star_logger(printer).debug("saving JSON workspace setings");
         workspace
             .read()
-            .save_settings()
+            .settings
+            .save_json()
             .context(format_context!("Failed to save settings"))?;
     }
 
+    if workspace.read().is_bin_dirty {
+        star_logger(printer).debug("saving BIN workspace bin settings");
+        workspace
+            .read()
+            .save_bin(printer)
+            .context(format_context!("Failed to save bin settings"))?;
+    }
+
+    Ok(())
+}
+
+pub fn run_starlark_modules(
+    printer: &mut printer::Printer,
+    workspace: workspace::WorkspaceArc,
+    modules: Vec<(Arc<str>, Arc<str>)>,
+    phase: task::Phase,
+    target: Option<Arc<str>>,
+) -> anyhow::Result<()> {
+    let is_dirty = workspace.read().is_dirty;
+
+    if is_dirty {
+        star_logger(printer).message("workspace is dirty");
+        evaluate_starlark_modules(printer, workspace.clone(), modules, phase)
+            .context(format_context!("evaluating modules"))?;
+        rules::update_tasks_digests(printer, workspace.clone())
+            .context(format_context!("updating digests"))?;
+    } else {
+        star_logger(printer).message("workspace is clean");
+        rules::import_tasks_from_workspace_settings(workspace.clone())
+            .context(format_context!("importing tasks"))?;
+        star_logger(printer).trace(format!("tasks {}", rules::get_pretty_tasks()).as_str());
+    }
+
+    execute_tasks(printer, workspace, phase, target).context(format_context!("executing tasks"))?;
     Ok(())
 }
 

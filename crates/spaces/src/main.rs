@@ -9,7 +9,6 @@ mod builtins;
 mod label;
 #[cfg(feature = "lsp")]
 mod lsp_context;
-mod inputs;
 mod rule;
 mod rules;
 mod task;
