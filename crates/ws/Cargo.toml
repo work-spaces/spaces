@@ -9,9 +9,11 @@ semver = "1"
 bincode = { version = "2.0.0-rc.3", features = ["derive"] }
 blake3 = "1"
 
-printer.workspace = true
-changes.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-anyhow.workspace = true
 anyhow-source-location.workspace = true
+anyhow.workspace = true
+changes.workspace = true
+environment.workspace = true
+inputs.workspace = true
+printer.workspace = true
+serde_json.workspace = true
+serde.workspace = true

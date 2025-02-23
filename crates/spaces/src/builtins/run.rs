@@ -4,7 +4,7 @@ use starlark::{environment::GlobalsBuilder, values::none::NoneType};
 use starstd::{get_rule_argument, Arg, Function};
 use std::collections::HashSet;
 
-use crate::{executor, inputs, rules, task, rule, singleton};
+use crate::{executor, rule, rules, singleton, task};
 
 const ADD_EXEC_EXAMPLE: &str = r#"run.add_exec(
     rule = {"name": name, "type": "Setup", "deps": ["sysroot-python:venv"]},
@@ -117,10 +117,18 @@ pub const FUNCTIONS: &[Function] = &[
         example: Some(r#"run.abort("Failed to do something")"#)}
 ];
 
-fn add_rule_to_all(rule: &rule::Rule) {
+fn add_rule_to_all(rule: &rule::Rule) -> anyhow::Result<()> {
     if let Some(rule::RuleType::Run) = rule.type_.as_ref() {
-        singleton::insert_run_all(rules::get_sanitized_rule_name(rule.name.clone()));
+        let workspace = singleton::get_workspace()
+            .context(format_context!("Internal Error: workspace not available"))?;
+        let mut workspace = workspace.write();
+        workspace
+            .settings
+            .bin
+            .run_all
+            .insert(rules::get_sanitized_rule_name(rule.name.clone()));
     }
+    Ok(())
 }
 
 // This defines the function that is visible to Starlark
@@ -136,7 +144,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for add target rule"))?;
 
-        add_rule_to_all(&rule);
+        add_rule_to_all(&rule)
+            .context(format_context!("Internal Error: Failed to add rule to all"))?;
 
         let rule_name = rule.name.clone();
         rules::insert_task(task::Task::new(
@@ -158,7 +167,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         inputs::validate_input_globs(&rule.inputs)
             .context(format_context!("invalid inputs globs with {}", rule.name))?;
 
-        add_rule_to_all(&rule);
+        add_rule_to_all(&rule)
+            .context(format_context!("Internal Error: Failed to add rule to all"))?;
 
         let mut exec: executor::exec::Exec = serde_json::from_value(exec.to_json_value()?)
             .context(format_context!("bad options for exec"))?;
@@ -190,7 +200,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         inputs::validate_input_globs(&rule.inputs)
             .context(format_context!("invalid inputs globs with {}", rule.name))?;
 
-        add_rule_to_all(&rule);
+        add_rule_to_all(&rule)
+            .context(format_context!("Internal Error: Failed to add rule to all"))?;
 
         let mut kill_exec: executor::exec::Kill = serde_json::from_value(kill.to_json_value()?)
             .context(format_context!("bad options for kill"))?;
@@ -216,7 +227,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         inputs::validate_input_globs(&rule.inputs)
             .context(format_context!("invalid inputs globs with {}", rule.name))?;
 
-        add_rule_to_all(&rule);
+        add_rule_to_all(&rule)
+            .context(format_context!("Internal Error: Failed to add rule to all"))?;
 
         let mut exec_if: executor::exec::ExecIf = serde_json::from_value(exec_if.to_json_value()?)
             .context(format_context!("bad options for exec"))?;

@@ -1,9 +1,11 @@
 use crate::{executor, rule};
+use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Condvar, Mutex};
-use clap::ValueEnum;
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, ValueEnum, strum::Display)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Serialize, Deserialize, ValueEnum, strum::Display
+)]
 pub enum Phase {
     Checkout,
     PostCheckout,
@@ -52,7 +54,6 @@ impl SignalArc {
         cvar.notify_all();
     }
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {

@@ -17,26 +17,27 @@ lsp-types = { version = "0.94.1", optional = true }
 strum = { version = "0.26", features = ["derive"] }
 thiserror = "2"
 
-starlark.workspace = true
-git.workspace = true
-platform.workspace = true
-graph.workspace = true
-printer.workspace = true
-state.workspace = true
-serde.workspace = true
-starstd.workspace = true
-petgraph.workspace = true
-serde_json.workspace = true
-http-archive.workspace = true
-easy-archiver.workspace = true
-glob-match.workspace = true
-url.workspace = true
-serde_yaml.workspace = true
-toml.workspace = true
 changes.workspace = true
+easy-archiver.workspace = true
 environment.workspace = true
+git.workspace = true
+glob-match.workspace = true
+graph.workspace = true
+http-archive.workspace = true
+inputs.workspace = true
 lock.workspace = true
 logger.workspace = true
+petgraph.workspace = true
+platform.workspace = true
+printer.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+serde.workspace = true
+starlark.workspace = true
+starstd.workspace = true
+state.workspace = true
+toml.workspace = true
+url.workspace = true
 ws.workspace = true
 
 semver = "1"

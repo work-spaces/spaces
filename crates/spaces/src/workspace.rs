@@ -1,4 +1,4 @@
-use crate::{inputs, singleton};
+use crate::singleton;
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -22,6 +22,10 @@ Spaces Workspace file
 "#;
 
 pub type WorkspaceArc = std::sync::Arc<lock::StateLock<Workspace>>;
+
+fn logger_printer(printer: &mut printer::Printer) -> logger::Logger<'_> {
+    logger::Logger::new_printer(printer, "workspace".into())
+}
 
 fn logger(progress: &mut printer::MultiProgressBar) -> logger::Logger<'_> {
     logger::Logger::new_progress(progress, "workspace".into())
@@ -128,15 +132,6 @@ pub fn build_directory() -> &'static str {
     "build"
 }
 
-pub fn get_inputs_path() -> &'static str {
-    "build/workspace.inputs.spaces"
-}
-
-pub fn get_changes_path() -> &'static str {
-    "build/workspace.changes.spaces"
-}
-
-
 #[derive(Debug)]
 pub struct Workspace {
     pub modules: Vec<(Arc<str>, Arc<str>)>,
@@ -148,10 +143,9 @@ pub struct Workspace {
     pub locks: HashMap<Arc<str>, Arc<str>>, // set during eval
     pub env: environment::Environment,      // set during eval
     pub is_dirty: bool,                     // true if any star files have changed
+    pub is_bin_dirty: bool,                 // true if any star files have changed
     #[allow(dead_code)]
     pub new_branch_name: Option<Arc<str>>, // set during eval - not used
-    changes: changes::Changes,              // modified during run
-    inputs: inputs::Inputs,                 // modified during run
     pub target: Option<Arc<str>>,           // target called from the command line
     pub trailing_args: Vec<Arc<str>>,
     pub updated_assets: HashSet<Arc<str>>, // used by assets to keep track of exclusive access
@@ -182,15 +176,11 @@ impl Workspace {
     }
 
     pub fn clear_members(&mut self) {
-        self.settings.members.clear();
+        self.settings.json.members.clear();
     }
 
     pub fn add_member(&mut self, member: ws::Member) {
-        self.settings.push_member(member);
-    }
-
-    pub fn save_settings(&self) -> anyhow::Result<()> {
-        self.settings.save(self.absolute_path.as_ref())
+        self.settings.json.push_member(member);
     }
 
     pub fn get_absolute_path(&self) -> Arc<str> {
@@ -252,17 +242,7 @@ impl Workspace {
             relative_invoked_path = relative_invoked_path.strip_prefix('/').unwrap().into();
         }
 
-        logger(progress).info(
-            format!(
-                "Invoked at: {}",
-                if relative_invoked_path.is_empty() {
-                    "<workspace>".into()
-                } else {
-                    relative_invoked_path.clone()
-                }
-            )
-            .as_str(),
-        );
+        logger(progress).info(format!("Invoked at: //{}", relative_invoked_path).as_str());
 
         relative_invoked_path.into()
     }
@@ -328,6 +308,9 @@ impl Workspace {
             format_context!("Failed to set current directory to {absolute_path}"),
         )?;
 
+        std::fs::create_dir_all(build_directory())
+            .context(format_context!("Failed to create build directory"))?;
+
         // hash set to prevent loading the same module twice
         let mut loaded_modules = HashSet::new();
 
@@ -345,9 +328,11 @@ impl Workspace {
         modules.push((ENV_FILE_NAME.into(), env_content));
 
         let mut is_run_or_inspect = true;
-        let mut settings = if let Ok(settings) = ws::Settings::load(absolute_path.as_ref()) {
+        let (mut settings, is_json_available) = ws::Settings::load();
+
+        if is_json_available == ws::IsJsonAvailable::Yes {
             logger(&mut progress).debug("Loading modules from sync order");
-            for module in settings.order.iter() {
+            for module in settings.json.order.iter() {
                 if is_rules_module(module.as_ref()) {
                     progress.increment(1);
                     if !loaded_modules.contains(module) {
@@ -362,16 +347,13 @@ impl Workspace {
                     }
                 }
             }
-            settings
         } else {
             logger(&mut progress).debug(format!("No sync order found at {absolute_path}").as_str());
             is_run_or_inspect = false;
-            let mut settings = ws::Settings::default();
             if let Some(scripts) = input_script_names {
-                settings.order = scripts;
+                settings.json.order = scripts;
             }
-            settings
-        };
+        }
 
         // workspace digest is calculated using the original modules passed on the
         // command line. If any repos are on tip of branch, the workspace
@@ -380,9 +362,6 @@ impl Workspace {
             logger(&mut progress).message(format!("Digesting {}", name).as_str());
         }
         let workspace_digest = calculate_digest(&modules);
-
-        std::fs::create_dir_all(build_directory())
-            .context(format_context!("Failed to create build directory"))?;
 
         let log_directory: Arc<str> = format!(
             "{}/logs_{}",
@@ -398,12 +377,12 @@ impl Workspace {
         // The workspace is not scanned on every run, only on the first run or when --rescan is passed
         // For large workspaces, this can be a significant time saver
         // is_scanned starts as None then Some(false) then Some(true) to finish the state machine
-        if !settings.is_scanned.unwrap_or(false) || singleton::get_is_rescan() {
+        if !settings.json.is_scanned.unwrap_or(false) || singleton::get_is_rescan() {
             // if the workspace is scanned, this will save settings on exit
             singleton::set_rescan(true);
 
             // if this is a checkout, we need to scan on first run/inspect
-            settings.is_scanned = Some(is_run_or_inspect);
+            settings.json.is_scanned = Some(is_run_or_inspect);
 
             logger(&mut progress).message(format!("Scanning {}", absolute_path).as_str());
 
@@ -417,8 +396,8 @@ impl Workspace {
                 .collect();
 
             progress.set_total(walkdir.len() as u64);
-            settings.bin_settings.star_files.clear();
-            settings.scanned_modules.clear();
+            settings.bin.star_files.clear();
+            settings.json.scanned_modules.clear();
             for entry in walkdir {
                 progress.increment(1);
                 if let Ok(entry) = entry {
@@ -439,7 +418,7 @@ impl Workspace {
                             .message(format!("star file {stripped_path}").as_str());
 
                         // all star files are hashed and tracked when modified
-                        settings.bin_settings.star_files.insert(
+                        settings.bin.star_files.insert(
                             stripped_path.into(),
                             ws::BinDetail {
                                 modified: None,
@@ -450,11 +429,12 @@ impl Workspace {
                         // spaces.star files are added to the modules to be processed
                         // no need to grab original command line modules
                         // they are stored in settings.order
-                        if is_rules_module(entry_name.as_str()) && !loaded_modules.contains(stripped_path)
+                        if is_rules_module(entry_name.as_str())
+                            && !loaded_modules.contains(stripped_path)
                         {
                             logger(&mut progress)
                                 .debug(format!("Loading module: {stripped_path}").as_str());
-                            settings.scanned_modules.insert(stripped_path.into());
+                            settings.json.scanned_modules.insert(stripped_path.into());
                         }
                     }
                 }
@@ -467,16 +447,18 @@ impl Workspace {
 
         // checks if any of the modules have changed
         // checks modified time then hashes
-        let updated_modules =
-            settings
-                .bin_settings
-                .update_hashes(&mut progress)
-                .context(format_context!(
-                    "Failed to update hashes for modules in workspace"
-                ))?;
+        let (updated_modules, settings_is_dirty) = settings
+            .bin
+            .update_hashes(&mut progress)
+            .context(format_context!(
+                "Failed to update hashes for modules in workspace"
+            ))?;
 
         // if any star files have changed, workspace is dirty - need to re-run starlark
-        let is_dirty = !updated_modules.is_empty();
+        let is_dirty = settings_is_dirty == ws::IsDirty::Yes;
+        if is_dirty {
+            logger(&mut progress).info("is dirty");
+        }
 
         // message the user of changed modules
         for updated in updated_modules {
@@ -484,7 +466,7 @@ impl Workspace {
         }
 
         // load the modules scanned from the workspace
-        for module_path in settings.scanned_modules.iter() {
+        for module_path in settings.json.scanned_modules.iter() {
             if !loaded_modules.contains(module_path) {
                 let content: Arc<str> = std::fs::read_to_string(module_path.as_ref())
                     .context(format_context!("Failed to read file {module_path}"))?
@@ -495,26 +477,15 @@ impl Workspace {
             }
         }
 
-        // the changes track the files in the workspace that are changed
-        // this change tracking mechanism is shared between all rules
-        // if two rules watch the same file for changes, the file
-        // is only hashed once.
-        let changes_path = get_changes_path();
-        let skip_folders = vec![ws::SPACES_LOGS_NAME.into()];
-        let changes = changes::Changes::new(changes_path, skip_folders);
-
         #[allow(unused)]
         let unique = get_unique().context(format_context!("failed to get unique marker"))?;
 
         // The inputs use the hashes calculated by Changes to keep
         // track of file hashes at the time a rule is executed
         if is_clear_inputs {
-            let inputs_path = get_inputs_path();
-            if std::path::Path::new(inputs_path).exists() {
-                std::fs::remove_file(inputs_path).context(format_context!(
-                    "Failed to remove inputs file {inputs_path}"
-                ))?;
-            }
+            settings
+                .clear_inputs()
+                .context(format_context!("Failed to clear inputs"))?;
         }
 
         // Workspace is assumed to reproducible until a rule is processed
@@ -532,10 +503,9 @@ impl Workspace {
             locks: HashMap::new(),
             env,
             new_branch_name: None,
-            changes,
             is_dirty,
+            is_bin_dirty: is_dirty,
             updated_assets: HashSet::new(),
-            inputs: inputs::Inputs::new(get_inputs_path()),
             rule_metrics: HashMap::new(),
             trailing_args: vec![],
             target: None,
@@ -546,6 +516,7 @@ impl Workspace {
 
     pub fn set_env(&mut self, env: environment::Environment) {
         self.env = env;
+        self.settings.bin.env_json = serde_json::to_string(&self.env).unwrap().into();
     }
 
     pub fn update_env(&mut self, env: environment::Environment) -> anyhow::Result<()> {
@@ -612,18 +583,13 @@ impl Workspace {
         progress: &mut printer::MultiProgressBar,
         inputs: &HashSet<Arc<str>>,
     ) -> anyhow::Result<()> {
-        self.changes
+        self.is_bin_dirty = true;
+        self.settings
+            .bin
+            .changes
             .update_from_inputs(progress, inputs)
             .context(format_context!("Failed to update workspace changes"))?;
 
-        Ok(())
-    }
-
-    pub fn save_changes(&mut self) -> anyhow::Result<()> {
-        let changes_path = get_changes_path();
-        self.changes
-            .save(changes_path)
-            .context(format_context!("Failed to save changes file"))?;
         Ok(())
     }
 
@@ -631,21 +597,12 @@ impl Workspace {
         self.locks.insert(rule_name.into(), commit);
     }
 
-    pub fn get_rule_inputs_digest(
-        &self,
-        progress: &mut printer::MultiProgressBar,
-        seed: &str,
-        globs: &HashSet<Arc<str>>,
-    ) -> anyhow::Result<Arc<str>> {
-        self.changes.get_digest(progress, seed, globs)
-    }
-
     pub fn get_short_digest(&self) -> Arc<str> {
         get_short_digest(self.digest.as_ref())
     }
 
     pub fn get_store_path(&self) -> Arc<str> {
-        self.settings.store_path.clone()
+        self.settings.json.store_path.clone()
     }
 
     pub fn get_spaces_tools_path(&self) -> Arc<str> {
@@ -670,17 +627,45 @@ impl Workspace {
         inputs: &HashSet<Arc<str>>,
     ) -> anyhow::Result<Option<Arc<str>>> {
         let digest = self
-            .get_rule_inputs_digest(progress, seed, inputs)
+            .settings
+            .bin
+            .changes
+            .get_digest(progress, seed, inputs)
             .context(format_context!("Failed to get digest for rule {rule_name}"))?;
-        self.inputs.is_changed(rule_name, digest)
+
+        let is_changed_result = self
+            .settings
+            .bin
+            .inputs
+            .is_changed(rule_name, digest)
+            .context(format_context!("Failed to check if rule inputs changed"))?;
+
+        logger(progress)
+            .debug(format!("Rule {rule_name} inputs changed: {is_changed_result:?}",).as_str());
+
+        Ok(is_changed_result)
+    }
+
+    pub fn save_bin(&self, printer: &mut printer::Printer) -> anyhow::Result<()> {
+        if self.settings.bin.changes.entries.len() > 0 {
+            for (key, _) in self.settings.bin.changes.entries.iter() {
+                logger_printer(printer).trace(format!("Changes: {key}").as_str());
+            }
+        } else {
+            logger_printer(printer).debug("No changes");
+        }
+
+        if self.settings.bin.inputs.entries.len() > 0 {
+            for (key, value) in self.settings.bin.inputs.entries.iter() {
+                logger_printer(printer).trace(format!("Inputs: {key}:{value}").as_str());
+            }
+        } else {
+            logger_printer(printer).debug("No changes");
+        }
+        self.settings.save_bin()
     }
 
     pub fn update_rule_digest(&mut self, rule: &str, digest: Arc<str>) {
-        self.inputs.save_digest(rule, digest);
-    }
-
-    pub fn save_inputs(&self) -> anyhow::Result<()> {
-        let inputs_path = get_inputs_path();
-        self.inputs.save(inputs_path)
+        self.settings.bin.inputs.save_digest(rule, digest);
     }
 }

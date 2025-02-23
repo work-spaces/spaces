@@ -59,13 +59,6 @@ pub const FUNCTIONS: &[Function] = &[
         example: None,
     },
     Function {
-        name: "get_workspace_digest",
-        description: "returns the digest of the workspace. This is only meaningful if the workspace is reproducible (which can't be known until after checkout)",
-        return_type: "str",
-        args: &[],
-        example: None,
-    },
-    Function {
         name: "is_ci",
         description: "returns true if `--ci` is passed on the command line",
         return_type: "int",

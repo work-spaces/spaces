@@ -69,7 +69,7 @@ pub const FUNCTIONS: &[Function] = &[
     },
     Function {
         name: "get_env_var",
-        description: "returns the path where the current script is located in the workspace",
+        description: "returns the value of the workspace environment variable",
         return_type: "str",
         args: &[
             Arg {
@@ -124,30 +124,9 @@ pub const FUNCTIONS: &[Function] = &[
         example: None,
     },
     Function {
-        name: "get_supported_platforms",
-        description: "returns a list of the supported platforms",
-        return_type: "list[str]",
-        args: &[],
-        example: None,
-    },
-    Function {
-        name: "get_cpu_count",
-        description: "returns the number of CPUs on the current machine",
-        return_type: "int",
-        args: &[],
-        example: None,
-    },
-    Function {
-        name: "get_workspace_digest",
+        name: "get_digest",
         description: "returns the digest of the workspace. This is only meaningful if the workspace is reproducible (which can't be known until after checkout)",
         return_type: "str",
-        args: &[],
-        example: None,
-    },
-    Function {
-        name: "is_ci",
-        description: "returns true if `--ci` is passed on the command line",
-        return_type: "int",
         args: &[],
         example: None,
     },
@@ -244,7 +223,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let member_requirement: ws::MemberRequirement = serde_json::from_value(member_requirement_json.clone())
             .context(format_context!("bad options for workspace member"))?;
 
-        let path = workspace_arc.read().settings.get_path_to_member(&member_requirement);
+        let path = workspace_arc.read().settings.json.get_path_to_member(&member_requirement);
         match path {
             Some(p) => Ok(p.to_string()),
             None => Err(format_error!("`{}` not found in workspace matching {:?}", member_requirement.url, member_requirement.required)),
@@ -260,7 +239,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let member_requirement: ws::MemberRequirement = serde_json::from_value(member_requirement_json.clone())
             .context(format_context!("bad options for workspace member"))?;
 
-        let path = workspace_arc.read().settings.get_path_to_member(&member_requirement);
+        let path = workspace_arc.read().settings.json.get_path_to_member(&member_requirement);
         match path {
             Some(_) => Ok(true),
             None => Ok(false),
