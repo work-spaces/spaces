@@ -3,10 +3,9 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use starlark::environment::GlobalsBuilder;
 use starlark::values::none::NoneType;
-use starstd::{Arg, Function};
 use starlark::values::{Heap, Value};
+use starstd::{Arg, Function};
 use std::sync::Arc;
-
 
 pub const FUNCTIONS: &[Function] = &[
     Function {
@@ -76,7 +75,7 @@ pub const FUNCTIONS: &[Function] = &[
         name: "parse_log_file",
         description: "Parses the log file header from yaml and puts the lines into an array",
         return_type: "dict['header': dict, 'lines': list[str]]",
-        args: &[            
+        args: &[
             Arg {
                 name: "path",
                 description: "The path to the spaces log file",
@@ -88,11 +87,24 @@ pub const FUNCTIONS: &[Function] = &[
     Function {
         name: "set_minimum_version",
         description: "sets the minimum version of spaces required to run the script",
-        return_type: "int",
+        return_type: "None",
         args: &[
             Arg {
                 name: "version",
                 description: "the minimum version of spaces required to run the script",
+                dict: &[],
+            },
+        ],
+        example: None,
+    },
+    Function {
+        name: "set_required_semver",
+        description: "sets the `spaces` semver required to run the workspace",
+        return_type: "None",
+        args: &[
+            Arg {
+                name: "semver",
+                description: "The semantic version required for this workspace",
                 dict: &[],
             },
         ],
@@ -112,6 +124,20 @@ pub const FUNCTIONS: &[Function] = &[
         example: None,
     },
 ];
+
+fn check_required_semver(required: &str) -> anyhow::Result<bool> {
+    let current_version = env!("CARGO_PKG_VERSION");
+    let required = required
+        .parse::<semver::VersionReq>()
+        .context(format_context!("Bad semver required"))?;
+    let version = current_version
+        .parse::<semver::Version>()
+        .context(format_context!(
+            "Internal Error: Failed to parse current version {current_version}"
+        ))?;
+
+    return Ok(required.matches(&version));
+}
 
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
@@ -164,7 +190,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[derive(serde::Serialize, serde::Deserialize)]
         struct Log {
             header: printer::LogHeader,
-            lines: Vec<Arc<str>>
+            lines: Vec<Arc<str>>,
         }
 
         let content = std::fs::read_to_string(path).context(format_context!(
@@ -189,18 +215,22 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             }
         }
 
-        let log_header: printer::LogHeader = serde_yaml::from_str(&header)
-            .context(format_context!("Failed to parse (yaml) Log Header file {}", path))?;
+        let log_header: printer::LogHeader = serde_yaml::from_str(&header).context(
+            format_context!("Failed to parse (yaml) Log Header file {}", path),
+        )?;
 
         let json_value = serde_json::to_value(&Log {
             header: log_header,
             lines,
-        }).context(format_context!("Internal Error: Failed to convert Log to JSON {}", path))?;
+        })
+        .context(format_context!(
+            "Internal Error: Failed to convert Log to JSON {}",
+            path
+        ))?;
 
         // Convert the JSON value to a Starlark value
         let alloc_value = heap.alloc(json_value);
         Ok(alloc_value)
-
     }
 
     fn get_path_to_store() -> anyhow::Result<String> {
@@ -234,11 +264,26 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 ))?
         {
             return Err(anyhow::anyhow!(
-                "Minimum required `spaces` version is {}. `spaces` version is {current_version}",
+                "Minimum required `spaces` version is `{}`. `spaces` version is `{current_version}`",
                 version.to_string(),
             ));
         }
         Ok(NoneType)
+    }
+
+    fn set_required_semver(required: &str) -> anyhow::Result<NoneType> {
+        let is_required_version = check_required_semver(required)?;
+        if !is_required_version {
+            let current_version = env!("CARGO_PKG_VERSION");
+            return Err(anyhow::anyhow!(
+                "Workflow/workspaces requires `spaces` semver `{required}`. `spaces` version is `{current_version}`",
+            ));
+        }
+        Ok(NoneType)
+    }
+
+    fn check_required_semver(required: &str) -> anyhow::Result<bool> {
+        Ok(check_required_semver(required)?)
     }
 
     fn set_max_queue_count(count: i64) -> anyhow::Result<NoneType> {
