@@ -39,9 +39,10 @@ fn get_process_id(rule: &str) -> Option<u32> {
     state.processes.get(rule).copied()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
 pub enum Expect {
     Failure,
+    #[default]
     Success,
     Any,
 }

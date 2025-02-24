@@ -385,6 +385,9 @@ pub fn execute_tasks(
 
             let _new_modules = rules::execute(printer, workspace.clone(), phase)
                 .context(format_context!("Failed to execute tasks"))?;
+
+            rules::export_log_status(workspace.clone())
+                .context(format_context!("Failed to export log status"))?;
         }
         task::Phase::Inspect => {
             star_logger(printer).message("--Inspect Phase--");

@@ -2,7 +2,7 @@ use crate::workspace::WorkspaceArc;
 use crate::{executor, label, singleton, task, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -100,6 +100,7 @@ pub fn execute_task(
         // check inputs/outputs to see if we need to run
         let name = task.rule.name.clone();
 
+        // when this goes out of scope it will notify the dependents
         let _signal_on_drop = SignalOnDrop {
             signal: task.signal.clone(),
         };
@@ -213,8 +214,8 @@ pub fn execute_task(
         let start_time = std::time::Instant::now();
 
         progress.reset_elapsed();
-        let task_result = if let Some(message) = skip_execute_message {
-            progress.set_ending_message(message.as_ref());
+        let task_result = if let Some(message) = skip_execute_message.as_ref() {
+            progress.set_ending_message(message);
             Ok(executor::TaskResult::new())
         } else {
             task.executor
@@ -235,9 +236,21 @@ pub fn execute_task(
 
         // before notifying dependents process the enabled_targets list
         {
+            let mut log_status = LogStatus {
+                name: rule_name.clone(),
+                duration: elapsed_time,
+                file: if skip_execute_message.is_some() {
+                    "<skipped>".into()
+                } else {
+                    workspace.read().get_log_file(&rule_name)
+                },
+                status: executor::exec::Expect::Success,
+            };
+
             let state = get_state().read();
             let mut tasks = state.tasks.write();
             if let Ok(task_result) = &task_result {
+                log_status.status = executor::exec::Expect::Success;
                 for enabled_target in task_result.enabled_targets.iter() {
                     let task = tasks
                         .get_mut(enabled_target)
@@ -248,6 +261,7 @@ pub fn execute_task(
                     task.rule.type_ = Some(rule::RuleType::Run);
                 }
             } else {
+                log_status.status = executor::exec::Expect::Failure;
                 // Cancel all pending tasks - exit gracefully
                 for task in tasks.values_mut() {
                     task.phase = task::Phase::Cancelled;
@@ -258,12 +272,22 @@ pub fn execute_task(
                 .get_mut(name.as_ref())
                 .context(format_context!("Task not found {name}"))?;
             task.phase = task::Phase::Complete;
+
+            state.log_status.write().push(log_status);
         }
 
         task_result
 
         // _signal_on_drop.drop() notifies the dependents
     })
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct LogStatus {
+    pub name: Arc<str>,
+    pub status: executor::exec::Expect,
+    pub duration: std::time::Duration,
+    pub file: Arc<str>,
 }
 
 #[derive(Debug)]
@@ -273,6 +297,7 @@ pub struct State {
     pub sorted: Vec<petgraph::prelude::NodeIndex>,
     pub latest_starlark_module: Option<Arc<str>>,
     pub all_modules: HashSet<Arc<str>>,
+    pub log_status: lock::StateLock<Vec<LogStatus>>,
 }
 
 impl State {
@@ -659,6 +684,7 @@ fn get_state() -> &'static lock::StateLock<State> {
         sorted: Vec::new(),
         latest_starlark_module: None,
         all_modules: HashSet::new(),
+        log_status: lock::StateLock::new(Vec::new()),
     }));
     STATE.get()
 }
@@ -782,6 +808,19 @@ pub fn get_setup_rules() -> Vec<Arc<str>> {
         .filter(|task| task.rule.type_ == Some(rule::RuleType::Setup))
         .map(|task| task.rule.name.clone())
         .collect()
+}
+
+pub fn export_log_status(workspace: WorkspaceArc) -> anyhow::Result<()> {
+    let state = get_state().read();
+    let log_status = state.log_status.read().clone();
+    let log_output_folder = workspace.read().log_directory.clone();
+    let log_status_file_output = format!("{}/log_status.json", log_output_folder);
+    let content = serde_json::to_string_pretty(&log_status)
+        .context(format_context!("Failed to serialize log status"))?;
+    std::fs::write(log_status_file_output.as_str(), content).context(format_context!(
+        "Failed to write log status to {log_status_file_output}"
+    ))?;
+    Ok(())
 }
 
 pub fn debug_sorted_tasks(
