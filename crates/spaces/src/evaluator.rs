@@ -1,4 +1,4 @@
-use crate::{builtins, executor, rule, rules, singleton, task, workspace};
+use crate::{builtins, executor, rules, singleton, task, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use starlark::environment::{FrozenModule, GlobalsBuilder, Module};
@@ -410,25 +410,30 @@ pub fn execute_tasks(
                 strip_prefix = Some(format!("//{}", relative_path).into());
             }
 
-            //only show checkout if log level is message or higher
-            if printer.verbosity.level <= printer::Level::Message {
+            if let Some(markdown_path) = singleton::get_inspect_markdown_path() {
+                rules::export_tasks_as_mardown(&markdown_path)
+                    .context(format_context!("Failed to export tasks as markdown"))?;
+            } else {
+                //only show checkout if log level is message or higher
+                if printer.verbosity.level <= printer::Level::Message {
+                    rules::show_tasks(
+                        printer,
+                        task::Phase::Checkout,
+                        target.clone(),
+                        &globs,
+                        strip_prefix.clone(),
+                    )
+                    .context(format_context!("Failed to show tasks"))?;
+                }
                 rules::show_tasks(
                     printer,
-                    task::Phase::Checkout,
+                    task::Phase::Run,
                     target.clone(),
                     &globs,
-                    strip_prefix.clone(),
+                    strip_prefix,
                 )
                 .context(format_context!("Failed to show tasks"))?;
             }
-            rules::show_tasks(
-                printer,
-                task::Phase::Run,
-                target.clone(),
-                &globs,
-                strip_prefix,
-            )
-            .context(format_context!("Failed to show tasks"))?;
         }
         task::Phase::Checkout => {
             star_logger(printer).message("--Post Checkout Phase--");

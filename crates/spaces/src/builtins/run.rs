@@ -4,7 +4,7 @@ use starlark::{environment::GlobalsBuilder, values::none::NoneType};
 use starstd::{get_rule_argument, Arg, Function};
 use std::collections::HashSet;
 
-use crate::{executor, rule, rules, singleton, task};
+use crate::{executor, rules, singleton, task};
 
 const ADD_EXEC_EXAMPLE: &str = r#"run.add_exec(
     rule = {"name": name, "type": "Setup", "deps": ["sysroot-python:venv"]},
