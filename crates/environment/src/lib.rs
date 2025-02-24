@@ -47,7 +47,10 @@ impl Environment {
     pub fn get_vars(&self) -> anyhow::Result<HashMap<Arc<str>, Arc<str>>> {
         let mut env_vars = HashMap::new();
 
-        env_vars.extend(self.get_inherited_vars().context(format_context!("Failed to get inherited vars"))?);
+        env_vars.extend(
+            self.get_inherited_vars()
+                .context(format_context!("Failed to get inherited vars"))?,
+        );
 
         for (key, value) in self.vars.iter() {
             env_vars.insert(key.clone(), value.clone());

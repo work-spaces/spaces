@@ -287,7 +287,7 @@ pub fn execute() -> anyhow::Result<()> {
                     target,
                     filter,
                     has_help,
-                    markdown
+                    markdown,
                 },
         } => {
             handle_verbosity(

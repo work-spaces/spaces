@@ -267,7 +267,8 @@ impl SpacesContext {
             self.workspace_path.clone(),
             evaluator::WithRules::Yes,
         )
-        .context(format_context!("Failed to process loads")).unwrap();
+        .context(format_context!("Failed to process loads"))
+        .unwrap();
         let modules = loads.iter().map(|(a, b)| (a.as_str(), b)).collect();
         let loader = ReturnFileLoader { modules: &modules };
 

@@ -55,21 +55,22 @@ pub fn transform_url_to_arguments(
     ])
 }
 
-pub fn download(gh_command: &str, url: &str, arguments: Vec<Arc<str>>, progress_bar: &mut printer::MultiProgressBar) -> anyhow::Result<()> {
+pub fn download(
+    gh_command: &str,
+    url: &str,
+    arguments: Vec<Arc<str>>,
+    progress_bar: &mut printer::MultiProgressBar,
+) -> anyhow::Result<()> {
     let options = printer::ExecuteOptions {
         arguments,
         ..Default::default()
     };
 
-    gh_logger(progress_bar).trace(
-        format!("{url} Downloading using gh {options:?}").as_str(),
-    );
+    gh_logger(progress_bar).trace(format!("{url} Downloading using gh {options:?}").as_str());
 
     progress_bar
         .execute_process(gh_command, options)
-        .context(format_context!(
-            "failed to download {url} using gh",
-        ))?;
+        .context(format_context!("failed to download {url} using gh",))?;
 
     Ok(())
 }

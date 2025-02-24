@@ -12,7 +12,7 @@ pub const FUNCTIONS: &[Function] = &[
         name: "get_path_to_log_file",
         description: "returns the relative workspace path to the log file for the target",
         return_type: "str",
-        args: &[            
+        args: &[
             Arg {
                 name: "name",
                 description: "The name of the rule to get the log file",
@@ -25,7 +25,7 @@ pub const FUNCTIONS: &[Function] = &[
         name: "get_path_to_member",
         description: "returns a string to the workspace member matching the specified requirement (error if not found)",
         return_type: "str",
-        args: &[            
+        args: &[
             Arg {
                 name: "member",
                 description: "The requirements for the member",
@@ -41,7 +41,7 @@ pub const FUNCTIONS: &[Function] = &[
         name: "is_path_to_member_available",
         description: "returns true if the workspace satisfies the requirments",
         return_type: "bool",
-        args: &[            
+        args: &[
             Arg {
                 name: "member",
                 description: "The requirements for the member",
@@ -134,7 +134,6 @@ pub const FUNCTIONS: &[Function] = &[
 
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
-
     fn is_reproducible() -> anyhow::Result<bool> {
         let workspace_arc =
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
@@ -216,30 +215,44 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
     fn get_path_to_member(
         #[starlark(require = named)] member: starlark::values::Value,
-    )-> anyhow::Result<String>{
+    ) -> anyhow::Result<String> {
         let workspace_arc = singleton::get_workspace()
-        .context(format_error!("Internal Error: No active workspace found"))?;
+            .context(format_error!("Internal Error: No active workspace found"))?;
         let member_requirement_json = member.to_json_value()?;
-        let member_requirement: ws::MemberRequirement = serde_json::from_value(member_requirement_json.clone())
-            .context(format_context!("bad options for workspace member"))?;
+        let member_requirement: ws::MemberRequirement =
+            serde_json::from_value(member_requirement_json.clone())
+                .context(format_context!("bad options for workspace member"))?;
 
-        let path = workspace_arc.read().settings.json.get_path_to_member(&member_requirement);
+        let path = workspace_arc
+            .read()
+            .settings
+            .json
+            .get_path_to_member(&member_requirement);
         match path {
             Some(p) => Ok(p.to_string()),
-            None => Err(format_error!("`{}` not found in workspace matching {:?}", member_requirement.url, member_requirement.required)),
+            None => Err(format_error!(
+                "`{}` not found in workspace matching {:?}",
+                member_requirement.url,
+                member_requirement.required
+            )),
         }
     }
 
     fn is_path_to_member_available(
         #[starlark(require = named)] member: starlark::values::Value,
-    )-> anyhow::Result<bool>{
+    ) -> anyhow::Result<bool> {
         let workspace_arc = singleton::get_workspace()
-        .context(format_error!("Internal Error: No active workspace found"))?;
+            .context(format_error!("Internal Error: No active workspace found"))?;
         let member_requirement_json = member.to_json_value()?;
-        let member_requirement: ws::MemberRequirement = serde_json::from_value(member_requirement_json.clone())
-            .context(format_context!("bad options for workspace member"))?;
+        let member_requirement: ws::MemberRequirement =
+            serde_json::from_value(member_requirement_json.clone())
+                .context(format_context!("bad options for workspace member"))?;
 
-        let path = workspace_arc.read().settings.json.get_path_to_member(&member_requirement);
+        let path = workspace_arc
+            .read()
+            .settings
+            .json
+            .get_path_to_member(&member_requirement);
         match path {
             Some(_) => Ok(true),
             None => Ok(false),
@@ -322,6 +335,4 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         Ok(alloc_value)
     }
-
-
 }

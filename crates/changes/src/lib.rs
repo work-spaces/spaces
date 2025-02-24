@@ -220,7 +220,7 @@ impl Changes {
         globs: &HashSet<Arc<str>>,
     ) -> anyhow::Result<Arc<str>> {
         let mut inputs = Vec::new();
-        
+
         for path in self.entries.keys() {
             let sane_path = Self::sanitize_path(path);
             if glob::match_globs(globs, sane_path) {
@@ -249,5 +249,4 @@ impl Changes {
 
         Ok(hasher.finalize().to_string().into())
     }
-
 }

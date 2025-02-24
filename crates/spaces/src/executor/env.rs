@@ -16,10 +16,11 @@ impl UpdateEnv {
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
-        logger::Logger::new_progress(&mut progress, name.into()).debug(
-            format!("Update env {name}: {:?}", &self).as_str(),
-        );
-        workspace.write().update_env(self.environment.clone())
+        logger::Logger::new_progress(&mut progress, name.into())
+            .debug(format!("Update env {name}: {:?}", &self).as_str());
+        workspace
+            .write()
+            .update_env(self.environment.clone())
             .context(format_context!("failed to update env"))?;
         Ok(())
     }

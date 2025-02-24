@@ -1,6 +1,6 @@
+use anyhow_source_location::format_error;
 use std::collections::HashSet;
 use std::sync::Arc;
-use anyhow_source_location::format_error;
 
 pub fn is_glob_include(glob: &str) -> Option<Arc<str>> {
     let mut result = glob.to_owned();
@@ -30,7 +30,7 @@ pub fn match_globs(globs: &HashSet<Arc<str>>, input: &str) -> bool {
             return true;
         }
     }
-    
+
     false
 }
 
@@ -44,11 +44,15 @@ pub fn validate(globs: &HashSet<Arc<str>>) -> anyhow::Result<()> {
             }
             continue;
         }
-        return Err(format_error!("invalid glob pattern: {value:?}. Must begin with '+' or '-'"));
+        return Err(format_error!(
+            "invalid glob pattern: {value:?}. Must begin with '+' or '-'"
+        ));
     }
 
     if !has_includes {
-        return Err(format_error!("if globs are specified, at least one must be an include (start with `+`)"));
+        return Err(format_error!(
+            "if globs are specified, at least one must be an include (start with `+`)"
+        ));
     }
 
     Ok(())

@@ -3,7 +3,6 @@ use anyhow_source_location::format_error;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-
 #[derive(Debug)]
 struct State {
     active_workspace: Option<workspace::WorkspaceArc>,
@@ -36,7 +35,6 @@ fn get_state() -> &'static lock::StateLock<State> {
     STATE.get()
 }
 
-
 pub fn process_anyhow_error(error: anyhow::Error) {
     let mut state = get_state().write();
     for cause in error.chain().rev() {
@@ -44,7 +42,7 @@ pub fn process_anyhow_error(error: anyhow::Error) {
     }
 }
 
-pub fn process_error(error: String){
+pub fn process_error(error: String) {
     let mut state = get_state().write();
     state.error_chain.push(error);
 }
@@ -78,7 +76,7 @@ pub fn get_max_queue_count() -> i64 {
 pub fn set_inspect_markdown_path(inspect_markdown_path: Option<Arc<str>>) {
     let mut state = get_state().write();
     state.inspect_markdown_path = inspect_markdown_path;
-} 
+}
 
 pub fn get_inspect_markdown_path() -> Option<Arc<str>> {
     let state = get_state().read();
@@ -127,5 +125,8 @@ pub fn set_active_workspace(workspace: workspace::WorkspaceArc) {
 
 pub fn get_workspace() -> anyhow::Result<workspace::WorkspaceArc> {
     let state = get_state().read();
-    state.active_workspace.clone().ok_or(format_error!("Internal Error: No active workspace"))
+    state
+        .active_workspace
+        .clone()
+        .ok_or(format_error!("Internal Error: No active workspace"))
 }

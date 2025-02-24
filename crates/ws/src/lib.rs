@@ -136,7 +136,7 @@ impl BinSettings {
             }
         }
 
-        if self.env_json.is_empty() || self.tasks_json.is_empty()  {
+        if self.env_json.is_empty() || self.tasks_json.is_empty() {
             result = IsDirty::Yes
         }
 

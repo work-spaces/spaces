@@ -186,9 +186,8 @@ impl FileLock {
             std::thread::sleep(std::time::Duration::from_millis(500));
             log_count += 1;
             if log_count == 10 {
-                logger::Logger::new_progress(progress, "lock".into()).debug(
-                    format!("Still waiting for to finish at {}", self.path).as_str(),
-                );
+                logger::Logger::new_progress(progress, "lock".into())
+                    .debug(format!("Still waiting for to finish at {}", self.path).as_str());
                 log_count = 0;
             }
         }
