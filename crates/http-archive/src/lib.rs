@@ -199,7 +199,7 @@ impl HttpArchive {
     }
 
     pub fn get_member(&self) -> ws::Member {
-        ws::Member{
+        ws::Member {
             path: self.spaces_key.clone(),
             url: self.archive.url.clone(),
             rev: self.archive.sha256.clone(),

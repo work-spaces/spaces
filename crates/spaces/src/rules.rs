@@ -343,8 +343,11 @@ impl State {
                         progress.increment_with_overflow(1);
                         progress.set_message("populating dependency graph");
                     } else {
-                        progress =
-                            Some(multiprogress.add_progress("workspace", Some(200), Some("Populated Graph")));
+                        progress = Some(multiprogress.add_progress(
+                            "workspace",
+                            Some(200),
+                            Some("Populated Graph"),
+                        ));
                     }
                 }
 
@@ -533,10 +536,17 @@ impl State {
 
         let run_rules = tasks
             .values()
-            .filter_map(|task| if task.phase == task::Phase::Run { Some(&task.rule) } else { None })
+            .filter_map(|task| {
+                if task.phase == task::Phase::Run {
+                    Some(&task.rule)
+                } else {
+                    None
+                }
+            })
             .collect::<Vec<_>>();
 
-        let mut printer = printer::Printer::new_file(path).context(format_context!("Failed to create file {path}"))?;
+        let mut printer = printer::Printer::new_file(path)
+            .context(format_context!("Failed to create file {path}"))?;
         let mut md_printer = printer::markdown::Markdown::new(&mut printer);
         let md = &mut md_printer;
         rule::Rule::print_markdown_header(md)?;

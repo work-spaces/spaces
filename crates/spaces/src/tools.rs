@@ -95,8 +95,7 @@ pub fn install_tools(printer: &mut printer::Printer, is_force_link: bool) -> any
     let mut multi_progress = printer::MultiProgress::new(printer);
 
     for (name, tool) in tools {
-        tools_logger(multi_progress.printer)
-            .debug(format!("dowload and install {name}").as_str());
+        tools_logger(multi_progress.printer).debug(format!("dowload and install {name}").as_str());
         download_and_install(&mut multi_progress, name, tool, is_force_link)
             .context(format_context!("Failed to download and install tools"))?;
     }

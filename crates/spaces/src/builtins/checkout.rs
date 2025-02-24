@@ -477,7 +477,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();
 
-        let worktree_path  = if let Some(directory) = repo.working_directory.as_ref(){
+        let worktree_path = if let Some(directory) = repo.working_directory.as_ref() {
             directory.clone()
         } else {
             workspace.get_absolute_path()
@@ -485,7 +485,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         if let Some(clone_type) = repo.clone.as_ref() {
             if *clone_type == git::Clone::Worktree && repo.sparse_checkout.is_some() {
-                return Err(format_error!("Sparse checkout is not supported with Worktree clone"));
+                return Err(format_error!(
+                    "Sparse checkout is not supported with Worktree clone"
+                ));
             }
         }
 
@@ -503,7 +505,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 clone: repo.clone.unwrap_or(git::Clone::Default),
                 is_evaluate_spaces_modules: repo.is_evaluate_spaces_modules.unwrap_or(true),
                 sparse_checkout: repo.sparse_checkout,
-                working_directory: repo.working_directory
+                working_directory: repo.working_directory,
             }),
         ))
         .context(format_context!("Failed to insert task {rule_name}"))?;

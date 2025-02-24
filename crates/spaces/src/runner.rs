@@ -24,13 +24,18 @@ pub fn run_starlark_modules_in_workspace(
     let workspace = {
         let checkout_scripts: Option<Vec<Arc<str>>> = match &run_workspace {
             RunWorkspace::Target(_, _) => None,
-            RunWorkspace::Script(scripts) => Some(scripts.iter().map(|e| e.0.clone()).collect())
+            RunWorkspace::Script(scripts) => Some(scripts.iter().map(|e| e.0.clone()).collect()),
         };
 
         let mut multi_progress = printer::MultiProgress::new(printer);
         let progress = multi_progress.add_progress("workspace", Some(100), Some("Complete"));
-        workspace::Workspace::new(progress, absolute_path_to_workspace, is_clear_inputs, checkout_scripts)
-            .context(format_context!("while running workspace"))?
+        workspace::Workspace::new(
+            progress,
+            absolute_path_to_workspace,
+            is_clear_inputs,
+            checkout_scripts,
+        )
+        .context(format_context!("while running workspace"))?
     };
 
     let workspace_arc = workspace::WorkspaceArc::new(lock::StateLock::new(workspace));
@@ -144,7 +149,9 @@ pub fn checkout(
         let dir = std::fs::read_dir(name.as_ref())
             .context(format_context!("while reading directory {name}"))?;
         if dir.count() > 0 {
-            return Err(format_error!("checkout directory must be non-existent or empty"));
+            return Err(format_error!(
+                "checkout directory must be non-existent or empty"
+            ));
         }
     }
 

@@ -47,7 +47,6 @@ impl Rule {
         map
     }
 
-
     pub fn print_markdown_header(md: &mut printer::markdown::Markdown) -> anyhow::Result<()> {
         md.heading(1, "Rules")?;
         Ok(())
@@ -109,7 +108,11 @@ impl Rule {
         Self::name_to_tag_anchor(&self.name)
     }
 
-    fn print_markdown(&self, md: &mut printer::markdown::Markdown, rule_map: &RuleMap) -> anyhow::Result<()> {
+    fn print_markdown(
+        &self,
+        md: &mut printer::markdown::Markdown,
+        rule_map: &RuleMap,
+    ) -> anyhow::Result<()> {
         md.hline()?;
 
         let heading = format!("{}", self.name);
@@ -140,7 +143,7 @@ impl Rule {
                     } else {
                         md.list_item(0, dep)?;
                     }
-                }                
+                }
             }
             md.printer.newline()?;
         }

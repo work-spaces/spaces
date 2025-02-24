@@ -21,22 +21,20 @@ pub const FUNCTIONS: &[Function] = &[Function {
     name: "exec",
     description: "Executes a process",
     return_type: "dict # with members `status`, `stdout`, and `stderr`",
-    args: &[
-        Arg {
-            name: "exec",
-            description: "dict with members",
-            dict: &[
-                ("command", "name of the command to execute"),
-                ("args", "optional list of arguments"),
-                ("env", "optional dict of environment variables"),
-                (
-                    "working_directory",
-                    "optional working directory (default is the workspace)",
-                ),
-                ("stdin", "optional string to pipe to the process stdin"),
-            ],
-        }
-    ],
+    args: &[Arg {
+        name: "exec",
+        description: "dict with members",
+        dict: &[
+            ("command", "name of the command to execute"),
+            ("args", "optional list of arguments"),
+            ("env", "optional dict of environment variables"),
+            (
+                "working_directory",
+                "optional working directory (default is the workspace)",
+            ),
+            ("stdin", "optional string to pipe to the process stdin"),
+        ],
+    }],
     example: None,
 }];
 
@@ -111,7 +109,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             );
             Ok(heap.alloc(serde_json::Value::Object(result_map)))
         } else {
-            Err(child_result.unwrap_err()).context(format_context!("Failed to spawn child process {invoke_command}"))
+            Err(child_result.unwrap_err()).context(format_context!(
+                "Failed to spawn child process {invoke_command}"
+            ))
         }
     }
 }

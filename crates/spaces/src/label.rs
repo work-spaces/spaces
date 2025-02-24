@@ -36,10 +36,9 @@ pub fn sanitize_rule(rule_name: Arc<str>, starlark_module: Option<Arc<str>>) -> 
             .strip_suffix(slash_suffix.as_str())
             .or_else(|| latest_module.strip_suffix(dot_suffix.as_str()))
             .unwrap_or("");
-    
+
         let separator = if rule_name.contains(':') { '/' } else { ':' };
         format!("//{rule_prefix}{separator}{rule_name}").into()
-
     } else {
         rule_name
     }

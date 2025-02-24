@@ -55,7 +55,8 @@ impl Graph {
         format!(
             "{target} not found. Similar targets include:\n{}",
             suggestions.join("\n")
-        ).into()
+        )
+        .into()
     }
 
     fn get_target_not_found_error(&self, target: Arc<str>) -> anyhow::Error {
