@@ -29,8 +29,7 @@ pub fn get_modified_time<ErrorType>(
 ) -> Option<std::time::SystemTime> {
     metadata_result
         .ok()
-        .map(|metadata| metadata.modified().ok())
-        .flatten()
+        .and_then(|metadata| metadata.modified().ok())
 }
 
 pub fn is_modified(

@@ -10,7 +10,7 @@ pub struct Logger<'a> {
     label: Arc<str>,
 }
 
-impl<'a> Logger<'a> {
+impl Logger<'_> {
     pub fn new_printer(printer: &mut printer::Printer, label: Arc<str>) -> Logger {
         Logger {
             printer: Printer::Printer(printer),

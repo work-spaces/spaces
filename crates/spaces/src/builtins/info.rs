@@ -136,7 +136,7 @@ fn check_required_semver(required: &str) -> anyhow::Result<bool> {
             "Internal Error: Failed to parse current version {current_version}"
         ))?;
 
-    return Ok(required.matches(&version));
+    Ok(required.matches(&version))
 }
 
 #[starlark_module]
@@ -283,7 +283,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     }
 
     fn check_required_semver(required: &str) -> anyhow::Result<bool> {
-        Ok(check_required_semver(required)?)
+        check_required_semver(required)
     }
 
     fn set_max_queue_count(count: i64) -> anyhow::Result<NoneType> {

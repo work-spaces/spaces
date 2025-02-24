@@ -56,10 +56,10 @@ impl Rule {
     pub fn print_markdown_section_heading(
         md: &mut printer::markdown::Markdown,
         section_name: &str,
-        rules: &Vec<&Rule>,
+        rules: &[&Rule],
     ) -> anyhow::Result<()> {
         md.heading(2, format!("Overview: {section_name}").as_str())?;
-        let mut sorted_rules = rules.clone();
+        let mut sorted_rules = rules.to_vec();
         sorted_rules.sort_by(|a, b| a.name.cmp(&b.name));
         for rule in sorted_rules {
             if rule.help.is_some() {
@@ -94,8 +94,7 @@ impl Rule {
         let anchor = anchor.to_string().replace('.', "-");
         let anchor = anchor.to_string().replace("//", "");
         let anchor = anchor.to_string().replace('/', "-");
-        let anchor = anchor.to_lowercase();
-        anchor
+        anchor.to_lowercase()
     }
 
     fn name_to_tag_anchor(name: &str) -> String {
@@ -115,7 +114,7 @@ impl Rule {
 
         let heading = format!("{}", self.name);
         md.heading(3, heading.as_str())?;
-        md.heading(5, &self.to_anchor().as_str())?;
+        md.heading(5, &self.to_anchor())?;
 
         md.printer.newline()?;
 
@@ -137,7 +136,7 @@ impl Rule {
                 // get the rule using the dep as the name
                 if let Some(dep_rule) = rule_map.get(dep) {
                     if dep_rule.help.is_some() {
-                        md.list_item(0, &Markdown::get_link(dep, &&Self::name_to_tag_anchor(dep)))?;
+                        md.list_item(0, &Markdown::get_link(dep, &Self::name_to_tag_anchor(dep)))?;
                     } else {
                         md.list_item(0, dep)?;
                     }

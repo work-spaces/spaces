@@ -244,7 +244,7 @@ impl Workspace {
 
         logger(progress).info(format!("Invoked at: //{}", relative_invoked_path).as_str());
 
-        relative_invoked_path.into()
+        relative_invoked_path
     }
 
     fn filter_predicate(workspace_path: &std::path::Path, entry: &walkdir::DirEntry) -> bool {
@@ -647,7 +647,7 @@ impl Workspace {
     }
 
     pub fn save_bin(&self, printer: &mut printer::Printer) -> anyhow::Result<()> {
-        if self.settings.bin.changes.entries.len() > 0 {
+        if !self.settings.bin.changes.entries.is_empty() {
             for (key, _) in self.settings.bin.changes.entries.iter() {
                 logger_printer(printer).trace(format!("Changes: {key}").as_str());
             }
@@ -655,7 +655,7 @@ impl Workspace {
             logger_printer(printer).debug("No changes");
         }
 
-        if self.settings.bin.inputs.entries.len() > 0 {
+        if !self.settings.bin.inputs.entries.is_empty() {
             for (key, value) in self.settings.bin.inputs.entries.iter() {
                 logger_printer(printer).trace(format!("Inputs: {key}:{value}").as_str());
             }

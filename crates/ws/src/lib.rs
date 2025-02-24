@@ -56,7 +56,7 @@ impl Member {
     }
 
     fn is_semver_match(&self, semver_required: &str) -> bool {
-        self.version.as_ref().map_or(false, |version| {
+        self.version.as_ref().is_some_and(|version| {
             let semver_member_version = semver::Version::parse(version.as_ref()).ok();
             let semver_required_version = semver::VersionReq::parse(semver_required).ok();
             if let (Some(semver_member_version), Some(semver_required_version)) =
@@ -94,14 +94,11 @@ pub struct BinSettings {
 
 impl BinSettings {
     fn new(path: &str) -> Self {
-        match Self::load(path) {
-            Ok(settings) => settings,
-            Err(_) => Default::default(),
-        }
+        Self::load(path).unwrap_or_default()
     }
 
     fn save(&self, path: &str) -> anyhow::Result<()> {
-        let encoded = bincode::encode_to_vec(&self, bincode::config::standard())
+        let encoded = bincode::encode_to_vec(self, bincode::config::standard())
             .context(format_context!("Failed to encode bin settings"))?;
         std::fs::write(path, encoded).context(format_context!("Failed to write to {path:?}"))?;
         Ok(())
