@@ -1,6 +1,6 @@
 use crate::{evaluator, task, workspace};
 use anyhow::Context;
-use anyhow_source_location::format_context;
+use anyhow_source_location::{format_context, format_error};
 use std::sync::Arc;
 
 #[cfg(feature = "lsp")]
@@ -139,6 +139,15 @@ pub fn checkout(
     script: Vec<Arc<str>>,
     create_lock_file: bool,
 ) -> anyhow::Result<()> {
+    // Checkout will fail if the target dir exists and is not empty
+    if std::path::Path::new(name.as_ref()).exists() {
+        let dir = std::fs::read_dir(name.as_ref())
+            .context(format_context!("while reading directory {name}"))?;
+        if dir.count() > 0 {
+            return Err(format_error!("checkout directory must be non-existent or empty"));
+        }
+    }
+
     std::fs::create_dir_all(name.as_ref())
         .context(format_context!("while creating workspace directory {name}"))?;
 
