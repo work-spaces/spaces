@@ -1,5 +1,5 @@
 use crate::executor::asset;
-use crate::{executor, rules, singleton, task, rule};
+use crate::{executor, rules, singleton, task};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};

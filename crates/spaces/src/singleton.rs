@@ -13,6 +13,7 @@ struct State {
     error_chain: Vec<String>,
     inspect_globs: HashSet<Arc<str>>,
     has_help: bool,
+    inspect_markdown_path: Option<Arc<str>>,
 }
 
 static STATE: state::InitCell<lock::StateLock<State>> = state::InitCell::new();
@@ -29,6 +30,7 @@ fn get_state() -> &'static lock::StateLock<State> {
         error_chain: Vec::new(),
         inspect_globs: HashSet::new(),
         has_help: false,
+        inspect_markdown_path: None,
     }));
 
     STATE.get()
@@ -71,6 +73,16 @@ pub fn set_has_help(has_help: bool) {
 pub fn get_max_queue_count() -> i64 {
     let state = get_state().read();
     state.max_queue_count
+}
+
+pub fn set_inspect_markdown_path(inspect_markdown_path: Option<Arc<str>>) {
+    let mut state = get_state().write();
+    state.inspect_markdown_path = inspect_markdown_path;
+} 
+
+pub fn get_inspect_markdown_path() -> Option<Arc<str>> {
+    let state = get_state().read();
+    state.inspect_markdown_path.clone()
 }
 
 pub fn set_inspect_globs(inspect_globs: HashSet<Arc<str>>) {

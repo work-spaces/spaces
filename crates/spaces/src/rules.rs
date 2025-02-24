@@ -1,5 +1,5 @@
 use crate::workspace::WorkspaceArc;
-use crate::{executor, label, rule, singleton, task, workspace};
+use crate::{executor, label, singleton, task, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::Serialize;
@@ -528,7 +528,24 @@ impl State {
         Ok(())
     }
 
-    pub fn execute(
+    fn export_tasks_as_mardown(&self, path: &str) -> anyhow::Result<()> {
+        let tasks = self.tasks.read();
+
+        let run_rules = tasks
+            .values()
+            .filter_map(|task| if task.phase == task::Phase::Run { Some(&task.rule) } else { None })
+            .collect::<Vec<_>>();
+
+        let mut printer = printer::Printer::new_file(path).context(format_context!("Failed to create file {path}"))?;
+        let mut md_printer = printer::markdown::Markdown::new(&mut printer);
+        let md = &mut md_printer;
+        rule::Rule::print_markdown_header(md)?;
+        rule::Rule::print_markdown_section_heading(md, "Run Rules", &run_rules)?;
+        rule::Rule::print_markdown_section_body(md, "Run Rules", &run_rules)?;
+        Ok(())
+    }
+
+    fn execute(
         &self,
         printer: &mut printer::Printer,
         workspace: workspace::WorkspaceArc,
@@ -686,6 +703,11 @@ pub fn show_tasks(
 ) -> anyhow::Result<()> {
     let state = get_state().read();
     state.show_tasks(printer, phase, target, filter, strip_prefix)
+}
+
+pub fn export_tasks_as_mardown(path: &str) -> anyhow::Result<()> {
+    let state = get_state().read();
+    state.export_tasks_as_mardown(path)
 }
 
 pub fn update_tasks_digests(

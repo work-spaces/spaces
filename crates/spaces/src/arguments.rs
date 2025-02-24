@@ -287,6 +287,7 @@ pub fn execute() -> anyhow::Result<()> {
                     target,
                     filter,
                     has_help,
+                    markdown
                 },
         } => {
             handle_verbosity(
@@ -327,6 +328,7 @@ pub fn execute() -> anyhow::Result<()> {
 
             singleton::set_inspect_globs(filter_globs);
             singleton::set_has_help(has_help);
+            singleton::set_inspect_markdown_path(markdown);
 
             runner::run_starlark_modules_in_workspace(
                 &mut printer,
@@ -457,6 +459,9 @@ Inspect all the scripts in the workspace without running any rules.
         // Only show rules with the help entry populated
         #[arg(long)]
         has_help: bool,
+        // Write the output of the inspect command to a markdown file
+        #[arg(long)]
+        markdown: Option<Arc<str>>,
     },
     /// Generates shell completions for the spaces command.
     Completions {
