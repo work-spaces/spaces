@@ -139,10 +139,20 @@ impl Git {
         logger(progress, self.url.clone())
             .debug(format!("execute clone to store with filter {filter:?}").as_str());
 
-        if std::path::Path::new(self.spaces_key.as_ref()).exists() {
-            logger(progress, self.url.clone())
-                .warning(format!("{} already exists", self.spaces_key).as_str());
-            return Ok(());
+        let spaces_name_path = std::path::Path::new(self.spaces_key.as_ref());
+        if std::path::Path::new(spaces_name_path).exists() {
+            // check if the directory is empty
+            let entries = std::fs::read_dir(spaces_name_path).context(format_context!(
+                "Internal Error: failed to read directory {}",
+                self.spaces_key
+            ))?;
+
+            if entries.count() > 0 {
+                logger(progress, self.url.clone()).warning(
+                    format!("{} already exists and is not empty", self.spaces_key).as_str(),
+                );
+                return Ok(());
+            }
         }
 
         let (relative_bare_store_path, name_dot_git) =
