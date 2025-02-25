@@ -1,6 +1,6 @@
 [package]
 name = "spaces"
-version = "0.14.4"
+version = "0.14.5"
 edition = "2021"
 
 [dependencies]
@@ -17,6 +17,7 @@ lsp-types = { version = "0.94.1", optional = true }
 strum = { version = "0.26", features = ["derive"] }
 thiserror = "2"
 
+copy.workspace = true
 changes.workspace = true
 easy-archiver.workspace = true
 environment.workspace = true

@@ -714,6 +714,12 @@ impl Repository {
         Ok(())
     }
 
+    pub fn pull(&self, progress_bar: &mut printer::MultiProgressBar) -> anyhow::Result<()> {
+        self.execute(progress_bar, vec!["pull".into()])
+            .context(format_context!("while pulling from {}", self.full_path))?;
+        Ok(())
+    }
+
     pub fn checkout(
         &self,
         progress_bar: &mut printer::MultiProgressBar,
