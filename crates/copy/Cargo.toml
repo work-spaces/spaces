@@ -9,4 +9,5 @@ reflink-copy = "0.1"
 walkdir = "2"
 
 anyhow-source-location.workspace = true
+logger.workspace = true
 printer.workspace = true

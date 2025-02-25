@@ -172,7 +172,6 @@ impl Git {
         ))?;
 
         let lock_file_path = format!("{working_directory}/{name_dot_git}.spaces.lock");
-
         let mut lock_file = lock::FileLock::new(lock_file_path.into());
 
         lock_file.lock(progress).context(format_context!(
@@ -208,7 +207,6 @@ impl Git {
         }
 
         // now use reflink-copy to copy the repository to the workspace
-
         copy::copy_with_cow_semantics(progress, &repo_path, &self.spaces_key).context(
             format_context!(
                 "{name} - Failed to copy repository {working_directory}/{name_dot_git} to {}",
