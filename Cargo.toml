@@ -12,7 +12,7 @@ members = [
     "crates/logger",
     "crates/suggest",
     "crates/ws",
-    "crates/inputs", "crates/rule",
+    "crates/inputs", "crates/rule", "crates/copy",
 ]
 
 [workspace.dependencies]
@@ -33,6 +33,7 @@ toml = "0.8"
 serde_yaml = "0.9"
 
 changes.path = "crates/changes"
+copy.path = "crates/copy"
 environment.path = "crates/environment"
 git.path = "crates/git"
 graph.path = "crates/graph"
