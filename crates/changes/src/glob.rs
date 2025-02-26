@@ -11,6 +11,9 @@ pub fn is_glob_include(glob: &str) -> Option<Arc<str>> {
         let char_len = first_char.len_utf8();
         result.drain(..char_len);
     }
+    if result.is_empty() {
+        result.push('.');
+    }
     Some(result.into())
 }
 
@@ -18,6 +21,7 @@ pub fn match_globs(globs: &HashSet<Arc<str>>, input: &str) -> bool {
     let includes = globs.iter().filter(|g| g.starts_with('+'));
     let excludes = globs.iter().filter(|g| g.starts_with('-'));
 
+    let input = input.strip_prefix("./").unwrap_or(input);
     for include in includes {
         let include_pattern = include.strip_prefix('+').unwrap_or(include.as_ref());
         if glob_match::glob_match(include_pattern, input) {

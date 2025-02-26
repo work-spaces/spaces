@@ -88,6 +88,7 @@ impl Changes {
     }
 
     fn filter_update(
+        progress: &mut printer::MultiProgressBar,
         entry: &walkdir::DirEntry,
         entries: &HashMap<Arc<str>, ChangeDetail>,
         skip_folders: &[Arc<str>],
@@ -98,12 +99,17 @@ impl Changes {
         }
 
         if entry.file_type().is_dir() {
+            let file_name = entry.file_name().to_string_lossy();
+            if file_name == ".git" || file_name == ".spaces" {
+                return false;
+            }
             return true;
         }
 
         let file_path: Arc<str> = entry.path().to_string_lossy().into();
 
         if !glob::match_globs(globs, file_path.as_ref()) {
+            changes_logger(progress).trace(format!("filtered `{file_path}`").as_str());
             return false;
         }
 
@@ -168,29 +174,45 @@ impl Changes {
             let input_path = if let Some(asterisk_postion) = input.find('*') {
                 let mut path = input.to_string();
                 path.truncate(asterisk_postion);
-                path.into()
+                if path.is_empty() {
+                    ".".into()
+                } else {
+                    path.into()
+                }
             } else {
                 // check if input is a file or directory
                 input.clone()
             };
 
+            changes_logger(progress).trace(format!("include input path `{input_path}`").as_str());
             if let Some(glob_include_path) = glob::is_glob_include(input_path.as_ref()) {
-                changes_logger(progress).trace(format!("Update glob {glob_include_path}").as_str());
+                changes_logger(progress)
+                    .trace(format!("Update glob `{glob_include_path}`").as_str());
 
                 let walk_dir: Vec<_> = walkdir::WalkDir::new(glob_include_path.as_ref())
                     .into_iter()
                     .filter_entry(|e| {
-                        Self::filter_update(e, &self.entries, &self.skip_folders, inputs)
+                        Self::filter_update(progress, e, &self.entries, &self.skip_folders, inputs)
                     })
                     .filter_map(|entry| entry.ok())
                     .collect();
 
+                changes_logger(progress)
+                    .trace(format!("walked {} entries", walk_dir.len()).as_str());
+
                 for entry in walk_dir.into_iter() {
+                    if entry.file_type().is_dir() {
+                        continue;
+                    }
+
                     let path = entry.path();
+                    let path_string: Arc<str> = path.to_string_lossy().into();
+                    changes_logger(progress).trace(format!("process {}", path.display()).as_str());
+
                     let change_detail = Self::process_entry(progress, path)
                         .context(format_context!("Failed to process entry"))?;
 
-                    if self.update_entry(progress, path.to_string_lossy().into(), change_detail) {
+                    if self.update_entry(progress, path_string.clone(), change_detail) {
                         count += 1;
                     }
 
