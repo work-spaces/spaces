@@ -1,4 +1,4 @@
-use printer::markdown::Markdown;
+use printer::markdown;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -39,30 +39,30 @@ pub struct Rule {
 type RuleMap = HashMap<Arc<str>, Rule>;
 
 impl Rule {
-    fn get_hash_map(rules: &Vec<&Rule>) -> RuleMap {
+    fn get_hash_map(rules: &[(&Rule, Option<String>)]) -> RuleMap {
         let mut map = HashMap::new();
-        for rule in rules {
+        for (rule, _) in rules {
             map.insert(rule.name.clone(), (*rule).clone());
         }
         map
     }
 
-    pub fn print_markdown_header(md: &mut printer::markdown::Markdown) -> anyhow::Result<()> {
+    pub fn print_markdown_header(md: &mut markdown::Markdown) -> anyhow::Result<()> {
         md.heading(1, "Rules")?;
         Ok(())
     }
 
     pub fn print_markdown_section_heading(
-        md: &mut printer::markdown::Markdown,
+        md: &mut markdown::Markdown,
         section_name: &str,
-        rules: &[&Rule],
+        rules: &[(&Rule, Option<String>)],
     ) -> anyhow::Result<()> {
         md.heading(2, format!("Overview: {section_name}").as_str())?;
         let mut sorted_rules = rules.to_vec();
-        sorted_rules.sort_by(|a, b| a.name.cmp(&b.name));
-        for rule in sorted_rules {
+        sorted_rules.sort_by(|a, b| a.0.name.cmp(&b.0.name));
+        for (rule, _) in sorted_rules {
             if rule.help.is_some() {
-                md.list_item(0, &Markdown::get_link(&rule.name, &rule.to_tag_anchor()))?;
+                md.list_item(0, &markdown::hyperlink(&rule.name, &rule.to_tag_anchor()))?;
             }
         }
         md.printer.newline()?;
@@ -71,17 +71,17 @@ impl Rule {
     }
 
     pub fn print_markdown_section_body(
-        md: &mut printer::markdown::Markdown,
+        md: &mut markdown::Markdown,
         section_name: &str,
-        rules: &Vec<&Rule>,
+        rules: &[(&Rule, Option<String>)],
     ) -> anyhow::Result<()> {
         let rule_map = Self::get_hash_map(rules);
         md.heading(2, format!("Details: {section_name}").as_str())?;
-        let mut sorted_rules = rules.clone();
-        sorted_rules.sort_by(|a, b| a.name.cmp(&b.name));
-        for rule in sorted_rules {
+        let mut sorted_rules = rules.to_vec();
+        sorted_rules.sort_by(|a, b| a.0.name.cmp(&b.0.name));
+        for (rule, details) in sorted_rules {
             if rule.help.is_some() {
-                rule.print_markdown(md, &rule_map)?;
+                rule.print_markdown(md, &rule_map, details)?;
             }
         }
         md.printer.newline()?;
@@ -110,8 +110,9 @@ impl Rule {
 
     fn print_markdown(
         &self,
-        md: &mut printer::markdown::Markdown,
+        md: &mut markdown::Markdown,
         rule_map: &RuleMap,
+        details: Option<String>,
     ) -> anyhow::Result<()> {
         md.hline()?;
 
@@ -128,6 +129,10 @@ impl Rule {
             md.heading(3, "Description")?;
             md.paragraph(help)?;
             md.printer.newline()?;
+            if let Some(details) = details {
+                md.paragraph(details.as_str())?;
+                md.printer.newline()?;
+            }
         } else {
             md.paragraph("No help text provided")?;
             md.printer.newline()?;
@@ -139,7 +144,7 @@ impl Rule {
                 // get the rule using the dep as the name
                 if let Some(dep_rule) = rule_map.get(dep) {
                     if dep_rule.help.is_some() {
-                        md.list_item(0, &Markdown::get_link(dep, &Self::name_to_tag_anchor(dep)))?;
+                        md.list_item(0, &markdown::hyperlink(dep, &Self::name_to_tag_anchor(dep)))?;
                     } else {
                         md.list_item(0, dep)?;
                     }

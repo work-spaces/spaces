@@ -119,4 +119,12 @@ impl Task {
         }
         Ok(result)
     }
+
+    pub fn to_markdown(&self) -> Option<String> {
+        match self {
+            Task::Exec(exec) => Some(exec.to_markdown()),
+            Task::Kill(kill) => Some(kill.to_markdown()),
+            _ => None,
+        }
+    }
 }
