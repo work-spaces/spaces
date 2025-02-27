@@ -4,6 +4,7 @@ use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use strum::Display;
 
 #[derive(Debug, Clone, Default)]
 struct State {
@@ -39,7 +40,7 @@ fn get_process_id(rule: &str) -> Option<u32> {
     state.processes.get(rule).copied()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default, Display)]
 pub enum Expect {
     Failure,
     #[default]
@@ -207,6 +208,46 @@ impl Exec {
 
         Ok(())
     }
+
+    pub fn to_markdown(&self) -> String {
+        use printer::markdown;
+        let mut result = String::new();
+
+        let invoke = format!(
+            "$ {} \\\n  {}",
+            self.command,
+            self.args
+                .as_ref()
+                .map(|args| args.join(" \\\n  "))
+                .unwrap_or_default()
+        );
+        result.push_str(&markdown::code_block("sh", invoke.as_str()));
+        let mut items: Vec<Arc<str>> = Vec::new();
+
+        if let Some(working_directory) = self.working_directory.as_ref() {
+            items.push(format!("Working Directory: `{}`\n", working_directory).into());
+        }
+        if let Some(redirect_stdout) = self.redirect_stdout.as_ref() {
+            items.push(format!("Redirect Stdout: `{}`\n", redirect_stdout).into());
+        }
+        if let Some(timeout) = self.timeout {
+            items.push(format!("Timeout: `{}`\n", timeout).into());
+        }
+
+        items.push(format!("Expect: `{}`", self.expect.unwrap_or_default()).into());
+
+        result.push_str(&markdown::list(items));
+
+        if let Some(env) = self.env.as_ref() {
+            let mut env_lines: Vec<Arc<str>> = Vec::new();
+            for (key, value) in env {
+                env_lines.push(format!("`{}`: `{}`", key, value).into());
+            }
+            result.push_str(&markdown::list(env_lines));
+        }
+
+        result
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -285,6 +326,17 @@ impl Kill {
         }
 
         Ok(())
+    }
+
+    pub fn to_markdown(&self) -> String {
+        use printer::markdown;
+        let mut result = String::new();
+        let invoke = format!("$ kill -s {} {}", self.signal.to_kill_arg(), self.target);
+        result.push_str(&markdown::code_block("sh", invoke.as_str()));
+        let mut items: Vec<Arc<str>> = Vec::new();
+        items.push(format!("Expect: `{}`", self.expect.unwrap_or_default()).into());
+        result.push_str(&markdown::list(items));
+        result
     }
 }
 

@@ -182,10 +182,10 @@ fn show_all(markdown: &mut printer::markdown::Markdown) -> anyhow::Result<()> {
     markdown.heading(2, "Table of Contents")?;
 
     markdown.list(vec![
-        "[Checkout Rules](#checkout-rules)",
-        "[Run Rules](#run-rules)",
-        "[Info Functions](#info-functions)",
-        "[Spaces Starlark Standard Functions](#spaces-starlark-standard-functions)",
+        "[Checkout Rules](#checkout-rules)".into(),
+        "[Run Rules](#run-rules)".into(),
+        "[Info Functions](#info-functions)".into(),
+        "[Spaces Starlark Standard Functions](#spaces-starlark-standard-functions)".into(),
     ])?;
 
     markdown.printer.newline()?;
@@ -197,22 +197,22 @@ fn show_all(markdown: &mut printer::markdown::Markdown) -> anyhow::Result<()> {
     )?;
 
     markdown.list(vec![
-        "`macos-aarch64`",
-        "`macos-x86_64`",
-        "`linux-aarch64`",
-        "`linux-x86_64`",
-        "`windows-aarch64`",
-        "`windows-x86_64`",
+        "`macos-aarch64`".into(),
+        "`macos-x86_64`".into(),
+        "`linux-aarch64`".into(),
+        "`linux-x86_64`".into(),
+        "`windows-aarch64`".into(),
+        "`windows-x86_64`".into(),
     ])?;
     markdown.printer.newline()?;
 
     markdown.paragraph("Rule types are:")?;
 
     markdown.list(vec![
-        "`Checkout`: Assigned by default to all checkout rules",
-        "`Setup`: Assign to a run rule to make all other run rules depend on it",
-        "`Run`: Assigned by default to run rules.",
-        "`Optional`: Assign to run rules that are not required to run. Use `add_exec_if()` to conditionally run the rule.",
+        "`Checkout`: Assigned by default to all checkout rules".into(),
+        "`Setup`: Assign to a run rule to make all other run rules depend on it".into(),
+        "`Run`: Assigned by default to run rules.".into(),
+        "`Optional`: Assign to run rules that are not required to run. Use `add_exec_if()` to conditionally run the rule.".into(),
     ])?;
 
     markdown.printer.newline()?;

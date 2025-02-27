@@ -563,7 +563,7 @@ impl State {
             .values()
             .filter_map(|task| {
                 if task.phase == task::Phase::Run {
-                    Some(&task.rule)
+                    Some((&task.rule, task.executor.to_markdown()))
                 } else {
                     None
                 }
