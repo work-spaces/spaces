@@ -3,6 +3,7 @@ use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::{Arc, RwLock};
+use strum::Display;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CheckoutOption {
@@ -24,7 +25,7 @@ pub enum Clone {
     Blobless,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Copy, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Copy, Default, Display)]
 pub enum SparseCheckoutMode {
     #[default]
     Cone,
@@ -717,6 +718,12 @@ impl Repository {
     pub fn pull(&self, progress_bar: &mut printer::MultiProgressBar) -> anyhow::Result<()> {
         self.execute(progress_bar, vec!["pull".into()])
             .context(format_context!("while pulling from {}", self.full_path))?;
+        Ok(())
+    }
+
+    pub fn fetch(&self, progress_bar: &mut printer::MultiProgressBar) -> anyhow::Result<()> {
+        self.execute(progress_bar, vec!["fetch".into()])
+            .context(format_context!("while fetching from {}", self.full_path))?;
         Ok(())
     }
 

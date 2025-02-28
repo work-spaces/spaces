@@ -14,7 +14,6 @@ starlark_lsp = { version = "0.13", optional = true }
 lsp-server = { version = "0.7", optional = true }
 itertools = { version = "0.14", optional = true }
 lsp-types = { version = "0.94.1", optional = true }
-strum = { version = "0.26", features = ["derive"] }
 thiserror = "2"
 
 copy.workspace = true
@@ -38,6 +37,7 @@ serde.workspace = true
 starlark.workspace = true
 starstd.workspace = true
 state.workspace = true
+strum.workspace = true
 toml.workspace = true
 url.workspace = true
 ws.workspace = true
