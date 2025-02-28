@@ -31,6 +31,7 @@ glob-match = "0.2"
 url = "2"
 toml = "0.8"
 serde_yaml = "0.9"
+strum = { version = "0.26", features = ["derive"] }
 
 changes.path = "crates/changes"
 copy.path = "crates/copy"

@@ -129,7 +129,7 @@ impl Git {
         Ok(())
     }
 
-    fn execute_default_clone_to_store_copy_to_workspace(
+    fn execute_default_clone(
         &self,
         progress: &mut printer::MultiProgressBar,
         workspace: workspace::WorkspaceArc,
@@ -155,11 +155,23 @@ impl Git {
             }
         }
 
+        let suffix: Arc<str> = if let Some(sparse_checkout) = self.sparse_checkout.as_ref() {
+            let mut sparse_string = sparse_checkout.mode.to_string();
+            for item in sparse_checkout.list.iter() {
+                sparse_string.push_str(item);
+            }
+            // do a blake3 hash of sparse_string for the suffix
+            let hash = blake3::hash(sparse_string.as_bytes());
+            hash.to_string().into()
+        } else {
+            "".into()
+        };
+
         let (relative_bare_store_path, name_dot_git) =
             git::BareRepository::url_to_relative_path_and_name(&self.url)
                 .context(format_context!("Failed to parse {name} url: {}", self.url))?;
         let store_path = workspace.read().get_store_path();
-
+        let store_repo_name: Arc<str> = format!("{name_dot_git}{suffix}").into();
         let working_directory: Arc<str> =
             format!("{store_path}/cow/{relative_bare_store_path}").into();
 
@@ -171,7 +183,7 @@ impl Git {
             working_directory
         ))?;
 
-        let lock_file_path = format!("{working_directory}/{name_dot_git}.spaces.lock");
+        let lock_file_path = format!("{working_directory}/{store_repo_name}.spaces.lock");
         let mut lock_file = lock::FileLock::new(lock_file_path.into());
 
         lock_file.lock(progress).context(format_context!(
@@ -179,117 +191,69 @@ impl Git {
             self.spaces_key
         ))?;
 
-        let repo_path: Arc<str> = format!("{working_directory}/{name_dot_git}").into();
-        if !std::path::Path::new(repo_path.as_ref()).exists() {
+        let repo_path: Arc<str> = format!("{working_directory}/{store_repo_name}").into();
+        let store_repository = if !std::path::Path::new(repo_path.as_ref()).exists() {
             let mut clone_arguments: Vec<Arc<str>> = vec!["clone".into()];
             if let Some(filter) = filter {
                 clone_arguments.push(format!("--filter={}", filter).into());
             }
 
-            clone_arguments.push(self.url.clone());
-            clone_arguments.push(name_dot_git.clone());
+            if self.sparse_checkout.is_some() {
+                clone_arguments.push("--no-checkout".into());
+            }
 
-            git::Repository::new_clone(
+            clone_arguments.push(self.url.clone());
+            clone_arguments.push(store_repo_name.clone());
+
+            let repository = git::Repository::new_clone(
                 progress,
                 self.url.clone(),
                 working_directory.clone(),
-                name_dot_git.clone(),
+                store_repo_name.clone(),
                 clone_arguments,
             )
             .context(format_context!(
-                "{name} - Failed to clone repository {working_directory}/{name_dot_git}",
+                "{name} - Failed to clone repository {working_directory}/{store_repo_name}",
             ))?;
+
+            if let Some(sparse_checkout) = self.sparse_checkout.as_ref() {
+                repository
+                    .setup_sparse_checkout(progress, sparse_checkout)
+                    .context(format_context!(
+                        "Failed to init sparse checkout in {repo_path}"
+                    ))?;
+            }
+
+            repository
         } else {
             let repository = git::Repository::new(self.url.clone(), repo_path.clone());
-            repository.pull(progress).context(format_context!(
-                "{name} - Failed to pull repository {working_directory}/{name_dot_git}",
+            repository.fetch(progress).context(format_context!(
+                "{name} - Failed to fetch repository {working_directory}/{store_repo_name}",
             ))?;
-        }
+            repository
+        };
 
-        // now use reflink-copy to copy the repository to the workspace
-        copy::copy_with_cow_semantics(progress, &repo_path, &self.spaces_key).context(
-            format_context!(
-                "{name} - Failed to copy repository {working_directory}/{name_dot_git} to {}",
-                self.spaces_key,
-            ),
-        )?;
-
-        // now execute checkout in the workspace
-        let workspace_repository = git::Repository::new(self.url.clone(), self.spaces_key.clone());
-
-        workspace_repository
+        store_repository
             .checkout(progress, &self.checkout)
             .context(format_context!(
                 "{name} - Failed to checkout repository {}",
                 self.spaces_key
             ))?;
 
+        // now use reflink-copy to copy the repository to the workspace
+        copy::copy_with_cow_semantics(progress, &store_repository.full_path, &self.spaces_key)
+            .context(format_context!(
+                "{name} - Failed to copy repository {working_directory}/{store_repo_name} to {}",
+                self.spaces_key,
+            ))?;
+
+        // now execute checkout in the workspace
+        let workspace_repository = git::Repository::new(self.url.clone(), self.spaces_key.clone());
         let args: Vec<Arc<str>> = vec!["reset".into(), "--hard".into(), "HEAD".into()];
         workspace_repository
             .execute(progress, args)
             .context(format_context!(
                 "{name} - Failed to reset repository {}",
-                self.spaces_key
-            ))?;
-
-        Ok(())
-    }
-
-    fn execute_default_clone(
-        &self,
-        progress: &mut printer::MultiProgressBar,
-        workspace: workspace::WorkspaceArc,
-        name: &str,
-        filter: Option<String>,
-    ) -> anyhow::Result<()> {
-        logger(progress, self.url.clone())
-            .debug(format!("execute default clone with filter {filter:?}").as_str());
-        if self.sparse_checkout.is_none() {
-            return self.execute_default_clone_to_store_copy_to_workspace(
-                progress, workspace, name, filter,
-            );
-        }
-
-        let mut clone_arguments: Vec<Arc<str>> = vec!["clone".into()];
-        if let Some(filter) = filter {
-            clone_arguments.push(format!("--filter={}", filter).into());
-        }
-
-        if self.sparse_checkout.is_some() {
-            clone_arguments.push("--no-checkout".into());
-        }
-
-        clone_arguments.push(self.url.clone());
-        clone_arguments.push(self.spaces_key.clone());
-
-        let workspace_directory = self.get_clone_working_directory(workspace.clone());
-        let repo_directory: Arc<str> =
-            format!("{}/{}", workspace_directory, self.spaces_key).into();
-
-        let repository = git::Repository::new_clone(
-            progress,
-            self.url.clone(),
-            workspace_directory.clone(),
-            self.spaces_key.clone(),
-            clone_arguments,
-        )
-        .context(format_context!(
-            "{name} - Failed to clone repository {}",
-            self.spaces_key
-        ))?;
-
-        if let Some(sparse_checkout) = self.sparse_checkout.as_ref() {
-            repository
-                .setup_sparse_checkout(progress, sparse_checkout)
-                .context(format_context!(
-                    "Failed to init sparse checkout in {repo_directory}"
-                ))?;
-        }
-
-        repository
-            .checkout(progress, &self.checkout)
-            .context(format_context!(
-                "{name} - Failed to checkout repository {}",
                 self.spaces_key
             ))?;
 
