@@ -171,6 +171,18 @@ pub fn execute_task(
         let rule_name = name.clone();
 
         let updated_digest = if let Some(inputs) = &task.rule.inputs {
+            for value in inputs {
+                if !value.starts_with("+//") && !value.starts_with("-//") {
+                    task_logger(&mut progress, name.clone()).warning(
+                        format!(
+                            "inputs globs {} must start with // starting with v0.15.0",
+                            value
+                        )
+                        .as_str(),
+                    );
+                }
+            }
+
             if skip_execute_message.is_some() {
                 None
             } else {
