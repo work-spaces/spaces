@@ -496,7 +496,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let spaces_key = rule.name.clone();
         let rule_name = rule.name.clone();
         let url = repo.url.trim_end_matches('/');
-        let url: Arc<str> = url.strip_suffix(".git").unwrap_or(url).into(); 
+        let url: Arc<str> = url.strip_suffix(".git").unwrap_or(url).into();
         rules::insert_task(task::Task::new(
             rule,
             task::Phase::Checkout,
