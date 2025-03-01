@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use starlark::environment::GlobalsBuilder;
 use starlark::values::none::NoneType;
 use starstd::{get_rule_argument, Arg, Function};
+use std::sync::Arc;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
@@ -494,11 +495,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let checkout = repo.get_checkout();
         let spaces_key = rule.name.clone();
         let rule_name = rule.name.clone();
+        let url = repo.url.trim_end_matches('/');
+        let url: Arc<str> = url.strip_suffix(".git").unwrap_or(url).into(); 
         rules::insert_task(task::Task::new(
             rule,
             task::Phase::Checkout,
             executor::Task::Git(executor::git::Git {
-                url: repo.url,
+                url,
                 spaces_key,
                 worktree_path,
                 checkout,
