@@ -425,22 +425,13 @@ impl BareRepository {
         }
 
         let bare_store = format!("{scheme}/{host}{path}");
-        repo_name.push_str(".git");
+        if !repo_name.ends_with(".git") {
+            repo_name.push_str(".git");
+        }
 
         Ok((bare_store.into(), repo_name.into()))
     }
 
-    #[allow(dead_code)]
-    pub fn get_workspace_name_from_url(url: &str) -> anyhow::Result<Arc<str>> {
-        let (_, repo_name) = Self::url_to_relative_path_and_name(url)?;
-
-        repo_name
-            .strip_suffix(".git")
-            .ok_or(format_error!(
-                "Failed to extract a workspace name from  {url}",
-            ))
-            .map(|e| e.into())
-    }
 }
 
 pub struct Worktree {
