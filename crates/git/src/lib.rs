@@ -431,7 +431,6 @@ impl BareRepository {
 
         Ok((bare_store.into(), repo_name.into()))
     }
-
 }
 
 pub struct Worktree {
