@@ -362,6 +362,12 @@ pub fn execute_tasks(
     star_logger(printer).debug("Inserting //:setup and //:all");
     let run_target = insert_setup_and_all_rules(workspace.clone(), target.clone())
         .context(format_context!("failed to insert run all"))?;
+
+    let glob_warnings = singleton::get_glob_warnings();
+    for warning in glob_warnings {
+        star_logger(printer).warning(warning.as_ref());
+    }
+
     match phase {
         task::Phase::Run => {
             star_logger(printer).message("--Run Phase--");

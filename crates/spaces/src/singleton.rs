@@ -13,6 +13,7 @@ struct State {
     inspect_globs: HashSet<Arc<str>>,
     has_help: bool,
     inspect_markdown_path: Option<Arc<str>>,
+    glob_warnings: Vec<Arc<str>>,
 }
 
 static STATE: state::InitCell<lock::StateLock<State>> = state::InitCell::new();
@@ -30,6 +31,7 @@ fn get_state() -> &'static lock::StateLock<State> {
         inspect_globs: HashSet::new(),
         has_help: false,
         inspect_markdown_path: None,
+        glob_warnings: Vec::new(),
     }));
 
     STATE.get()
@@ -56,6 +58,16 @@ pub fn show_error_chain() {
         let show_error = error.to_string().replace('\n', "\n    ");
         eprintln!("  [{offset}]: {show_error}");
     }
+}
+
+pub fn push_glob_warning(warning: Arc<str>) {
+    let mut state = get_state().write();
+    state.glob_warnings.push(warning);
+}
+
+pub fn get_glob_warnings() -> Vec<Arc<str>> {
+    let state = get_state().read();
+    state.glob_warnings.clone()
 }
 
 pub fn get_has_help() -> bool {
