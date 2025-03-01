@@ -171,18 +171,6 @@ pub fn execute_task(
         let rule_name = name.clone();
 
         let updated_digest = if let Some(inputs) = &task.rule.inputs {
-            for value in inputs {
-                if !value.starts_with("+//") && !value.starts_with("-//") {
-                    task_logger(&mut progress, name.clone()).warning(
-                        format!(
-                            "inputs globs {} must start with // starting with v0.15.0",
-                            value
-                        )
-                        .as_str(),
-                    );
-                }
-            }
-
             if skip_execute_message.is_some() {
                 None
             } else {
@@ -326,6 +314,19 @@ impl State {
         let rule_label = label::sanitize_rule(task.rule.name, self.latest_starlark_module.clone());
         task.rule.name = rule_label.clone();
         task.signal = task::SignalArc::new(rule_label.clone());
+
+        if let Some(inputs) = task.rule.inputs.clone() {
+            let mut new_inputs = HashSet::new();
+            for input in inputs.iter() {
+                let value = label::sanitize_glob_value(
+                    input.as_ref(),
+                    rule_label.as_ref(),
+                    self.latest_starlark_module.clone(),
+                );
+                new_inputs.insert(value);
+            }
+            task.rule.inputs = Some(new_inputs);
+        }
 
         // update deps that refer to rules in the same starlark module
         if let Some(deps) = task.rule.deps.as_mut() {
