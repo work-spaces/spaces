@@ -287,7 +287,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let rule_name = rule.name.clone();
         let mut inputs = HashSet::new();
-        inputs.insert(format!("+{}/**", create_archive.input).into());
+        inputs.insert(format!("+//{}/**", create_archive.input).into());
         rule.inputs = Some(inputs);
 
         let mut outputs = HashSet::new();

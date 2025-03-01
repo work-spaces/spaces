@@ -1,4 +1,4 @@
-use crate::workspace;
+use crate::{singleton, workspace};
 use std::sync::Arc;
 
 pub fn sanitize_rule_for_display(rule_name: Arc<str>) -> Arc<str> {
@@ -42,6 +42,26 @@ pub fn sanitize_rule(rule_name: Arc<str>, starlark_module: Option<Arc<str>>) -> 
     } else {
         rule_name
     }
+}
+
+pub fn sanitize_glob_value(
+    value: &str,
+    rule_name: &str,
+    starlark_module: Option<Arc<str>>,
+) -> Arc<str> {
+    if value.starts_with("+//") || value.starts_with("-//") {
+        return value.replace("+//", "+").replace("-//", "-").into();
+    }
+
+    singleton::push_glob_warning(
+        format!(
+            "{}:{rule_name} inputs -> {value} must use +// or -// in v0.15.0",
+            starlark_module.unwrap_or("unknown".into())
+        )
+        .into(),
+    );
+
+    value.into()
 }
 
 pub fn sanitize_working_directory(

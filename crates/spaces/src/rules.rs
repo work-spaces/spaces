@@ -315,6 +315,19 @@ impl State {
         task.rule.name = rule_label.clone();
         task.signal = task::SignalArc::new(rule_label.clone());
 
+        if let Some(inputs) = task.rule.inputs.clone() {
+            let mut new_inputs = HashSet::new();
+            for input in inputs.iter() {
+                let value = label::sanitize_glob_value(
+                    input.as_ref(),
+                    rule_label.as_ref(),
+                    self.latest_starlark_module.clone(),
+                );
+                new_inputs.insert(value);
+            }
+            task.rule.inputs = Some(new_inputs);
+        }
+
         // update deps that refer to rules in the same starlark module
         if let Some(deps) = task.rule.deps.as_mut() {
             for dep in deps.iter_mut() {
