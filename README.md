@@ -26,6 +26,7 @@ Some common options include:
   - Use additional tools like `nix` or `dotslash` to manage executables.
 - Use your build system (e.g. `cmake`) to download and build depedencies
 - Package managers such as `apt`, `brew`, or `choco`.
+- Metabuild options such as `bitbake` or `buildstream`.
 
 Finding the right one is challenging. 
 
@@ -116,11 +117,45 @@ Use `spaces` in github actions with https://github.com/work-spaces/install-space
 
 ### Spaces Starlark SDK
 
-The `spaces` starlark [SDK](https://github.com/work-spaces/sdk) is added in a `preload` script. Once added, subsequent scripts can `load` functions to simplify rule writing.
+The `spaces` starlark [SDK](https://github.com/work-spaces/sdk) is added in a `preload` script during checkout. `spaces checkout` can process multiple scripts in order. The first script cannot use any `load` statements because nothing has been populated in the workspace. The first script populates the workspace with the SDK. Subsequent checkout scripts can `load` functions populated in the workspace by preceding scripts.
 
 ```sh
 spaces checkout --script=preload --script=my-project --name=build-my-project
 ```
+
+```python
+# preload.spaces.star
+
+# checkout.add_repo() is a built-in: use `spaces docs` to see documentation of built-in functions
+# checkout_add_repo() is a convenience wrapper function defined in https://github.com/work-spaces/sdk.
+# Scripts that run after this one, can use `load("//@star/sdk/star/checkout.star", "checkout_add_repo")`
+# instead of calling the built-in directly.
+checkout.add_repo(
+    rule = {"name": "@star/sdk"},  # stores this repo in the workspaces at `@star/sdk`
+                                   #   the `@star` folder is a conventional location for
+                                   #   common, loadable starlark code
+    repo = {
+        "url": "https://github.com/work-spaces/sdk",
+        "rev": "main",
+        "checkout": "Revision",
+        "clone": "Blobless"
+    }
+)
+```
+
+```python
+# my-project.spaces.star
+
+load("//@star/sdk/star/checkout.star", "checkout_add_repo")
+
+# This is easier to use than checkout.add_repo() but isn't available in the initial script
+checkout_add_repo(
+  "my-project",
+  url = "https://github.com/my-org/my-project",
+  rev = "main
+)
+```
+
 
 ### More About Checkout
 
@@ -257,15 +292,33 @@ spaces run show:list_directory
 The most common way to add source code is using `checkout_add_repo()`. Here is an example:
 
 ```python
-load("//@star/sdk/star/checkout.star", "checkout_add_repo")
+load("//@star/sdk/star/checkout.star", "checkout_add_repo", "CHECKOUT_CLONE_BLOBLESS")
 
 checkout_add_repo(
-  "spaces",
-  url = "https://github.com/work-spaces/spaces",
-  clone = "Blobless"
+  "spaces",                # name of the rule and location of the repo in the workspace
+  url = "https://github.com/work-spaces/spaces", # url to clone
+  clone = CHECKOUT_CLONE_BLOBLESS  # use a blobless clone
 )
+```
 
 ### Adding Run Rules
+
+The most common run rule is to execute a shell command using `run_add_exec()`.
+
+```python
+
+load("//@star/sdk/star/run.star", "run_add_exec", "RUN_LOG_LEVEL_APP)
+
+run_add_exec(
+  "show",                   # name of the rule
+  command = "ls",           # command to execute in the shell
+  args = ["-alt"],          # arguments to pass to ls
+  working_directory = ".",  # execute in the directory where this rule is
+                            #   default is to execute at the workspace root
+  deps = ["another_rule"],  # run this rule after `another_rule` completes
+  log_level = RUN_LOG_LEVEL_APP  # Show the output of the rule to the user
+)
+```
 
 ## Uninstall Spaces
 
