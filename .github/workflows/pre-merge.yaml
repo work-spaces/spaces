@@ -26,5 +26,8 @@ jobs:
     - name: Cargo Clippy Check
       run: cargo clippy
 
+    - name: Run Tests
+      run: cargo test
+
     - name: Build on Ubuntu
       run: cargo build
