@@ -717,6 +717,14 @@ impl Repository {
         Ok(())
     }
 
+    pub fn is_branch(&self, progress_bar: &mut printer::MultiProgressBar, ref_name: &str) -> bool {
+        is_branch(progress_bar, &self.url, &self.full_path, ref_name)
+    }
+
+    pub fn is_head_branch(&self, progress_bar: &mut printer::MultiProgressBar) -> bool {
+        is_head_branch(progress_bar, &self.url, &self.full_path)
+    }
+
     pub fn checkout(
         &self,
         progress_bar: &mut printer::MultiProgressBar,

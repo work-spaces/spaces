@@ -239,6 +239,13 @@ impl Git {
                 "{name} - Failed to checkout repository {}",
                 self.spaces_key
             ))?;
+        
+        if store_repository.is_head_branch(progress) {
+            store_repository.pull(progress).context(format_context!(
+                "{name} - Failed to pull repository {}",
+                self.spaces_key
+            ))?;
+        }
 
         // now use reflink-copy to copy the repository to the workspace
         copy::copy_with_cow_semantics(progress, &store_repository.full_path, &self.spaces_key)

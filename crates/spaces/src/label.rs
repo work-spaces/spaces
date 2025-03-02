@@ -49,16 +49,22 @@ pub fn sanitize_glob_value(
     rule_name: &str,
     starlark_module: Option<Arc<str>>,
 ) -> Arc<str> {
+    let module = starlark_module.unwrap_or("unknown".into());
+    if value.starts_with("+**") || value.starts_with("+//**") {
+        singleton::push_glob_warning(
+            format!(
+                "{module}:{rule_name} inputs -> {value} globbing the workspace root is bad for performance"
+            )
+            .into()
+        );
+    }
+
     if value.starts_with("+//") || value.starts_with("-//") {
         return value.replace("+//", "+").replace("-//", "-").into();
     }
 
     singleton::push_glob_warning(
-        format!(
-            "{}:{rule_name} inputs -> {value} must use +// or -// in v0.15.0",
-            starlark_module.unwrap_or("unknown".into())
-        )
-        .into(),
+        format!("{module}:{rule_name} inputs -> {value} must use +// or -// in v0.15.0").into(),
     );
 
     value.into()
