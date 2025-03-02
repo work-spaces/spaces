@@ -239,7 +239,7 @@ impl Git {
                 "{name} - Failed to checkout repository {}",
                 self.spaces_key
             ))?;
-        
+
         if store_repository.is_head_branch(progress) {
             store_repository.pull(progress).context(format_context!(
                 "{name} - Failed to pull repository {}",
