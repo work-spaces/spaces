@@ -130,6 +130,7 @@ impl Rule {
             md.paragraph(help)?;
             md.printer.newline()?;
             if let Some(details) = details {
+                md.heading(3, "Task Details")?;
                 md.paragraph(details.as_str())?;
                 md.printer.newline()?;
             }
