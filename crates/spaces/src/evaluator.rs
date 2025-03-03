@@ -1,3 +1,4 @@
+use crate::workspace::WorkspaceArc;
 use crate::{builtins, executor, rules, singleton, task, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
@@ -57,6 +58,7 @@ pub fn get_globals(with_rules: WithRules) -> GlobalsBuilder {
 pub fn evaluate_loads(
     ast: &AstModule,
     name: Arc<str>,
+    workspace: Option<WorkspaceArc>,
     workspace_path: Arc<str>,
     with_rules: WithRules,
 ) -> anyhow::Result<Vec<(String, FrozenModule)>> {
@@ -80,6 +82,7 @@ pub fn evaluate_loads(
         loads.push((
             load.module_id.to_owned(),
             evaluate_module(
+                workspace.clone(),
                 workspace_path.clone(),
                 module_load_path.clone(),
                 contents,
@@ -93,11 +96,18 @@ pub fn evaluate_loads(
 pub fn evaluate_ast(
     ast: AstModule,
     name: Arc<str>,
+    workspace: Option<WorkspaceArc>,
     workspace_path: Arc<str>,
     with_rules: WithRules,
 ) -> anyhow::Result<Module> {
-    let loads = evaluate_loads(&ast, name.clone(), workspace_path.clone(), with_rules)
-        .context(format_context!("Failed to process loads"))?;
+    let loads = evaluate_loads(
+        &ast,
+        name.clone(),
+        workspace.clone(),
+        workspace_path,
+        with_rules,
+    )
+    .context(format_context!("Failed to process loads"))?;
     let modules = loads.iter().map(|(a, b)| (a.as_str(), b)).collect();
     let loader = ReturnFileLoader { modules: &modules };
 
@@ -106,15 +116,30 @@ pub fn evaluate_ast(
     let module = Module::new();
     {
         let mut eval = Evaluator::new(&module);
+
         eval.set_loader(&loader);
         eval.eval_module(ast, &globals)
             .map_err(|e| format_error!("{e:?}"))?;
     }
 
+    if let Some(workspace) = workspace {
+        if singleton::get_inspect_stardoc_path().is_some() {
+            let mut workspace = workspace.write();
+            let doc_items: Vec<(Arc<str>, _)> = module
+                .names()
+                .map(|name| {
+                    let value = module.get(&name).unwrap();
+                    (name.as_str().into(), value.documentation())
+                })
+                .collect();
+            workspace.stardoc.insert(name, doc_items);
+        }
+    }
     Ok(module)
 }
 
 pub fn evaluate_module(
+    workspace: Option<WorkspaceArc>,
     workspace_path: Arc<str>,
     name: Arc<str>,
     content: String,
@@ -127,7 +152,7 @@ pub fn evaluate_module(
     let dialect = get_dialect();
     let ast =
         AstModule::parse(name.as_ref(), content, &dialect).map_err(|e| format_error!("{e:?}"))?;
-    let module = evaluate_ast(ast, name, workspace_path, with_rules)?;
+    let module = evaluate_ast(ast, name, workspace, workspace_path, with_rules)?;
     Ok(module.freeze()?)
 
     /*
@@ -292,12 +317,14 @@ pub fn evaluate_starlark_modules(
             singleton::set_active_workspace(workspace.clone());
             star_logger(printer).message(format!("evaluating {}", name).as_str());
 
-            let eval_workspace_path = workspace_path.clone();
             let eval_name = name.clone();
+            let workspace_arc = workspace.clone();
+            let eval_workspace_path = workspace_path.clone();
 
             let handle = std::thread::spawn(move || -> anyhow::Result<()> {
                 let _ = evaluate_module(
-                    eval_workspace_path.clone(),
+                    Some(workspace_arc),
+                    eval_workspace_path,
                     eval_name.clone(),
                     content.to_string(),
                     WithRules::Yes,
@@ -349,6 +376,16 @@ pub fn evaluate_starlark_modules(
         }
     }
     rules::set_latest_starlark_module("".into());
+
+    if singleton::get_inspect_stardoc_path().is_some() {
+        let workspace = workspace.read();
+        for (name, doc_items) in workspace.stardoc.entries.iter() {
+            println!("Module: {}", name);
+            for item in doc_items {
+                println!("{}", item.to_markdown());
+            }
+        }
+    }
 
     Ok(())
 }
@@ -539,8 +576,14 @@ pub fn run_starlark_script(name: Arc<str>, script: Arc<str>) -> anyhow::Result<(
         .unwrap_or(".".to_string())
         .into();
 
-    evaluate_module(workspace, name.clone(), script.to_string(), WithRules::No)
-        .context(format_context!("Failed to evaluate module {}", name))?;
+    evaluate_module(
+        None,
+        workspace,
+        name.clone(),
+        script.to_string(),
+        WithRules::No,
+    )
+    .context(format_context!("Failed to evaluate module {}", name))?;
 
     Ok(())
 }
