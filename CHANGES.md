@@ -1,5 +1,9 @@
 # Spaces Change log
 
+## v0.14.5
+
+- See [v0.14.4 Milestone](https://github.com/work-spaces/spaces/milestone/4?closed=1)
+
 ## v0.14.4
 
 - See [v0.14.4 Milestone](https://github.com/work-spaces/spaces/milestone/1?closed=1)
