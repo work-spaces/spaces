@@ -1,4 +1,4 @@
-use crate::singleton;
+use crate::{singleton, stardoc};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -150,6 +150,7 @@ pub struct Workspace {
     pub trailing_args: Vec<Arc<str>>,
     pub updated_assets: HashSet<Arc<str>>, // used by assets to keep track of exclusive access
     pub rule_metrics: HashMap<Arc<str>, RuleMetrics>, // used to keep track of rule metrics
+    pub stardoc: stardoc::StarDoc, // used to keep track of rule documentation
     pub settings: ws::Settings,
 }
 
@@ -507,6 +508,7 @@ impl Workspace {
             is_bin_dirty: is_dirty,
             updated_assets: HashSet::new(),
             rule_metrics: HashMap::new(),
+            stardoc: stardoc::StarDoc::default(),
             trailing_args: vec![],
             target: None,
             relative_invoked_path,

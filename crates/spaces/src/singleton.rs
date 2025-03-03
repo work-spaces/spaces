@@ -13,6 +13,7 @@ struct State {
     inspect_globs: HashSet<Arc<str>>,
     has_help: bool,
     inspect_markdown_path: Option<Arc<str>>,
+    inspect_stardoc_path: Option<Arc<str>>,
     glob_warnings: Vec<Arc<str>>,
 }
 
@@ -31,6 +32,7 @@ fn get_state() -> &'static lock::StateLock<State> {
         inspect_globs: HashSet::new(),
         has_help: false,
         inspect_markdown_path: None,
+        inspect_stardoc_path: None,
         glob_warnings: Vec::new(),
     }));
 
@@ -83,6 +85,16 @@ pub fn set_has_help(has_help: bool) {
 pub fn get_max_queue_count() -> i64 {
     let state = get_state().read();
     state.max_queue_count
+}
+
+pub fn get_inspect_stardoc_path() -> Option<Arc<str>> {
+    let state = get_state().read();
+    state.inspect_stardoc_path.clone()
+}
+
+pub fn set_inspect_stardoc_path(inspect_stardoc_path: Option<Arc<str>>) {
+    let mut state = get_state().write();
+    state.inspect_stardoc_path = inspect_stardoc_path;
 }
 
 pub fn set_inspect_markdown_path(inspect_markdown_path: Option<Arc<str>>) {

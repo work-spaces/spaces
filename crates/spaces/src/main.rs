@@ -11,6 +11,7 @@ mod label;
 mod lsp_context;
 mod rules;
 mod runner;
+mod stardoc;
 mod singleton;
 mod task;
 mod tools;
