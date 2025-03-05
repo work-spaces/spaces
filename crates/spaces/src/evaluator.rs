@@ -365,7 +365,7 @@ pub fn execute_tasks(
 
     let glob_warnings = singleton::get_glob_warnings();
     for warning in glob_warnings {
-        star_logger(printer).warning(warning.as_ref());
+        star_logger(printer).message(warning.as_ref());
     }
 
     match phase {
