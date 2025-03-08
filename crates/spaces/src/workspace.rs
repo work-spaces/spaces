@@ -150,7 +150,7 @@ pub struct Workspace {
     pub trailing_args: Vec<Arc<str>>,
     pub updated_assets: HashSet<Arc<str>>, // used by assets to keep track of exclusive access
     pub rule_metrics: HashMap<Arc<str>, RuleMetrics>, // used to keep track of rule metrics
-    pub stardoc: stardoc::StarDoc, // used to keep track of rule documentation
+    pub stardoc: stardoc::StarDoc,         // used to keep track of rule documentation
     pub settings: ws::Settings,
 }
 
