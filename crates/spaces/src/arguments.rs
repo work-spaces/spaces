@@ -330,6 +330,9 @@ pub fn execute() -> anyhow::Result<()> {
             singleton::set_inspect_globs(filter_globs);
             singleton::set_has_help(has_help);
             singleton::set_inspect_markdown_path(markdown);
+            if stardoc.is_some() {
+                singleton::set_rescan(true);
+            }
             singleton::set_inspect_stardoc_path(stardoc);
 
             runner::run_starlark_modules_in_workspace(

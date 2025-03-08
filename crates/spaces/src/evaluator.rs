@@ -132,7 +132,10 @@ pub fn evaluate_ast(
                     (name.as_str().into(), value.documentation())
                 })
                 .collect();
-            workspace.stardoc.insert(name, doc_items);
+            let name = name
+                .strip_prefix(format!("{}/", workspace.get_absolute_path()).as_str())
+                .unwrap_or(name.as_ref());
+            workspace.stardoc.insert(name.into(), doc_items);
         }
     }
     Ok(module)
@@ -377,13 +380,25 @@ pub fn evaluate_starlark_modules(
     }
     rules::set_latest_starlark_module("".into());
 
-    if singleton::get_inspect_stardoc_path().is_some() {
+    if let Some(stardoc) = singleton::get_inspect_stardoc_path() {
         let workspace = workspace.read();
+        let stardoc_path = std::path::Path::new(stardoc.as_ref());
         for (name, doc_items) in workspace.stardoc.entries.iter() {
-            println!("Module: {}", name);
-            for item in doc_items {
-                println!("{}", item.to_markdown());
+            let name = name.strip_prefix("//").unwrap_or(name);
+            let relative_path = std::path::Path::new(name).with_extension("md");
+            // strip the .star suffix
+            let output_file = stardoc_path.join(relative_path);
+            // append .md suffix
+            if let Some(parent) = output_file.parent() {
+                std::fs::create_dir_all(parent)
+                    .context(format_context!("Failed to create directory {parent:?}"))?;
             }
+            let mut content = String::new();
+            for item in doc_items {
+                content.push_str(item.to_markdown().as_ref());
+            }
+            std::fs::write(output_file.clone(), content)
+                .context(format_context!("Failed to write file {output_file:?}"))?;
         }
     }
 
