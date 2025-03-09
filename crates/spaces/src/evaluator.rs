@@ -127,15 +127,28 @@ pub fn evaluate_ast(
             let mut workspace = workspace.write();
             let doc_items: Vec<(Arc<str>, _)> = module
                 .names()
-                .map(|name| {
-                    let value = module.get(&name).unwrap();
-                    (name.as_str().into(), value.documentation())
+                .filter_map(|function_name| {
+                    let value = module.get(&function_name).unwrap();
+                    // The signature is the full path to the function with the file path
+                    // filter out values where the signature doesn't start with the module
+                    // that is being processed. These are loaded from another module
+                    // and don't belong in the docs for this module
+                    let signature_starts_with_name = value
+                        .parameters_spec()
+                        .map(|spec| spec.signature())
+                        .map(|signature| signature.starts_with(name.as_ref()))
+                        .unwrap_or(false);
+                    if signature_starts_with_name {
+                        Some((function_name.as_str().into(), value.documentation()))
+                    } else {
+                        None
+                    }
                 })
                 .collect();
-            let name = name
+            let relative_name = name
                 .strip_prefix(format!("{}/", workspace.get_absolute_path()).as_str())
                 .unwrap_or(name.as_ref());
-            workspace.stardoc.insert(name.into(), doc_items);
+            workspace.stardoc.insert(relative_name.into(), doc_items);
         }
     }
     Ok(module)
@@ -382,24 +395,10 @@ pub fn evaluate_starlark_modules(
 
     if let Some(stardoc) = singleton::get_inspect_stardoc_path() {
         let workspace = workspace.read();
-        let stardoc_path = std::path::Path::new(stardoc.as_ref());
-        for (name, doc_items) in workspace.stardoc.entries.iter() {
-            let name = name.strip_prefix("//").unwrap_or(name);
-            let relative_path = std::path::Path::new(name).with_extension("md");
-            // strip the .star suffix
-            let output_file = stardoc_path.join(relative_path);
-            // append .md suffix
-            if let Some(parent) = output_file.parent() {
-                std::fs::create_dir_all(parent)
-                    .context(format_context!("Failed to create directory {parent:?}"))?;
-            }
-            let mut content = String::new();
-            for item in doc_items {
-                content.push_str(item.to_markdown().as_ref());
-            }
-            std::fs::write(output_file.clone(), content)
-                .context(format_context!("Failed to write file {output_file:?}"))?;
-        }
+        workspace
+            .stardoc
+            .generate(stardoc.as_ref())
+            .context(format_context!("Failed to generate stardoc"))?;
     }
 
     Ok(())
