@@ -101,7 +101,7 @@ Info functions are executed immediately. They are not rule definitions."#,
 }
 
 fn show_workspace(level: u8, markdown: &mut printer::markdown::Markdown) -> anyhow::Result<()> {
-    markdown.heading(level, "Info Functions")?;
+    markdown.heading(level, "Workspace Functions")?;
 
     markdown.heading(level + 1, "Description")?;
 
@@ -191,6 +191,7 @@ fn show_all(markdown: &mut printer::markdown::Markdown) -> anyhow::Result<()> {
     markdown.printer.newline()?;
 
     markdown.heading(2, "Rule Options")?;
+    markdown.heading(3, "Platforms")?;
 
     markdown.paragraph(
         r#"All rules can be run on a list of platforms (default is all). Specify a platform as:"#,
@@ -206,7 +207,7 @@ fn show_all(markdown: &mut printer::markdown::Markdown) -> anyhow::Result<()> {
     ])?;
     markdown.printer.newline()?;
 
-    markdown.paragraph("Rule types are:")?;
+    markdown.heading(3, "Rule Types")?;
 
     markdown.list(vec![
         "`Checkout`: Assigned by default to all checkout rules".into(),
@@ -217,16 +218,16 @@ fn show_all(markdown: &mut printer::markdown::Markdown) -> anyhow::Result<()> {
 
     markdown.printer.newline()?;
 
-    markdown.paragraph("Evaluate run scripts without executin rules:")?;
+    markdown.paragraph("Inspect (evaluate) scripts without executing rules:")?;
 
     markdown.code_block(
         "sh",
         r#"# show rules with a `help` entry
-spaces evaluate
+spaces inspect --has-help
 # show all rules
-spaces --verbosity=message evaluate
+spaces --verbosity=message inspect
 # show all rules with all details
-spaces --verbosity=debug evaluate
+spaces --verbosity=debug inspect
 "#,
     )?;
 
