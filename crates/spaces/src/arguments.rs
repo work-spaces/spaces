@@ -458,16 +458,16 @@ Inspect all the scripts in the workspace without running any rules.
     Inspect {
         /// The name of the target to evaluate (default is all targets).
         target: Option<Arc<str>>,
-        // Filter targets with a glob (e.g. `--filter=**/my-target`)
+        /// Filter targets with a glob (e.g. `--filter=**/my-target`)
         #[arg(long)]
         filter: Option<Arc<str>>,
-        // Only show rules with the help entry populated
+        /// Only show rules with the help entry populated
         #[arg(long)]
         has_help: bool,
-        // Write the output of the inspect command to a markdown file
+        /// Write the output of the inspect command to a markdown file
         #[arg(long)]
         markdown: Option<Arc<str>>,
-        // Write the starlark documentation to the specified path
+        /// Write the starlark documentation to the specified path
         #[arg(long)]
         stardoc: Option<Arc<str>>,
     },
