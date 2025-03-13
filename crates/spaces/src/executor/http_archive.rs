@@ -33,5 +33,4 @@ impl HttpArchive {
 
         Ok(())
     }
-
 }
