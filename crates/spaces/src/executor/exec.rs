@@ -213,14 +213,27 @@ impl Exec {
         use printer::markdown;
         let mut result = String::new();
 
-        let invoke = format!(
-            "$ {} \\\n  {}",
-            self.command,
-            self.args
-                .as_ref()
-                .map(|args| args.join(" \\\n  "))
-                .unwrap_or_default()
-        );
+        let has_args = if let Some(args) = self.args.as_ref() {
+            !args.is_empty()
+        } else {
+            false
+        };
+
+        let invoke = if has_args {
+            format!(
+                "{} \\\n  {}",
+                self.command,
+                self.args
+                    .as_ref()
+                    .map(|args| args.join(" \\\n  "))
+                    .unwrap_or_default()
+            )
+        } else {
+            format!("{}", self.command)
+        };
+
+        result.push_str("Shell Command:\n\n");
+
         result.push_str(&markdown::code_block("sh", invoke.as_str()));
         let mut items: Vec<Arc<str>> = Vec::new();
 

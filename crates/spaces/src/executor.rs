@@ -120,10 +120,45 @@ impl Task {
         Ok(result)
     }
 
+    fn target_to_markdown() -> String {
+        let mut result = String::new();
+        use printer::markdown;
+        result.push_str(&markdown::paragraph(
+            "This target executes its dependencies.",
+        ));
+        result.push('\n');
+        result
+    }
+
+    fn details_to_json_markdown<Input: serde::Serialize>(input: Input) -> String {
+        use printer::markdown;
+        let mut result = String::new();
+        let code_block = markdown::code_block(
+            "json",
+            serde_json::to_string_pretty(&input)
+                .unwrap_or_default()
+                .as_str(),
+        );
+        result.push_str(code_block.as_str());
+        result.push('\n');
+        result
+    }
+
     pub fn to_markdown(&self) -> Option<String> {
         match self {
-            Task::Exec(exec) => Some(exec.to_markdown()),
-            Task::Kill(kill) => Some(kill.to_markdown()),
+            Task::Git(task) => Some(Self::details_to_json_markdown(task)),
+            Task::HttpArchive(task) => {
+                Some(Self::details_to_json_markdown(&task.http_archive.archive))
+            }
+            Task::OrasArchive(task) => Some(Self::details_to_json_markdown(task)),
+            Task::AddWhichAsset(task) => Some(Self::details_to_json_markdown(task)),
+            Task::AddHardLink(task) => Some(Self::details_to_json_markdown(task)),
+            Task::AddSoftLink(task) => Some(Self::details_to_json_markdown(task)),
+            Task::UpdateAsset(task) => Some(Self::details_to_json_markdown(task)),
+            Task::UpdateEnv(task) => Some(Self::details_to_json_markdown(task)),
+            Task::Exec(task) => Some(task.to_markdown()),
+            Task::Kill(task) => Some(task.to_markdown()),
+            Task::Target => Some(Self::target_to_markdown()),
             _ => None,
         }
     }
