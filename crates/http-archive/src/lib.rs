@@ -118,7 +118,7 @@ pub fn download_string(url: &str) -> anyhow::Result<Arc<str>> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpArchive {
     pub spaces_key: Arc<str>,
-    archive: Archive,
+    pub archive: Archive,
     archive_driver: Option<easy_archiver::driver::Driver>,
     pub full_path_to_archive: String,
     tools_path: String,

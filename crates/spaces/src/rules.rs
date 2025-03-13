@@ -572,6 +572,17 @@ impl State {
     fn export_tasks_as_mardown(&self, path: &str) -> anyhow::Result<()> {
         let tasks = self.tasks.read();
 
+        let checkout_rules = tasks
+            .values()
+            .filter_map(|task| {
+                if task.phase == task::Phase::Checkout {
+                    Some((&task.rule, task.executor.to_markdown()))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
         let run_rules = tasks
             .values()
             .filter_map(|task| {
@@ -587,9 +598,8 @@ impl State {
             .context(format_context!("Failed to create file {path}"))?;
         let mut md_printer = printer::markdown::Markdown::new(&mut printer);
         let md = &mut md_printer;
-        rule::Rule::print_markdown_header(md)?;
-        rule::Rule::print_markdown_section_heading(md, "Run Rules", &run_rules)?;
-        rule::Rule::print_markdown_section_body(md, "Run Rules", &run_rules)?;
+        rule::Rule::print_markdown_section(md, "Checkout Rules", &checkout_rules, false, false)?;
+        rule::Rule::print_markdown_section(md, "Run Rules", &run_rules, true, true)?;
         Ok(())
     }
 

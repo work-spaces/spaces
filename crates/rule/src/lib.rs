@@ -36,122 +36,113 @@ pub struct Rule {
     pub type_: Option<RuleType>,
 }
 
-type RuleMap = HashMap<Arc<str>, Rule>;
+type RuleMap = HashMap<Arc<str>, (Rule, Option<String>)>;
+
+struct Section {
+    name: Arc<str>,
+    rules: Vec<Arc<str>>,
+}
 
 impl Rule {
     fn get_hash_map(rules: &[(&Rule, Option<String>)]) -> RuleMap {
         let mut map = HashMap::new();
-        for (rule, _) in rules {
-            map.insert(rule.name.clone(), (*rule).clone());
+        for (rule, details) in rules {
+            map.insert(rule.name.clone(), ((*rule).clone(), details.clone()));
         }
         map
     }
 
-    pub fn print_markdown_header(md: &mut markdown::Markdown) -> anyhow::Result<()> {
-        md.heading(1, "Rules")?;
-        Ok(())
-    }
-
-    pub fn print_markdown_section_heading(
-        md: &mut markdown::Markdown,
-        section_name: &str,
-        rules: &[(&Rule, Option<String>)],
-    ) -> anyhow::Result<()> {
-        md.heading(2, format!("Overview: {section_name}").as_str())?;
-        let mut sorted_rules = rules.to_vec();
-        sorted_rules.sort_by(|a, b| a.0.name.cmp(&b.0.name));
-        for (rule, _) in sorted_rules {
-            if rule.help.is_some() {
-                md.list_item(0, &markdown::hyperlink(&rule.name, &rule.to_tag_anchor()))?;
-            }
+    fn get_sections(rules: &[(&Rule, Option<String>)]) -> Vec<Section> {
+        let mut sections = HashMap::new();
+        for (rule, _) in rules {
+            let mut parts = rule.name.split(':');
+            let section_name: Arc<str> = parts.next().unwrap_or_default().into();
+            let rule_name: Arc<str> = parts.next().unwrap_or_default().into();
+            let section = sections
+                .entry(section_name.clone())
+                .or_insert_with(|| Section {
+                    name: section_name,
+                    rules: Vec::new(),
+                });
+            section.rules.push(rule_name);
         }
-        md.printer.newline()?;
-
-        Ok(())
+        let mut sections = sections.into_values().collect::<Vec<_>>();
+        sections.sort_by(|a, b| a.name.cmp(&b.name));
+        for section in sections.iter_mut() {
+            section.rules.sort();
+        }
+        sections
     }
 
-    pub fn print_markdown_section_body(
+    pub fn print_markdown_section(
         md: &mut markdown::Markdown,
         section_name: &str,
         rules: &[(&Rule, Option<String>)],
+        show_has_help: bool,
+        is_run_rules: bool,
     ) -> anyhow::Result<()> {
         let rule_map = Self::get_hash_map(rules);
-        md.heading(2, format!("Details: {section_name}").as_str())?;
-        let mut sorted_rules = rules.to_vec();
-        sorted_rules.sort_by(|a, b| a.0.name.cmp(&b.0.name));
-        for (rule, details) in sorted_rules {
-            if rule.help.is_some() {
-                rule.print_markdown(md, &rule_map, details)?;
+        md.heading(2, section_name)?;
+        let sections = Self::get_sections(rules);
+        for section in sections.iter() {
+            md.heading(3, section.name.as_ref())?;
+            for rule_name in section.rules.iter() {
+                if let Some((rule, details)) =
+                    rule_map.get(format!("{}:{rule_name}", section.name).as_str())
+                {
+                    if !show_has_help || rule.help.is_some() {
+                        md.heading(4, rule_name)?;
+                        rule.print_markdown(md, details.to_owned(), is_run_rules)?;
+                    }
+                }
             }
         }
         md.printer.newline()?;
         Ok(())
-    }
-
-    fn name_to_anchor(name: &str) -> String {
-        let anchor = name.to_string().replace(':', "_");
-        let anchor = anchor.to_string().replace('.', "-");
-        let anchor = anchor.to_string().replace("//", "");
-        let anchor = anchor.to_string().replace('/', "-");
-        anchor.to_lowercase()
-    }
-
-    fn name_to_tag_anchor(name: &str) -> String {
-        format!("#{}", Self::name_to_anchor(name))
-    }
-
-    fn to_anchor(&self) -> String {
-        Self::name_to_anchor(&self.name)
-    }
-
-    fn to_tag_anchor(&self) -> String {
-        Self::name_to_tag_anchor(&self.name)
     }
 
     fn print_markdown(
         &self,
         md: &mut markdown::Markdown,
-        rule_map: &RuleMap,
         details: Option<String>,
+        is_run_rule: bool,
     ) -> anyhow::Result<()> {
         md.hline()?;
-
-        let heading = format!("{}", self.name);
-        md.heading(3, heading.as_str())?;
-        md.heading(5, &self.to_anchor())?;
-
-        md.printer.newline()?;
-
-        let spaces_run_example = format!("spaces run {}", self.name);
-        md.code_block("sh", spaces_run_example.as_str())?;
-
+        if is_run_rule {
+            let spaces_run_example = format!("spaces run {}", self.name);
+            md.code_block("sh", spaces_run_example.as_str())?;
+            md.printer.newline()?;
+        }
         if let Some(help) = &self.help {
-            md.heading(3, "Description")?;
+            md.bold("Description")?;
+            md.printer.newline()?;
+            md.printer.newline()?;
             md.paragraph(help)?;
             md.printer.newline()?;
-            if let Some(details) = details {
-                md.heading(3, "Task Details")?;
-                md.paragraph(details.as_str())?;
-                md.printer.newline()?;
-            }
-        } else {
+        } else if is_run_rule {
             md.paragraph("No help text provided")?;
             md.printer.newline()?;
         }
 
-        if let Some(deps) = self.deps.as_ref() {
-            md.heading(3, "Dependencies")?;
-            for dep in deps {
-                // get the rule using the dep as the name
-                if let Some(dep_rule) = rule_map.get(dep) {
-                    if dep_rule.help.is_some() {
-                        md.list_item(0, &markdown::hyperlink(dep, &Self::name_to_tag_anchor(dep)))?;
-                    } else {
-                        md.list_item(0, dep)?;
-                    }
-                }
-            }
+        if let Some(details) = details {
+            md.bold("Details")?;
             md.printer.newline()?;
+            md.printer.newline()?;
+            md.paragraph(details.as_str())?;
+            md.printer.newline()?;
+        }
+
+        if let Some(deps) = self.deps.as_ref() {
+            if !deps.is_empty() {
+                md.bold("Dependencies")?;
+                md.printer.newline()?;
+                md.printer.newline()?;
+                for dep in deps {
+                    // get the rule using the dep as the name
+                    md.list_item(0, dep)?;
+                }
+                md.printer.newline()?;
+            }
         }
 
         Ok(())
