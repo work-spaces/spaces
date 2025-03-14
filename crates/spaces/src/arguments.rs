@@ -119,6 +119,7 @@ pub fn execute() -> anyhow::Result<()> {
                     name,
                     script,
                     workflow,
+                    wf,
                     create_lock_file,
                     force_install_tools,
                 },
@@ -135,7 +136,11 @@ pub fn execute() -> anyhow::Result<()> {
             let mut script_inputs: Vec<Arc<str>> = vec![];
             script_inputs.extend(script.clone());
 
-            if let Some(workflow) = workflow {
+            if wf.is_some() && workflow.is_some() {
+                return Err(format_error!("Cannot use both --workflow and --wf"));
+            }
+
+            if let Some(workflow) = workflow.or(wf) {
                 let parts: Vec<_> = workflow.split(':').collect();
                 if parts.len() != 2 {
                     return Err(format_error!("Invalid workflow format: {}.\n Use --workflow=<directory>:<script>,<script>,...", workflow));
@@ -413,7 +418,7 @@ Executes the checkout rules in the specified scripts."#)]
 
 If <directory> has `workflows.spaces.toml`, it will be parsed for shortcuts if only one <script> is passed.
 - `spaces checkout --workflow=workflows:my-shortcut --name=workspace-name`
-  - run scripts list in `my-shortcut` in `workflows/workflows.spaces.toml`
+  - run scripts listed in `my-shortcut` in `workflows/workflows.spaces.toml`
 - `spaces checkout --workflow=workflows:preload,my-shortcut --name=workspace-name`
   - run `workflows/preload.spaces.star` then `workflows/my-shortcut.spaces.star`
 
@@ -423,6 +428,9 @@ my-shortcut = ["preload", "my-shortcut"]
 "#
         )]
         workflow: Option<Arc<str>>,
+        /// Shortcut for --workflow
+        #[arg(long)]
+        wf: Option<Arc<str>>,
         /// Create a lock file for the workspace. This file can be passed on the next checkout as a script to re-create the exact workspace.
         #[arg(long)]
         create_lock_file: bool,
