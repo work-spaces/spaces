@@ -148,9 +148,33 @@ impl Git {
             ))?;
 
             if entries.count() > 0 {
-                logger(progress, self.url.clone()).warning(
-                    format!("{} already exists and is not empty", self.spaces_key).as_str(),
-                );
+                let existing_repo = git::Repository::new(self.url.clone(), self.spaces_key.clone());
+
+                if existing_repo.is_dirty(progress) {
+                    logger(progress, self.url.clone()).warning(
+                        format!(
+                            "{} already exists and is dirty - not updating",
+                            self.spaces_key
+                        )
+                        .as_str(),
+                    );
+                    return Ok(());
+                }
+
+                if existing_repo.is_head_branch(progress) {
+                    existing_repo.pull(progress).context(format_context!(
+                        "{name} - Failed to pull repository {}",
+                        self.spaces_key
+                    ))?;
+                    return Ok(());
+                }
+
+                existing_repo
+                    .checkout(progress, &self.checkout)
+                    .context(format_context!(
+                        "{name} - Failed to checkout repository {}",
+                        self.spaces_key
+                    ))?;
                 return Ok(());
             }
         }

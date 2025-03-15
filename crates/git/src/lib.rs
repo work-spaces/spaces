@@ -217,6 +217,21 @@ pub fn is_branch(
     execute_git_command(progress_bar, url, options).is_ok()
 }
 
+pub fn is_dirty(progress_bar: &mut printer::MultiProgressBar, url: &str, directory: &str) -> bool {
+    let options = printer::ExecuteOptions {
+        working_directory: Some(directory.into()),
+        arguments: vec!["status".into(), "--porcelain".into()],
+        is_return_stdout: true,
+        ..Default::default()
+    };
+    let output = execute_git_command(progress_bar, url, options).unwrap_or(None);
+    if let Some(output) = output {
+        !output.is_empty()
+    } else {
+        false
+    }
+}
+
 pub fn get_latest_tag(
     progress_bar: &mut printer::MultiProgressBar,
     url: &str,
@@ -719,6 +734,10 @@ impl Repository {
 
     pub fn is_branch(&self, progress_bar: &mut printer::MultiProgressBar, ref_name: &str) -> bool {
         is_branch(progress_bar, &self.url, &self.full_path, ref_name)
+    }
+
+    pub fn is_dirty(&self, progress_bar: &mut printer::MultiProgressBar) -> bool {
+        is_dirty(progress_bar, &self.url, &self.full_path)
     }
 
     pub fn is_head_branch(&self, progress_bar: &mut printer::MultiProgressBar) -> bool {
