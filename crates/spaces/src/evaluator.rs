@@ -440,11 +440,13 @@ pub fn execute_tasks(
             rules::debug_sorted_tasks(printer, phase)
                 .context(format_context!("Failed to debug sorted tasks"))?;
 
-            let _new_modules = rules::execute(printer, workspace.clone(), phase)
-                .context(format_context!("Failed to execute tasks"))?;
+            let execute_result = rules::execute(printer, workspace.clone(), phase);
 
             rules::export_log_status(workspace.clone())
                 .context(format_context!("Failed to export log status"))?;
+
+            let _new_modules =
+                execute_result.context(format_context!("Failed to execute tasks"))?;
         }
         task::Phase::Inspect => {
             star_logger(printer).message("--Inspect Phase--");
