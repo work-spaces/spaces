@@ -220,6 +220,10 @@ pub fn execute() -> anyhow::Result<()> {
                 hide_progress_bars,
                 show_elapsed_time,
             );
+
+            // Always need to evaluate when doing a sync
+            singleton::set_rescan(true);
+
             runner::run_starlark_modules_in_workspace(
                 &mut printer,
                 task::Phase::Checkout,
