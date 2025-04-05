@@ -375,6 +375,21 @@ impl Workspace {
             "Failed to create log folder {log_directory}",
         ))?;
 
+        // load the modules scanned from the workspace
+        for module_path in settings.json.scanned_modules.iter() {
+            let module_path_as_path = std::path::Path::new(module_path.as_ref());
+            if !module_path_as_path.exists() {
+                logger(&mut progress).warning(
+                    format!(
+                        "Module {} does not exist - rescanning workspace",
+                        module_path
+                    )
+                    .as_str(),
+                );
+                singleton::set_rescan(true);
+            }
+        }
+
         // The workspace is not scanned on every run, only on the first run or when --rescan is passed
         // For large workspaces, this can be a significant time saver
         // is_scanned starts as None then Some(false) then Some(true) to finish the state machine
