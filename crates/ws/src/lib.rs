@@ -12,6 +12,10 @@ const BIN_SETTINGS_FILE_NAME: &str = "build/workspace.settings.spaces";
 pub const SPACES_WORKSPACE_ENV_VAR: &str = "SPACES_WORKSPACE";
 const SPACES_HOME_ENV_VAR: &str = "SPACES_HOME";
 
+fn logger(progress: &mut printer::MultiProgressBar) -> logger::Logger<'_> {
+    logger::Logger::new_progress(progress, "ws".into())
+}
+
 pub fn get_checkout_store_path() -> Arc<str> {
     if let Ok(spaces_home) = std::env::var(SPACES_HOME_ENV_VAR) {
         return format!("{}/.spaces/store", spaces_home).into();
@@ -119,9 +123,12 @@ impl BinSettings {
     ) -> anyhow::Result<(Vec<Arc<str>>, IsDirty)> {
         let mut result = IsDirty::No;
         let mut updated_modules = Vec::new();
+        logger(progress)
+            .debug(format!("Checking {:?} star files", self.star_files.iter().count()).as_str());
         for (module_path, bin_detail) in self.star_files.iter_mut() {
             progress.increment(1);
             let mod_path = std::path::Path::new(module_path.as_ref());
+            logger(progress).debug(format!("Checking {:?} for changes", mod_path).as_str());
             let modified = changes::get_modified_time(mod_path.metadata());
             if changes::is_modified(modified, bin_detail.modified) {
                 let content: Arc<str> = std::fs::read_to_string(module_path.as_ref())

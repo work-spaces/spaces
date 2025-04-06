@@ -393,7 +393,10 @@ impl Workspace {
         // The workspace is not scanned on every run, only on the first run or when --rescan is passed
         // For large workspaces, this can be a significant time saver
         // is_scanned starts as None then Some(false) then Some(true) to finish the state machine
-        if !settings.json.is_scanned.unwrap_or(false) || singleton::get_is_rescan() {
+        if !settings.json.is_scanned.unwrap_or(false)
+            || singleton::get_is_rescan()
+            || settings.bin.star_files.is_empty()
+        {
             // if the workspace is scanned, this will save settings on exit
             singleton::set_rescan(true);
 
