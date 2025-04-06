@@ -420,7 +420,7 @@ pub fn execute_tasks(
     }
 
     if phase == task::Phase::Checkout || singleton::get_is_rescan() || workspace.read().is_dirty {
-        star_logger(printer).debug("saving JSON workspace setings");
+        star_logger(printer).debug("saving JSON workspace settings");
         workspace
             .read()
             .settings
