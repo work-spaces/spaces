@@ -90,6 +90,7 @@ pub struct BinSettings {
     pub star_files: HashMap<Arc<str>, BinDetail>, // modules and hashes to detect changes
     pub changes: changes::Changes,
     pub inputs: inputs::Inputs,
+    pub is_always_evaluate: bool,
 }
 
 impl BinSettings {

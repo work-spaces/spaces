@@ -568,9 +568,14 @@ pub fn run_starlark_modules(
     target: Option<Arc<str>>,
 ) -> anyhow::Result<()> {
     let is_dirty = workspace.read().is_dirty;
+    let is_always_evaluate = workspace.read().settings.bin.is_always_evaluate;
 
-    if is_dirty {
-        star_logger(printer).message("workspace is dirty");
+    if is_dirty || is_always_evaluate {
+        if is_always_evaluate {
+            star_logger(printer).message("always evaluate modules enabled");
+        } else {
+            star_logger(printer).message("workspace is dirty");
+        }
         evaluate_starlark_modules(printer, workspace.clone(), modules, phase)
             .context(format_context!("evaluating modules"))?;
         rules::update_tasks_digests(printer, workspace.clone())

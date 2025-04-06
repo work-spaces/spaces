@@ -213,6 +213,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(NoneType)
     }
 
+    fn set_always_evaluate(always_evaluate: bool) -> anyhow::Result<NoneType> {
+        let workspace_arc = singleton::get_workspace()
+            .context(format_error!("Internal Error: No active workspace found"))?;
+        let mut workspace = workspace_arc.write();
+        workspace.settings.bin.is_always_evaluate = always_evaluate;
+        Ok(NoneType)
+    }
+
     fn get_path_to_member(
         #[starlark(require = named)] member: starlark::values::Value,
     ) -> anyhow::Result<String> {
@@ -262,6 +270,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     fn get_path_to_log_file(rule: &str) -> anyhow::Result<String> {
         let workspace_arc =
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
+        {
+            let mut workspace = workspace_arc.write();
+            workspace.settings.bin.is_always_evaluate = true;
+        }
         let workspace = workspace_arc.read();
         let rule_name = rules::get_sanitized_rule_name(rule.into());
         Ok(workspace.get_log_file(rule_name.as_ref()).to_string())
