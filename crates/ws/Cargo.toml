@@ -14,6 +14,7 @@ anyhow.workspace = true
 changes.workspace = true
 environment.workspace = true
 inputs.workspace = true
+logger.workspace = true
 printer.workspace = true
 serde_json.workspace = true
 serde.workspace = true
