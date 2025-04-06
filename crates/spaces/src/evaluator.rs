@@ -419,6 +419,15 @@ pub fn execute_tasks(
         star_logger(printer).message(warning.as_ref());
     }
 
+    if phase == task::Phase::Checkout || singleton::get_is_rescan() || workspace.read().is_dirty {
+        star_logger(printer).debug("saving JSON workspace setings");
+        workspace
+            .read()
+            .settings
+            .save_json()
+            .context(format_context!("Failed to save settings"))?;
+    }
+
     match phase {
         task::Phase::Run => {
             star_logger(printer).message("--Run Phase--");
@@ -540,17 +549,8 @@ pub fn execute_tasks(
         _ => {}
     }
 
-    if phase == task::Phase::Checkout || singleton::get_is_rescan() || workspace.read().is_dirty {
-        star_logger(printer).debug("saving JSON workspace setings");
-        workspace
-            .read()
-            .settings
-            .save_json()
-            .context(format_context!("Failed to save settings"))?;
-    }
-
     if workspace.read().is_bin_dirty {
-        star_logger(printer).debug("saving BIN workspace bin settings");
+        star_logger(printer).debug("saving BIN workspace settings");
         workspace
             .read()
             .save_bin(printer)
