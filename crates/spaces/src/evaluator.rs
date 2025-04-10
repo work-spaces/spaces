@@ -518,6 +518,20 @@ pub fn execute_tasks(
             rules::execute(printer, workspace.clone(), task::Phase::PostCheckout)
                 .context(format_context!("failed to execute post checkout phase"))?;
 
+            // Add command line env values
+            let checkout_env = singleton::get_checkout_env();
+            {
+                let mut workspace_write = workspace.write();
+                for env in checkout_env {
+                    let mut parts = env.split('=');
+                    let key = parts.next();
+                    let value = parts.next();
+                    if let (Some(key), Some(value)) = (key, value) {
+                        workspace_write.env.vars.insert(key.into(), value.into());
+                    }
+                }
+            }
+
             // prepend PATH with sysroot/bin if sysroot/bin is not already in the PATH
             let mut env = workspace.read().get_env();
             let sysroot_bin: Arc<str> =

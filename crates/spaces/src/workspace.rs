@@ -510,8 +510,16 @@ impl Workspace {
         // Workspace is assumed to reproducible until a rule is processed
         // that is not reproducible - such as a repo on tip of branch
         let mut env = environment::Environment::default();
-        env.vars
-            .insert(SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE.into(), "true".into());
+
+        let is_reproducible = if singleton::get_checkout_env().is_empty() {
+            "true"
+        } else {
+            "false"
+        };
+        env.vars.insert(
+            SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE.into(),
+            is_reproducible.into(),
+        );
 
         Ok(Self {
             modules,
