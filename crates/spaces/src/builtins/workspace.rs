@@ -162,7 +162,17 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let workspace_arc =
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();
-        Ok(workspace.get_env().vars.contains_key(var_name))
+
+        let env = workspace.get_env();
+        // check in env.inherited_vars (Option<Vec<str>>) contains the var_name
+        if let Some(inherited_vars) = &env.inherited_vars {
+            let var_name: std::sync::Arc<str> = var_name.into();
+            if inherited_vars.contains(&var_name) {
+                return Ok(std::env::var(var_name.as_ref()).is_ok());
+            }
+        }
+
+        Ok(env.vars.contains_key(var_name))
     }
 
     fn get_env_var(var_name: &str) -> anyhow::Result<String> {
@@ -176,6 +186,16 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         if let Some(value) = env.vars.get(var_name) {
             return Ok(value.clone().to_string());
+        }
+
+        // check in env.inherited_vars (Option<Vec<str>>) contains the var_name
+        if let Some(inherited_vars) = &env.inherited_vars {
+            let var_name: std::sync::Arc<str> = var_name.into();
+            if inherited_vars.contains(&var_name) {
+                return Ok(std::env::var(var_name.as_ref()).context(format_error!(
+                    "Failed to get environment variable: {var_name}"
+                ))?);
+            }
         }
 
         Err(format_error!(
