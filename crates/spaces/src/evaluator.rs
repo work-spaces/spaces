@@ -523,10 +523,8 @@ pub fn execute_tasks(
             {
                 let mut workspace_write = workspace.write();
                 for env in checkout_env {
-                    let mut parts = env.split('=');
-                    let key = parts.next();
-                    let value = parts.next();
-                    if let (Some(key), Some(value)) = (key, value) {
+                    let parts = env.split_once('=');
+                    if let Some((key, value)) = parts {
                         workspace_write.env.vars.insert(key.into(), value.into());
                     }
                 }

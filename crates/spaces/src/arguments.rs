@@ -138,10 +138,8 @@ pub fn execute() -> anyhow::Result<()> {
             script_inputs.extend(script.clone());
 
             for env_pair in env.iter() {
-                let mut parts = env_pair.split('=');
-                let key = parts.next();
-                let value = parts.next();
-                if key.is_none() || value.is_none() {
+                let parts = env_pair.split_once('=');
+                if parts.is_none() {
                     return Err(format_error!(
                         "Invalid env format: {env_pair}.\n Use `--env=VAR=VALUE`"
                     ));
