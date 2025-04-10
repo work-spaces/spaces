@@ -117,6 +117,7 @@ pub fn execute() -> anyhow::Result<()> {
             commands:
                 Commands::Checkout {
                     name,
+                    env,
                     script,
                     workflow,
                     wf,
@@ -135,6 +136,19 @@ pub fn execute() -> anyhow::Result<()> {
 
             let mut script_inputs: Vec<Arc<str>> = vec![];
             script_inputs.extend(script.clone());
+
+            for env_pair in env.iter() {
+                let mut parts = env_pair.split('=');
+                let key = parts.next();
+                let value = parts.next();
+                if key.is_none() || value.is_none() {
+                    return Err(format_error!(
+                        "Invalid env format: {env_pair}.\n Use `--env=VAR=VALUE`"
+                    ));
+                }
+            }
+
+            singleton::set_checkout_env(env);
 
             if wf.is_some() && workflow.is_some() {
                 return Err(format_error!("Cannot use both --workflow and --wf"));
@@ -412,6 +426,9 @@ Executes the checkout rules in the specified scripts."#)]
         /// The name of the workspace to create.
         #[arg(long)]
         name: Arc<str>,
+        /// Environment variables to add to the checked out workspace. Use `--env=VAR=VALUE`. Makes workspace not reproducible.
+        #[arg(long, value_hint = ValueHint::FilePath)]
+        env: Vec<Arc<str>>,
         /// The path(s) to the `spaces.star`` file containing checkout rules. Paths are processed in order.
         #[arg(long, value_hint = ValueHint::FilePath)]
         script: Vec<Arc<str>>,

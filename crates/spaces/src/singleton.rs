@@ -10,6 +10,7 @@ struct State {
     is_rescan: bool,
     max_queue_count: i64,
     error_chain: Vec<String>,
+    checkout_env: Vec<Arc<str>>,
     inspect_globs: HashSet<Arc<str>>,
     has_help: bool,
     inspect_markdown_path: Option<Arc<str>>,
@@ -33,6 +34,7 @@ fn get_state() -> &'static lock::StateLock<State> {
         has_help: false,
         inspect_markdown_path: None,
         inspect_stardoc_path: None,
+        checkout_env: Vec::new(),
         glob_warnings: Vec::new(),
     }));
 
@@ -75,6 +77,16 @@ pub fn get_glob_warnings() -> Vec<Arc<str>> {
 pub fn get_has_help() -> bool {
     let state = get_state().read();
     state.has_help
+}
+
+pub fn get_checkout_env() -> Vec<Arc<str>> {
+    let state = get_state().read();
+    state.checkout_env.clone()
+}
+
+pub fn set_checkout_env(checkout_env: Vec<Arc<str>>) {
+    let mut state = get_state().write();
+    state.checkout_env = checkout_env;
 }
 
 pub fn set_has_help(has_help: bool) {
