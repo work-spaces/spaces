@@ -265,7 +265,7 @@ fn insert_setup_and_all_rules(
         task::Phase::Run,
         executor::Task::Target,
     ))
-    .context(format_context!("Failed to insert task `setup`"))?;
+    .context(format_context!("Failed to insert task `test`"))?;
 
     if target.is_none() {
         Ok(Some(rule::ALL_RULE_NAME.into()))
