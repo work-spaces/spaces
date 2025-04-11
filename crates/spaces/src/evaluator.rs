@@ -223,7 +223,7 @@ fn insert_setup_and_all_rules(
         task::Phase::Run,
         executor::Task::Target,
     ))
-    .context(format_context!("Failed to insert task `all`"))?;
+    .context(format_context!("Failed to insert task `setup`"))?;
 
     let mut deps: Vec<Arc<str>> = Vec::new();
     let all_deps = workspace.read().settings.bin.run_all.clone();
@@ -249,6 +249,23 @@ fn insert_setup_and_all_rules(
         executor::Task::Target,
     ))
     .context(format_context!("Failed to insert task `all`"))?;
+
+    let test_rule = rule::Rule {
+        name: rule::TEST_RULE_NAME.into(),
+        help: Some("Builtin rule to run tests".into()),
+        inputs: None,
+        outputs: None,
+        type_: Some(rule::RuleType::Run),
+        platforms: None,
+        deps: Some(rules::get_test_rules()),
+    };
+
+    rules::insert_task(task::Task::new(
+        test_rule,
+        task::Phase::Run,
+        executor::Task::Target,
+    ))
+    .context(format_context!("Failed to insert task `setup`"))?;
 
     if target.is_none() {
         Ok(Some(rule::ALL_RULE_NAME.into()))
