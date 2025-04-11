@@ -833,6 +833,16 @@ pub fn get_setup_rules() -> Vec<Arc<str>> {
         .collect()
 }
 
+pub fn get_test_rules() -> Vec<Arc<str>> {
+    let state = get_state().read();
+    let tasks = state.tasks.read();
+    tasks
+        .values()
+        .filter(|task| task.rule.type_ == Some(rule::RuleType::Test))
+        .map(|task| task.rule.name.clone())
+        .collect()
+}
+
 pub fn export_log_status(workspace: WorkspaceArc) -> anyhow::Result<()> {
     let state = get_state().read();
     let log_status = state.log_status.read().clone();
