@@ -145,7 +145,7 @@ pub fn execute() -> anyhow::Result<()> {
                 }
             }
 
-            singleton::set_checkout_env(env);
+            singleton::set_args_env(env);
 
             if wf.is_some() && workflow.is_some() {
                 return Err(format_error!("Cannot use both --workflow and --wf"));
@@ -267,6 +267,7 @@ pub fn execute() -> anyhow::Result<()> {
             commands:
                 Commands::Run {
                     target,
+                    env,
                     forget_inputs,
                     extra_rule_args,
                 },
@@ -285,6 +286,8 @@ pub fn execute() -> anyhow::Result<()> {
                     "Extra rule arguments are only allowed when a target is specified."
                 ));
             }
+
+            singleton::set_args_env(env);
 
             runner::run_starlark_modules_in_workspace(
                 &mut printer,
@@ -473,6 +476,9 @@ Runs a spaces run rule.
         /// Forces rules to run even if input globs are the same as last time.
         #[arg(long)]
         forget_inputs: bool,
+        /// Environment variables to override during the run. Use `--env=VAR=VALUE`.
+        #[arg(long)]
+        env: Vec<Arc<str>>,
         #[arg(
             trailing_var_arg = true,
             help = r"Extra arguments to pass to the rule (passed after `--`)"

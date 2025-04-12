@@ -520,7 +520,7 @@ impl Workspace {
         // that is not reproducible - such as a repo on tip of branch
         let mut env = environment::Environment::default();
 
-        let is_reproducible = if singleton::get_checkout_env().is_empty() {
+        let is_reproducible = if singleton::get_args_env().is_empty() {
             "true"
         } else {
             "false"
@@ -529,6 +529,12 @@ impl Workspace {
             SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE.into(),
             is_reproducible.into(),
         );
+
+        if !singleton::get_args_env().is_empty() {
+            // scripts may read ENV variables
+            // so they need to rerun if any are passed on the command line
+            settings.bin.is_always_evaluate = true;
+        }
 
         Ok(Self {
             modules,
