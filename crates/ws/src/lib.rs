@@ -123,8 +123,7 @@ impl BinSettings {
     ) -> anyhow::Result<(Vec<Arc<str>>, IsDirty)> {
         let mut result = IsDirty::No;
         let mut updated_modules = Vec::new();
-        logger(progress)
-            .debug(format!("Checking {:?} star files", self.star_files.len()).as_str());
+        logger(progress).debug(format!("Checking {:?} star files", self.star_files.len()).as_str());
         for (module_path, bin_detail) in self.star_files.iter_mut() {
             progress.increment(1);
             let mod_path = std::path::Path::new(module_path.as_ref());
