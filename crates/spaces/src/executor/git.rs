@@ -1,4 +1,4 @@
-use crate::workspace;
+use crate::{singleton, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -437,9 +437,30 @@ impl Git {
             is_locked = true;
         }
 
+        if singleton::get_new_branches().contains(&name.into()) {
+            logger(progress, self.url.clone()).message("creating new branch");
+            let new_branch = workspace.read().get_new_branch_name();
+            let options = printer::ExecuteOptions {
+                working_directory: Some(working_directory.clone()),
+                arguments: vec!["switch".into(), "-c".into(), new_branch],
+                ..Default::default()
+            };
+
+            logger(progress, self.url.clone())
+                .debug(format!("{}: git {options:?}", self.spaces_key).as_str());
+
+            git::execute_git_command(progress, &self.url, options).context(format_context!(
+                "Failed to create new branch for {}",
+                self.spaces_key
+            ))?;
+
+            workspace.write().set_is_reproducible(false);
+        }
+        
+
         // after possibly applying the lock commit, check for reproducibility
         if !is_locked {
-            // check if checkout is on a branch or commiy
+            // check if checkout is on a branch or commit
             let is_branch =
                 git::is_branch(progress, &self.url, working_directory.as_ref(), &ref_name);
             if is_branch {

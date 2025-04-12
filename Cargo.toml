@@ -12,7 +12,10 @@ members = [
     "crates/logger",
     "crates/suggest",
     "crates/ws",
-    "crates/inputs", "crates/rule", "crates/copy",
+    "crates/inputs", 
+    "crates/rule", 
+    "crates/copy", 
+    "crates/workflows",
 ]
 
 [workspace.dependencies]
@@ -47,6 +50,7 @@ rule.path = "crates/rule"
 starstd.path = "crates/starstd"
 suggest.path = "crates/suggest"
 ws.path = "crates/ws"
+workflows.path = "crates/workflows"
 
 [profile.dev]
 opt-level = 3

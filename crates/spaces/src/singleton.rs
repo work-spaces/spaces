@@ -11,6 +11,7 @@ struct State {
     max_queue_count: i64,
     error_chain: Vec<String>,
     checkout_env: Vec<Arc<str>>,
+    new_branches: Vec<Arc<str>>,
     inspect_globs: HashSet<Arc<str>>,
     has_help: bool,
     inspect_markdown_path: Option<Arc<str>>,
@@ -32,6 +33,7 @@ fn get_state() -> &'static lock::StateLock<State> {
         error_chain: Vec::new(),
         inspect_globs: HashSet::new(),
         has_help: false,
+        new_branches: Vec::new(),
         inspect_markdown_path: None,
         inspect_stardoc_path: None,
         checkout_env: Vec::new(),
@@ -87,6 +89,16 @@ pub fn get_checkout_env() -> Vec<Arc<str>> {
 pub fn set_checkout_env(checkout_env: Vec<Arc<str>>) {
     let mut state = get_state().write();
     state.checkout_env = checkout_env;
+}
+
+pub fn get_new_branches() -> Vec<Arc<str>> {
+    let state = get_state().read();
+    state.new_branches.clone()
+}
+
+pub fn set_new_branches(new_branches: Vec<Arc<str>>) {
+    let mut state = get_state().write();
+    state.new_branches = new_branches;
 }
 
 pub fn set_has_help(has_help: bool) {

@@ -144,8 +144,6 @@ pub struct Workspace {
     pub env: environment::Environment,      // set during eval
     pub is_dirty: bool,                     // true if any star files have changed
     pub is_bin_dirty: bool,                 // true if any star files have changed
-    #[allow(dead_code)]
-    pub new_branch_name: Option<Arc<str>>, // set during eval - not used
     pub target: Option<Arc<str>>,           // target called from the command line
     pub trailing_args: Vec<Arc<str>>,
     pub updated_assets: HashSet<Arc<str>>, // used by assets to keep track of exclusive access
@@ -162,6 +160,17 @@ impl Workspace {
                 elapsed_time: elapsed_time.as_secs_f64(),
             },
         );
+    }
+
+    pub fn get_new_branch_name(&self) -> Arc<str> {
+        let path = self.absolute_path.clone();
+        let directory_name = std::path::Path::new(path.as_ref())
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+
+        directory_name.into()
     }
 
     pub fn set_is_reproducible(&mut self, value: bool) {
@@ -529,7 +538,6 @@ impl Workspace {
             digest: workspace_digest,
             locks: HashMap::new(),
             env,
-            new_branch_name: None,
             is_dirty,
             is_bin_dirty: is_dirty,
             updated_assets: HashSet::new(),
