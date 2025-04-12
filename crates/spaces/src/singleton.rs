@@ -1,6 +1,6 @@
 use crate::workspace;
 use anyhow_source_location::format_error;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 #[derive(Debug)]
@@ -10,7 +10,7 @@ struct State {
     is_rescan: bool,
     max_queue_count: i64,
     error_chain: Vec<String>,
-    checkout_env: Vec<Arc<str>>,
+    args_env: Vec<Arc<str>>,
     new_branches: Vec<Arc<str>>,
     inspect_globs: HashSet<Arc<str>>,
     has_help: bool,
@@ -36,7 +36,7 @@ fn get_state() -> &'static lock::StateLock<State> {
         new_branches: Vec::new(),
         inspect_markdown_path: None,
         inspect_stardoc_path: None,
-        checkout_env: Vec::new(),
+        args_env: Vec::new(),
         glob_warnings: Vec::new(),
     }));
 
@@ -81,14 +81,21 @@ pub fn get_has_help() -> bool {
     state.has_help
 }
 
-pub fn get_checkout_env() -> Vec<Arc<str>> {
+pub fn get_args_env() -> HashMap<Arc<str>, Arc<str>> {
     let state = get_state().read();
-    state.checkout_env.clone()
+    let mut result = HashMap::new();
+    for env in state.args_env.iter() {
+        let parts = env.split_once('=');
+        if let Some((key, value)) = parts {
+            result.insert(key.into(), value.into());
+        }
+    }
+    result
 }
 
-pub fn set_checkout_env(checkout_env: Vec<Arc<str>>) {
+pub fn set_args_env(checkout_env: Vec<Arc<str>>) {
     let mut state = get_state().write();
-    state.checkout_env = checkout_env;
+    state.args_env = checkout_env;
 }
 
 pub fn get_new_branches() -> Vec<Arc<str>> {

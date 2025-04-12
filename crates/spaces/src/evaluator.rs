@@ -546,14 +546,11 @@ pub fn execute_tasks(
                 .context(format_context!("failed to execute post checkout phase"))?;
 
             // Add command line env values
-            let checkout_env = singleton::get_checkout_env();
+            let env_args = singleton::get_args_env();
             {
                 let mut workspace_write = workspace.write();
-                for env in checkout_env {
-                    let parts = env.split_once('=');
-                    if let Some((key, value)) = parts {
-                        workspace_write.env.vars.insert(key.into(), value.into());
-                    }
+                for (key, value) in env_args {
+                    workspace_write.env.vars.insert(key, value);
                 }
             }
 

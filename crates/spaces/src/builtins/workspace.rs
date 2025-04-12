@@ -172,13 +172,21 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             }
         }
 
-        Ok(env.vars.contains_key(var_name))
+        let args_env = singleton::get_args_env();
+        Ok(env.vars.contains_key(var_name) || args_env.contains_key(var_name))
     }
 
     fn get_env_var(var_name: &str) -> anyhow::Result<String> {
         let workspace_arc =
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();
+
+        // first check the command line overrides
+        let args_env = singleton::get_args_env();
+        if let Some(value) = args_env.get(var_name) {
+            return Ok(value.clone().to_string());
+        }
+
         let env = workspace.get_env();
         if var_name == "PATH" {
             return Ok(env.get_path().to_string());

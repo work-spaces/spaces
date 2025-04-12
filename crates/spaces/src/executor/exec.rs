@@ -78,6 +78,12 @@ impl Exec {
             environment_map.insert(key, value);
         }
 
+        // overwrite values passed on the command line
+        let args_env = singleton::get_args_env();
+        for (key, value) in args_env {
+            environment_map.insert(key, value);
+        }
+
         let command_line_target = workspace.read().target.clone();
 
         let mut log_level = self.log_level;
