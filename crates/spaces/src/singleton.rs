@@ -10,7 +10,7 @@ struct State {
     is_rescan: bool,
     max_queue_count: i64,
     error_chain: Vec<String>,
-    args_env: Vec<Arc<str>>,
+    args_env: HashMap<Arc<str>, Arc<str>>,
     new_branches: Vec<Arc<str>>,
     inspect_globs: HashSet<Arc<str>>,
     has_help: bool,
@@ -36,7 +36,7 @@ fn get_state() -> &'static lock::StateLock<State> {
         new_branches: Vec::new(),
         inspect_markdown_path: None,
         inspect_stardoc_path: None,
-        args_env: Vec::new(),
+        args_env: HashMap::new(),
         glob_warnings: Vec::new(),
     }));
 
@@ -83,19 +83,22 @@ pub fn get_has_help() -> bool {
 
 pub fn get_args_env() -> HashMap<Arc<str>, Arc<str>> {
     let state = get_state().read();
-    let mut result = HashMap::new();
-    for env in state.args_env.iter() {
-        let parts = env.split_once('=');
-        if let Some((key, value)) = parts {
-            result.insert(key.into(), value.into());
-        }
-    }
-    result
+    state.args_env.clone()
 }
 
-pub fn set_args_env(checkout_env: Vec<Arc<str>>) {
+pub fn set_args_env(args: Vec<Arc<str>>) -> anyhow::Result<()> {
     let mut state = get_state().write();
-    state.args_env = checkout_env;
+    for env in args.iter() {
+        let parts = env.split_once('=');
+        if let Some((key, value)) = parts {
+            state.args_env.insert(key.into(), value.into());
+        } else {
+            return Err(format_error!(
+                "Bad env argument: `{env}` use `<key>=<value>`"
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub fn get_new_branches() -> Vec<Arc<str>> {

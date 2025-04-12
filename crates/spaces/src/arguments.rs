@@ -145,7 +145,9 @@ pub fn execute() -> anyhow::Result<()> {
                 }
             }
 
-            singleton::set_args_env(env);
+            singleton::set_args_env(env).context(format_context!(
+                "while setting environment variables for checkout rules"
+            ))?;
 
             if wf.is_some() && workflow.is_some() {
                 return Err(format_error!("Cannot use both --workflow and --wf"));
@@ -287,7 +289,9 @@ pub fn execute() -> anyhow::Result<()> {
                 ));
             }
 
-            singleton::set_args_env(env);
+            singleton::set_args_env(env).context(format_context!(
+                "while setting environment variables for run rules"
+            ))?;
 
             runner::run_starlark_modules_in_workspace(
                 &mut printer,
