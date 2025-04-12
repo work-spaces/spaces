@@ -456,7 +456,6 @@ impl Git {
 
             workspace.write().set_is_reproducible(false);
         }
-        
 
         // after possibly applying the lock commit, check for reproducibility
         if !is_locked {
