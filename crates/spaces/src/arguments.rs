@@ -116,6 +116,7 @@ pub fn execute() -> anyhow::Result<()> {
                 Commands::Checkout {
                     name,
                     env,
+                    new_branch,
                     script,
                     workflow,
                     wf,
@@ -194,6 +195,11 @@ pub fn execute() -> anyhow::Result<()> {
                     script_inputs.push(format!("{}/{}", directory, script).into());
                 }
             }
+
+            // Add any new branches specified by the command line
+            let mut new_branches = singleton::get_new_branches();
+            new_branches.extend(new_branch);
+            singleton::set_new_branches(new_branches);
 
             for script_path in script_inputs.iter() {
                 if script_path.as_ref().ends_with("env")
@@ -419,8 +425,11 @@ Executes the checkout rules in the specified scripts."#)]
         #[arg(long)]
         name: Arc<str>,
         /// Environment variables to add to the checked out workspace. Use `--env=VAR=VALUE`. Makes workspace not reproducible.
-        #[arg(long, value_hint = ValueHint::FilePath)]
+        #[arg(long)]
         env: Vec<Arc<str>>,
+        /// Use --new-branch=<rule> to have spaces create a new branch for the rule. Branch name will match the workspace name.
+        #[arg(long)]
+        new_branch: Vec<Arc<str>>,
         /// The path(s) to the `spaces.star`` file containing checkout rules. Paths are processed in order.
         #[arg(long, value_hint = ValueHint::FilePath)]
         script: Vec<Arc<str>>,

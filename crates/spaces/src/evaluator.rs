@@ -526,6 +526,16 @@ pub fn execute_tasks(
         task::Phase::Checkout => {
             star_logger(printer).message("--Post Checkout Phase--");
 
+            // warn if any new branches don't match a git rule
+            let new_branches = singleton::get_new_branches();
+            for item in new_branches {
+                if !rules::is_git_rule(item.as_ref()) {
+                    star_logger(printer).warning(
+                        format!("Did not create new branch for {}. Not a git rule", item).as_str(),
+                    );
+                }
+            }
+
             // at this point everything should be set, sort tasks as if in run phase
             rules::update_depedency_graph(printer, None, task::Phase::Run)
                 .context(format_context!("Failed to sort tasks"))?;
