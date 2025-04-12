@@ -843,6 +843,16 @@ pub fn get_test_rules() -> Vec<Arc<str>> {
         .collect()
 }
 
+pub fn is_git_rule(name: &str) -> bool {
+    let state = get_state().read();
+    let tasks = state.tasks.read();
+    if let Some(task) = tasks.get(name) {
+        matches!(task.executor, executor::Task::Git(_))
+    } else {
+        false
+    }
+}
+
 pub fn export_log_status(workspace: WorkspaceArc) -> anyhow::Result<()> {
     let state = get_state().read();
     let log_status = state.log_status.read().clone();
