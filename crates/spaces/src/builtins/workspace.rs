@@ -192,9 +192,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         if let Some(inherited_vars) = &env.inherited_vars {
             let var_name: std::sync::Arc<str> = var_name.into();
             if inherited_vars.contains(&var_name) {
-                return Ok(std::env::var(var_name.as_ref()).context(format_error!(
+                return std::env::var(var_name.as_ref()).context(format_error!(
                     "Failed to get environment variable: {var_name}"
-                ))?);
+                ));
             }
         }
 

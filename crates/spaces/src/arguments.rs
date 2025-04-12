@@ -4,8 +4,6 @@ use anyhow_source_location::{format_context, format_error};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
 use std::sync::Arc;
 
-type WorkflowsToml = std::collections::HashMap<Arc<str>, Vec<Arc<str>>>;
-
 #[derive(ValueEnum, Clone, Copy, Debug)]
 pub enum Level {
     Trace,
@@ -162,25 +160,21 @@ pub fn execute() -> anyhow::Result<()> {
                 let inputs: Vec<_> = parts[1].split(',').collect();
                 let mut scripts: Vec<Arc<str>> = vec![];
 
-                let workflows_json_path =
-                    format!("{}/{}", directory, workspace::WORKFLOW_TOML_NAME);
-                let mut is_workspace_json_input = false;
-                if std::path::Path::new(workflows_json_path.as_str()).exists() && inputs.len() == 1
-                {
-                    let workflows_json: WorkflowsToml = toml::from_str(
-                        std::fs::read_to_string(workflows_json_path.as_str())
-                            .context(format_context!("Failed to read workflows json"))?
-                            .as_str(),
-                    )
-                    .context(format_context!("Failed to parse workflows json"))?;
-
-                    if let Some(workflow_scripts) = workflows_json.get(inputs[0]) {
-                        is_workspace_json_input = true;
-                        scripts.extend(workflow_scripts.clone());
+                let is_workspace_toml = if inputs.len() == 1 {
+                    let dev_flow = workflows::try_workflows(directory, inputs[0])
+                        .context(format_context!("Failed to parse workflows"))?;
+                    if let Some(dev_flow) = dev_flow {
+                        scripts.extend(dev_flow.checkout_scripts);
+                        singleton::set_new_branches(dev_flow.new_branches);
+                        true
+                    } else {
+                        false
                     }
-                }
+                } else {
+                    false
+                };
 
-                if !is_workspace_json_input {
+                if !is_workspace_toml {
                     scripts.extend(inputs.iter().map(|s| (*s).into()));
                 }
 
