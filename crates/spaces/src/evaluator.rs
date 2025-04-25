@@ -536,8 +536,7 @@ pub fn execute_tasks(
                 }
             }
 
-            // at this point everything should be set, sort tasks as if in run phase
-            rules::update_depedency_graph(printer, None, task::Phase::Run)
+            rules::update_depedency_graph(printer, None, task::Phase::Checkout)
                 .context(format_context!("Failed to sort tasks"))?;
             rules::debug_sorted_tasks(printer, task::Phase::PostCheckout)
                 .context(format_context!("Failed to debug sorted tasks"))?;
