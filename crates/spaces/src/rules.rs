@@ -823,24 +823,26 @@ pub fn add_setup_dep_to_run_rules() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn get_setup_rules() -> Vec<Arc<str>> {
+fn get_rules_by_type(rule_type: rule::RuleType) -> Vec<Arc<str>> {
     let state = get_state().read();
     let tasks = state.tasks.read();
     tasks
         .values()
-        .filter(|task| task.rule.type_ == Some(rule::RuleType::Setup))
+        .filter(|task| task.rule.type_ == Some(rule_type))
         .map(|task| task.rule.name.clone())
         .collect()
 }
 
+pub fn get_setup_rules() -> Vec<Arc<str>> {
+    get_rules_by_type(rule::RuleType::Setup)
+}
+
 pub fn get_test_rules() -> Vec<Arc<str>> {
-    let state = get_state().read();
-    let tasks = state.tasks.read();
-    tasks
-        .values()
-        .filter(|task| task.rule.type_ == Some(rule::RuleType::Test))
-        .map(|task| task.rule.name.clone())
-        .collect()
+    get_rules_by_type(rule::RuleType::Test)
+}
+
+pub fn get_clean_rules() -> Vec<Arc<str>> {
+    get_rules_by_type(rule::RuleType::Clean)
 }
 
 pub fn is_git_rule(name: &str) -> bool {

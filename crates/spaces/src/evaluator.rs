@@ -248,14 +248,14 @@ fn insert_setup_and_all_rules(
         task::Phase::Run,
         executor::Task::Target,
     ))
-    .context(format_context!("Failed to insert task `all`"))?;
+    .context(format_context!("Failed to insert task `//:all`"))?;
 
     let test_rule = rule::Rule {
         name: rule::TEST_RULE_NAME.into(),
         help: Some("Builtin rule to run tests".into()),
         inputs: None,
         outputs: None,
-        type_: Some(rule::RuleType::Run),
+        type_: Some(rule::RuleType::Test),
         platforms: None,
         deps: Some(rules::get_test_rules()),
     };
@@ -265,7 +265,24 @@ fn insert_setup_and_all_rules(
         task::Phase::Run,
         executor::Task::Target,
     ))
-    .context(format_context!("Failed to insert task `test`"))?;
+    .context(format_context!("Failed to insert task `//:test`"))?;
+
+    let clean_rule = rule::Rule {
+        name: rule::CLEAN_RULE_NAME.into(),
+        help: Some("Builtin rule to run tests".into()),
+        inputs: None,
+        outputs: None,
+        type_: Some(rule::RuleType::Clean),
+        platforms: None,
+        deps: Some(rules::get_clean_rules()),
+    };
+
+    rules::insert_task(task::Task::new(
+        clean_rule,
+        task::Phase::Run,
+        executor::Task::Target,
+    ))
+    .context(format_context!("Failed to insert task `//:clean`"))?;
 
     if target.is_none() {
         Ok(Some(rule::ALL_RULE_NAME.into()))
