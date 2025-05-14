@@ -269,7 +269,7 @@ fn insert_setup_and_all_rules(
 
     let clean_rule = rule::Rule {
         name: rule::CLEAN_RULE_NAME.into(),
-        help: Some("Builtin rule to run tests".into()),
+        help: Some("Builtin rule to cleanup the workspace".into()),
         inputs: None,
         outputs: None,
         type_: Some(rule::RuleType::Clean),
