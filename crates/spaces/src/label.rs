@@ -87,6 +87,8 @@ pub fn sanitize_working_directory(
         let separator = if path_prefix.is_empty() { "" } else { "/" };
         format!("//{path_prefix}{separator}{working_directory}").into()
     } else {
+        // The latest module is always available, this path is unreachable
+        // unless there is a bug
         working_directory
     }
 }

@@ -74,6 +74,23 @@ impl Exec {
             .get_vars()
             .context(format_context!("Failed to get env vars"))?;
 
+        let absolute_path_to_workspace = workspace.read().get_absolute_path();
+        let (working_directory, pwd) = if let Some(directory) = self.working_directory.as_ref() {
+            if let Some(relative_workspace_path) = directory.strip_prefix("//") {
+                let absolute_path: Arc<str> =
+                    format!("{absolute_path_to_workspace}/{relative_workspace_path}").into();
+                (Some(absolute_path.clone()), absolute_path)
+            } else {
+                // the working directory member gets santized when the rule is created
+                // and always starts with //
+                (None, absolute_path_to_workspace.clone())
+            }
+        } else {
+            (None, absolute_path_to_workspace.clone())
+        };
+
+        environment_map.insert("PWD".into(), pwd);
+
         for (key, value) in self.env.clone().unwrap_or_default() {
             environment_map.insert(key, value);
         }
@@ -98,24 +115,12 @@ impl Exec {
             }
         }
 
-        let workspace_path = workspace.read().get_absolute_path();
         let environment = environment_map.into_iter().collect::<Vec<_>>();
 
         let log_file_path = if singleton::get_is_ci() {
             None
         } else {
             Some(workspace.read().get_log_file(name))
-        };
-
-        let working_directory = if let Some(directory) = self.working_directory.as_ref() {
-            if let Some(relative_path) = directory.strip_prefix("//") {
-                Some(format!("{workspace_path}/{relative_path}").into())
-            } else {
-                // sanitize means this path never gets taken
-                Some(directory.clone())
-            }
-        } else {
-            None
         };
 
         let options = printer::ExecuteOptions {
