@@ -601,11 +601,9 @@ pub fn execute_tasks(
         _ => {}
     }
 
-    let is_clean = if let Some(target) = target {
-        target.as_ref() == rule::CLEAN_RULE_NAME
-    } else {
-        false
-    };
+    let is_clean = target
+        .map(|t| t.as_ref() == rule::CLEAN_RULE_NAME)
+        .unwrap_or(false);
 
     if workspace.read().is_bin_dirty || is_clean {
         star_logger(printer).debug("saving BIN workspace settings");
