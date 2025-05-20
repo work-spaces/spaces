@@ -444,7 +444,7 @@ pub fn execute_tasks(
     phase: task::Phase,
     target: Option<Arc<str>>,
 ) -> anyhow::Result<()> {
-    star_logger(printer).debug("Inserting //:setup and //:all");
+    star_logger(printer).debug("Inserting //:setup, //:all, //:test, //:clean rules");
     let run_target = insert_setup_and_all_rules(workspace.clone(), target.clone())
         .context(format_context!("failed to insert run all"))?;
 
@@ -601,8 +601,18 @@ pub fn execute_tasks(
         _ => {}
     }
 
-    if workspace.read().is_bin_dirty {
+    let is_clean = if let Some(target) = target {
+        target.as_ref() == rule::CLEAN_RULE_NAME
+    } else {
+        false
+    };
+
+    if workspace.read().is_bin_dirty || is_clean {
         star_logger(printer).debug("saving BIN workspace settings");
+        if is_clean {
+            star_logger(printer).message("Cleaning workspace: forgetting inputs");
+            workspace.write().settings.bin = ws::BinSettings::default();
+        }
         workspace
             .read()
             .save_bin(printer)
