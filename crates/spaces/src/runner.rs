@@ -90,7 +90,7 @@ pub fn foreach_repo(
                 if path.exists() && path.is_dir() {
                     repos.push(member.clone());
                 }
-            };
+            }
         }
     }
 
