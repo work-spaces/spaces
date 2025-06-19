@@ -123,6 +123,9 @@ impl Exec {
             Some(workspace.read().get_log_file(name))
         };
 
+        logger(progress, name).debug(format!("Workspace ENV: {workspace_env:?}",).as_str());
+        logger(progress, name).debug(format!("Env: {environment:?}",).as_str());
+
         let options = printer::ExecuteOptions {
             label: name.into(),
             arguments,

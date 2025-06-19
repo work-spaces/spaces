@@ -249,6 +249,45 @@ pub fn execute() -> anyhow::Result<()> {
             .context(format_context!("during runner sync"))?;
         }
 
+        Arguments {
+            verbosity,
+            hide_progress_bars,
+            show_elapsed_time,
+            ci,
+            rescan,
+            commands: Commands::Foreach { mode },
+        } => {
+            handle_verbosity(
+                &mut printer,
+                verbosity.into(),
+                ci,
+                rescan,
+                hide_progress_bars,
+                show_elapsed_time,
+            );
+
+            // Extract command_args from the mode
+
+            let (is_run_on_branch_only, command_args) = match &mode {
+                ForEachMode::Repo { command_args } => (false, command_args),
+                ForEachMode::Branch { command_args } => (true, command_args),
+            };
+
+            if command_args.is_empty() {
+                return Err(format_error!(
+                    "No command provided to run on each repo. Pass after ` -- `."
+                ));
+            }
+
+            runner::foreach_repo(
+                &mut printer,
+                runner::RunWorkspace::Target(None, vec![]),
+                is_run_on_branch_only,
+                command_args,
+            )
+            .context(format_context!("while running command in each repo"))?;
+        }
+
         #[cfg(feature = "lsp")]
         Arguments {
             verbosity,
@@ -423,6 +462,28 @@ pub fn execute() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Subcommand, Clone)]
+enum ForEachMode {
+    /// Run the command in each repository in the workspace.
+    Repo {
+        /// The arguments to pass to the command.
+        #[arg(
+            trailing_var_arg = true,
+            help = r"Command plus arguments to run in each repo (passed after `--`)"
+        )]
+        command_args: Vec<Arc<str>>,
+    },
+    /// Run the command in each repository in the workspace that is checked out on a branch .
+    Branch {
+        /// The arguments to pass to the command.
+        #[arg(
+            trailing_var_arg = true,
+            help = r"Command plus arguments to run in each repo on a branch (passed after `--`)"
+        )]
+        command_args: Vec<Arc<str>>,
+    },
+}
+
 #[derive(Debug, Subcommand)]
 enum Commands {
     #[command(about = r#"
@@ -522,6 +583,12 @@ Inspect all the scripts in the workspace without running any rules.
         /// What documentation do you want to see?
         #[arg(value_enum)]
         item: Option<docs::DocItem>,
+    },
+    /// Runs a command in each repo or branch in the workspace.
+    Foreach {
+        /// The mode to run the command in.
+        #[command(subcommand)]
+        mode: ForEachMode,
     },
     /// Run the Spaces language server protocol. Not currently functional.
     #[cfg(feature = "lsp")]
