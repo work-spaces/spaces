@@ -1,4 +1,4 @@
-use crate::{evaluator, task, workspace};
+use crate::{evaluator, executor, task, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use std::sync::Arc;
@@ -8,9 +8,128 @@ use crate::{lsp_context, singleton};
 #[cfg(feature = "lsp")]
 use itertools::Itertools;
 
+#[derive(Debug, Clone)]
 pub enum RunWorkspace {
     Target(Option<Arc<str>>, Vec<Arc<str>>),
     Script(Vec<(Arc<str>, Arc<str>)>),
+}
+
+fn get_workspace(
+    printer: &mut printer::Printer,
+    run_workspace: RunWorkspace,
+    absolute_path_to_workspace: Option<Arc<str>>,
+    is_clear_inputs: bool,
+) -> anyhow::Result<workspace::Workspace> {
+    let checkout_scripts: Option<Vec<Arc<str>>> = match &run_workspace {
+        RunWorkspace::Target(_, _) => None,
+        RunWorkspace::Script(scripts) => Some(scripts.iter().map(|e| e.0.clone()).collect()),
+    };
+
+    let mut multi_progress = printer::MultiProgress::new(printer);
+    let progress = multi_progress.add_progress("workspace", Some(100), Some("Complete"));
+
+    workspace::Workspace::new(
+        progress,
+        absolute_path_to_workspace,
+        is_clear_inputs,
+        checkout_scripts,
+    )
+    .context(format_context!("while running workspace"))
+}
+
+pub fn foreach_repo(
+    printer: &mut printer::Printer,
+    run_workspace: RunWorkspace,
+    is_run_on_branches_only: bool,
+    command_arguments: &[Arc<str>],
+) -> anyhow::Result<()> {
+    let workspace = get_workspace(printer, run_workspace, None, false)
+        .context(format_context!("while getting workspace"))?;
+
+    let workspace_arc = workspace::WorkspaceArc::new(lock::StateLock::new(workspace));
+    let workspace_modules = workspace_arc.read().modules.clone();
+    let modules = workspace_modules.iter().filter_map(|(name, module)| {
+        if name.as_ref() == workspace::ENV_FILE_NAME {
+            Some((name.clone(), module.clone()))
+        } else {
+            None
+        }
+    });
+
+    // evaluate the modules to bring in env.spaces.star
+    evaluator::evaluate_starlark_modules(
+        printer,
+        workspace_arc.clone(),
+        modules.collect(),
+        task::Phase::Inspect,
+    )
+    .context(format_context!(
+        "while evaluating starlark modules for foreach"
+    ))?;
+
+    let mut multi_progress = printer::MultiProgress::new(printer);
+    let workspace_members = workspace_arc.read().settings.json.members.clone();
+
+    let mut repos = Vec::new();
+    for (url, member_list) in workspace_members.iter() {
+        for member in member_list.iter() {
+            if is_run_on_branches_only {
+                let mut repo_progress = multi_progress.add_progress(
+                    format!("inspect-{}", member.path).as_str(),
+                    Some(100),
+                    Some("Complete"),
+                );
+                // use git to check if member is on a branch
+                let repo = git::Repository::new(url.clone(), member.path.clone());
+                if repo.is_branch(&mut repo_progress, &member.rev) {
+                    repos.push(member.clone());
+                }
+            } else {
+                // check if member.path is an existing directory
+                let path = std::path::Path::new(member.path.as_ref());
+                if path.exists() && path.is_dir() {
+                    repos.push(member.clone());
+                }
+            };
+        }
+    }
+
+    let command_string = command_arguments.join(" ");
+    let command_label = command_arguments.join("_");
+    for member in repos.iter() {
+        let args = Some(command_arguments.to_owned().split_off(1));
+        let command = command_arguments[0].clone();
+        let working_directory = format!("//{}", member.path).into();
+
+        let mut exec_progress =
+            multi_progress.add_progress(command.as_ref(), Some(100), Some("Complete"));
+
+        exec_progress.log(
+            printer::Level::App,
+            format!("[{working_directory}] {command_string}").as_str(),
+        );
+
+        let name = format!("__foreach_{working_directory}_{command_label}");
+
+        let exec = executor::exec::Exec {
+            command: command.clone(),
+            args,
+            env: None,
+            working_directory: Some(working_directory),
+            redirect_stdout: None,
+            expect: None,
+            log_level: Some(printer::Level::App),
+            timeout: None,
+        };
+
+        exec.execute(&mut exec_progress, workspace_arc.clone(), name.as_str())
+            .context(format_context!(
+                "while executing command {} in workspace",
+                command
+            ))?;
+    }
+
+    Ok(())
 }
 
 pub fn run_starlark_modules_in_workspace(
@@ -21,22 +140,13 @@ pub fn run_starlark_modules_in_workspace(
     run_workspace: RunWorkspace,
     is_create_lock_file: bool,
 ) -> anyhow::Result<()> {
-    let workspace = {
-        let checkout_scripts: Option<Vec<Arc<str>>> = match &run_workspace {
-            RunWorkspace::Target(_, _) => None,
-            RunWorkspace::Script(scripts) => Some(scripts.iter().map(|e| e.0.clone()).collect()),
-        };
-
-        let mut multi_progress = printer::MultiProgress::new(printer);
-        let progress = multi_progress.add_progress("workspace", Some(100), Some("Complete"));
-        workspace::Workspace::new(
-            progress,
-            absolute_path_to_workspace,
-            is_clear_inputs,
-            checkout_scripts,
-        )
-        .context(format_context!("while running workspace"))?
-    };
+    let workspace = get_workspace(
+        printer,
+        run_workspace.clone(),
+        absolute_path_to_workspace,
+        is_clear_inputs,
+    )
+    .context(format_context!("while getting workspace"))?;
 
     let workspace_arc = workspace::WorkspaceArc::new(lock::StateLock::new(workspace));
     match run_workspace {
