@@ -435,6 +435,15 @@ pub fn evaluate_starlark_modules(
             .context(format_context!("Failed to generate stardoc"))?;
     }
 
+    if phase == task::Phase::Checkout {
+        // check if sysroot/bin/spaces exists
+        if !std::path::Path::new("sysroot/bin/spaces").exists() {
+            star_logger(printer).warning(
+                "sysroot/bin/spaces not found. Add a rule to checkout a compatible version of spaces to the workspace.",
+            );
+        }
+    }
+
     Ok(())
 }
 
