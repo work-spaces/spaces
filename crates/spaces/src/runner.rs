@@ -8,6 +8,12 @@ use crate::{lsp_context, singleton};
 #[cfg(feature = "lsp")]
 use itertools::Itertools;
 
+pub enum ForEachRepo {
+    Repo,
+    Branch,
+    DirtyBranch,
+}
+
 #[derive(Debug, Clone)]
 pub enum RunWorkspace {
     Target(Option<Arc<str>>, Vec<Arc<str>>),
@@ -40,7 +46,7 @@ fn get_workspace(
 pub fn foreach_repo(
     printer: &mut printer::Printer,
     run_workspace: RunWorkspace,
-    is_run_on_branches_only: bool,
+    for_each_repo: ForEachRepo,
     command_arguments: &[Arc<str>],
 ) -> anyhow::Result<()> {
     let workspace = get_workspace(printer, run_workspace, None, false)
@@ -71,6 +77,13 @@ pub fn foreach_repo(
     let workspace_members = workspace_arc.read().settings.json.members.clone();
 
     let mut repos = Vec::new();
+
+    let is_run_on_branches_only = matches!(
+        for_each_repo,
+        ForEachRepo::Branch | ForEachRepo::DirtyBranch
+    );
+    let is_run_on_dirty_branches = matches!(for_each_repo, ForEachRepo::DirtyBranch);
+
     for (url, member_list) in workspace_members.iter() {
         for member in member_list.iter() {
             if is_run_on_branches_only {
@@ -82,7 +95,18 @@ pub fn foreach_repo(
                 // use git to check if member is on a branch
                 let repo = git::Repository::new(url.clone(), member.path.clone());
                 if repo.is_branch(&mut repo_progress, &member.rev) {
-                    repos.push(member.clone());
+                    if is_run_on_dirty_branches {
+                        // check if the branch is dirty
+                        if repo.is_dirty(&mut repo_progress) {
+                            repos.push(member.clone());
+                        } else {
+                            repo_progress.set_ending_message(
+                                format!("Skipping {}: branch is clean", member.path).as_str(),
+                            );
+                        }
+                    } else {
+                        repos.push(member.clone());
+                    }
                 }
             } else {
                 // check if member.path is an existing directory
