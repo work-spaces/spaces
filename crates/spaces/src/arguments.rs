@@ -268,9 +268,12 @@ pub fn execute() -> anyhow::Result<()> {
 
             // Extract command_args from the mode
 
-            let (is_run_on_branch_only, command_args) = match &mode {
-                ForEachMode::Repo { command_args } => (false, command_args),
-                ForEachMode::Branch { command_args } => (true, command_args),
+            let (for_each_repo, command_args) = match &mode {
+                ForEachMode::Repo { command_args } => (runner::ForEachRepo::Repo, command_args),
+                ForEachMode::Branch { command_args } => (runner::ForEachRepo::Branch, command_args),
+                ForEachMode::DirtyBranch { command_args } => {
+                    (runner::ForEachRepo::DirtyBranch, command_args)
+                }
             };
 
             if command_args.is_empty() {
@@ -282,7 +285,7 @@ pub fn execute() -> anyhow::Result<()> {
             runner::foreach_repo(
                 &mut printer,
                 runner::RunWorkspace::Target(None, vec![]),
-                is_run_on_branch_only,
+                for_each_repo,
                 command_args,
             )
             .context(format_context!("while running command in each repo"))?;
@@ -475,6 +478,14 @@ enum ForEachMode {
     },
     /// Run the command in each repository in the workspace that is checked out on a branch .
     Branch {
+        /// The arguments to pass to the command.
+        #[arg(
+            trailing_var_arg = true,
+            help = r"Command plus arguments to run in each repo on a branch (passed after `--`)"
+        )]
+        command_args: Vec<Arc<str>>,
+    },
+    DirtyBranch {
         /// The arguments to pass to the command.
         #[arg(
             trailing_var_arg = true,
