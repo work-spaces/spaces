@@ -217,6 +217,29 @@ pub fn is_branch(
     execute_git_command(progress_bar, url, options).is_ok()
 }
 
+pub fn is_current_branch(
+    progress_bar: &mut printer::MultiProgressBar,
+    url: &str,
+    directory: &str,
+    ref_name: &str,
+) -> bool {
+    let options = printer::ExecuteOptions {
+        working_directory: Some(directory.into()),
+        arguments: vec!["branch".into(), "--show-current".into()],
+        is_return_stdout: true,
+        ..Default::default()
+    };
+    let branch = execute_git_command(progress_bar, url, options)
+        .unwrap_or(None)
+        .map(|s| s.trim().to_string());
+
+    if let Some(branch) = branch {
+        branch == ref_name
+    } else {
+        false
+    }
+}
+
 pub fn is_dirty(progress_bar: &mut printer::MultiProgressBar, url: &str, directory: &str) -> bool {
     let options = printer::ExecuteOptions {
         working_directory: Some(directory.into()),
@@ -736,6 +759,13 @@ impl Repository {
         is_branch(progress_bar, &self.url, &self.full_path, ref_name)
     }
 
+    pub fn is_current_branch(
+        &self,
+        progress_bar: &mut printer::MultiProgressBar,
+        ref_name: &str,
+    ) -> bool {
+        is_current_branch(progress_bar, &self.url, &self.full_path, ref_name)
+    }
     pub fn is_dirty(&self, progress_bar: &mut printer::MultiProgressBar) -> bool {
         is_dirty(progress_bar, &self.url, &self.full_path)
     }

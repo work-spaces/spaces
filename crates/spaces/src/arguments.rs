@@ -489,7 +489,7 @@ enum ForEachMode {
         /// The arguments to pass to the command.
         #[arg(
             trailing_var_arg = true,
-            help = r"Command plus arguments to run in each repo on a branch (passed after `--`)"
+            help = r"Command plus arguments to run in each repo on a dirty branch (passed after `--`)"
         )]
         command_args: Vec<Arc<str>>,
     },

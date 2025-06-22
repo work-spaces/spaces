@@ -90,23 +90,30 @@ pub fn foreach_repo(
                 let mut repo_progress = multi_progress.add_progress(
                     format!("inspect-{}", member.path).as_str(),
                     Some(100),
-                    Some("Complete"),
+                    Some("Queueing for execution"),
                 );
                 // use git to check if member is on a branch
                 let repo = git::Repository::new(url.clone(), member.path.clone());
                 if repo.is_branch(&mut repo_progress, &member.rev) {
-                    if is_run_on_dirty_branches {
-                        // check if the branch is dirty
-                        if repo.is_dirty(&mut repo_progress) {
-                            repos.push(member.clone());
+                    if repo.is_current_branch(&mut repo_progress, &member.rev) {
+                        if is_run_on_dirty_branches {
+                            // check if the branch is dirty
+                            if repo.is_dirty(&mut repo_progress) {
+                                repos.push(member.clone());
+                            } else {
+                                repo_progress.set_ending_message("Skipping: branch is clean");
+                            }
                         } else {
-                            repo_progress.set_ending_message(
-                                format!("Skipping {}: branch is clean", member.path).as_str(),
-                            );
+                            repos.push(member.clone());
                         }
                     } else {
-                        repos.push(member.clone());
+                        repo_progress.set_ending_message(
+                            format!("Skipping: not on branch {}", member.rev).as_str(),
+                        );
                     }
+                } else {
+                    repo_progress
+                        .set_ending_message("Skipping: rev is not a branch");
                 }
             } else {
                 // check if member.path is an existing directory
