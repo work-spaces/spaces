@@ -112,8 +112,7 @@ pub fn foreach_repo(
                         );
                     }
                 } else {
-                    repo_progress
-                        .set_ending_message("Skipping: rev is not a branch");
+                    repo_progress.set_ending_message("Skipping: rev is not a branch");
                 }
             } else {
                 // check if member.path is an existing directory
