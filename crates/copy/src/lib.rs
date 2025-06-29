@@ -8,7 +8,7 @@ pub fn copy_with_cow_semantics(
 ) -> anyhow::Result<()> {
     let all_files = walkdir::WalkDir::new(source)
         .into_iter()
-        .filter_map(|e| if let Ok(e) = e { Some(e) } else { None })
+        .filter_map(|e| e.ok())
         .collect::<Vec<_>>();
     progress.set_total(all_files.len() as u64);
 

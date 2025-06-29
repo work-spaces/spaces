@@ -123,7 +123,7 @@ pub fn execute_task(
             get_task_signal_deps(&task).context(format_context!("Failed to get signal deps"))?;
         let total = deps_signals.len();
 
-        task_logger(&mut progress, name.clone()).trace(format!("{} dependencies", total).as_str());
+        task_logger(&mut progress, name.clone()).trace(format!("{total} dependencies").as_str());
 
         let mut count = 1;
         for deps_rule_signal in deps_signals {
@@ -134,11 +134,7 @@ pub fn execute_task(
             };
 
             task_logger(&mut progress, name.clone()).debug(
-                format!(
-                    "{name} Waiting for dependency {} {count}/{total}",
-                    signal_name
-                )
-                .as_str(),
+                format!("{name} Waiting for dependency {signal_name} {count}/{total}").as_str(),
             );
 
             deps_rule_signal.wait_is_ready(std::time::Duration::from_millis(100));
@@ -628,9 +624,9 @@ impl State {
                     "Skipped (Optional)".to_string()
                 } else {
                     let message = if let Some(rule_type) = task.rule.type_ {
-                        format!("{:?}", rule_type)
+                        format!("{rule_type:?}")
                     } else {
-                        format!("{:?}", phase)
+                        format!("{phase:?}")
                     };
                     format!("Complete ({message})")
                 };
@@ -729,7 +725,7 @@ pub fn get_checkout_path() -> anyhow::Result<Arc<str>> {
 pub fn get_path_to_build_checkout(rule_name: Arc<str>) -> anyhow::Result<Arc<str>> {
     let state = get_state().read();
     let rule_name = state.get_sanitized_rule_name(rule_name);
-    Ok(format!("build/{}", rule_name).into())
+    Ok(format!("build/{rule_name}").into())
 }
 
 pub fn get_sanitized_rule_name(rule_name: Arc<str>) -> Arc<str> {
@@ -859,7 +855,7 @@ pub fn export_log_status(workspace: WorkspaceArc) -> anyhow::Result<()> {
     let state = get_state().read();
     let log_status = state.log_status.read().clone();
     let log_output_folder = workspace.read().log_directory.clone();
-    let log_status_file_output = format!("{}/log_status.json", log_output_folder);
+    let log_status_file_output = format!("{log_output_folder}/log_status.json");
     let content = serde_json::to_string_pretty(&log_status)
         .context(format_context!("Failed to serialize log status"))?;
     std::fs::write(log_status_file_output.as_str(), content).context(format_context!(

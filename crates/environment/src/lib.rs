@@ -67,7 +67,7 @@ impl Environment {
             .context(format_context!("Failed to get vars"))?;
 
         for (key, value) in vars {
-            let line = format!("export {}=\"{}\"\n", key, value);
+            let line = format!("export {key}=\"{value}\"\n");
             content.push_str(&line);
         }
 

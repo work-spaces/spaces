@@ -275,7 +275,7 @@ impl HttpArchive {
                 };
 
             if let Some(relative_target_path) = relative_target_path {
-                let full_target_path = format!("{}/{}", target_prefix, relative_target_path);
+                let full_target_path = format!("{target_prefix}/{relative_target_path}");
 
                 match self.archive.link {
                     ArchiveLink::Hard => {
@@ -518,7 +518,7 @@ impl HttpArchive {
         let path = archive_url.path();
         let mut relative_path = format!("{scheme}/{host}{path}");
         if let Some(filename) = filename {
-            relative_path = format!("{}/{}", relative_path, filename);
+            relative_path = format!("{relative_path}/{filename}");
         }
         Ok(relative_path)
     }

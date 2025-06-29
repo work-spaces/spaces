@@ -182,8 +182,8 @@ pub fn execute() -> anyhow::Result<()> {
                 }
 
                 for script in scripts {
-                    let short_path = format!("{}/{}", directory, script);
-                    let long_path = format!("{}/{}.spaces.star", directory, script);
+                    let short_path = format!("{directory}/{script}");
+                    let long_path = format!("{directory}/{script}.spaces.star");
                     if !std::path::Path::new(long_path.as_str()).exists()
                         && !std::path::Path::new(short_path.as_str()).exists()
                     {
@@ -194,7 +194,7 @@ pub fn execute() -> anyhow::Result<()> {
                         ));
                     }
 
-                    script_inputs.push(format!("{}/{}", directory, script).into());
+                    script_inputs.push(format!("{directory}/{script}").into());
                 }
             }
 

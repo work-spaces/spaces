@@ -210,7 +210,7 @@ pub fn is_branch(
             "show-ref".into(),
             "--verify".into(),
             "--quiet".into(),
-            format!("refs/heads/{}", ref_name).into(),
+            format!("refs/heads/{ref_name}").into(),
         ],
         ..Default::default()
     };
@@ -371,7 +371,7 @@ impl BareRepository {
         std::fs::create_dir_all(bare_store_path.as_ref())
             .context(format_context!("failed to creat dir {bare_store_path}"))?;
 
-        let full_path: Arc<str> = format!("{}{}", bare_store_path, name_dot_git).into();
+        let full_path: Arc<str> = format!("{bare_store_path}{name_dot_git}").into();
 
         if !std::path::Path::new(full_path.as_ref()).exists() {
             options.working_directory = Some(bare_store_path);
@@ -599,7 +599,7 @@ impl Repository {
         let clone_path = std::path::Path::new(clone_name.as_ref());
         if clone_path.exists() {
             url_logger(progress, url.as_ref())
-                .warning(format!("{} already exists", clone_name).as_str());
+                .warning(format!("{clone_name} already exists").as_str());
         } else {
             url_logger(progress, url.as_ref())
                 .message(format!("git {}", arguments.join(" ")).as_str());
@@ -648,14 +648,13 @@ impl Repository {
                 let current_commit = log.commit.clone();
                 if let Some(tag) = log.tag.as_ref() {
                     url_logger(progress, self.url.as_ref())
-                        .debug(format!("Found tag:{}", tag).as_str());
+                        .debug(format!("Found tag:{tag}").as_str());
                     let stripped_tag = tag.trim_matches('v');
                     if let Ok(version) = semver::Version::parse(stripped_tag) {
                         if required.matches(&version) {
                             url_logger(progress, self.url.as_ref()).debug(
                                 format!(
-                                    "Found tag {} for branch {} that satisfies semver requirement",
-                                    stripped_tag, branch
+                                    "Found tag {stripped_tag} for branch {branch} that satisfies semver requirement"
                                 )
                                 .as_str(),
                             );

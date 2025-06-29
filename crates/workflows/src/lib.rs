@@ -22,7 +22,7 @@ pub enum Flow {
 pub type Workflows = HashMap<Arc<str>, Flow>;
 
 pub fn try_workflows(directory: &str, key_name: &str) -> anyhow::Result<Option<Devflow>> {
-    let workflows_json_path = format!("{}/{}", directory, WORKFLOW_TOML_NAME);
+    let workflows_json_path = format!("{directory}/{WORKFLOW_TOML_NAME}");
     let mut result = None;
     if std::path::Path::new(workflows_json_path.as_str()).exists() {
         let workflows_toml: Workflows = toml::from_str(

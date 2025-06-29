@@ -49,8 +49,8 @@ pub fn transform_url_to_arguments(
         "release".into(),
         "download".into(),
         tag.into(),
-        format!("--repo={}/{}/{}", domain, owner, repo).into(),
-        format!("--pattern={}", pattern).into(),
+        format!("--repo={domain}/{owner}/{repo}").into(),
+        format!("--pattern={pattern}").into(),
         format!("--output={full_path_to_archive}").into(),
     ])
 }

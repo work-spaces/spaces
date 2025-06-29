@@ -252,13 +252,13 @@ impl Exec {
         let mut items: Vec<Arc<str>> = Vec::new();
 
         if let Some(working_directory) = self.working_directory.as_ref() {
-            items.push(format!("Working Directory: `{}`\n", working_directory).into());
+            items.push(format!("Working Directory: `{working_directory}`\n").into());
         }
         if let Some(redirect_stdout) = self.redirect_stdout.as_ref() {
-            items.push(format!("Redirect Stdout: `{}`\n", redirect_stdout).into());
+            items.push(format!("Redirect Stdout: `{redirect_stdout}`\n").into());
         }
         if let Some(timeout) = self.timeout {
-            items.push(format!("Timeout: `{}`\n", timeout).into());
+            items.push(format!("Timeout: `{timeout}`\n").into());
         }
 
         items.push(format!("Expect: `{}`", self.expect.unwrap_or_default()).into());
@@ -268,7 +268,7 @@ impl Exec {
         if let Some(env) = self.env.as_ref() {
             let mut env_lines: Vec<Arc<str>> = Vec::new();
             for (key, value) in env {
-                env_lines.push(format!("`{}`: `{}`", key, value).into());
+                env_lines.push(format!("`{key}`: `{value}`").into());
             }
             result.push_str(&markdown::list(env_lines));
         }
@@ -327,7 +327,7 @@ impl Kill {
                 arguments: vec![
                     "-s".into(),
                     self.signal.to_kill_arg(),
-                    format!("{}", process_id).into(),
+                    format!("{process_id}").into(),
                 ],
                 ..Default::default()
             };
