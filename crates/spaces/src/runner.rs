@@ -88,14 +88,14 @@ pub fn foreach_repo(
         for member in member_list.iter() {
             if is_run_on_branches_only {
                 let mut repo_progress = multi_progress.add_progress(
-                    format!("inspect-{}", member.path).as_str(),
+                    format!("//{}", member.path).as_str(),
                     Some(100),
                     Some("Queueing for execution"),
                 );
                 // use git to check if member is on a branch
                 let repo = git::Repository::new(url.clone(), member.path.clone());
                 if repo.is_branch(&mut repo_progress, &member.rev) {
-                    if repo.is_current_branch(&mut repo_progress, &member.rev) {
+                    if repo.is_currently_on_a_branch(&mut repo_progress) {
                         if is_run_on_dirty_branches {
                             // check if the branch is dirty
                             if repo.is_dirty(&mut repo_progress) {
@@ -107,9 +107,7 @@ pub fn foreach_repo(
                             repos.push(member.clone());
                         }
                     } else {
-                        repo_progress.set_ending_message(
-                            format!("Skipping: not on branch {}", member.rev).as_str(),
-                        );
+                        repo_progress.set_ending_message("Skipping: not currently on a branch");
                     }
                 } else {
                     repo_progress.set_ending_message("Skipping: rev is not a branch");
