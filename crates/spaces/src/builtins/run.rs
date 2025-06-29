@@ -281,12 +281,16 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             ));
         }
 
-        let create_archive: easy_archiver::CreateArchive =
+        let mut create_archive: easy_archiver::CreateArchive =
             serde_json::from_value(archive.to_json_value()?)
                 .context(format_context!("bad options for archive"))?;
 
         let rule_name = rule.name.clone();
         let mut inputs = HashSet::new();
+
+        let input = create_archive.input.strip_prefix("//").unwrap_or(&create_archive.input).to_owned();
+        create_archive.input = input;
+    
         inputs.insert(format!("+//{}/**", create_archive.input).into());
         rule.inputs = Some(inputs);
 
