@@ -310,7 +310,7 @@ fn show_eval_progress(
             progress_bar = Some(multi_progress.add_progress(
                 "evaluating",
                 Some(200),
-                Some(format!("Complete ({})", name).as_str()),
+                Some(format!("Complete ({name})").as_str()),
             ));
             progress_bar.as_mut().unwrap().set_message(name);
         }
@@ -365,7 +365,7 @@ pub fn evaluate_starlark_modules(
         if let Some((name, content)) = module_queue.pop_front() {
             let mut _workspace_lock = get_state().write();
             singleton::set_active_workspace(workspace.clone());
-            star_logger(printer).message(format!("evaluating {}", name).as_str());
+            star_logger(printer).message(format!("evaluating {name}").as_str());
 
             let eval_name = name.clone();
             let workspace_arc = workspace.clone();
@@ -406,7 +406,7 @@ pub fn evaluate_starlark_modules(
 
             let mut new_modules = Vec::new();
             for module in task_result.new_modules {
-                let path_to_module = format!("{}/{}", workspace_path, module);
+                let path_to_module = format!("{workspace_path}/{module}");
                 let content = std::fs::read_to_string(path_to_module.as_str())
                     .context(format_context!("Failed to read file {path_to_module}"))?;
 
@@ -520,8 +520,8 @@ pub fn execute_tasks(
             let relative_path = workspace.read().relative_invoked_path.clone();
             let mut strip_prefix = None;
             if globs.is_empty() && !relative_path.is_empty() {
-                globs.insert(format!("+{}**", relative_path).into());
-                strip_prefix = Some(format!("//{}", relative_path).into());
+                globs.insert(format!("+{relative_path}**").into());
+                strip_prefix = Some(format!("//{relative_path}").into());
             }
 
             if let Some(markdown_path) = singleton::get_inspect_markdown_path() {
@@ -557,7 +557,7 @@ pub fn execute_tasks(
             for item in new_branches {
                 if !rules::is_git_rule(item.as_ref()) {
                     star_logger(printer).warning(
-                        format!("Did not create new branch for {}. Not a git rule", item).as_str(),
+                        format!("Did not create new branch for {item}. Not a git rule").as_str(),
                     );
                 }
             }

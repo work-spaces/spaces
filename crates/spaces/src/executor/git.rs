@@ -25,7 +25,7 @@ impl Git {
     fn rev_to_version(rev: Option<Arc<str>>) -> Option<Arc<str>> {
         if let Some(rev) = rev {
             // many projects use name-v1.2.3 as the tag
-            let split_rev = rev.as_ref().split('-').last().unwrap_or(rev.as_ref());
+            let split_rev = rev.as_ref().split('-').next_back().unwrap_or(rev.as_ref());
             // if rev is semver parse-able, set the version
             let stripped_rev = split_rev.strip_prefix("v").unwrap_or(split_rev.as_ref());
             let version: Option<Arc<str>> = semver::Version::parse(stripped_rev)
@@ -219,7 +219,7 @@ impl Git {
         let store_repository = if !std::path::Path::new(repo_path.as_ref()).exists() {
             let mut clone_arguments: Vec<Arc<str>> = vec!["clone".into()];
             if let Some(filter) = filter {
-                clone_arguments.push(format!("--filter={}", filter).into());
+                clone_arguments.push(format!("--filter={filter}").into());
             }
 
             if self.sparse_checkout.is_some() {

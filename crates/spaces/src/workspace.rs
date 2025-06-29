@@ -219,7 +219,7 @@ impl Workspace {
     fn find_workspace_root(current_working_directory: &str) -> anyhow::Result<Arc<str>> {
         let mut current_directory = current_working_directory.to_owned();
         loop {
-            let workspace_path = format!("{}/{}", current_directory, ENV_FILE_NAME);
+            let workspace_path = format!("{current_directory}/{ENV_FILE_NAME}");
             if std::path::Path::new(workspace_path.as_str()).exists() {
                 return Ok(current_directory.into());
             }
@@ -252,7 +252,7 @@ impl Workspace {
             relative_invoked_path = relative_invoked_path.strip_prefix('/').unwrap().into();
         }
 
-        logger(progress).info(format!("Invoked at: //{}", relative_invoked_path).as_str());
+        logger(progress).info(format!("Invoked at: //{relative_invoked_path}").as_str());
 
         relative_invoked_path
     }
@@ -328,7 +328,7 @@ impl Workspace {
         let mut modules: Vec<(Arc<str>, Arc<str>)> = vec![];
 
         let env_content: Arc<str> =
-            std::fs::read_to_string(format!("{}/{}", absolute_path, ENV_FILE_NAME))
+            std::fs::read_to_string(format!("{absolute_path}/{ENV_FILE_NAME}"))
                 .context(format_context!(
                     "Failed to read workspace file: {ENV_FILE_NAME}"
                 ))?
@@ -346,12 +346,12 @@ impl Workspace {
                 if is_rules_module(module.as_ref()) {
                     progress.increment(1);
                     if !loaded_modules.contains(module) {
-                        let path = format!("{}/{}", absolute_path, module);
+                        let path = format!("{absolute_path}/{module}");
                         let content = std::fs::read_to_string(path.as_str())
                             .context(format_context!("Failed to read file {}", path))?;
 
                         logger(&mut progress)
-                            .trace(format!("Loading module from sync order: {}", module).as_str());
+                            .trace(format!("Loading module from sync order: {module}").as_str());
                         loaded_modules.insert(module.clone());
                         modules.push((module.clone(), content.into()));
                     }
@@ -369,7 +369,7 @@ impl Workspace {
         // command line. If any repos are on tip of branch, the workspace
         // is marked as not-reproducible
         for (name, _) in modules.iter() {
-            logger(&mut progress).message(format!("Digesting {}", name).as_str());
+            logger(&mut progress).message(format!("Digesting {name}").as_str());
         }
         let workspace_digest = calculate_digest(&modules);
 
@@ -389,11 +389,7 @@ impl Workspace {
             let module_path_as_path = std::path::Path::new(module_path.as_ref());
             if !module_path_as_path.exists() {
                 logger(&mut progress).warning(
-                    format!(
-                        "Module {} does not exist - rescanning workspace",
-                        module_path
-                    )
-                    .as_str(),
+                    format!("Module {module_path} does not exist - rescanning workspace").as_str(),
                 );
                 singleton::set_rescan(true);
             }
@@ -412,7 +408,7 @@ impl Workspace {
             // if this is a checkout, we need to scan on first run/inspect
             settings.json.is_scanned = Some(is_run_or_inspect);
 
-            logger(&mut progress).message(format!("Scanning {}", absolute_path).as_str());
+            logger(&mut progress).message(format!("Scanning {absolute_path}").as_str());
 
             // walkdir and find all .star files in the workspace
             // skip sysroot/build/logs directories
@@ -440,7 +436,7 @@ impl Workspace {
 
                     let path: Arc<str> = entry.path().to_string_lossy().into();
                     if let Some(stripped_path) =
-                        path.strip_prefix(format!("{}/", absolute_path).as_str())
+                        path.strip_prefix(format!("{absolute_path}/").as_str())
                     {
                         logger(&mut progress)
                             .message(format!("star file {stripped_path}").as_str());

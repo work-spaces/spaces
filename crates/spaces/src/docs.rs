@@ -41,7 +41,7 @@ fn show_function(
     for arg in function.args {
         markdown.list_item(1, format!("`{}`: {}", arg.name, arg.description).as_str())?;
         for (key, value) in arg.dict {
-            markdown.list_item(2, format!("`{}`: {}", key, value).as_str())?;
+            markdown.list_item(2, format!("`{key}`: {value}").as_str())?;
         }
     }
 

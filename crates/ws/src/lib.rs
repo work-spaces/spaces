@@ -18,7 +18,7 @@ fn logger(progress: &mut printer::MultiProgressBar) -> logger::Logger<'_> {
 
 pub fn get_checkout_store_path() -> Arc<str> {
     if let Ok(spaces_home) = std::env::var(SPACES_HOME_ENV_VAR) {
-        return format!("{}/.spaces/store", spaces_home).into();
+        return format!("{spaces_home}/.spaces/store").into();
     }
     if let Ok(Some(home_path)) = homedir::my_home() {
         return format!("{}/.spaces/store", home_path.to_string_lossy()).into();
@@ -127,7 +127,7 @@ impl BinSettings {
         for (module_path, bin_detail) in self.star_files.iter_mut() {
             progress.increment(1);
             let mod_path = std::path::Path::new(module_path.as_ref());
-            logger(progress).debug(format!("Checking {:?} for changes", mod_path).as_str());
+            logger(progress).debug(format!("Checking {mod_path:?} for changes").as_str());
             let modified = changes::get_modified_time(mod_path.metadata());
             if changes::is_modified(modified, bin_detail.modified) {
                 let content: Arc<str> = std::fs::read_to_string(module_path.as_ref())

@@ -178,7 +178,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         }
 
         if let Some(redirect_stdout) = exec.redirect_stdout.as_mut() {
-            *redirect_stdout = format!("build/{}", redirect_stdout).into();
+            *redirect_stdout = format!("build/{redirect_stdout}").into();
         }
         let rule_name = rule.name.clone();
         rules::insert_task(task::Task::new(
@@ -288,9 +288,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let rule_name = rule.name.clone();
         let mut inputs = HashSet::new();
 
-        let input = create_archive.input.strip_prefix("//").unwrap_or(&create_archive.input).to_owned();
+        let input = create_archive
+            .input
+            .strip_prefix("//")
+            .unwrap_or(&create_archive.input)
+            .to_owned();
         create_archive.input = input;
-    
+
         inputs.insert(format!("+//{}/**", create_archive.input).into());
         rule.inputs = Some(inputs);
 

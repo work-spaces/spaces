@@ -44,7 +44,7 @@ impl OrasArchive {
             arguments: vec![
                 "pull".into(),
                 "--no-tty".into(),
-                format!("--output={}", output_folder).into(),
+                format!("--output={output_folder}").into(),
                 artifact_label.clone(),
             ],
             ..Default::default()

@@ -573,7 +573,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             bin_rule.name = format!("{}/{}", hard_link_rule.name, bin).into();
 
             // cargo install uses the root/bin install directory
-            let output_file = format!("{}/bin/{}", output_directory, bin);
+            let output_file = format!("{output_directory}/bin/{bin}");
 
             let rule_name = hard_link_rule.name.clone();
             rules::insert_task(task::Task::new(
@@ -581,7 +581,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 task::Phase::PostCheckout,
                 executor::Task::AddHardLink(asset::AddHardLink {
                     source: output_file,
-                    destination: format!("sysroot/bin/{}", bin),
+                    destination: format!("sysroot/bin/{bin}"),
                 }),
             ))
             .context(format_context!("Failed to insert task {rule_name}"))?;
@@ -813,7 +813,7 @@ fn add_http_archive(
         let mut globs = archive.globs.unwrap_or_default();
         if let Some(includes) = archive.includes.as_ref() {
             for include in includes {
-                globs.insert(format!("+{}", include).into());
+                globs.insert(format!("+{include}").into());
             }
         }
 
@@ -822,7 +822,7 @@ fn add_http_archive(
                 globs.insert("+**".into());
             }
             for exclude in excludes {
-                globs.insert(format!("-{}", exclude).into());
+                globs.insert(format!("-{exclude}").into());
             }
         }
 
