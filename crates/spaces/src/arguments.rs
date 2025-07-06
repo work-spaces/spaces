@@ -11,6 +11,7 @@ pub enum Level {
     Message,
     Info,
     App,
+    Passthrough,
     Warning,
     Error,
 }
@@ -23,6 +24,7 @@ impl From<Level> for printer::Level {
             Level::Message => printer::Level::Message,
             Level::Info => printer::Level::Info,
             Level::App => printer::Level::App,
+            Level::Passthrough => printer::Level::Passthrough,
             Level::Warning => printer::Level::Warning,
             Level::Error => printer::Level::Error,
         }
