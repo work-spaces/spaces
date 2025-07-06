@@ -110,7 +110,7 @@ impl Exec {
                 let is_trailing_args_empty = trailing_args.is_empty();
                 arguments.extend(trailing_args);
                 if log_level.is_none() && !is_trailing_args_empty {
-                    log_level = Some(printer::Level::App);
+                    log_level = Some(printer::Level::Passthrough);
                 }
             }
         }
