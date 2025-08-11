@@ -105,7 +105,7 @@ pub fn execute() -> anyhow::Result<()> {
     }
 
     let args = Arguments::parse();
-    let mut printer = printer::Printer::new_stdout();
+    let mut stdout_printer = printer::Printer::new_stdout();
 
     match args {
         Arguments {
@@ -127,7 +127,7 @@ pub fn execute() -> anyhow::Result<()> {
                 },
         } => {
             handle_verbosity(
-                &mut printer,
+                &mut stdout_printer,
                 verbosity.into(),
                 ci,
                 rescan,
@@ -213,10 +213,10 @@ pub fn execute() -> anyhow::Result<()> {
                 }
             }
 
-            tools::install_tools(&mut printer, force_install_tools)
+            tools::install_tools(&mut stdout_printer, force_install_tools)
                 .context(format_context!("while installing tools"))?;
 
-            runner::checkout(&mut printer, name, script_inputs, create_lock_file)
+            runner::checkout(&mut stdout_printer, name, script_inputs, create_lock_file)
                 .context(format_context!("during runner checkout"))?;
         }
 
@@ -229,7 +229,7 @@ pub fn execute() -> anyhow::Result<()> {
             commands: Commands::Sync {},
         } => {
             handle_verbosity(
-                &mut printer,
+                &mut stdout_printer,
                 verbosity.into(),
                 ci,
                 rescan,
@@ -241,7 +241,7 @@ pub fn execute() -> anyhow::Result<()> {
             singleton::set_rescan(true);
 
             runner::run_starlark_modules_in_workspace(
-                &mut printer,
+                &mut stdout_printer,
                 task::Phase::Checkout,
                 None,
                 true,
@@ -260,7 +260,7 @@ pub fn execute() -> anyhow::Result<()> {
             commands: Commands::Foreach { mode },
         } => {
             handle_verbosity(
-                &mut printer,
+                &mut stdout_printer,
                 verbosity.into(),
                 ci,
                 rescan,
@@ -285,7 +285,7 @@ pub fn execute() -> anyhow::Result<()> {
             }
 
             runner::foreach_repo(
-                &mut printer,
+                &mut stdout_printer,
                 runner::RunWorkspace::Target(None, vec![]),
                 for_each_repo,
                 command_args,
@@ -297,11 +297,43 @@ pub fn execute() -> anyhow::Result<()> {
         Arguments {
             verbosity,
             hide_progress_bars,
+            show_elapsed_time,
             ci,
-            commands: Commands::RunLsp {},
+            rescan,
+            commands: Commands::RunLsp { log },
         } => {
-            handle_verbosity(&mut printer, verbosity.into(), ci, hide_progress_bars);
-            runner::run_lsp(&mut printer).context(format_context!("during runner sync"))?;
+            let mut null_printer = printer::Printer::new_null_term();
+
+            // Open (or create) a log file for append
+
+            let log_file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(".spaces/lsp.log")?;
+
+            // Redirect the process's stderr to this file
+            use std::os::fd::IntoRawFd;
+            let fd = log_file.into_raw_fd();
+            unsafe {
+                libc::dup2(fd, libc::STDERR_FILENO);
+            }
+
+            handle_verbosity(
+                &mut null_printer,
+                verbosity.into(),
+                ci,
+                rescan,
+                hide_progress_bars,
+                show_elapsed_time,
+            );
+
+            if let Some(log) = log {
+                singleton::set_lsp_log(log);
+            }
+
+            singleton::enable_lsp_mode();
+
+            runner::run_lsp(&mut null_printer).context(format_context!("during runner sync"))?;
         }
 
         Arguments {
@@ -319,7 +351,7 @@ pub fn execute() -> anyhow::Result<()> {
                 },
         } => {
             handle_verbosity(
-                &mut printer,
+                &mut stdout_printer,
                 verbosity.into(),
                 ci,
                 rescan,
@@ -338,7 +370,7 @@ pub fn execute() -> anyhow::Result<()> {
             ))?;
 
             runner::run_starlark_modules_in_workspace(
-                &mut printer,
+                &mut stdout_printer,
                 task::Phase::Run,
                 None,
                 forget_inputs,
@@ -364,7 +396,7 @@ pub fn execute() -> anyhow::Result<()> {
                 },
         } => {
             handle_verbosity(
-                &mut printer,
+                &mut stdout_printer,
                 verbosity.into(),
                 ci,
                 rescan,
@@ -372,8 +404,8 @@ pub fn execute() -> anyhow::Result<()> {
                 show_elapsed_time,
             );
 
-            if printer.verbosity.level > printer::Level::Info {
-                printer.verbosity.level = printer::Level::Info;
+            if stdout_printer.verbosity.level > printer::Level::Info {
+                stdout_printer.verbosity.level = printer::Level::Info;
             }
 
             let mut filter_globs = std::collections::HashSet::new();
@@ -408,7 +440,7 @@ pub fn execute() -> anyhow::Result<()> {
             singleton::set_inspect_stardoc_path(stardoc);
 
             runner::run_starlark_modules_in_workspace(
-                &mut printer,
+                &mut stdout_printer,
                 task::Phase::Inspect,
                 None,
                 false,
@@ -427,7 +459,7 @@ pub fn execute() -> anyhow::Result<()> {
             commands: Commands::Completions { shell },
         } => {
             handle_verbosity(
-                &mut printer,
+                &mut stdout_printer,
                 verbosity.into(),
                 ci,
                 rescan,
@@ -452,7 +484,7 @@ pub fn execute() -> anyhow::Result<()> {
             commands: Commands::Docs { item },
         } => {
             handle_verbosity(
-                &mut printer,
+                &mut stdout_printer,
                 verbosity.into(),
                 ci,
                 rescan,
@@ -460,7 +492,7 @@ pub fn execute() -> anyhow::Result<()> {
                 show_elapsed_time,
             );
 
-            docs::show(&mut printer, item)?;
+            docs::show(&mut stdout_printer, item)?;
         }
     }
 
@@ -517,7 +549,7 @@ Executes the checkout rules in the specified scripts."#)]
         #[arg(
             long,
             help = r#"Scripts to process in the format of `--workflow=<directory>:<script>,<script>,...`.
-`--script` is processed before `--workflow`. 
+`--script` is processed before `--workflow`.
 
 If <directory> has `workflows.spaces.toml`, it will be parsed for shortcuts if only one <script> is passed.
 - `spaces checkout --workflow=workflows:my-shortcut --name=workspace-name`
@@ -565,7 +597,7 @@ Runs a spaces run rule.
     },
     #[command(about = r"
 Inspect all the scripts in the workspace without running any rules.
-- `spaces inspect`: show the rules that have `help` entries: 
+- `spaces inspect`: show the rules that have `help` entries:
 - `spaces inspect <target-name>`: show target plus dependencies
 - `spaces --verbosity=message inspect`: show all rules
 - `spaces --verbosity=debug inspect`: show all rules in detail")]
@@ -605,5 +637,9 @@ Inspect all the scripts in the workspace without running any rules.
     },
     /// Run the Spaces language server protocol. Not currently functional.
     #[cfg(feature = "lsp")]
-    RunLsp {},
+    RunLsp {
+        /// Specify a file to write for log output
+        #[arg(long, value_enum)]
+        log: Option<Arc<str>>,
+    },
 }

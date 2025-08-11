@@ -215,15 +215,13 @@ pub fn run_lsp(printer: &mut printer::Printer) -> anyhow::Result<()> {
     let workspace = {
         let mut multi_progress = printer::MultiProgress::new(printer);
         let progress = multi_progress.add_progress("workspace", Some(100), Some("Complete"));
-        workspace::Workspace::new(progress, None)
+        workspace::Workspace::new(progress, None, false, None)
             .context(format_context!("while running workspace"))?
     };
 
     let workspace_arc = workspace::WorkspaceArc::new(lock::StateLock::new(workspace));
 
     use starlark_lsp::server;
-    let dialect = evaluator::get_dialect();
-    let globals = evaluator::get_globals(evaluator::WithRules::Yes).build();
     eprintln!("Starting Spaces Starlark server");
 
     singleton::set_active_workspace(workspace_arc.clone());
@@ -254,8 +252,6 @@ pub fn run_lsp(printer: &mut printer::Printer) -> anyhow::Result<()> {
         true,
         &[],
         true,
-        dialect,
-        globals,
     )
     .context(format_context!(
         "Internal Error: Failed to create spaces lsp context"

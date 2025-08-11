@@ -106,8 +106,8 @@ checkout.add_platform_archive(
 const ADD_CARGO_BIN_EXAMPLE: &str = r#"checkout.add_cargo_bin(
     rule = {"name": "probe-rs-tools"},
     cargo_bin = {
-        "crate": "probe-rs-tools", 
-        "version": "0.24.0", 
+        "crate": "probe-rs-tools",
+        "version": "0.24.0",
         "bins": ["probe-rs", "cargo-embed", "cargo-flash"]
     },
 )"#;
@@ -131,7 +131,7 @@ checkout.add_asset(
     },
 )"#;
 
-const ADD_WHICH_ASSET_DESCRIPTION: &str = r#"Adds a hardlink to an executable file available on the `PATH` 
+const ADD_WHICH_ASSET_DESCRIPTION: &str = r#"Adds a hardlink to an executable file available on the `PATH`
 when checking out the workspace. This is useful for building tools that have complex dependencies.
 Avoid using this when creating a workspace for your project. It creates system dependencies
 that break workspace hermicity."#;
