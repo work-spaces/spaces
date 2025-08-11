@@ -8,6 +8,7 @@ struct State {
     active_workspace: Option<workspace::WorkspaceArc>,
     is_ci: bool,
     is_rescan: bool,
+    is_lsp: bool,
     max_queue_count: i64,
     error_chain: Vec<String>,
     args_env: HashMap<Arc<str>, Arc<str>>,
@@ -28,6 +29,7 @@ fn get_state() -> &'static lock::StateLock<State> {
     STATE.set(lock::StateLock::new(State {
         is_ci: false,
         is_rescan: false,
+        is_lsp: false,
         max_queue_count: 8,
         active_workspace: None,
         error_chain: Vec::new(),
@@ -79,6 +81,16 @@ pub fn get_glob_warnings() -> Vec<Arc<str>> {
 pub fn get_has_help() -> bool {
     let state = get_state().read();
     state.has_help
+}
+
+pub fn enable_lsp_mode() {
+    let mut state = get_state().write();
+    state.is_lsp = true;
+}
+
+pub fn is_lsp_mode() -> bool {
+    let state = get_state().read();
+    state.is_lsp
 }
 
 pub fn get_args_env() -> HashMap<Arc<str>, Arc<str>> {

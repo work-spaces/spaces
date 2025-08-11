@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-use crate::evaluator;
+use crate::{evaluator, singleton};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use std::sync::Arc;
@@ -112,11 +112,11 @@ impl SpacesContext {
         print_non_none: bool,
         prelude: &[PathBuf],
         module: bool,
-        dialect: Dialect,
-        globals: Globals,
     ) -> anyhow::Result<Self> {
         let mut builtin_docs: HashMap<LspUrl, String> = HashMap::new();
         let mut builtin_symbols: HashMap<String, LspUrl> = HashMap::new();
+        let globals = evaluator::get_globals(evaluator::WithRules::Yes).build();
+
         for (name, item) in globals.documentation().members {
             let uri = Url::parse(&format!("starlark:/{name}.bzl"))
                 .context(format_context!("Failed to parse URL for {name}"))?;
@@ -126,13 +126,15 @@ impl SpacesContext {
             builtin_symbols.insert(name, uri);
         }
 
+        eprintln!("New spaces context -- ");
+
         let mut ctx = Self {
             workspace_path,
             mode,
             print_non_none,
             prelude: Vec::new(),
             module: None,
-            dialect,
+            dialect: evaluator::get_dialect(),
             globals,
             builtin_docs,
             builtin_symbols,
@@ -157,10 +159,13 @@ impl SpacesContext {
     fn load_path(&self, path: &Path) -> starlark::Result<FrozenModule> {
         let env = Module::new();
 
+        eprintln!("Load path {path:?}");
+
         let content =
             fs::read_to_string(path).context(format_context!("Failed to read {path:?}"))?;
 
         let frozen_module = evaluator::evaluate_module(
+            None,
             self.workspace_path.clone(),
             path.to_string_lossy().into(),
             content.into(),
@@ -173,6 +178,8 @@ impl SpacesContext {
 
     fn new_module(prelude: &[FrozenModule]) -> Module {
         let module = Module::new();
+        eprintln!("new module");
+
         for p in prelude {
             module.import_public_symbols(p);
         }
@@ -180,6 +187,7 @@ impl SpacesContext {
     }
 
     fn go(&self, file: &str, ast: AstModule) -> EvalResult<impl Iterator<Item = EvalMessage>> {
+        eprintln!("go");
         let mut warnings = Either::Left(iter::empty());
         let mut errors = Either::Left(iter::empty());
         let final_ast = match self.mode {
@@ -203,6 +211,7 @@ impl SpacesContext {
         file: &str,
         result: starlark::Result<EvalResult<impl Iterator<Item = EvalMessage>>>,
     ) -> EvalResult<impl Iterator<Item = EvalMessage>> {
+        eprintln!("err: {file}");
         match result {
             Err(e) => EvalResult {
                 messages: Either::Left(iter::once(EvalMessage::from_error(Path::new(file), &e))),
@@ -219,6 +228,7 @@ impl SpacesContext {
         &self,
         content: String,
     ) -> EvalResult<impl Iterator<Item = EvalMessage>> {
+        eprintln!("expression: {content}");
         let file = "expression";
         Self::err(
             file,
@@ -230,6 +240,8 @@ impl SpacesContext {
 
     pub(crate) fn file(&self, file: &Path) -> EvalResult<impl Iterator<Item = EvalMessage>> {
         let filename = &file.to_string_lossy();
+        eprintln!("file");
+
         Self::err(
             filename,
             fs::read_to_string(file)
@@ -261,34 +273,34 @@ impl SpacesContext {
             }
         };
 
-        let loads = evaluator::evaluate_loads(
+        let loads_result = evaluator::evaluate_loads(
             &ast,
             file.into(),
+            None,
             self.workspace_path.clone(),
             evaluator::WithRules::Yes,
-        )
-        .context(format_context!("Failed to process loads"))
-        .unwrap();
-        let modules = loads.iter().map(|(a, b)| (a.as_str(), b)).collect();
-        let loader = ReturnFileLoader { modules: &modules };
+        );
 
-        let globals_builder = evaluator::get_globals(evaluator::WithRules::Yes);
-        let globals = globals_builder.build();
         let module = Module::new();
-
-        let mut eval = Evaluator::new(&module);
-        eval.set_loader(&loader);
-        eval.enable_terminal_breakpoint_console();
-        let eval_result = eval
-            .eval_module(ast, &globals)
-            .map_err(|e| format_error!("{e:?}"));
+        let eval_result = match loads_result {
+            Ok(loads) => {
+                let modules = loads.iter().map(|(a, b)| (a.as_str(), b)).collect();
+                let loader = ReturnFileLoader { modules: &modules };
+                let mut eval = Evaluator::new(&module);
+                eval.enable_terminal_breakpoint_console();
+                eval.set_loader(&loader);
+                eval.eval_module(ast, &self.globals)
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))
+            }
+            Err(loads_err) => Err(loads_err.into()),
+        };
 
         Self::err(
             file,
             eval_result
                 .map(|v| {
                     if self.print_non_none && !v.is_none() {
-                        println!("{}", v);
+                        eprintln!("{}", v);
                     }
                     EvalResult {
                         messages: iter::empty(),
@@ -299,29 +311,16 @@ impl SpacesContext {
         )
     }
 
-    fn is_suppressed(&self, file: &str, issue: &str) -> bool {
+    fn is_suppressed(&self, _file: &str, _issue: &str) -> bool {
         false
     }
 
     fn check(&self, file: &str, module: &AstModule) -> impl Iterator<Item = EvalMessage> {
-        let globals = if self.prelude.is_empty() {
-            None
-        } else {
-            let mut globals = HashSet::new();
-            for modu in &self.prelude {
-                for name in modu.names() {
-                    globals.insert(name.as_str().to_owned());
-                }
-            }
-
-            for global_symbol in self.builtin_symbols.keys() {
-                globals.insert(global_symbol.to_owned());
-            }
-
-            Some(globals)
-        };
-
-        let mut lints = module.lint(globals.as_ref());
+        let mut globals = HashSet::new();
+        for (name, _) in self.globals.iter() {
+            globals.insert(name.to_owned());
+        }
+        let mut lints = module.lint(Some(&globals));
         lints.retain(|issue| !self.is_suppressed(file, &issue.short_name));
         lints.into_iter().map(EvalMessage::from)
     }
@@ -371,6 +370,7 @@ impl LspContext for SpacesContext {
         current_file: &LspUrl,
         workspace_root: Option<&Path>,
     ) -> anyhow::Result<Option<StringLiteralResult>> {
+        eprintln!("resolve_string_literal");
         self.resolve_load(literal, current_file, workspace_root)
             .map(|url| {
                 Some(StringLiteralResult {

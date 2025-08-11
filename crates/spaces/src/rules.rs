@@ -307,6 +307,12 @@ impl State {
 
     pub fn insert_task(&self, mut task: task::Task) -> anyhow::Result<()> {
         // update the rule name to have the starlark module name
+
+        // don't insert tasks in lsp mode
+        if singleton::is_lsp_mode() {
+            return Ok(());
+        }
+
         let rule_label = label::sanitize_rule(task.rule.name, self.latest_starlark_module.clone());
         task.rule.name = rule_label.clone();
         task.signal = task::SignalArc::new(rule_label.clone());
