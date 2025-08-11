@@ -83,6 +83,7 @@ pub fn get_has_help() -> bool {
     state.has_help
 }
 
+#[cfg(feature = "lsp")]
 pub fn enable_lsp_mode() {
     let mut state = get_state().write();
     state.is_lsp = true;
