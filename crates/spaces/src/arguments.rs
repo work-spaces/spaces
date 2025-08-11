@@ -300,7 +300,7 @@ pub fn execute() -> anyhow::Result<()> {
             show_elapsed_time,
             ci,
             rescan,
-            commands: Commands::RunLsp { log },
+            commands: Commands::RunLsp {},
         } => {
             let mut null_printer = printer::Printer::new_null_term();
 
@@ -326,10 +326,6 @@ pub fn execute() -> anyhow::Result<()> {
                 hide_progress_bars,
                 show_elapsed_time,
             );
-
-            if let Some(log) = log {
-                singleton::set_lsp_log(log);
-            }
 
             singleton::enable_lsp_mode();
 
@@ -637,9 +633,5 @@ Inspect all the scripts in the workspace without running any rules.
     },
     /// Run the Spaces language server protocol. Not currently functional.
     #[cfg(feature = "lsp")]
-    RunLsp {
-        /// Specify a file to write for log output
-        #[arg(long, value_enum)]
-        log: Option<Arc<str>>,
-    },
+    RunLsp {},
 }
