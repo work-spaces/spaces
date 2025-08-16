@@ -8,6 +8,52 @@ use crate::{lsp_context, singleton};
 #[cfg(feature = "lsp")]
 use itertools::Itertools;
 
+pub enum IsClearInputs {
+    No,
+    Yes,
+}
+
+impl From<IsClearInputs> for bool {
+    fn from(is_clear_inputs: IsClearInputs) -> bool {
+        match is_clear_inputs {
+            IsClearInputs::No => false,
+            IsClearInputs::Yes => true,
+        }
+    }
+}
+
+impl From<bool> for IsClearInputs {
+    fn from(is_clear_inputs: bool) -> Self {
+        match is_clear_inputs {
+            false => IsClearInputs::No,
+            true => IsClearInputs::Yes,
+        }
+    }
+}
+
+pub enum IsCreateLockFile {
+    No,
+    Yes,
+}
+
+impl From<IsCreateLockFile> for bool {
+    fn from(is_create_lock_file: IsCreateLockFile) -> bool {
+        match is_create_lock_file {
+            IsCreateLockFile::No => false,
+            IsCreateLockFile::Yes => true,
+        }
+    }
+}
+
+impl From<bool> for IsCreateLockFile {
+    fn from(is_create_lock_file: bool) -> Self {
+        match is_create_lock_file {
+            false => IsCreateLockFile::No,
+            true => IsCreateLockFile::Yes,
+        }
+    }
+}
+
 pub enum ForEachRepo {
     Repo,
     Branch,
@@ -24,7 +70,7 @@ fn get_workspace(
     printer: &mut printer::Printer,
     run_workspace: RunWorkspace,
     absolute_path_to_workspace: Option<Arc<str>>,
-    is_clear_inputs: bool,
+    is_clear_inputs: IsClearInputs,
 ) -> anyhow::Result<workspace::Workspace> {
     let checkout_scripts: Option<Vec<Arc<str>>> = match &run_workspace {
         RunWorkspace::Target(_, _) => None,
@@ -37,7 +83,7 @@ fn get_workspace(
     workspace::Workspace::new(
         progress,
         absolute_path_to_workspace,
-        is_clear_inputs,
+        is_clear_inputs.into(),
         checkout_scripts,
     )
     .context(format_context!("while running workspace"))
@@ -49,7 +95,7 @@ pub fn foreach_repo(
     for_each_repo: ForEachRepo,
     command_arguments: &[Arc<str>],
 ) -> anyhow::Result<()> {
-    let workspace = get_workspace(printer, run_workspace, None, false)
+    let workspace = get_workspace(printer, run_workspace, None, IsClearInputs::No)
         .context(format_context!("while getting workspace"))?;
 
     let workspace_arc = workspace::WorkspaceArc::new(lock::StateLock::new(workspace));
@@ -164,9 +210,9 @@ pub fn run_starlark_modules_in_workspace(
     printer: &mut printer::Printer,
     phase: task::Phase,
     absolute_path_to_workspace: Option<Arc<str>>,
-    is_clear_inputs: bool,
+    is_clear_inputs: IsClearInputs,
     run_workspace: RunWorkspace,
-    is_create_lock_file: bool,
+    is_create_lock_file: IsCreateLockFile,
 ) -> anyhow::Result<()> {
     let workspace = get_workspace(
         printer,
@@ -191,7 +237,7 @@ pub fn run_starlark_modules_in_workspace(
                 logger::Logger::new_printer(printer, name.clone()).message("Digesting");
             }
 
-            workspace_arc.write().is_create_lock_file = is_create_lock_file;
+            workspace_arc.write().is_create_lock_file = is_create_lock_file.into();
             workspace_arc.write().digest = workspace::calculate_digest(&scripts);
 
             evaluator::run_starlark_modules(printer, workspace_arc.clone(), scripts, phase, None)
@@ -276,7 +322,7 @@ pub fn checkout(
     printer: &mut printer::Printer,
     name: Arc<str>,
     script: Vec<Arc<str>>,
-    create_lock_file: bool,
+    create_lock_file: IsCreateLockFile,
 ) -> anyhow::Result<()> {
     // Checkout will fail if the target dir exists and is not empty
     if std::path::Path::new(name.as_ref()).exists() {
@@ -328,7 +374,7 @@ pub fn checkout(
         printer,
         task::Phase::Checkout,
         Some(absolute_path_to_workspace.clone()),
-        false,
+        IsClearInputs::No,
         RunWorkspace::Script(scripts),
         create_lock_file,
     )

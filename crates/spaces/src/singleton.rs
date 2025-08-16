@@ -9,6 +9,7 @@ struct State {
     is_ci: bool,
     is_rescan: bool,
     is_lsp: bool,
+    is_skip_deps: bool,
     max_queue_count: i64,
     error_chain: Vec<String>,
     args_env: HashMap<Arc<str>, Arc<str>>,
@@ -30,6 +31,7 @@ fn get_state() -> &'static lock::StateLock<State> {
         is_ci: false,
         is_rescan: false,
         is_lsp: false,
+        is_skip_deps: false,
         max_queue_count: 8,
         active_workspace: None,
         error_chain: Vec::new(),
@@ -92,6 +94,16 @@ pub fn enable_lsp_mode() {
 pub fn is_lsp_mode() -> bool {
     let state = get_state().read();
     state.is_lsp
+}
+
+pub fn enable_skip_deps_mode() {
+    let mut state = get_state().write();
+    state.is_skip_deps = true;
+}
+
+pub fn is_skip_deps_mode() -> bool {
+    let state = get_state().read();
+    state.is_skip_deps
 }
 
 pub fn get_args_env() -> HashMap<Arc<str>, Arc<str>> {
