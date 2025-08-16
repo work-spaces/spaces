@@ -1,6 +1,6 @@
 [package]
 name = "spaces"
-version = "0.14.14"
+version = "0.14.15"
 edition = "2021"
 
 [dependencies]
@@ -13,7 +13,7 @@ starlark_syntax = { version = "0.13", optional = true }
 starlark_lsp = { version = "0.13", optional = true }
 lsp-server = { version = "0.7", optional = true }
 itertools = { version = "0.14", optional = true }
-lsp-types = { version = "0.94.1", optional = true }
+lsp-types = { version = "0.97", optional = true }
 thiserror = "2"
 libc = { version = "0.2", optional = true }
 
