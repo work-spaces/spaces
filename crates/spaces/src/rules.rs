@@ -412,8 +412,6 @@ impl State {
             }
         }
 
-        let target_is_some = target.is_some();
-
         rules_printer_logger(printer)
             .debug(format!("sorting graph with for {target:?}...").as_str());
         self.sorted = self
