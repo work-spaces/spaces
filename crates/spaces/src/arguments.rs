@@ -216,8 +216,13 @@ pub fn execute() -> anyhow::Result<()> {
             tools::install_tools(&mut stdout_printer, force_install_tools)
                 .context(format_context!("while installing tools"))?;
 
-            runner::checkout(&mut stdout_printer, name, script_inputs, create_lock_file)
-                .context(format_context!("during runner checkout"))?;
+            runner::checkout(
+                &mut stdout_printer,
+                name,
+                script_inputs,
+                create_lock_file.into(),
+            )
+            .context(format_context!("during runner checkout"))?;
         }
 
         Arguments {
@@ -244,9 +249,9 @@ pub fn execute() -> anyhow::Result<()> {
                 &mut stdout_printer,
                 task::Phase::Checkout,
                 None,
-                true,
+                runner::IsClearInputs::Yes,
                 runner::RunWorkspace::Target(None, vec![]),
-                false,
+                runner::IsCreateLockFile::No,
             )
             .context(format_context!("during runner sync"))?;
         }
@@ -343,6 +348,7 @@ pub fn execute() -> anyhow::Result<()> {
                     target,
                     env,
                     forget_inputs,
+                    skip_deps,
                     extra_rule_args,
                 },
         } => {
@@ -355,6 +361,12 @@ pub fn execute() -> anyhow::Result<()> {
                 show_elapsed_time,
             );
 
+            if target.is_none() && skip_deps {
+                return Err(format_error!(
+                    "Skipping dependencies is only allowed when a target is specified."
+                ));
+            }
+
             if target.is_none() && !extra_rule_args.is_empty() {
                 return Err(format_error!(
                     "Extra rule arguments are only allowed when a target is specified."
@@ -365,13 +377,17 @@ pub fn execute() -> anyhow::Result<()> {
                 "while setting environment variables for run rules"
             ))?;
 
+            if skip_deps {
+                singleton::enable_skip_deps_mode();
+            }
+
             runner::run_starlark_modules_in_workspace(
                 &mut stdout_printer,
                 task::Phase::Run,
                 None,
-                forget_inputs,
+                forget_inputs.into(),
                 runner::RunWorkspace::Target(target, extra_rule_args),
-                false,
+                runner::IsCreateLockFile::No,
             )
             .context(format_context!("while executing run rules"))?;
         }
@@ -439,9 +455,9 @@ pub fn execute() -> anyhow::Result<()> {
                 &mut stdout_printer,
                 task::Phase::Inspect,
                 None,
-                false,
+                runner::IsClearInputs::No,
                 runner::RunWorkspace::Target(target, vec![]),
-                false,
+                runner::IsCreateLockFile::No,
             )
             .context(format_context!("while executing run rules"))?;
         }
@@ -582,6 +598,9 @@ Runs a spaces run rule.
         /// Forces rules to run even if input globs are the same as last time.
         #[arg(long)]
         forget_inputs: bool,
+        /// Runs only the target specified, without executing dependencies.
+        #[arg(long)]
+        skip_deps: bool,
         /// Environment variables to override during the run. Use `--env=VAR=VALUE`.
         #[arg(long)]
         env: Vec<Arc<str>>,

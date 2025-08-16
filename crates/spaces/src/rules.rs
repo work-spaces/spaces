@@ -418,20 +418,26 @@ impl State {
             .debug(format!("sorting graph with for {target:?}...").as_str());
         self.sorted = self
             .graph
-            .get_sorted_tasks(target)
+            .get_sorted_tasks(target.clone())
             .context(format_context!("Failed to sort tasks"))?;
 
         rules_printer_logger(printer)
             .debug(format!("done with {} nodes", self.sorted.len()).as_str());
 
-        if target_is_some {
+        if let Some(target) = target {
             // enable any optional tasks in the graph
             for node_index in self.sorted.iter() {
                 let task_name = self.graph.get_task(*node_index);
                 let task = tasks
                     .get_mut(task_name)
                     .ok_or(format_error!("Task not found {task_name}"))?;
-                if task.rule.type_ == Some(rule::RuleType::Optional) {
+                if singleton::is_skip_deps_mode() {
+                    if target != task.rule.name {
+                        task.rule.type_ = Some(rule::RuleType::Optional);
+                    } else {
+                        task.rule.type_ = Some(rule::RuleType::Run);
+                    }
+                } else if task.rule.type_ == Some(rule::RuleType::Optional) {
                     task.rule.type_ = Some(rule::RuleType::Run);
                 }
             }
