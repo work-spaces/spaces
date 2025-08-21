@@ -58,6 +58,15 @@ impl Repo {
             CheckoutOption::NewBranch => Checkout::NewBranch(self.rev.clone()),
         }
     }
+
+    pub fn is_cow_semantics(&self) -> bool {
+        // return true for Default or Blobless
+        if let Some(clone) = &self.clone {
+            matches!(clone, Clone::Default | Clone::Blobless)
+        } else {
+            false
+        }
+    }
 }
 
 pub struct LogEntry {

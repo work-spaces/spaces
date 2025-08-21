@@ -507,7 +507,7 @@ impl HttpArchive {
         Ok(next_progress_bar)
     }
 
-    fn url_to_relative_path(url: &str, filename: &Option<Arc<str>>) -> anyhow::Result<String> {
+    pub fn url_to_relative_path(url: &str, filename: &Option<Arc<str>>) -> anyhow::Result<String> {
         let archive_url = url::Url::parse(url)
             .context(format_context!("Failed to parse bare store url {url}"))?;
 

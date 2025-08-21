@@ -350,6 +350,9 @@ impl Git {
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
+        // The logic in Repo::is_cow_semantics() needs to stay in sync
+        // with the logic here. Default and Blobless use cow semantics.
+
         match self.clone {
             git::Clone::Worktree => self
                 .execute_worktree_clone(progress, workspace.clone(), name)

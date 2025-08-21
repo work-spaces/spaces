@@ -602,10 +602,14 @@ pub fn execute_tasks(
             let env_str = serde_json::to_string_pretty(&env)?;
 
             star_logger(printer).debug("saving workspace env");
-            workspace
-                .read()
+            let read_workspace = workspace.read();
+            read_workspace
                 .save_env_file(env_str.as_str())
                 .context(format_context!("Failed to save env file"))?;
+
+            read_workspace
+                .finalize_store()
+                .context(format_context!("Failed to finalize store"))?;
         }
         _ => {}
     }

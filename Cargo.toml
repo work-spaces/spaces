@@ -16,6 +16,7 @@ members = [
     "crates/rule",
     "crates/copy",
     "crates/workflows",
+    "crates/store",
 ]
 
 [workspace.dependencies]
@@ -48,6 +49,7 @@ logger.path = "crates/logger"
 platform.path = "crates/platform"
 rule.path = "crates/rule"
 starstd.path = "crates/starstd"
+store.path = "crates/store"
 suggest.path = "crates/suggest"
 ws.path = "crates/ws"
 workflows.path = "crates/workflows"

@@ -150,6 +150,7 @@ pub struct Workspace {
     pub rule_metrics: HashMap<Arc<str>, RuleMetrics>, // used to keep track of rule metrics
     pub stardoc: stardoc::StarDoc,         // used to keep track of rule documentation
     pub settings: ws::Settings,
+    pub store: store::Store,
 }
 
 impl Workspace {
@@ -549,6 +550,7 @@ impl Workspace {
             target: None,
             relative_invoked_path,
             settings,
+            store: store::Store::default(),
         })
     }
 
@@ -575,6 +577,26 @@ impl Workspace {
                 self.env.system_paths = Some(system_paths);
             }
         }
+        Ok(())
+    }
+
+    pub fn add_store_entry(&mut self, path_in_store: Arc<str>, size: u128) {
+        self.store.add_entry(path_in_store, size);
+    }
+
+    pub fn finalize_store(&self) -> anyhow::Result<()> {
+        let store_path = ws::get_checkout_store_path();
+        let mut saved_store = store::Store::load(store_path.as_ref()).context(format_context!(
+            "Failed to load store manifest from {}",
+            store_path
+        ))?;
+
+        saved_store.merge(self.store.clone());
+
+        saved_store
+            .save(store_path.as_ref())
+            .context(format_context!("Failed to save store in {}", store_path))?;
+
         Ok(())
     }
 
