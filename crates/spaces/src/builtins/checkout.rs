@@ -1,4 +1,5 @@
 use crate::executor::asset;
+use crate::workspace::WorkspaceArc;
 use crate::{executor, rules, singleton, task};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
@@ -476,11 +477,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let workspace_arc =
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
-        let workspace = workspace_arc.read();
 
         let worktree_path = if let Some(directory) = repo.working_directory.as_ref() {
             directory.clone()
         } else {
+            let workspace = workspace_arc.read();
             workspace.get_absolute_path()
         };
 
@@ -497,6 +498,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let rule_name = rule.name.clone();
         let url = repo.url.trim_end_matches('/');
         let url: Arc<str> = url.strip_suffix(".git").unwrap_or(url).into();
+
+        add_git_url_to_workspace_store_queue(
+            workspace_arc.clone(),
+            url.as_ref(),
+            if repo.is_cow_semantics() { "cow/" } else { "" },
+        );
+
         rules::insert_task(task::Task::new(
             rule,
             task::Phase::Checkout,
@@ -792,6 +800,25 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     }
 }
 
+fn add_git_url_to_workspace_store_queue(workspace_arc: WorkspaceArc, url: &str, cow: &str) {
+    let mut workspace = workspace_arc.write();
+    if let Ok((store_path, repo_name)) = git::BareRepository::url_to_relative_path_and_name(url) {
+        let store_path = format!("{cow}{store_path}/{repo_name}");
+        workspace.add_store_entry(store_path.into(), 0_u128);
+    }
+}
+
+fn add_http_url_to_workspace_store_queue(
+    workspace_arc: WorkspaceArc,
+    url: &str,
+    filename: &Option<Arc<str>>,
+) {
+    let mut workspace = workspace_arc.write();
+    if let Ok(relative_path) = http_archive::HttpArchive::url_to_relative_path(url, filename) {
+        workspace.add_store_entry(relative_path.into(), 0_u128);
+    }
+}
+
 fn add_http_archive(
     rule: rule::Rule,
     archive_option: Option<http_archive::Archive>,
@@ -835,6 +862,13 @@ fn add_http_archive(
 
         let workspace_arc =
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
+
+        add_http_url_to_workspace_store_queue(
+            workspace_arc.clone(),
+            archive.url.as_ref(),
+            &archive.filename,
+        );
+
         let workspace = workspace_arc.read();
 
         let http_archive = http_archive::HttpArchive::new(
