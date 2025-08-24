@@ -14,28 +14,6 @@ const ADD_EXEC_EXAMPLE: &str = r#"run.add_exec(
     },
 )"#;
 
-const ADD_EXEC_IF_EXAMPLE: &str = r#"run.add_exec(
-    rule = {"name": create_file, "type": "Optional" },
-    exec = {
-        "command": "touch",
-        "args": ["some_file"],
-    },
-)
-
-run.add_exec_if(
-    rule = {"name": check_file, "deps": []},
-    exec_if = {
-        "if": {
-            "command": "ls",
-            "args": [
-                "some_file",
-            ],
-            "expect": "Failure",
-        },
-        "then": ["create_file"],
-    }
-)"#;
-
 const ADD_TARGET_EXAMPLE: &str = r#"run.add_target(
     rule = {"name": "my_rule", "deps": ["my_other_rule"]},
 )"#;
@@ -78,23 +56,6 @@ pub const FUNCTIONS: &[Function] = &[
             },
         ],
         example: Some(ADD_EXEC_EXAMPLE)},
-    Function {
-        name: "add_exec_if",
-        description: "Adds a rule to execute if a condition is met.",
-        return_type: "None",
-        args: &[
-            get_rule_argument(),
-            Arg {
-                name: "exec_if",
-                description: "dict with",
-                dict: &[
-                    ("if", "this is an `exec` object used with add_exec()"),
-                    ("then", "list of optional targets to enable if the command has the expected result"),
-                    ("else", "optional list of optional targets to enable if the command has the unexpected result"),
-                ],
-            },
-        ],
-        example: Some(ADD_EXEC_IF_EXAMPLE)},
     Function {
         name: "add_target",
         description: "Adds a target. There is no specific action for the target, but this rule can be useful for organizing dependencies.",
@@ -212,51 +173,6 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             rule,
             task::Phase::Run,
             executor::Task::Kill(kill_exec),
-        ))
-        .context(format_context!("Failed to insert task {rule_name}"))?;
-        Ok(NoneType)
-    }
-
-    fn add_exec_if(
-        #[starlark(require = named)] rule: starlark::values::Value,
-        #[starlark(require = named)] exec_if: starlark::values::Value,
-    ) -> anyhow::Result<NoneType> {
-        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for exec_if rule"))?;
-
-        inputs::validate_input_globs(&rule.inputs)
-            .context(format_context!("invalid inputs globs with {}", rule.name))?;
-
-        add_rule_to_all(&rule)
-            .context(format_context!("Internal Error: Failed to add rule to all"))?;
-
-        let mut exec_if: executor::exec::ExecIf = serde_json::from_value(exec_if.to_json_value()?)
-            .context(format_context!("bad options for exec"))?;
-
-        if let Some(redirect_stdout) = exec_if.if_.redirect_stdout.as_mut() {
-            *redirect_stdout = format!(
-                "{}/{}",
-                rules::get_path_to_build_checkout(rule.name.clone())?,
-                redirect_stdout
-            )
-            .into();
-        }
-
-        for target in exec_if.then_.iter_mut() {
-            *target = rules::get_sanitized_rule_name(target.clone());
-        }
-
-        if let Some(else_targets) = exec_if.else_.as_mut() {
-            for target in else_targets.iter_mut() {
-                *target = rules::get_sanitized_rule_name(target.clone());
-            }
-        }
-
-        let rule_name = rule.name.clone();
-        rules::insert_task(task::Task::new(
-            rule,
-            task::Phase::Run,
-            executor::Task::ExecIf(exec_if),
         ))
         .context(format_context!("Failed to insert task {rule_name}"))?;
         Ok(NoneType)

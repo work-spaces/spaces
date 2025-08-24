@@ -230,7 +230,6 @@ pub fn execute_task(
             }
         }
 
-        // before notifying dependents process the enabled_targets list
         {
             let mut log_status = LogStatus {
                 name: rule_name.clone(),
@@ -245,17 +244,8 @@ pub fn execute_task(
 
             let state = get_state().read();
             let mut tasks = state.tasks.write();
-            if let Ok(task_result) = &task_result {
+            if task_result.is_ok() {
                 log_status.status = executor::exec::Expect::Success;
-                for enabled_target in task_result.enabled_targets.iter() {
-                    let task = tasks
-                        .get_mut(enabled_target)
-                        .ok_or(format_error!("Task not found {enabled_target}"))
-                        .unwrap_or_else(|_| {
-                            panic!("Internal Error: Task not found {enabled_target}")
-                        });
-                    task.rule.type_ = Some(rule::RuleType::Run);
-                }
             } else {
                 log_status.status = executor::exec::Expect::Failure;
                 // Cancel all pending tasks - exit gracefully

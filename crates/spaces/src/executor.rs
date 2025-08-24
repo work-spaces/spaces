@@ -14,27 +14,23 @@ use std::sync::Arc;
 
 pub struct TaskResult {
     pub new_modules: Vec<Arc<str>>,
-    pub enabled_targets: Vec<Arc<str>>,
 }
 
 impl TaskResult {
     pub fn new() -> Self {
         TaskResult {
             new_modules: Vec::new(),
-            enabled_targets: Vec::new(),
         }
     }
 
     pub fn extend(&mut self, other: TaskResult) {
         self.new_modules.extend(other.new_modules);
-        self.enabled_targets.extend(other.enabled_targets);
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Task {
     Exec(exec::Exec),
-    ExecIf(exec::ExecIf),
     Kill(exec::Kill),
     Target,
     CreateArchive(archive::Archive),
@@ -57,15 +53,10 @@ impl Task {
         name: &str,
     ) -> anyhow::Result<TaskResult> {
         let mut check_new_modules = false;
-        let mut enabled_targets = Vec::new();
         match self {
             Task::HttpArchive(archive) => archive.execute(progress, workspace.clone(), name),
             Task::OrasArchive(archive) => archive.execute(progress, workspace.clone(), name),
             Task::Exec(exec) => exec.execute(&mut progress, workspace.clone(), name),
-            Task::ExecIf(exec_if) => {
-                enabled_targets = exec_if.execute(progress, workspace.clone(), name);
-                Ok(())
-            }
             Task::Kill(kill) => kill.execute(name, &mut progress),
             Task::CreateArchive(archive) => archive.execute(progress, workspace.clone(), name),
             Task::UpdateAsset(asset) => asset.execute(progress, workspace.clone(), name),
@@ -85,7 +76,6 @@ impl Task {
 
         let mut result = TaskResult {
             new_modules: Vec::new(),
-            enabled_targets,
         };
 
         if check_new_modules {
