@@ -497,6 +497,15 @@ pub fn execute_tasks(
             rules::export_log_status(workspace.clone())
                 .context(format_context!("Failed to export log status"))?;
 
+            if execute_result.is_err() {
+                let read_workspace = workspace.read();
+                if read_workspace.is_any_digest_updated {
+                    read_workspace
+                        .save_bin(printer)
+                        .context(format_context!("Failed to save bin settings"))?;
+                }
+            }
+
             let _new_modules =
                 execute_result.context(format_context!("Failed to execute tasks"))?;
         }
