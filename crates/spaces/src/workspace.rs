@@ -150,6 +150,7 @@ pub struct Workspace {
     pub rule_metrics: HashMap<Arc<str>, RuleMetrics>, // used to keep track of rule metrics
     pub stardoc: stardoc::StarDoc,         // used to keep track of rule documentation
     pub settings: ws::Settings,
+    pub is_any_digest_updated: bool,
     pub store: store::Store,
 }
 
@@ -550,6 +551,7 @@ impl Workspace {
             target: None,
             relative_invoked_path,
             settings,
+            is_any_digest_updated: false,
             store: store::Store::default(),
         })
     }
@@ -726,6 +728,7 @@ impl Workspace {
     }
 
     pub fn update_rule_digest(&mut self, rule: &str, digest: Arc<str>) {
+        self.is_any_digest_updated = true;
         self.settings.bin.inputs.save_digest(rule, digest);
     }
 }
