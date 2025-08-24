@@ -90,7 +90,7 @@ fn show_info(level: u8, markdown: &mut printer::markdown::Markdown) -> anyhow::R
     markdown.heading(level + 1, "Description")?;
 
     markdown.paragraph(
-        r#"The `info` functions provide information about spaces and the platform. 
+        r#"The `info` functions provide information about spaces and the platform.
 Info functions are executed immediately. They are not rule definitions."#,
     )?;
 
@@ -212,8 +212,8 @@ fn show_all(markdown: &mut printer::markdown::Markdown) -> anyhow::Result<()> {
     markdown.list(vec![
         "`Checkout`: Assigned by default to all checkout rules".into(),
         "`Setup`: Assign to a run rule to make all other run rules depend on it".into(),
-        "`Run`: Assigned by default to run rules.".into(),
-        "`Optional`: Assign to run rules that are not required to run. Use `add_exec_if()` to conditionally run the rule.".into(),
+        "`Run`: Runs when running `//:all`".into(),
+        "`Optional`: Runs if specifical executed or depended on".into(),
     ])?;
 
     markdown.printer.newline()?;
