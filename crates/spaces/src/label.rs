@@ -1,4 +1,5 @@
 use crate::{singleton, workspace};
+use anyhow_source_location::format_error;
 use std::sync::Arc;
 
 pub fn sanitize_rule_for_display(rule_name: Arc<str>) -> Arc<str> {
@@ -48,9 +49,9 @@ pub fn sanitize_glob_value(
     value: &str,
     rule_name: &str,
     starlark_module: Option<Arc<str>>,
-) -> Arc<str> {
+) -> anyhow::Result<Arc<str>> {
     let module = starlark_module.unwrap_or("unknown".into());
-    if value.starts_with("+**") || value.starts_with("+//**") {
+    if value.starts_with("+//**") {
         singleton::push_glob_warning(
             format!(
                 "{module}:{rule_name} inputs -> {value} globbing the workspace root is bad for performance"
@@ -60,14 +61,15 @@ pub fn sanitize_glob_value(
     }
 
     if value.starts_with("+//") || value.starts_with("-//") {
-        return value.replace("+//", "+").replace("-//", "-").into();
+        return Ok(value.replace("+//", "+").replace("-//", "-").into());
     }
 
-    singleton::push_glob_warning(
-        format!("{module}:{rule_name} inputs -> {value} must use +// or -// in v0.15.0").into(),
-    );
-
-    value.into()
+    Err(format_error!(
+        "{}:{} inputs -> {} must begin with +// or -// and be a workspace root path",
+        module,
+        rule_name,
+        value
+    ))
 }
 
 pub fn sanitize_working_directory(

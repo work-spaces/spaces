@@ -314,7 +314,8 @@ impl State {
                     input.as_ref(),
                     rule_label.as_ref(),
                     self.latest_starlark_module.clone(),
-                );
+                )
+                .context(format_context!("Failed to sanitize inputs: {}", input))?;
                 new_inputs.insert(value);
             }
             task.rule.inputs = Some(new_inputs);
