@@ -89,16 +89,10 @@ fn get_workspace(
     .context(format_context!("while running workspace"))
 }
 
-pub fn foreach_repo(
+fn evaluate_environment(
     printer: &mut printer::Printer,
-    run_workspace: RunWorkspace,
-    for_each_repo: ForEachRepo,
-    command_arguments: &[Arc<str>],
+    workspace_arc: workspace::WorkspaceArc,
 ) -> anyhow::Result<()> {
-    let workspace = get_workspace(printer, run_workspace, None, IsClearInputs::No)
-        .context(format_context!("while getting workspace"))?;
-
-    let workspace_arc = workspace::WorkspaceArc::new(lock::StateLock::new(workspace));
     let workspace_modules = workspace_arc.read().modules.clone();
     let modules = workspace_modules.iter().filter_map(|(name, module)| {
         if name.as_ref() == workspace::ENV_FILE_NAME {
@@ -115,9 +109,23 @@ pub fn foreach_repo(
         modules.collect(),
         task::Phase::Inspect,
     )
-    .context(format_context!(
-        "while evaluating starlark modules for foreach"
-    ))?;
+    .context(format_context!("while evaluating starlark env module"))?;
+
+    Ok(())
+}
+
+pub fn foreach_repo(
+    printer: &mut printer::Printer,
+    run_workspace: RunWorkspace,
+    for_each_repo: ForEachRepo,
+    command_arguments: &[Arc<str>],
+) -> anyhow::Result<()> {
+    let workspace = get_workspace(printer, run_workspace, None, IsClearInputs::No)
+        .context(format_context!("while getting workspace"))?;
+
+    let workspace_arc = workspace::WorkspaceArc::new(lock::StateLock::new(workspace));
+    evaluate_environment(printer, workspace_arc.clone())
+        .context(format_context!("while evaluating starlark env module"))?;
 
     let mut multi_progress = printer::MultiProgress::new(printer);
     let workspace_members = workspace_arc.read().settings.json.members.clone();
@@ -202,6 +210,55 @@ pub fn foreach_repo(
                 command
             ))?;
     }
+
+    Ok(())
+}
+
+pub fn run_shell_in_workspace(
+    printer: &mut printer::Printer,
+    path: Option<Arc<str>>,
+) -> anyhow::Result<()> {
+    let workspace = get_workspace(
+        printer,
+        RunWorkspace::Target(None, vec![]),
+        None,
+        IsClearInputs::No,
+    )
+    .context(format_context!("while getting workspace"))?;
+
+    let workspace_arc = workspace::WorkspaceArc::new(lock::StateLock::new(workspace));
+    evaluate_environment(printer, workspace_arc.clone())
+        .context(format_context!("while evaluating starlark env module"))?;
+
+    // Pick a shell — respect user's environment, or fall back to /b
+    // in/sh
+    let shell = path.unwrap_or("/bin/bash".into());
+
+    // Create the command
+    let mut process = std::process::Command::new(shell.as_ref());
+
+    let workspace_read = workspace_arc.read();
+    let environment_map = workspace_read
+        .get_env()
+        .get_vars()
+        .context(format_context!("Failed to get env vars"))?;
+
+    process.env_clear();
+
+    // Set custom environment variables
+    for (key, value) in environment_map {
+        process.env(key.as_ref(), value.as_ref());
+    }
+
+    // Make it interactive
+    process
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit());
+
+    let _ = process
+        .status()
+        .context(format_context!("failed to launch shell"));
 
     Ok(())
 }

@@ -298,6 +298,27 @@ pub fn execute() -> anyhow::Result<()> {
             .context(format_context!("while running command in each repo"))?;
         }
 
+        Arguments {
+            verbosity,
+            hide_progress_bars,
+            show_elapsed_time,
+            ci,
+            rescan,
+            commands: Commands::Shell { path },
+        } => {
+            handle_verbosity(
+                &mut stdout_printer,
+                verbosity.into(),
+                ci,
+                rescan,
+                hide_progress_bars,
+                show_elapsed_time,
+            );
+
+            runner::run_shell_in_workspace(&mut stdout_printer, path)
+                .context(format_context!("while running user shell"))?;
+        }
+
         #[cfg(feature = "lsp")]
         Arguments {
             verbosity,
@@ -649,6 +670,12 @@ Inspect all the scripts in the workspace without running any rules.
         /// The mode to run the command in.
         #[command(subcommand)]
         mode: ForEachMode,
+    },
+    /// Runs an interactive shell using the workspace environment (experimental).
+    Shell {
+        /// Path to the shell to run. Default is /bin/bash
+        #[arg(long)]
+        path: Option<Arc<str>>,
     },
     /// Run the Spaces language server protocol. Not currently functional.
     #[cfg(feature = "lsp")]
