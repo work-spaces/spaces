@@ -31,7 +31,7 @@
     "add_prefix": "sysroot",
     "link": "Hard",
     "sha256": "8c95e5c9ee4fb907a7e096ee7959ee0a66d1eb44ad27380afec7219dae65175b",
-    "strip_prefix": "gh_2.81.0_windows_amd64",
+    "strip_prefix": "gh_2.81.0_windows_arm64",
     "url": "https://github.com/cli/cli/releases/download/v2.81.0/gh_2.81.0_windows_arm64.zip"
   },
   "windows-x86_64": {
