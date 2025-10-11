@@ -230,8 +230,6 @@ pub fn run_shell_in_workspace(
     evaluate_environment(printer, workspace_arc.clone())
         .context(format_context!("while evaluating starlark env module"))?;
 
-    // Pick a shell — respect user's environment, or fall back to /b
-    // in/sh
     let shell = path.unwrap_or("/bin/bash".into());
 
     // Create the command
@@ -256,9 +254,9 @@ pub fn run_shell_in_workspace(
         .stdout(std::process::Stdio::inherit())
         .stderr(std::process::Stdio::inherit());
 
-    let _ = process
+    process
         .status()
-        .context(format_context!("failed to launch shell"));
+        .context(format_context!("failed to launch shell"))?;
 
     Ok(())
 }
