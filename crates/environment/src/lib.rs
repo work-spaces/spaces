@@ -31,14 +31,22 @@ impl Environment {
         path.into()
     }
 
-    pub fn get_inherited_vars(&self) -> anyhow::Result<HashMap<Arc<str>, Arc<str>>> {
+    fn get_inherited_vars(&self) -> anyhow::Result<HashMap<Arc<str>, Arc<str>>> {
         let mut env_vars = HashMap::new();
         if let Some(inherited) = &self.inherited_vars {
             for key in inherited {
-                let value = std::env::var(key.as_ref()).context(format_context!(
-                    "failed to get env var {key} from calling env to pass to workspace env"
-                ))?;
-                env_vars.insert(key.clone(), value.into());
+                // if key ends in ? it is optional
+                if key.ends_with('?') {
+                    let trimmed_key = key.trim_end_matches('?');
+                    if let Ok(value) = std::env::var(trimmed_key) {
+                        env_vars.insert(trimmed_key.into(), value.into());
+                    }
+                } else {
+                    let value = std::env::var(key.as_ref()).context(format_context!(
+                        "failed to get env var {key} from calling env to pass to workspace env"
+                    ))?;
+                    env_vars.insert(key.clone(), value.into());
+                }
             }
         }
         Ok(env_vars)
@@ -67,7 +75,8 @@ impl Environment {
             .context(format_context!("Failed to get vars"))?;
 
         for (key, value) in vars {
-            let line = format!("export {key}=\"{value}\"\n");
+            let sanitized_key = key.trim_end_matches('?');
+            let line = format!("export {sanitized_key}=\"{value}\"\n");
             content.push_str(&line);
         }
 
