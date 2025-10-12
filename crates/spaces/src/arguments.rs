@@ -34,7 +34,6 @@ impl From<Level> for printer::Level {
 #[derive(Debug, Parser)]
 #[command(version, about, long_about = None)]
 pub struct Arguments {
-    /// The verbosity level of the output.
     #[arg(short, long, default_value = "app")]
     pub verbosity: Level,
     /// Dont show progress bars
@@ -570,11 +569,17 @@ Executes the checkout rules in the specified scripts."#)]
         /// The name of the workspace to create.
         #[arg(long)]
         name: Arc<str>,
-        /// Environment variables to add to the checked out workspace. Use `--env=VAR=VALUE`. Makes workspace not reproducible.
-        #[arg(long)]
+        #[arg(
+            long,
+            help = r#"Environment variables to add to the checked out workspace.
+  Use `--env=VAR=VALUE`. Makes workspace not reproducible."#
+        )]
         env: Vec<Arc<str>>,
-        /// Use --new-branch=<rule> to have spaces create a new branch for the rule. Branch name will match the workspace name.
-        #[arg(long)]
+        #[arg(
+            long,
+            help = r#"Use --new-branch=<rule> to have spaces create a new branch for the rule.
+  Branch name will match the workspace name."#
+        )]
         new_branch: Vec<Arc<str>>,
         /// The path(s) to the `spaces.star`` file containing checkout rules. Paths are processed in order.
         #[arg(long, value_hint = ValueHint::FilePath)]
@@ -582,37 +587,38 @@ Executes the checkout rules in the specified scripts."#)]
         #[arg(
             long,
             help = r#"Scripts to process in the format of `--workflow=<directory>:<script>,<script>,...`.
-`--script` is processed before `--workflow`.
+  `--script` is processed before `--workflow`.
 
-If <directory> has `workflows.spaces.toml`, it will be parsed for shortcuts if only one <script> is passed.
-- `spaces checkout --workflow=workflows:my-shortcut --name=workspace-name`
-  - run scripts listed in `my-shortcut` in `workflows/workflows.spaces.toml`
-- `spaces checkout --workflow=workflows:preload,my-shortcut --name=workspace-name`
-  - run `workflows/preload.spaces.star` then `workflows/my-shortcut.spaces.star`
+  If <directory> has `workflows.spaces.toml`, it will be parsed for shortcuts if only one <script> is passed.
+  - `spaces checkout --workflow=workflows:my-shortcut --name=workspace-name`
+    - run scripts listed in `my-shortcut` in `workflows/workflows.spaces.toml`
+  - `spaces checkout --workflow=workflows:preload,my-shortcut --name=workspace-name`
+    - run `workflows/preload.spaces.star` then `workflows/my-shortcut.spaces.star`
 
-```toml
-my-shortcut = ["preload", "my-shortcut"]
-```
-"#
+  ```toml
+  my-shortcut = ["preload", "my-shortcut"]
+  ```"#
         )]
         workflow: Option<Arc<str>>,
         /// Shortcut for --workflow
         #[arg(long)]
         wf: Option<Arc<str>>,
-        /// Create a lock file for the workspace. This file can be passed on the next checkout as a script to re-create the exact workspace.
-        #[arg(long)]
+        #[arg(
+            long,
+            help = r#"Create a lock file for the workspace.
+  This file can be passed on the next checkout as a script to re-create the exact workspace."#
+        )]
         create_lock_file: bool,
         /// Force install the tools spaces needs to run.
         #[arg(long)]
         force_install_tools: bool,
     },
-    /// Runs checkout rules within an existing workspace. This is experimental. Don't use it.
+    /// Runs checkout rules within an existing workspace (experimental)
     Sync {},
-    #[command(about = r"
-Runs a spaces run rule.
-- `spaces run`: Run all non-optional rules with dependencies
-- `spaces run my-target`: Run a single target plus dependencies
-- `spaces run my-target -- --some-arg --some-other-arg`: pass additional arguments to a rule")]
+    #[command(about = r"Runs a spaces run rule.
+  - `spaces run`: Run all non-optional rules with dependencies
+  - `spaces run my-target`: Run a single target plus dependencies
+  - `spaces run my-target -- --some-arg --some-other-arg`: pass additional arguments to a rule")]
     Run {
         /// The name of the target to run (default is all targets).
         target: Option<Arc<str>>,
@@ -631,12 +637,13 @@ Runs a spaces run rule.
         )]
         extra_rule_args: Vec<Arc<str>>,
     },
-    #[command(about = r"
-Inspect all the scripts in the workspace without running any rules.
-- `spaces inspect`: show the rules that have `help` entries:
-- `spaces inspect <target-name>`: show target plus dependencies
-- `spaces --verbosity=message inspect`: show all rules
-- `spaces --verbosity=debug inspect`: show all rules in detail")]
+    #[command(
+        about = r"Inspect all the scripts in the workspace without running any rules.
+  - `spaces inspect`: show the rules that have `help` entries:
+  - `spaces inspect <target-name>`: show target plus dependencies
+  - `spaces --verbosity=message inspect`: show all rules
+  - `spaces --verbosity=debug inspect`: show all rules in detail"
+    )]
     Inspect {
         /// The name of the target to evaluate (default is all targets).
         target: Option<Arc<str>>,
@@ -653,9 +660,9 @@ Inspect all the scripts in the workspace without running any rules.
         #[arg(long)]
         stardoc: Option<Arc<str>>,
     },
-    /// Generates shell completions for the spaces command.
+    /// Generates shell completions for the spaces command (experimental)
     Completions {
-        /// The shell to generate the completions for
+        /// Target shell
         #[arg(long, value_enum)]
         shell: clap_complete::Shell,
     },
