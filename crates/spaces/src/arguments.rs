@@ -581,7 +581,7 @@ Executes the checkout rules in the specified scripts."#)]
   Branch name will match the workspace name."#
         )]
         new_branch: Vec<Arc<str>>,
-        /// The path(s) to the `spaces.star`` file containing checkout rules. Paths are processed in order.
+        /// The path(s) to the `spaces.star` file containing checkout rules. Paths are processed in order.
         #[arg(long, value_hint = ValueHint::FilePath)]
         script: Vec<Arc<str>>,
         #[arg(
