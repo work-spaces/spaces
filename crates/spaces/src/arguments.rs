@@ -205,10 +205,12 @@ pub fn execute() -> anyhow::Result<()> {
             singleton::set_new_branches(new_branches);
 
             for script_path in script_inputs.iter() {
-                if script_path.as_ref().ends_with("env")
-                    || script_path.ends_with(workspace::ENV_FILE_NAME)
-                {
-                    return Err(format_error!("`env.spaces.star` is a reserved script name",));
+                let script_as_path = std::path::Path::new(script_path.as_ref());
+                if let Some(file_name) = script_as_path.file_name() {
+                    let file_name = file_name.to_string_lossy();
+                    if file_name == "env" || file_name == workspace::ENV_FILE_NAME {
+                        return Err(format_error!("`env.spaces.star` is a reserved script name",));
+                    }
                 }
             }
 
