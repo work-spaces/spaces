@@ -682,7 +682,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .context(format_context!("bad options for which asset rule"))?;
 
         let asset: asset::AddSoftLink = serde_json::from_value(asset.to_json_value()?).context(
-            format_context!("Failed to parse which add_soft_link_asset arguments"),
+            format_context!("Failed to parse add_soft_link_asset arguments"),
         )?;
 
         let rule_name = rule.name.clone();
