@@ -224,7 +224,7 @@ impl HttpArchive {
                 )
             }
             Err(_) => {
-                format!("{full_path_to_archive}/{effective_sha256}")
+                format!("{full_path_to_archive}/{effective_sha256}/{archive_file_name}")
             }
         };
 
