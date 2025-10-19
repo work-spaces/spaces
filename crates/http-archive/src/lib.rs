@@ -224,7 +224,7 @@ impl HttpArchive {
                 )
             }
             Err(_) => {
-                format!("{full_path_to_archive}/{archive_file_name}")
+                format!("{full_path_to_archive}/{effective_sha256}")
             }
         };
 
@@ -514,6 +514,19 @@ impl HttpArchive {
             let file_name = path_to_artifact.file_name().ok_or(format_error!(
                 "No file name found in archive path {path_to_artifact:?}"
             ))?;
+
+            // Check sha256 is correct
+            let file_contents = std::fs::read(path_to_artifact).context(format_context!(
+                "failed to load contents for {:?}",
+                path_to_artifact
+            ))?;
+            let file_digest = sha256::digest(file_contents).to_ascii_lowercase();
+            let expected_digest = self.archive.sha256.to_lowercase();
+            if file_digest != expected_digest {
+                return Err(format_error!(
+                    "SHA256 mismatch for {path_to_artifact:?}, expected {expected_digest}, got {file_digest}"
+                ));
+            }
 
             // the file needs to be moved to the extracted files directory
             // that is where the create links function will look for it
