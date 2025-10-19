@@ -11,6 +11,7 @@ reqwest = { version = "0.12", default-features = false, features = [
 ] }
 tokio = { version = "1", features = ["rt-multi-thread"] }
 which = "7"
+sha256 = "1"
 
 anyhow-source-location.workspace = true
 changes.workspace = true
