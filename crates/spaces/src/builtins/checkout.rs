@@ -639,7 +639,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .context(format_context!("bad options for which asset rule"))?;
 
         let asset: asset::AddWhichAsset = serde_json::from_value(asset.to_json_value()?)
-            .context(format_context!("Failed to parse which asset arguments"))?;
+            .context(format_context!("Failed to parse add_which_asset arguments"))?;
 
         let rule_name = rule.name.clone();
         rules::insert_task(task::Task::new(
@@ -659,8 +659,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for which asset rule"))?;
 
-        let asset: asset::AddHardLink = serde_json::from_value(asset.to_json_value()?)
-            .context(format_context!("Failed to parse which asset arguments"))?;
+        let asset: asset::AddHardLink = serde_json::from_value(asset.to_json_value()?).context(
+            format_context!("Failed to parse add_hard_link_asset arguments"),
+        )?;
 
         let rule_name = rule.name.clone();
         rules::insert_task(task::Task::new(
@@ -680,8 +681,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for which asset rule"))?;
 
-        let asset: asset::AddSoftLink = serde_json::from_value(asset.to_json_value()?)
-            .context(format_context!("Failed to parse which asset arguments"))?;
+        let asset: asset::AddSoftLink = serde_json::from_value(asset.to_json_value()?).context(
+            format_context!("Failed to parse which add_soft_link_asset arguments"),
+        )?;
 
         let rule_name = rule.name.clone();
         rules::insert_task(task::Task::new(
@@ -703,7 +705,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .context(format_context!("bad options for add archive rule"))?;
 
         let archive: http_archive::Archive = serde_json::from_value(archive.to_json_value()?)
-            .context(format_context!("Failed to parse archive arguments"))?;
+            .context(format_context!("Failed to parse add_archive arguments"))?;
 
         add_http_archive(rule, Some(archive)).context(format_context!("Failed to add archive"))?;
         Ok(NoneType)
@@ -741,7 +743,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let add_asset: executor::asset::AddAsset =
             serde_json::from_value(asset.to_json_value()?)
-                .context(format_context!("Failed to parse asset arguments"))?;
+                .context(format_context!("Failed to parse add_asset arguments"))?;
 
         let rule_name = rule.name.clone();
         rules::insert_task(task::Task::new(
@@ -762,7 +764,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         // support JSON, yaml, and toml
         let update_asset: executor::asset::UpdateAsset =
             serde_json::from_value(asset.to_json_value()?)
-                .context(format_context!("Failed to parse archive arguments"))?;
+                .context(format_context!("Failed to parse update_asset arguments"))?;
 
         let rule_name = rule.name.clone();
         rules::insert_task(task::Task::new(
@@ -784,7 +786,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         // support JSON, yaml, and toml
         let environment: environment::Environment = serde_json::from_value(env.to_json_value()?)
-            .context(format_context!("Failed to parse archive arguments"))?;
+            .context(format_context!("Failed to parse update_env arguments"))?;
 
         let update_env = executor::env::UpdateEnv { environment };
 
