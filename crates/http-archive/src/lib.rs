@@ -3,7 +3,8 @@ mod gh;
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 use tokio::io::AsyncWriteExt;
 
@@ -47,6 +48,7 @@ pub struct Archive {
     pub add_prefix: Option<Arc<str>>,
     pub filename: Option<Arc<str>>,
     pub version: Option<Arc<str>>,
+    pub headers: Option<HashMap<Arc<str>, Arc<str>>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -54,10 +56,22 @@ struct Files {
     files: HashSet<Arc<str>>,
 }
 
+pub fn validate_headers(headers: &HashMap<Arc<str>, Arc<str>>) -> anyhow::Result<()> {
+    for (key, value) in headers {
+        // use reqwest to validate headers
+        let _ = reqwest::header::HeaderName::from_str(key)
+            .context(format_context!("While checking header key {}", key))?;
+        let _ = reqwest::header::HeaderValue::from_str(value)
+            .context(format_context!("While checking header value {}", value))?;
+    }
+    Ok(())
+}
+
 pub fn download(
     mut progress: printer::MultiProgressBar,
     url: &str,
     destination: &str,
+    headers: Option<HashMap<Arc<str>, Arc<str>>>,
     runtime: &tokio::runtime::Runtime,
 ) -> anyhow::Result<tokio::task::JoinHandle<anyhow::Result<printer::MultiProgressBar>>> {
     label_logger(&mut progress, url)
@@ -69,12 +83,31 @@ pub fn download(
     let join_handle = runtime.spawn(async move {
         let client = reqwest::ClientBuilder::new()
             .redirect(reqwest::redirect::Policy::limited(20))
-            .build()?;
+            .build()
+            .context(format_context!("Failed to build reqwest client"))?;
 
-        let request = client
-            .get(&url)
-            .header(reqwest::header::USER_AGENT, "wget")
-            .header(reqwest::header::ACCEPT, "*/*");
+        let mut client_headers = HashMap::new();
+
+        client_headers.insert(reqwest::header::USER_AGENT, "wget".into());
+        client_headers.insert(reqwest::header::ACCEPT, "*/*".into());
+
+        label_logger(&mut progress, &url).trace(format!("Headers are: {headers:?}").as_str());
+
+        if let Some(headers) = headers {
+            for (key, value) in headers {
+                let header_name = reqwest::header::HeaderName::from_str(key.as_ref()).context(
+                    format_context!("While converting {} to a standard header", key),
+                )?;
+                label_logger(&mut progress, &url)
+                    .debug(format!("Inserting header as: {header_name:?}").as_str());
+                let _ = client_headers.insert(header_name, value);
+            }
+        }
+
+        let mut request = client.get(&url);
+        for (key, value) in client_headers {
+            request = request.header(key, value.as_ref());
+        }
 
         label_logger(&mut progress, &url).debug(format!("Reqwest request: {request:?}").as_str());
 
@@ -410,6 +443,7 @@ impl HttpArchive {
             progress,
             self.archive.url.as_ref(),
             full_path_to_archive.as_str(),
+            self.archive.headers.clone(),
             runtime,
         )
     }
