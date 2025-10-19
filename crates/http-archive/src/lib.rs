@@ -86,10 +86,20 @@ pub fn download(
             .build()
             .context(format_context!("Failed to build reqwest client"))?;
 
-        let mut client_headers = HashMap::new();
+        let mut client_headers = reqwest::header::HeaderMap::new();
 
-        client_headers.insert(reqwest::header::USER_AGENT, "wget".into());
-        client_headers.insert(reqwest::header::ACCEPT, "*/*".into());
+        client_headers.insert(
+            reqwest::header::USER_AGENT,
+            reqwest::header::HeaderValue::from_str("wget").context(format_context!(
+                "Internal Error: failed to create wget error value"
+            ))?,
+        );
+        client_headers.insert(
+            reqwest::header::ACCEPT,
+            reqwest::header::HeaderValue::from_str("*/*").context(format_context!(
+                "Internal Error: failed to create accept header value"
+            ))?,
+        );
 
         label_logger(&mut progress, &url).trace(format!("Headers are: {headers:?}").as_str());
 
@@ -98,16 +108,16 @@ pub fn download(
                 let header_name = reqwest::header::HeaderName::from_str(key.as_ref()).context(
                     format_context!("While converting {} to a standard header", key),
                 )?;
+                let header_value = reqwest::header::HeaderValue::from_str(value.as_ref()).context(
+                    format_context!("While converting {} to a standard header value", value),
+                )?;
                 label_logger(&mut progress, &url)
                     .debug(format!("Inserting header as: {header_name:?}").as_str());
-                let _ = client_headers.insert(header_name, value);
+                let _ = client_headers.insert(header_name, header_value);
             }
         }
 
-        let mut request = client.get(&url);
-        for (key, value) in client_headers {
-            request = request.header(key, value.as_ref());
-        }
+        let request = client.get(&url).headers(client_headers);
 
         label_logger(&mut progress, &url).debug(format!("Reqwest request: {request:?}").as_str());
 
