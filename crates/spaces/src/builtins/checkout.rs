@@ -837,6 +837,12 @@ fn add_http_archive(
             archive.sha256
         };
 
+        // Validate headers
+        if let Some(headers) = archive.headers.as_ref() {
+            http_archive::validate_headers(headers)
+                .context(format_context!("Failed to validate standard headers"))?;
+        }
+
         let mut globs = archive.globs.unwrap_or_default();
         if let Some(includes) = archive.includes.as_ref() {
             for include in includes {
