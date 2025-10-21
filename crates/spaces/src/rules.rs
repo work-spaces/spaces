@@ -513,6 +513,7 @@ impl State {
 
         #[derive(Serialize)]
         struct TaskInfo {
+            source: String,
             help: String,
         }
         let mut task_info_list: HashMap<Arc<str>, _> = std::collections::HashMap::new();
@@ -555,8 +556,8 @@ impl State {
                             task_name = stripped.strip_prefix("/").unwrap_or(stripped);
                         }
                     }
-
-                    task_info_list.insert(task_name.into(), TaskInfo { help });
+                    let source = label::get_source_from_label(task_name);
+                    task_info_list.insert(task_name.into(), TaskInfo { help, source });
                 }
             }
         }
