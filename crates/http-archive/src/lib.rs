@@ -363,6 +363,10 @@ impl HttpArchive {
         let target = std::path::Path::new(target_path.as_str());
         let original = std::path::Path::new(source.as_str());
 
+        // Hold the mutex to ensure operations are atomic
+        #[allow(clippy::readonly_write_lock)]
+        let _state = get_state().write().unwrap();
+
         if make_read_only == MakeReadOnly::Yes {
             // original file needs to be updated to be read-only
             let original_metadata = std::fs::metadata(original)
@@ -377,10 +381,6 @@ impl HttpArchive {
                 "Failed to set permissions for {original:?}"
             ))?;
         }
-
-        // Hold the mutex to ensure operations are atomic
-        #[allow(clippy::readonly_write_lock)]
-        let _state = get_state().write().unwrap();
 
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent)
