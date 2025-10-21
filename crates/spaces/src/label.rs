@@ -2,6 +2,20 @@ use crate::{singleton, workspace};
 use anyhow_source_location::format_error;
 use std::sync::Arc;
 
+pub fn get_source_from_label(label: &str) -> String {
+    let (source, _rule_name) = label.split_once(":").unwrap_or((label, ""));
+    let source = source.strip_prefix("//").unwrap_or(source);
+    let source_dot = format!("{source}.spaces.star");
+    let source_slash = format!("{source}/spaces.star");
+    if std::path::Path::new(source_dot.as_str()).exists() {
+        source_dot
+    } else if std::path::Path::new(source_slash.as_str()).exists() {
+        source_slash
+    } else {
+        source.to_string()
+    }
+}
+
 pub fn sanitize_rule_for_display(rule_name: Arc<str>) -> Arc<str> {
     // if length > MAX_RULE_NAME_LENGTH show firtst INTRO_LENGTH chars, then ... then the rest
     const MAX_RULE_NAME_LENGTH: usize = 64;
