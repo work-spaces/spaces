@@ -7,9 +7,9 @@ pub fn get_source_from_label(label: &str) -> String {
     let source = source.strip_prefix("//").unwrap_or(source);
     let source_dot = format!("{source}.spaces.star");
     let source_slash = format!("{source}/spaces.star");
-    if std::path::Path::new(source_dot.as_str()).exists() {
+    if std::path::Path::new(&source_dot).exists() {
         source_dot
-    } else if std::path::Path::new(source_slash.as_str()).exists() {
+    } else if std::path::Path::new(&source_slash).exists() {
         source_slash
     } else {
         source.to_string()
