@@ -28,6 +28,12 @@ pub enum ArchiveLink {
     Hard,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum MakeReadOnly {
+    No,
+    Yes,
+}
+
 fn label_logger<'a>(
     progress: &'a mut printer::MultiProgressBar,
     label: &str,
@@ -325,9 +331,12 @@ impl HttpArchive {
                         label_logger(&mut progress_bar, "hardlink").trace(
                             format!("Creating hard link {full_target_path} -> {source}").as_str(),
                         );
-                        Self::create_hard_link(full_target_path.clone(), source.clone()).context(
-                            format_context!("hard link {full_target_path} -> {source}",),
-                        )?;
+                        Self::create_hard_link(
+                            full_target_path.clone(),
+                            source.clone(),
+                            MakeReadOnly::Yes,
+                        )
+                        .context(format_context!("hard link {full_target_path} -> {source}",))?;
                     }
                     ArchiveLink::None => (),
                 }
@@ -346,9 +355,28 @@ impl HttpArchive {
         Ok(())
     }
 
-    pub fn create_hard_link(target_path: String, source: String) -> anyhow::Result<()> {
+    pub fn create_hard_link(
+        target_path: String,
+        source: String,
+        make_read_only: MakeReadOnly,
+    ) -> anyhow::Result<()> {
         let target = std::path::Path::new(target_path.as_str());
         let original = std::path::Path::new(source.as_str());
+
+        if make_read_only == MakeReadOnly::Yes {
+            // original file needs to be updated to be read-only
+            let original_metadata = std::fs::metadata(original)
+                .context(format_context!("Failed to get metadata for {original:?}"))?;
+
+            // Update the metadata to be read-only
+            let mut read_only_permissions = original_metadata.permissions();
+            read_only_permissions.set_readonly(true);
+
+            // Set the permissions to read-only
+            std::fs::set_permissions(original, read_only_permissions).context(format_context!(
+                "Failed to set permissions for {original:?}"
+            ))?;
+        }
 
         // Hold the mutex to ensure operations are atomic
         #[allow(clippy::readonly_write_lock)]
