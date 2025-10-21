@@ -134,13 +134,16 @@ impl AddWhichAsset {
 
         let source = path.to_string_lossy().to_string();
 
-        http_archive::HttpArchive::create_hard_link(destination.clone(), source).context(
-            format_context!(
-                "Failed to create hard link from {} to {}",
-                path.display(),
-                destination
-            ),
-        )?;
+        http_archive::HttpArchive::create_hard_link(
+            destination.clone(),
+            source,
+            http_archive::MakeReadOnly::No,
+        )
+        .context(format_context!(
+            "Failed to create hard link from {} to {}",
+            path.display(),
+            destination
+        ))?;
 
         Ok(())
     }
@@ -165,13 +168,16 @@ impl AddHardLink {
         let destination = format!("{}/{}", workspace, self.destination);
         let source = self.source.clone();
 
-        http_archive::HttpArchive::create_hard_link(destination.clone(), source.clone()).context(
-            format_context!(
-                "Failed to create hard link from {} to {}",
-                source,
-                destination
-            ),
-        )?;
+        http_archive::HttpArchive::create_hard_link(
+            destination.clone(),
+            source.clone(),
+            http_archive::MakeReadOnly::No,
+        )
+        .context(format_context!(
+            "Failed to create hard link from {} to {}",
+            source,
+            destination
+        ))?;
 
         Ok(())
     }
