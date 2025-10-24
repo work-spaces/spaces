@@ -8,6 +8,8 @@ use crate::{lsp_context, singleton};
 #[cfg(feature = "lsp")]
 use itertools::Itertools;
 
+pub use evaluator::IsExecuteTasks;
+
 pub enum IsClearInputs {
     No,
     Yes,
@@ -268,6 +270,7 @@ pub fn run_starlark_modules_in_workspace(
     is_clear_inputs: IsClearInputs,
     run_workspace: RunWorkspace,
     is_create_lock_file: IsCreateLockFile,
+    is_execute_tasks: IsExecuteTasks,
 ) -> anyhow::Result<()> {
     let workspace = get_workspace(
         printer,
@@ -284,8 +287,15 @@ pub fn run_starlark_modules_in_workspace(
             let target = target.map(|e| workspace_arc.read().transform_target_path(e));
             workspace_arc.write().target = target.clone();
             let modules = workspace_arc.read().modules.clone();
-            evaluator::run_starlark_modules(printer, workspace_arc.clone(), modules, phase, target)
-                .context(format_context!("while executing workspace rules"))?
+            evaluator::run_starlark_modules(
+                printer,
+                workspace_arc.clone(),
+                modules,
+                phase,
+                target,
+                is_execute_tasks,
+            )
+            .context(format_context!("while executing workspace rules"))?
         }
         RunWorkspace::Script(scripts) => {
             for (name, _) in scripts.iter() {
@@ -295,8 +305,15 @@ pub fn run_starlark_modules_in_workspace(
             workspace_arc.write().is_create_lock_file = is_create_lock_file.into();
             workspace_arc.write().digest = workspace::calculate_digest(&scripts);
 
-            evaluator::run_starlark_modules(printer, workspace_arc.clone(), scripts, phase, None)
-                .context(format_context!("while evaulating starlark modules"))?;
+            evaluator::run_starlark_modules(
+                printer,
+                workspace_arc.clone(),
+                scripts,
+                phase,
+                None,
+                is_execute_tasks,
+            )
+            .context(format_context!("while evaulating starlark modules"))?;
 
             workspace_arc
                 .read()
@@ -432,6 +449,7 @@ pub fn checkout(
         IsClearInputs::No,
         RunWorkspace::Script(scripts),
         create_lock_file,
+        IsExecuteTasks::Yes,
     )
     .context(format_context!(
         "while evaulating starklark modules for checkout"

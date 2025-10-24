@@ -1,4 +1,4 @@
-use crate::{docs, evaluator, runner, singleton, task, tools, workspace};
+use crate::{completions, docs, evaluator, rules, runner, singleton, task, tools, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
@@ -253,6 +253,7 @@ pub fn execute() -> anyhow::Result<()> {
                 runner::IsClearInputs::Yes,
                 runner::RunWorkspace::Target(None, vec![]),
                 runner::IsCreateLockFile::No,
+                runner::IsExecuteTasks::Yes,
             )
             .context(format_context!("during runner sync"))?;
         }
@@ -410,6 +411,7 @@ pub fn execute() -> anyhow::Result<()> {
                 forget_inputs.into(),
                 runner::RunWorkspace::Target(target, extra_rule_args),
                 runner::IsCreateLockFile::No,
+                runner::IsExecuteTasks::Yes,
             )
             .context(format_context!("while executing run rules"))?;
         }
@@ -480,6 +482,7 @@ pub fn execute() -> anyhow::Result<()> {
                 runner::IsClearInputs::No,
                 runner::RunWorkspace::Target(target, vec![]),
                 runner::IsCreateLockFile::No,
+                runner::IsExecuteTasks::Yes,
             )
             .context(format_context!("while executing run rules"))?;
         }
@@ -490,7 +493,7 @@ pub fn execute() -> anyhow::Result<()> {
             show_elapsed_time,
             ci,
             rescan,
-            commands: Commands::Completions { shell },
+            commands: Commands::Completions { shell, output },
         } => {
             handle_verbosity(
                 &mut stdout_printer,
@@ -501,12 +504,32 @@ pub fn execute() -> anyhow::Result<()> {
                 show_elapsed_time,
             );
 
-            clap_complete::generate(
+            runner::run_starlark_modules_in_workspace(
+                &mut stdout_printer,
+                task::Phase::Inspect,
+                None,
+                runner::IsClearInputs::No,
+                runner::RunWorkspace::Target(None, vec![]),
+                runner::IsCreateLockFile::No,
+                runner::IsExecuteTasks::No,
+            )
+            .context(format_context!("while executing run rules"))?;
+
+            // rules are now available
+            let run_targets =
+                rules::get_run_targets().context(format_context!("Failed to get run targets"))?;
+
+            let completion_content = completions::generate_workspace_completions(
+                &Arguments::command(),
                 shell,
-                &mut Arguments::command(),
-                "spaces",
-                &mut std::io::stdout(),
-            );
+                run_targets,
+            )
+            .context(format_context!("Failed to generate workspace completions"))?;
+
+            //write content to stdout
+            std::fs::write(std::path::Path::new(output.as_ref()), completion_content).context(
+                format_context!("Failed to write workspace completions to file"),
+            )?;
         }
 
         Arguments {
@@ -667,6 +690,9 @@ Executes the checkout rules in the specified scripts."#)]
         /// Target shell
         #[arg(long, value_enum)]
         shell: clap_complete::Shell,
+        /// Output file path
+        #[arg(long)]
+        output: Arc<str>,
     },
     /// Shows the documentation for spaces starlark modules.
     Docs {

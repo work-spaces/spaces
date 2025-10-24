@@ -27,6 +27,12 @@ pub enum WithRules {
     Yes,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum IsExecuteTasks {
+    No,
+    Yes,
+}
+
 pub fn get_dialect() -> Dialect {
     Dialect {
         enable_top_level_stmt: true,
@@ -648,6 +654,7 @@ pub fn run_starlark_modules(
     modules: Vec<(Arc<str>, Arc<str>)>,
     phase: task::Phase,
     target: Option<Arc<str>>,
+    is_execute_tasks: IsExecuteTasks,
 ) -> anyhow::Result<()> {
     let is_dirty = workspace.read().is_dirty;
     let is_always_evaluate = workspace.read().settings.bin.is_always_evaluate;
@@ -669,7 +676,10 @@ pub fn run_starlark_modules(
         star_logger(printer).trace(format!("tasks {}", rules::get_pretty_tasks()).as_str());
     }
 
-    execute_tasks(printer, workspace, phase, target).context(format_context!("executing tasks"))?;
+    if is_execute_tasks == IsExecuteTasks::Yes {
+        execute_tasks(printer, workspace, phase, target)
+            .context(format_context!("executing tasks"))?;
+    }
     Ok(())
 }
 
