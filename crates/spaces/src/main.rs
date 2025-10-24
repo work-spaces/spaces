@@ -3,6 +3,7 @@ extern crate starlark;
 
 mod arguments;
 mod builtins;
+mod completions;
 mod docs;
 mod evaluator;
 mod executor;

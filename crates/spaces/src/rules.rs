@@ -601,6 +601,23 @@ impl State {
         Ok(())
     }
 
+    fn get_run_targets(&self) -> anyhow::Result<Vec<Arc<str>>> {
+        let tasks = self.tasks.read();
+
+        let run_rules = tasks
+            .values()
+            .filter_map(|task| {
+                if task.phase == task::Phase::Run {
+                    Some(task.rule.name.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        Ok(run_rules)
+    }
+
     fn execute(
         &self,
         printer: &mut printer::Printer,
@@ -760,6 +777,11 @@ pub fn show_tasks(
 ) -> anyhow::Result<()> {
     let state = get_state().read();
     state.show_tasks(printer, phase, target, filter, strip_prefix)
+}
+
+pub fn get_run_targets() -> anyhow::Result<Vec<Arc<str>>> {
+    let state = get_state().read();
+    state.get_run_targets()
 }
 
 pub fn export_tasks_as_mardown(path: &str) -> anyhow::Result<()> {
