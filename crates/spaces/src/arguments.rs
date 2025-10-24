@@ -528,7 +528,7 @@ pub fn execute() -> anyhow::Result<()> {
 
             //write content to stdout
             std::fs::write(std::path::Path::new(output.as_ref()), completion_content).context(
-                format_context!("Failed to write workspace completions to file"),
+                format_context!("Failed to write workspace completions to file {output}"),
             )?;
         }
 
