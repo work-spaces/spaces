@@ -472,29 +472,27 @@ pub fn checkout(
         format!("Is checkout result error? {}", checkout_result.is_err()).as_str(),
     )?;
     if checkout_result.is_err() {
-        match checkout_cleanup {
-            CheckoutCleanup::Workspace | CheckoutCleanup::WorkspaceContents => {
+        {
+            printer.log(
+                printer::Level::Debug,
+                format!("Cleaning up workspace {absolute_path_to_workspace}").as_str(),
+            )?;
+
+            std::fs::remove_dir_all(absolute_path_to_workspace.as_ref())
+                .context(format_context!("while cleaning up workspace"))?;
+
+            // re-create the diretory if it previously existed
+            if checkout_cleanup == CheckoutCleanup::WorkspaceContents {
                 printer.log(
                     printer::Level::Debug,
-                    format!("Cleaning up workspace {absolute_path_to_workspace}").as_str(),
+                    format!(
+                        "Restoring existing workspace folder {absolute_path_to_workspace}",
+
+                    )
+                    .as_str(),
                 )?;
-
-                std::fs::remove_dir_all(absolute_path_to_workspace.as_ref())
-                    .context(format_context!("while cleaning up workspace"))?;
-
-                // re-create the diretory if it previously existed
-                if checkout_cleanup == CheckoutCleanup::WorkspaceContents {
-                    printer.log(
-                        printer::Level::Debug,
-                        format!(
-                            "Restoring existing workspace folder {absolute_path_to_workspace}",
-
-                        )
-                        .as_str(),
-                    )?;
-                    std::fs::create_dir(absolute_path_to_workspace.as_ref())
-                        .context(format_context!("while creating workspace"))?;
-                }
+                std::fs::create_dir(absolute_path_to_workspace.as_ref())
+                    .context(format_context!("while creating workspace"))?;
             }
         }
     }
