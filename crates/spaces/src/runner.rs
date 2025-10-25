@@ -467,10 +467,6 @@ pub fn checkout(
         "while evaulating starklark modules for checkout"
     ));
 
-    printer.log(
-        printer::Level::Debug,
-        format!("Is checkout result error? {}", checkout_result.is_err()).as_str(),
-    )?;
     if checkout_result.is_err() {
         {
             printer.log(
