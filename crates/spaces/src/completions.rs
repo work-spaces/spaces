@@ -29,7 +29,7 @@ pub fn generate_workspace_completions(
 
                     sc_clone = sc_clone.arg(
                         clap::Arg::new("target")
-                            .help(arg.get_help().map(|help| help.clone()).unwrap_or_default())
+                            .help(arg.get_help().cloned().unwrap_or_default())
                             .num_args(1)
                             .value_parser(targets_value_parser),
                     );

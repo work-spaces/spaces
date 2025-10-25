@@ -396,8 +396,14 @@ pub fn checkout(
     script: Vec<Arc<str>>,
     create_lock_file: IsCreateLockFile,
 ) -> anyhow::Result<()> {
+    #[derive(Debug, Clone, PartialEq)]
+    enum CheckoutCleanup {
+        Workspace,
+        WorkspaceContents,
+    }
+
     // Checkout will fail if the target dir exists and is not empty
-    if std::path::Path::new(name.as_ref()).exists() {
+    let checkout_cleanup = if std::path::Path::new(name.as_ref()).exists() {
         let dir = std::fs::read_dir(name.as_ref())
             .context(format_context!("while reading directory {name}"))?;
         if dir.count() > 0 {
@@ -405,7 +411,13 @@ pub fn checkout(
                 "checkout directory must be non-existent or empty"
             ));
         }
-    }
+
+        // on cleanup, delete only the contents of the directory
+        CheckoutCleanup::WorkspaceContents
+    } else {
+        // on cleanup, delete the entire directory since it doesn't exist yet
+        CheckoutCleanup::Workspace
+    };
 
     std::fs::create_dir_all(name.as_ref())
         .context(format_context!("while creating workspace directory {name}"))?;
@@ -442,7 +454,7 @@ pub fn checkout(
     let target_workspace_directory = current_working_directory.join(name.as_ref());
     let absolute_path_to_workspace: Arc<str> = target_workspace_directory.to_string_lossy().into();
 
-    run_starlark_modules_in_workspace(
+    let checkout_result = run_starlark_modules_in_workspace(
         printer,
         task::Phase::Checkout,
         Some(absolute_path_to_workspace.clone()),
@@ -453,7 +465,39 @@ pub fn checkout(
     )
     .context(format_context!(
         "while evaulating starklark modules for checkout"
-    ))?;
+    ));
 
-    Ok(())
+    printer.log(
+        printer::Level::Debug,
+        format!("Is checkout result error? {}", checkout_result.is_err()).as_str(),
+    )?;
+    if checkout_result.is_err() {
+        match checkout_cleanup {
+            CheckoutCleanup::Workspace | CheckoutCleanup::WorkspaceContents => {
+                printer.log(
+                    printer::Level::Debug,
+                    format!("Cleaning up workspace {absolute_path_to_workspace}").as_str(),
+                )?;
+
+                std::fs::remove_dir_all(absolute_path_to_workspace.as_ref())
+                    .context(format_context!("while cleaning up workspace"))?;
+
+                // re-create the diretory if it previously existed
+                if checkout_cleanup == CheckoutCleanup::WorkspaceContents {
+                    printer.log(
+                        printer::Level::Debug,
+                        format!(
+                            "Restoring existing workspace folder {absolute_path_to_workspace}",
+
+                        )
+                        .as_str(),
+                    )?;
+                    std::fs::create_dir(absolute_path_to_workspace.as_ref())
+                        .context(format_context!("while creating workspace"))?;
+                }
+            }
+        }
+    }
+
+    checkout_result
 }
