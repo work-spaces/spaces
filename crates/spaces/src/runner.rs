@@ -464,7 +464,7 @@ pub fn checkout(
         IsExecuteTasks::Yes,
     )
     .context(format_context!(
-        "while evaulating starklark modules for checkout"
+        "while evaluating starlark modules for checkout"
     ));
 
     if checkout_result.is_err() {
