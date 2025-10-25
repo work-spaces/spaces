@@ -123,6 +123,7 @@ pub fn execute() -> anyhow::Result<()> {
                     wf,
                     create_lock_file,
                     force_install_tools,
+                    keep_workspace_on_failure,
                 },
         } => {
             handle_verbosity(
@@ -222,6 +223,7 @@ pub fn execute() -> anyhow::Result<()> {
                 name,
                 script_inputs,
                 create_lock_file.into(),
+                keep_workspace_on_failure,
             )
             .context(format_context!("during runner checkout"))?;
         }
@@ -637,6 +639,9 @@ Executes the checkout rules in the specified scripts."#)]
         /// Force install the tools spaces needs to run.
         #[arg(long)]
         force_install_tools: bool,
+        /// Do not delete the workspace directory if checkout fails.
+        #[arg(long)]
+        keep_workspace_on_failure: bool,
     },
     /// Runs checkout rules within an existing workspace (experimental)
     Sync {},

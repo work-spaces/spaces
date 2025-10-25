@@ -395,6 +395,7 @@ pub fn checkout(
     name: Arc<str>,
     script: Vec<Arc<str>>,
     create_lock_file: IsCreateLockFile,
+    keep_workspace_on_failure: bool,
 ) -> anyhow::Result<()> {
     #[derive(Debug, Clone, PartialEq)]
     enum CheckoutCleanup {
@@ -467,7 +468,7 @@ pub fn checkout(
         "while evaluating starlark modules for checkout"
     ));
 
-    if checkout_result.is_err() {
+    if !keep_workspace_on_failure && checkout_result.is_err() {
         {
             printer.log(
                 printer::Level::Debug,
@@ -481,11 +482,8 @@ pub fn checkout(
             if checkout_cleanup == CheckoutCleanup::WorkspaceContents {
                 printer.log(
                     printer::Level::Debug,
-                    format!(
-                        "Restoring existing workspace folder {absolute_path_to_workspace}",
-
-                    )
-                    .as_str(),
+                    format!("Restoring existing workspace folder {absolute_path_to_workspace}",)
+                        .as_str(),
                 )?;
                 std::fs::create_dir(absolute_path_to_workspace.as_ref())
                     .context(format_context!("while creating workspace"))?;
