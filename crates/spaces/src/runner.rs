@@ -483,13 +483,13 @@ pub fn checkout(
                 )?;
                 let contents = std::fs::read_dir(absolute_path_to_workspace.as_ref()).context(
                     format_context!(
-                        "while reading workspace contents for failed workspace{absolute_path_to_workspace}"
+                        "while reading workspace contents for failed workspace {absolute_path_to_workspace}"
                     ),
                 )?;
 
                 for entry in contents {
                     let entry = entry.context(format_context!(
-                        "while reading workspace entry in failed workspace{absolute_path_to_workspace}"
+                        "while reading workspace entry in failed workspace {absolute_path_to_workspace}"
                     ))?;
                     let path = entry.path();
                     if path.is_file() {
