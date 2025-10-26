@@ -1,0 +1,71 @@
+
+
+[workspace]
+resolver = "2"
+exclude = ["zed-starlark"]
+members = [
+    "spaces/crates/spaces",
+    "spaces/crates/copy",
+    "spaces/crates/graph",
+    "spaces/crates/git",
+    "spaces/crates/platform",
+    "spaces/crates/starstd",
+    "spaces/crates/store",
+    "spaces/crates/changes",
+    "spaces/crates/environment",
+    "spaces/crates/lock",
+    "spaces/crates/logger",
+    "spaces/crates/suggest",
+    "spaces/crates/ws",
+    "spaces/crates/workflows",
+]
+
+[workspace.dependencies]
+anyhow-source-location = { git = "https://github.com/work-spaces/anyhow-source-location", rev = "v0.1.0" }
+anyhow = "1.0.95"
+serde = { version = "1", features = ["derive", "rc"] }
+starlark = "0.13"
+state = "0.6.0"
+petgraph = "0.6.5"
+serde_json = "1"
+glob-match = "0.2.1"
+url = "2.5.2"
+toml = "0.9"
+serde_yaml = "0.9"
+strum = { version = "0.26", features = ["derive"] }
+
+easy-archiver = { path = "./easy-archiver", features = ["printer"] }
+
+capsule.path = "spaces/crates/capsule"
+changes.path = "spaces/crates/changes"
+copy.path = "spaces/crates/copy"
+environment.path = "spaces/crates/environment"
+git.path = "spaces/crates/git"
+graph.path = "spaces/crates/graph"
+http-archive.path = "spaces/crates/http-archive"
+inputs.path = "spaces/crates/inputs"
+lock.path = "spaces/crates/lock"
+logger.path = "spaces/crates/logger"
+platform.path = "spaces/crates/platform"
+printer.path = "printer"
+rule.path = "spaces/crates/rule"
+starstd.path = "spaces/crates/starstd"
+suggest.path = "spaces/crates/suggest"
+store.path = "spaces/crates/store"
+ws.path = "spaces/crates/ws"
+workflows.path = "spaces/crates/workflows"
+
+[profile.dev]
+opt-level = 3
+lto = false
+debug = true
+strip = false
+codegen-units = 16
+
+[profile.release]
+opt-level = "z"
+lto = true
+debug = false
+panic = "abort"
+strip = true
+codegen-units = 1
