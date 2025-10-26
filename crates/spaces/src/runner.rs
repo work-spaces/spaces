@@ -475,23 +475,43 @@ pub fn checkout(
 
     if !keep_workspace_on_failure && checkout_result.is_err() {
         {
-            printer.log(
-                printer::Level::Debug,
-                format!("Cleaning up workspace {absolute_path_to_workspace}").as_str(),
-            )?;
-
-            std::fs::remove_dir_all(absolute_path_to_workspace.as_ref())
-                .context(format_context!("while cleaning up workspace"))?;
-
-            // re-create the diretory if it previously existed
             if checkout_cleanup == CheckoutCleanup::WorkspaceContents {
                 printer.log(
                     printer::Level::Debug,
                     format!("Restoring existing workspace folder {absolute_path_to_workspace}",)
                         .as_str(),
                 )?;
-                std::fs::create_dir(absolute_path_to_workspace.as_ref())
-                    .context(format_context!("while creating workspace"))?;
+                let contents = std::fs::read_dir(absolute_path_to_workspace.as_ref()).context(
+                    format_context!(
+                        "while reading workspace contents for failed workspace{absolute_path_to_workspace}"
+                    ),
+                )?;
+
+                for entry in contents {
+                    let entry = entry.context(format_context!(
+                        "while reading workspace entry in failed workspace{absolute_path_to_workspace}"
+                    ))?;
+                    let path = entry.path();
+                    if path.is_file() {
+                        std::fs::remove_file(path).context(format_context!(
+                            "while removing file in failed workspace {absolute_path_to_workspace}"
+                        ))?;
+                    } else if path.is_dir() {
+                        std::fs::remove_dir_all(path)
+                            .context(format_context!("while removing directory in failed workspace {absolute_path_to_workspace}"))?;
+                    }
+                }
+            } else {
+                printer.log(
+                    printer::Level::Debug,
+                    format!("Cleaning up workspace {absolute_path_to_workspace}").as_str(),
+                )?;
+
+                std::fs::remove_dir_all(absolute_path_to_workspace.as_ref()).context(
+                    format_context!(
+                        "while cleaning up failed workspace {absolute_path_to_workspace}"
+                    ),
+                )?;
             }
         }
     }
