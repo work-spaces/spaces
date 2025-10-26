@@ -394,6 +394,7 @@ pub fn checkout(
     printer: &mut printer::Printer,
     name: Arc<str>,
     script: Vec<Arc<str>>,
+    checkout_repo_script: Option<Arc<str>>,
     create_lock_file: IsCreateLockFile,
     keep_workspace_on_failure: bool,
 ) -> anyhow::Result<()> {
@@ -443,6 +444,10 @@ pub fn checkout(
         )?;
 
         scripts.push((file_name, one_script_contents.into()));
+    }
+
+    if let Some(checkout_repo_script) = checkout_repo_script {
+        scripts.push(("checkout.spaces.star".into(), checkout_repo_script));
     }
 
     std::fs::write(format!("{}/{}", name, workspace::ENV_FILE_NAME), "").context(

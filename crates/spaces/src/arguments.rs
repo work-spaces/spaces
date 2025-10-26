@@ -73,6 +73,23 @@ fn handle_verbosity(
     }
 }
 
+fn set_workspace_env(env: Vec<Arc<str>>) -> anyhow::Result<()> {
+    for env_pair in env.iter() {
+        let parts = env_pair.split_once('=');
+        if parts.is_none() {
+            return Err(format_error!(
+                "Invalid env format: {env_pair}.\n Use `--env=VAR=VALUE`"
+            ));
+        }
+    }
+
+    singleton::set_args_env(env).context(format_context!(
+        "while setting environment variables for checkout rules"
+    ))?;
+
+    Ok(())
+}
+
 pub fn execute() -> anyhow::Result<()> {
     if std::env::args().len() == 1 {
         let mut stdin_contents = String::new();
@@ -138,22 +155,11 @@ pub fn execute() -> anyhow::Result<()> {
             let mut script_inputs: Vec<Arc<str>> = vec![];
             script_inputs.extend(script.clone());
 
-            for env_pair in env.iter() {
-                let parts = env_pair.split_once('=');
-                if parts.is_none() {
-                    return Err(format_error!(
-                        "Invalid env format: {env_pair}.\n Use `--env=VAR=VALUE`"
-                    ));
-                }
-            }
-
-            singleton::set_args_env(env).context(format_context!(
-                "while setting environment variables for checkout rules"
-            ))?;
-
             if wf.is_some() && workflow.is_some() {
                 return Err(format_error!("Cannot use both --workflow and --wf"));
             }
+
+            set_workspace_env(env).context(format_context!("While checking out workflow"))?;
 
             if let Some(workflow) = workflow.or(wf) {
                 let parts: Vec<_> = workflow.split(':').collect();
@@ -222,8 +228,84 @@ pub fn execute() -> anyhow::Result<()> {
                 &mut stdout_printer,
                 name,
                 script_inputs,
+                None,
                 create_lock_file.into(),
                 keep_workspace_on_failure,
+            )
+            .context(format_context!("during runner checkout"))?;
+        }
+
+        Arguments {
+            verbosity,
+            hide_progress_bars,
+            show_elapsed_time,
+            ci,
+            rescan,
+            commands:
+                Commands::CheckoutRepo {
+                    name,
+                    rule_name,
+                    url,
+                    rev,
+                    clone,
+                    env,
+                    create_lock_file,
+                    force_install_tools,
+                },
+        } => {
+            handle_verbosity(
+                &mut stdout_printer,
+                verbosity.into(),
+                ci,
+                rescan,
+                hide_progress_bars,
+                show_elapsed_time,
+            );
+
+            set_workspace_env(env).context(format_context!("While checking out repo"))?;
+            let clone = clone.unwrap_or(git::Clone::Default);
+
+            // get the repo name from the url
+            let repo_name = if let Some(rule_name) = rule_name {
+                rule_name
+            } else {
+                let repo_name = url
+                    .split('/')
+                    .next_back()
+                    .context(format_context!("URL is mal-formed {url}"))?;
+
+                repo_name.strip_suffix(".git").unwrap_or(repo_name).into()
+            };
+
+            // remove the .git extension
+
+            let script: Arc<str> = format!(
+                r#"
+checkout.add_repo(
+    rule = {{
+        "name": "{repo_name}"
+    }},
+    repo = {{
+        "url": "{url}",
+        "rev": "{rev}",
+        "checkout": "Revision",
+        "clone": "{clone}"
+    }}
+)
+"#
+            )
+            .into();
+
+            tools::install_tools(&mut stdout_printer, force_install_tools)
+                .context(format_context!("while installing tools"))?;
+
+            runner::checkout(
+                &mut stdout_printer,
+                name,
+                vec![],
+                Some(script),
+                create_lock_file.into(),
+                false,
             )
             .context(format_context!("during runner checkout"))?;
         }
@@ -642,6 +724,45 @@ Executes the checkout rules in the specified scripts."#)]
         /// Do not delete the workspace directory if checkout fails.
         #[arg(long)]
         keep_workspace_on_failure: bool,
+    },
+    #[command(about = r#"
+  Uses git to clone a repository in a new workspace and evaluates the top level [*]spaces.star files.
+  This can be used if the repository defines all of its own dependencies."#)]
+    CheckoutRepo {
+        #[arg(long)]
+        /// The new workspace name.
+        name: Arc<str>,
+        #[arg(
+            long,
+            help = r#"The name to give to the repo checkout rule.
+  This will also be the name of the directory where the repository is cloned.
+  The default behavior is to infer the name from the URL."#
+        )]
+        rule_name: Option<Arc<str>>,
+        /// The URL of the repository to clone.
+        #[arg(long)]
+        url: Arc<str>,
+        /// The revisiont (brach/commit/tag) to checkout
+        #[arg(long)]
+        rev: Arc<str>,
+        /// The method to use for cloning the repository (default is a standard clone).
+        #[arg(long)]
+        clone: Option<git::Clone>,
+        #[arg(
+            long,
+            help = r#"Environment variables to add to the checked out workspace.
+  Use `--env=VAR=VALUE`. Makes workspace not reproducible."#
+        )]
+        env: Vec<Arc<str>>,
+        #[arg(
+            long,
+            help = r#"Create a lock file for the workspace.
+  This file can be passed on the next checkout as a script to re-create the exact workspace."#
+        )]
+        create_lock_file: bool,
+        /// Force install the tools spaces needs to run.
+        #[arg(long)]
+        force_install_tools: bool,
     },
     /// Runs checkout rules within an existing workspace (experimental)
     Sync {},
