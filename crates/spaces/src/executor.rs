@@ -106,6 +106,8 @@ impl Task {
                     }
                 }
             }
+            // sorts the modules lexicographically
+            result.new_modules.sort();
         }
         Ok(result)
     }
