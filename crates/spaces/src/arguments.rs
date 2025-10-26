@@ -742,7 +742,7 @@ Executes the checkout rules in the specified scripts."#)]
         /// The URL of the repository to clone.
         #[arg(long)]
         url: Arc<str>,
-        /// The revisiont (brach/commit/tag) to checkout
+        /// The revision (branch/commit/tag) to checkout
         #[arg(long)]
         rev: Arc<str>,
         /// The method to use for cloning the repository (default is a standard clone).
