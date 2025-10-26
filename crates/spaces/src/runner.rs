@@ -478,8 +478,10 @@ pub fn checkout(
             if checkout_cleanup == CheckoutCleanup::WorkspaceContents {
                 printer.log(
                     printer::Level::Debug,
-                    format!("Removing contents from existing workspace {absolute_path_to_workspace}",)
-                        .as_str(),
+                    format!(
+                        "Removing contents from existing workspace {absolute_path_to_workspace}",
+                    )
+                    .as_str(),
                 )?;
                 let contents = std::fs::read_dir(absolute_path_to_workspace.as_ref()).context(
                     format_context!(
