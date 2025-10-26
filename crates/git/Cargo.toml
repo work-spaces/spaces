@@ -6,6 +6,7 @@ edition = "2021"
 
 [dependencies]
 semver = "1"
+clap = { version = "4", features = ["derive"] }
 
 anyhow-source-location.workspace = true
 anyhow.workspace = true
