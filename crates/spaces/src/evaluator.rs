@@ -436,7 +436,7 @@ pub fn evaluate_starlark_modules(
                 let hash = blake3::hash(content.as_bytes()).to_string();
                 if !known_modules.contains(&hash) {
                     known_modules.insert(hash);
-                    module_queue.push_back((module.clone(), content.clone().into()));
+                    module_queue.push_back((module, content.into()));
                 }
             }
         }
