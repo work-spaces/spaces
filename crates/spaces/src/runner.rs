@@ -447,7 +447,17 @@ pub fn checkout(
     }
 
     if let Some(checkout_repo_script) = checkout_repo_script {
-        scripts.push(("checkout.spaces.star".into(), checkout_repo_script));
+        scripts.push((
+            workspace::CHECKOUT_FILE_NAME.into(),
+            checkout_repo_script.clone(),
+        ));
+        std::fs::write(
+            format!("{name}/{}", workspace::CHECKOUT_FILE_NAME),
+            checkout_repo_script.as_ref(),
+        )
+        .context(format_context!(
+            "while writing script file checkout.spaces.star to workspace"
+        ))?;
     }
 
     std::fs::write(format!("{}/{}", name, workspace::ENV_FILE_NAME), "").context(
