@@ -456,7 +456,8 @@ pub fn checkout(
             checkout_repo_script.as_ref(),
         )
         .context(format_context!(
-            "while writing script file checkout.spaces.star to workspace"
+            "while writing script file {} to workspace",
+            workspace::CHECKOUT_FILE_NAME
         ))?;
     }
 
