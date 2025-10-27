@@ -204,6 +204,13 @@ run_add_exec(
 )
 
 run_add_exec(
+    "build",
+    command = "cargo",
+    args = ["build"],
+    help = "Run cargo build on workspace",
+)
+
+run_add_exec(
     "clippy",
     command = "cargo",
     args = ["clippy"],
