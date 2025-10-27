@@ -419,14 +419,24 @@ pub fn evaluate_starlark_modules(
                 new_modules.push((module, content));
             }
 
-            // sort new modules by the first item
+            // sorts the modules lexicographically by the filename
             new_modules.sort_by(|first, second| first.0.cmp(&second.0));
+            star_logger(printer).debug(
+                format!(
+                    "Adding new modules: {:?}",
+                    new_modules
+                        .iter()
+                        .map(|(name, _content)| name)
+                        .collect::<Vec<_>>()
+                )
+                .as_str(),
+            );
 
             for (module, content) in new_modules {
                 let hash = blake3::hash(content.as_bytes()).to_string();
                 if !known_modules.contains(&hash) {
                     known_modules.insert(hash);
-                    module_queue.push_front((module, content.into()));
+                    module_queue.push_back((module.clone(), content.clone().into()));
                 }
             }
         }
