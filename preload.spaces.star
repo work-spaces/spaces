@@ -8,8 +8,8 @@ checkout.add_repo(
         "url": "https://github.com/work-spaces/sdk",
         "rev": "v0.3.13",
         "checkout": "Revision",
-        "clone": "Default"
-    }
+        "clone": "Default",
+    },
 )
 
 checkout.add_repo(
@@ -18,6 +18,6 @@ checkout.add_repo(
         "url": "https://github.com/work-spaces/packages",
         "rev": "v0.2.19",
         "checkout": "Revision",
-        "clone": "Default"
-    }
+        "clone": "Default",
+    },
 )

@@ -3,27 +3,30 @@ Spaces starlark checkout script to make changes to spaces, printer, and easy-arc
 With VSCode/Zed integration
 """
 
-load("//@star/sdk/star/spaces-env.star", "spaces_working_env")
+load("//@star/packages/star/buildifier.star", "buildifier_add")
+load("//@star/packages/star/rust.star", "rust_add")
+load("//@star/packages/star/sccache.star", "sccache_add")
 load(
     "//@star/sdk/star/checkout.star",
     "checkout_add_asset",
-    "checkout_add_repo",
     "checkout_add_hard_link_asset",
+    "checkout_add_repo",
     "checkout_update_asset",
 )
-load("//@star/packages/star/rust.star", "rust_add")
-load("//@star/packages/star/buildifier.star", "buildifier_add")
-load("//@star/packages/star/sccache.star", "sccache_add")
-load("//@star/sdk/star/run.star",
+load(
+    "//@star/sdk/star/run.star",
     "run_add_exec",
-    "run_add_exec_test")
+    "run_add_exec_test",
+)
 load("//@star/sdk/star/shell.star", "shell")
+load("//@star/sdk/star/spaces-env.star", "spaces_working_env")
 load(
     "//@star/sdk/star/ws.star",
     "workspace_get_absolute_path",
+    "workspace_get_env_var",
     "workspace_get_path_to_checkout",
     "workspace_is_env_var_set",
-    "workspace_get_env_var")
+)
 
 # Configure the top level workspace
 
@@ -40,7 +43,6 @@ cargo install --path=spaces/crates/spaces --root=$HOME/.local --profile=release
 ```
 
 """
-
 
 CAPSULES = """
 
@@ -145,7 +147,7 @@ task_options = {
     "env": {
         "CARGO_HOME": "{}/cargo".format(spaces_store),
         "RUSTUP_HOME": "{}/rustup".format(spaces_store),
-        "RUSTFLAGS": "--remap-path-prefix={}/=".format(workspace_get_absolute_path())
+        "RUSTFLAGS": "--remap-path-prefix={}/=".format(workspace_get_absolute_path()),
     },
 }
 
@@ -178,22 +180,22 @@ checkout_update_asset(
     "zed_settings",
     destination = ".zed/settings.json",
     value = {
-      "lsp": {
-        "rust-analyzer": {
-          "initialization_options": {
-            "cargo": {
-              "features": []
-            }
-          }
-        }
-      },
-      "languages": {
-        "Starlark": {
-          "language_servers": ["!spaces-lsp", "!buck2-lsp", "!starpls", "!tilt"],
-          "tab_size": 4
-        }
-      }
-    }
+        "lsp": {
+            "rust-analyzer": {
+                "initialization_options": {
+                    "cargo": {
+                        "features": [],
+                    },
+                },
+            },
+        },
+        "languages": {
+            "Starlark": {
+                "language_servers": ["!spaces-lsp", "!buck2-lsp", "!starpls", "!tilt"],
+                "tab_size": 4,
+            },
+        },
+    },
 )
 
 run_add_exec(
@@ -233,12 +235,12 @@ run_add_exec_test(
         "test",
         "--package=capsule",
         "--",
-        "--test-threads=1", # Tests share state (heap) and can't be multithreaded
+        "--test-threads=1",  # Tests share state (heap) and can't be multithreaded
     ],
     env = {
         "RUST_BACKTRACE": "1",
         "RUST_LOG": "trace",
-    }
+    },
 )
 
 SPACES_INSTALL_ROOT = "SPACES_INSTALL_ROOT"
@@ -263,4 +265,4 @@ shell(
     script = "cargo install --features=lsp --force --path=spaces/crates/spaces --profile=dev --root={}".format(root),
 )
 
-spaces_working_env()
+spaces_working_env(add_spaces_to_sysroot = True, inherit_terminal = True)
