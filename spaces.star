@@ -32,45 +32,6 @@ load(
 
 SPACES_CHECKOUT_PATH = workspace_get_path_to_checkout()
 
-developer_md_content = """
-
-# Developer Notes
-
-```sh
-#this builds a faster for dev
-cargo install --path=spaces/crates/spaces --root=$HOME/.local --profile=dev
-cargo install --path=spaces/crates/spaces --root=$HOME/.local --profile=release
-```
-
-"""
-
-CAPSULES = """
-
-checkout_add_repo(
-    "@capsules/manifest",
-    url = "https://github.com/work-spaces/spaces",
-)
-
-CURL = capsule_descriptor("github.com", "curl", "curl", "0.8")
-LIBC = capsule_descriptor("github.com", "libc", "libc", "0.8")
-
-checkout_add_capsules(
-    "checkout_capsules",
-    manifest = "//@capsules/manifest",
-    capsules = [
-        CURL,
-        LIBC
-    ],
-)
-
-"""
-
-checkout_add_asset(
-    "Developer_md",
-    destination = "Developer.md",
-    content = developer_md_content,
-)
-
 # This is needed for easy-archiver to pickup the local version of printer
 checkout_update_asset(
     "cargo_config",
