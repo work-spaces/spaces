@@ -6,6 +6,16 @@ use std::collections::HashSet;
 
 use crate::{executor, rules, singleton, task};
 
+const ADD_ARCHIVE_EXAMPLE: &str = r#"run.add_archive(
+    rule = {"name": name, "type": "Optional", "deps": ["sysroot-python:venv"]},
+    archive = {
+        "input": "build/install",
+        "name": "my_archive",
+        "version": "1.0",
+        "driver": "tar.gz",
+    },
+)"#;
+
 const ADD_EXEC_EXAMPLE: &str = r#"run.add_exec(
     rule = {"name": name, "type": "Setup", "deps": ["sysroot-python:venv"]},
     exec = {
@@ -19,6 +29,27 @@ const ADD_TARGET_EXAMPLE: &str = r#"run.add_target(
 )"#;
 
 pub const FUNCTIONS: &[Function] = &[
+    Function {
+        name: "add_archive",
+        description: "Adds a rule that will archive a directory.",
+        return_type: "None",
+        args: &[
+            get_rule_argument(),
+            Arg {
+                name: "archive",
+                description: "dict with",
+                dict: &[
+                    ("input", "path to the directory to archive"),
+                    ("name", "name of the archive"),
+                    ("version", "archive version (will be part of the filename)"),
+                    ("driver", "The compression driver: tar.gz|tar.bz2|zip|tar.7z|tar.xz"),
+                    ("platform", "Optionally specify the platform"),
+                    ("includes", "Optional list of glob patterns applied to the input directory for inclusion"),
+                    ("excludes", "Optional list of glob patterns applied to the input directory for exclusion"),
+                ],
+            },
+        ],
+        example: Some(ADD_ARCHIVE_EXAMPLE)},
     Function {
         name: "add_exec",
         description: "Adds a rule that will execute a process.",

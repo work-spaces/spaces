@@ -84,7 +84,7 @@ pub const FUNCTIONS: &[Function] = &[
         },
         Function {
             name: "set_exit_code",
-            description: r#"Sets the exit code of the script. 
+            description: r#"Sets the exit code of the script.
 Use zero for success and non-zero for failure.
 This doesn't exit the script."#,
             return_type: "none",
@@ -101,7 +101,7 @@ This doesn't exit the script."#,
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
     fn abort(message: &str) -> anyhow::Result<NoneType> {
-        Err(anyhow::anyhow!(format!("Aborting: {}", message)))
+        Err(anyhow::anyhow!(format!("Aborting: {message}")))
     }
 
     fn print(content: &str) -> anyhow::Result<NoneType> {

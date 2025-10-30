@@ -177,7 +177,7 @@ run_add_exec(
     "clippy",
     command = "cargo",
     args = ["clippy"],
-    log_level = "App",
+    log_level = "Passthrough",
     help = "Run cargo clippy on workspace",
 )
 
@@ -185,7 +185,7 @@ run_add_exec(
     "format",
     command = "cargo",
     args = ["fmt"],
-    log_level = "App",
+    log_level = "Passthrough",
     help = "Run cargo fmt on workspace",
 )
 
