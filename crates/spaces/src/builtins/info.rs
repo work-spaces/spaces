@@ -264,8 +264,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 ))?
         {
             return Err(anyhow::anyhow!(
-                "Minimum required `spaces` version is `{}`. `spaces` version is `{current_version}`",
-                version.to_string(),
+                "Minimum required `spaces` version is `{version}`. `spaces` version is `{current_version}`"
             ));
         }
         Ok(NoneType)
