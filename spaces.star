@@ -225,7 +225,7 @@ run_add_exec(
     command = "cargo",
     args = ["fmt"],
     log_level = "App",
-    help = "Run cargo clippy on workspace",
+    help = "Run cargo fmt on workspace",
 )
 
 run_add_exec_test(
