@@ -11,12 +11,13 @@ members = [
     "crates/lock",
     "crates/logger",
     "crates/suggest",
+    "crates/shell",
     "crates/ws",
     "crates/inputs",
     "crates/rule",
     "crates/copy",
     "crates/workflows",
-    "crates/store",
+    "crates/store", "crates/shell",
 ]
 
 [workspace.dependencies]
@@ -49,6 +50,7 @@ logger.path = "crates/logger"
 platform.path = "crates/platform"
 rule.path = "crates/rule"
 starstd.path = "crates/starstd"
+shell.path = "crates/shell"
 store.path = "crates/store"
 suggest.path = "crates/suggest"
 ws.path = "crates/ws"

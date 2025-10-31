@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 pub const WORKFLOW_TOML_NAME: &str = "workflows.spaces.toml";
+pub const SHELL_TOML_NAME: &str = "shell.spaces.toml";
 pub const CHECKOUT_FILE_NAME: &str = "checkout.spaces.star";
 pub const ENV_FILE_NAME: &str = "env.spaces.star";
 pub const LOCK_FILE_NAME: &str = "lock.spaces.star";

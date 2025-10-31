@@ -10,6 +10,7 @@ members = [
     "spaces/crates/git",
     "spaces/crates/platform",
     "spaces/crates/starstd",
+    "spaces/crates/shell",
     "spaces/crates/store",
     "spaces/crates/changes",
     "spaces/crates/environment",
@@ -49,6 +50,7 @@ logger.path = "spaces/crates/logger"
 platform.path = "spaces/crates/platform"
 printer.path = "printer"
 rule.path = "spaces/crates/rule"
+shell.path = "spaces/crates/shell"
 starstd.path = "spaces/crates/starstd"
 suggest.path = "spaces/crates/suggest"
 store.path = "spaces/crates/store"
