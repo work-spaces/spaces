@@ -19,18 +19,19 @@ pub struct Config {
 
 impl Config {
     pub fn load(
-        path: Option<Arc<str>>,
+        config_path_path: Option<Arc<str>>,
         default_shell_path: Option<Arc<str>>,
     ) -> anyhow::Result<Self> {
-        if let Some(path) = path {
-            let contents = std::fs::read_to_string(path.as_ref()).context(format_context!(
-                "Failed to read shell configuration file from {}",
-                path
-            ))?;
+        if let Some(config_path_path) = config_path_path {
+            let contents =
+                std::fs::read_to_string(config_path_path.as_ref()).context(format_context!(
+                    "Failed to read shell configuration file from {}",
+                    config_path_path
+                ))?;
 
             let shell = toml::from_str(&contents).context(format_context!(
                 "Failed to parse toml shell configuration from {}",
-                path
+                config_path_path
             ))?;
 
             Ok(shell)
@@ -57,7 +58,7 @@ pub fn run(
         let config_file = startup_directory.join(startup.name.as_ref());
 
         std::fs::write(&config_file, startup.contents.as_ref()).context(format_context!(
-            "Failed to write shell startupconfiguration file to {}",
+            "Failed to write shell startup configuration file to {}",
             config_file.display()
         ))?;
 

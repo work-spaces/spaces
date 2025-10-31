@@ -17,7 +17,7 @@ members = [
     "crates/rule",
     "crates/copy",
     "crates/workflows",
-    "crates/store", "crates/shell",
+    "crates/store",
 ]
 
 [workspace.dependencies]
