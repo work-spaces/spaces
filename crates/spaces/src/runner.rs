@@ -232,33 +232,36 @@ pub fn run_shell_in_workspace(
     evaluate_environment(printer, workspace_arc.clone())
         .context(format_context!("while evaluating starlark env module"))?;
 
-    let shell = path.unwrap_or("/bin/bash".into());
+    let shell_config_path = std::path::Path::new(workspace::SHELL_TOML_NAME);
+    let shell_config_path_option = if shell_config_path.exists() {
+        Some(workspace::SHELL_TOML_NAME.into())
+    } else {
+        None
+    };
 
-    // Create the command
-    let mut process = std::process::Command::new(shell.as_ref());
+    let shell_config = shell::Config::load(shell_config_path_option, path)
+        .context(format_context!("while loading shell config"))?;
 
-    let workspace_read = workspace_arc.read();
-    let environment_map = workspace_read
+    let environment_map = workspace_arc
+        .read()
         .get_env()
         .get_vars()
         .context(format_context!("Failed to get env vars"))?;
 
-    process.env_clear();
-
-    // Set custom environment variables
-    for (key, value) in environment_map {
-        process.env(key.as_ref(), value.as_ref());
+    const SHELL_DIR: &str = ".spaces/shell";
+    if shell_config.startup.is_some() {
+        std::fs::create_dir_all(".spaces/shell").context(format_context!(
+            "while creating shell directory `{}`",
+            SHELL_DIR
+        ))?;
     }
 
-    // Make it interactive
-    process
-        .stdin(std::process::Stdio::inherit())
-        .stdout(std::process::Stdio::inherit())
-        .stderr(std::process::Stdio::inherit());
-
-    process
-        .status()
-        .context(format_context!("failed to launch shell"))?;
+    shell::run(
+        &shell_config,
+        &environment_map,
+        std::path::Path::new(SHELL_DIR),
+    )
+    .context(format_context!("while running shell"))?;
 
     Ok(())
 }
