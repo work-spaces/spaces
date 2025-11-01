@@ -691,7 +691,7 @@ loaded from `co.spaces.toml` in the current directory.
 ```toml
 [spaces-dev.Repo]
 url = "https://github.com/work-spaces/spaces"
-rule-name = "spaces" # optionally checkout in a different directory - defalut is from URL
+rule-name = "spaces" # optionally checkout in a different directory - default is from URL
 rev = "main" # branch/tag/commit to checkout
 new-branch = ["spaces"] # optionally create a new branch for a git repository
 clone = "Default" # optionally close type Default/Blobless
