@@ -91,7 +91,7 @@ fn create_shortcuts(
 
     for (key, value) in shortcuts {
         let function = match shell_type {
-            ShellType::Bash | ShellType::Zsh => format!("{key}() {{\n\t{value}\n }}"),
+            ShellType::Bash | ShellType::Zsh => format!("{key}() {{\n\t{value}\n}}"),
             ShellType::Fish => format!("function {key}\n\t{value}\nend"),
         };
         functions.push(function.into());
