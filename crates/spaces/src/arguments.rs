@@ -694,7 +694,7 @@ url = "https://github.com/work-spaces/spaces"
 rule-name = "spaces" # optionally checkout in a different directory - default is from URL
 rev = "main" # branch/tag/commit to checkout
 new-branch = ["spaces"] # optionally create a new branch for a git repository
-clone = "Default" # optionally close type Default/Blobless
+clone = "Default" # optionally clone type Default/Blobless
 env = ["SET_VALUE=VALUE", "ANOTHER_VALUE=ANOTHER_VALUE"] # optionally add environment variables
 create-lock-file = false # optionally create a lock file
 
