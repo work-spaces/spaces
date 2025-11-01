@@ -1,4 +1,4 @@
-use crate::{completions, docs, evaluator, rules, runner, singleton, task, tools, workspace};
+use crate::{co, completions, docs, evaluator, rules, runner, singleton, task, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
@@ -73,30 +73,6 @@ fn handle_verbosity(
     }
 }
 
-fn handle_new_branch(new_branch: Vec<Arc<str>>) {
-    // Add any new branches specified by the command line
-    let mut new_branches = singleton::get_new_branches();
-    new_branches.extend(new_branch);
-    singleton::set_new_branches(new_branches);
-}
-
-fn set_workspace_env(env: Vec<Arc<str>>) -> anyhow::Result<()> {
-    for env_pair in env.iter() {
-        let parts = env_pair.split_once('=');
-        if parts.is_none() {
-            return Err(format_error!(
-                "Invalid env format: {env_pair}.\n Use `--env=VAR=VALUE`"
-            ));
-        }
-    }
-
-    singleton::set_args_env(env).context(format_context!(
-        "while setting environment variables for checkout rules"
-    ))?;
-
-    Ok(())
-}
-
 pub fn execute() -> anyhow::Result<()> {
     if std::env::args().len() == 1 {
         let mut stdin_contents = String::new();
@@ -159,84 +135,19 @@ pub fn execute() -> anyhow::Result<()> {
                 show_elapsed_time,
             );
 
-            let mut script_inputs: Vec<Arc<str>> = vec![];
-            script_inputs.extend(script.clone());
-
-            if wf.is_some() && workflow.is_some() {
-                return Err(format_error!("Cannot use both --workflow and --wf"));
-            }
-
-            set_workspace_env(env).context(format_context!("While checking out workflow"))?;
-
-            if let Some(workflow) = workflow.or(wf) {
-                let parts: Vec<_> = workflow.split(':').collect();
-                if parts.len() != 2 {
-                    return Err(format_error!("Invalid workflow format: {}.\n Use --workflow=<directory>:<script>,<script>,...", workflow));
-                }
-                let directory = parts[0];
-
-                let inputs: Vec<_> = parts[1].split(',').collect();
-                let mut scripts: Vec<Arc<str>> = vec![];
-
-                let is_workspace_toml = if inputs.len() == 1 {
-                    let dev_flow = workflows::try_workflows(directory, inputs[0])
-                        .context(format_context!("Failed to parse workflows"))?;
-                    if let Some(dev_flow) = dev_flow {
-                        scripts.extend(dev_flow.checkout_scripts);
-                        singleton::set_new_branches(dev_flow.new_branches);
-                        true
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                };
-
-                if !is_workspace_toml {
-                    scripts.extend(inputs.iter().map(|s| (*s).into()));
-                }
-
-                for script in scripts {
-                    let short_path = format!("{directory}/{script}");
-                    let long_path = format!("{directory}/{script}.spaces.star");
-                    if !std::path::Path::new(long_path.as_str()).exists()
-                        && !std::path::Path::new(short_path.as_str()).exists()
-                    {
-                        return Err(format_error!(
-                            "Script file not found: {}/{}",
-                            directory,
-                            script
-                        ));
-                    }
-
-                    script_inputs.push(format!("{directory}/{script}").into());
-                }
-            }
-
-            handle_new_branch(new_branch);
-
-            for script_path in script_inputs.iter() {
-                let script_as_path = std::path::Path::new(script_path.as_ref());
-                if let Some(file_name) = script_as_path.file_name() {
-                    let file_name = file_name.to_string_lossy();
-                    if file_name == "env" || file_name == workspace::ENV_FILE_NAME {
-                        return Err(format_error!("`env.spaces.star` is a reserved script name",));
-                    }
-                }
-            }
-
-            tools::install_tools(&mut stdout_printer, force_install_tools)
-                .context(format_context!("while installing tools"))?;
-
-            runner::checkout(
+            co::checkout_workflow(
                 &mut stdout_printer,
                 name,
-                script_inputs,
-                None,
-                create_lock_file.into(),
+                env,
+                new_branch,
+                script,
+                workflow,
+                wf,
+                create_lock_file,
+                force_install_tools,
                 keep_workspace_on_failure,
             )
-            .context(format_context!("during runner checkout"))?;
+            .context(format_context!("While checking out workflow"))?;
         }
 
         Arguments {
@@ -267,64 +178,52 @@ pub fn execute() -> anyhow::Result<()> {
                 show_elapsed_time,
             );
 
-            set_workspace_env(env).context(format_context!("While checking out repo"))?;
-            let clone = clone.unwrap_or(git::Clone::Default);
-
-            // get the repo name from the url
-            let repo_name = if let Some(rule_name) = rule_name {
-                rule_name
-            } else {
-                let repo_name = url
-                    .split('/')
-                    .next_back()
-                    .context(format_context!("URL is mal-formed {url}"))?;
-
-                repo_name.strip_suffix(".git").unwrap_or(repo_name).into()
-            };
-
-            // remove the .git extension
-
-            let script: Arc<str> = format!(
-                r#"
-checkout.add_repo(
-    rule = {{
-        "name": "{repo_name}"
-    }},
-    repo = {{
-        "url": "{url}",
-        "rev": "{rev}",
-        "checkout": "Revision",
-        "clone": "{clone}"
-    }}
-)
-"#
-            )
-            .into();
-
-            tools::install_tools(&mut stdout_printer, force_install_tools)
-                .context(format_context!("while installing tools"))?;
-
-            //sanitize the new branches with a //checkout: prefix
-            let mut new_branches = new_branch;
-            for branch in new_branches.iter_mut() {
-                if !branch.starts_with("//") {
-                    *branch = format!("//checkout:{branch}").into();
-                }
-            }
-
-            handle_new_branch(new_branches);
-
-            runner::checkout(
+            co::checkout_repo(
                 &mut stdout_printer,
                 name,
-                vec![],
-                Some(script),
-                create_lock_file.into(),
-                false,
+                rule_name,
+                url,
+                rev,
+                clone,
+                env,
+                new_branch,
+                create_lock_file,
+                force_install_tools,
             )
-            .context(format_context!("during runner checkout"))?;
+            .context(format_context!("while checking out repo"))?;
         }
 
+        Arguments {
+            verbosity,
+            hide_progress_bars,
+            show_elapsed_time,
+            ci,
+            rescan,
+            commands: Commands::Co { checkout, name },
+        } => {
+            handle_verbosity(
+                &mut stdout_printer,
+                verbosity.into(),
+                ci,
+                rescan,
+                hide_progress_bars,
+                show_elapsed_time,
+            );
+
+            let checkout_map =
+                co::Checkout::load().context(format_context!("Failed to load co file"))?;
+
+            let checkout = checkout_map.get(&checkout).context(format_context!(
+                "Failed to find `{}` in `{}`",
+                checkout,
+                co::CO_FILE_NAME
+            ))?;
+
+            checkout
+                .clone()
+                .checkout(&mut stdout_printer, name)
+                .context(format_context!("while checking out repo"))?;
+        }
         Arguments {
             verbosity,
             hide_progress_bars,
@@ -688,7 +587,7 @@ enum ForEachMode {
 #[derive(Debug, Subcommand)]
 enum Commands {
     #[command(about = r#"
-Executes the checkout rules in the specified scripts."#)]
+Executes the checkout rules in the specified scripts or workflow files."#)]
     Checkout {
         /// The name of the workspace to create.
         #[arg(long)]
@@ -741,8 +640,8 @@ Executes the checkout rules in the specified scripts."#)]
         keep_workspace_on_failure: bool,
     },
     #[command(about = r#"
-  Uses git to clone a repository in a new workspace and evaluates the top level [*]spaces.star files.
-  This can be used if the repository defines all of its own dependencies."#)]
+Uses git to clone a repository in a new workspace and evaluates the top level [*]spaces.star files.
+This can be used if the repository defines all of its own dependencies."#)]
     CheckoutRepo {
         #[arg(long)]
         /// The new workspace name.
@@ -784,6 +683,36 @@ Executes the checkout rules in the specified scripts."#)]
         /// Force install the tools spaces needs to run.
         #[arg(long)]
         force_install_tools: bool,
+    },
+    #[command(about = r#"
+The shortform version of `checkout` and `checkout-repo`. The details of the command are
+loaded from `co.spaces.toml` in the current directory.
+
+```toml
+[spaces-dev.Repo]
+url = "https://github.com/work-spaces/spaces"
+rule-name = "spaces" # optionally checkout in a different directory - defalut is from URL
+rev = "main" # branch/tag/commit to checkout
+new-branch = ["spaces"] # optionally create a new branch for a git repository
+clone = "Default" # optionally close type Default/Blobless
+env = ["SET_VALUE=VALUE", "ANOTHER_VALUE=ANOTHER_VALUE"] # optionally add environment variables
+create-lock-file = false # optionally create a lock file
+
+
+[ninja-build.Workflow]
+# Loads the ninja-build-dev flow from workflows/workflows.spaces.toml
+workflow = "workflows:ninja-build-dev" # Workflow to checkout or use script
+script = ["workflows/preload", "workflows/ninja-build"] # Use in place of or addition to workflow
+env = ["SET_VALUE=VALUE", "ANOTHER_VALUE=ANOTHER_VALUE"] # optionally add environment variables
+new-branch = ["spaces"] # optionally create a new branch for a git repository
+create-lock-file = false # optionally create a lock file
+```
+"#)]
+    Co {
+        /// The name of the checkout entry (e.g. `spaces-dev` or `ninja-build` from above).
+        checkout: Arc<str>,
+        /// The name of the workspace to create.
+        name: Arc<str>,
     },
     /// Runs checkout rules within an existing workspace (experimental)
     Sync {},
