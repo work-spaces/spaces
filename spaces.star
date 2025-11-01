@@ -37,7 +37,7 @@ SHORTCUTS = {
     "inspect": "spaces inspect",
     "install_dev": "spaces run //spaces:install_dev",
     "install_dev_lsp": "spaces run //spaces:install_dev_lsp",
-    "install_release": "spaces run //spaces:format",
+    "install_release": "spaces run //spaces:install_release",
     "clippy": "spaces run //spaces:clippy",
     "format": "spaces run //spaces:format",
 }
