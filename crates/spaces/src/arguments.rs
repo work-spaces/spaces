@@ -73,6 +73,13 @@ fn handle_verbosity(
     }
 }
 
+fn handle_new_branch(new_branch: Vec<Arc<str>>) {
+    // Add any new branches specified by the command line
+    let mut new_branches = singleton::get_new_branches();
+    new_branches.extend(new_branch);
+    singleton::set_new_branches(new_branches);
+}
+
 fn set_workspace_env(env: Vec<Arc<str>>) -> anyhow::Result<()> {
     for env_pair in env.iter() {
         let parts = env_pair.split_once('=');
@@ -206,10 +213,7 @@ pub fn execute() -> anyhow::Result<()> {
                 }
             }
 
-            // Add any new branches specified by the command line
-            let mut new_branches = singleton::get_new_branches();
-            new_branches.extend(new_branch);
-            singleton::set_new_branches(new_branches);
+            handle_new_branch(new_branch);
 
             for script_path in script_inputs.iter() {
                 let script_as_path = std::path::Path::new(script_path.as_ref());
@@ -249,6 +253,7 @@ pub fn execute() -> anyhow::Result<()> {
                     rev,
                     clone,
                     env,
+                    new_branch,
                     create_lock_file,
                     force_install_tools,
                 },
@@ -298,6 +303,16 @@ checkout.add_repo(
 
             tools::install_tools(&mut stdout_printer, force_install_tools)
                 .context(format_context!("while installing tools"))?;
+
+            //sanitize the new branches with a //checkout: prefix
+            let mut new_branches = new_branch;
+            for branch in new_branches.iter_mut() {
+                if !branch.starts_with("//") {
+                    *branch = format!("//checkout:{branch}").into();
+                }
+            }
+
+            handle_new_branch(new_branches);
 
             runner::checkout(
                 &mut stdout_printer,
@@ -745,6 +760,12 @@ Executes the checkout rules in the specified scripts."#)]
         /// The revision (branch/commit/tag) to checkout
         #[arg(long)]
         rev: Arc<str>,
+        #[arg(
+            long,
+            help = r#"Use --new-branch=<rule> to have spaces create a new branch for the rule.
+  Branch name will match the workspace name. This can be used multiple times."#
+        )]
+        new_branch: Vec<Arc<str>>,
         /// The method to use for cloning the repository (default is a standard clone).
         #[arg(long)]
         clone: Option<git::Clone>,
