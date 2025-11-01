@@ -169,12 +169,19 @@ impl Git {
                     return Ok(());
                 }
 
+                // fetch to ensure any new tags are made available
+                existing_repo.fetch(progress).context(format_context!(
+                    "{name} - Failed to fetch repository {}",
+                    self.spaces_key
+                ))?;
+
                 existing_repo
                     .checkout(progress, &self.checkout)
                     .context(format_context!(
                         "{name} - Failed to checkout repository {}",
                         self.spaces_key
                     ))?;
+
                 return Ok(());
             }
         }
