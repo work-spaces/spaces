@@ -6,6 +6,7 @@ With VSCode/Zed integration
 load("//@star/packages/star/buildifier.star", "buildifier_add")
 load("//@star/packages/star/rust.star", "rust_add")
 load("//@star/packages/star/sccache.star", "sccache_add")
+load("//@star/packages/star/starship.star", "starship_add_bash")
 load(
     "//@star/sdk/star/checkout.star",
     "checkout_add_asset",
@@ -31,6 +32,18 @@ load(
 # Configure the top level workspace
 
 SPACES_CHECKOUT_PATH = workspace_get_path_to_checkout()
+
+SHORTCUTS = {
+    "inspect": "spaces inspect",
+    "install_dev": "spaces run //spaces:install_dev",
+    "install_dev_lsp": "spaces run //spaces:install_dev_lsp",
+    "install_release": "spaces run //spaces:format",
+    "clippy": "spaces run //spaces:clippy",
+    "format": "spaces run //spaces:format",
+}
+
+
+starship_add_bash("starship0", shortcuts = SHORTCUTS)
 
 # This is needed for easy-archiver to pickup the local version of printer
 checkout_update_asset(
