@@ -42,7 +42,6 @@ SHORTCUTS = {
     "format": "spaces run //spaces:format",
 }
 
-
 starship_add_bash("starship0", shortcuts = SHORTCUTS)
 
 # This is needed for easy-archiver to pickup the local version of printer
