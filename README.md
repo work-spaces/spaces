@@ -1,91 +1,68 @@
 # spaces
 
+## What is `spaces`?
+
+`spaces` is:
+
+- a reproducible workspace builder that manages
+  - dev tools: `cmake`, `clang`, `cargo`, `python` and anything else you can specify
+  - archives: populate your workspace from any archive on the internet
+  - repos: clone one or more repositories into your workspace
+  - assets: populate your workspace with IDE settings such as `.vscode/settings.json` or `.zed/setting.json`
+  - environment: specify variables or inherit from the system as needed
+- a lightweight meta-build task-runner
+  - Create rules that run in series or parallel using `starlark`
+  - Execute anything you can call from the command line in precise folder locations and environment
+  - Auto-skip rules that don't need to run again
+- An awesome inner-loop shell
+  - Start a shell with an environment that exactly matches the `spaces` task runner.
+
+
+## Demo
+
+Checkout the `spaces` sources and dependencies including an isolated `rust` toolchain.
+
+[![asciicast](https://asciinema.org/a/X257gr2yfcqESfsIztH2cOaty.svg)](https://asciinema.org/a/X257gr2yfcqESfsIztH2cOaty)
+
+Use the `spaces` task runner to build or use `spaces shell` to access dev tools directly in the workspace environment.
+
+[![asciicast](https://asciinema.org/a/N0sOGeGLDZK9ijTalUofRGmYv.svg)](https://asciinema.org/a/N0sOGeGLDZK9ijTalUofRGmYv)
+
 ## Read the Docs
 
 [Spaces Documentation](https://work-spaces.github.io/)
 
-## Try it Now
+## Contribute
 
-Quickly create a `python3.11` virtual environment usinv `uv`.
+You can create a workspace dedicated to improving `spaces`.
 
 ```sh
+spaces checkout-repo \
+  --url=https://github.com/work-spaces/spaces \
+   --rev=main \
+   --new-branch=spaces \
+   --name=issue-x-fix-something
+cd issue-x-fix-something
+spaces run //spaces:check
+```
+
+## Example Python Workspace
+
+Quickly create a `python3` workspace with a dedicated virtual environment usinv `uv`.
+
+```sh
+# Install spaces at $HOME/.local/bin:$PATH
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/work-spaces/install-spaces/refs/heads/main/install.sh)"
 export PATH=$HOME/.local/bin:$PATH
-git clone https://github.com/work-spaces/workflows/
-spaces checkout --workflow=workflows:lock,preload,python-sdk --name=python-quick-test
-cd python-quick-test
-spaces run
-source ./env
-python -c "print('hello')"
 ```
-
-## Why spaces?
-
-How do you ensure everyone who checks out your code has all the same tools and dependencies?
-
-Some common options include: 
-
-- Docker. Put all the tools and dependencies in a container and you are set.
-- Monorepos. Commit all source code to one big repo. 
-  - Use additional tools like `nix` or `dotslash` to manage executables.
-- Use your build system (e.g. `cmake`) to download and build depedencies
-- Package managers such as `apt`, `brew`, or `choco`.
-- Metabuild options such as `bitbake` or `buildstream`.
-
-Finding the right one is challenging. 
-
-`spaces` is a lightweight solution that lets you create a workspace with:
-
-- Code you need to develop
-- Source and/or binary dependencies
-- Executable tools
-
-Downloaded artifacts are hashed and managed in the `spaces` store for efficient sharing across projects.
-
-`spaces` is a single binary. It is powered by `starlark` and `rust`. `starlark` is a python dialect that lets you write expressive rules to:
-
-- `checkout` source code and tools to your workspace
-- `run` tasks based on a dependency graph
-
-All workflows use the same commands:
 
 ```sh
-spaces checkout --workflow=<workflow directory>:<workflow script>,... --name=<workspace folder name>
-cd <workspace folder name>
-spaces run
-
-# you can do inner-loop developement from the command line in the `spaces run` environment using
-source ./env
-```
-
-Here is an abbreviated example from the spaces [workflows repo](https://github.com/work-spaces/workflows/).
-
-```python
-# load the rust script from the sysroot repository
-# // indicates the workspace root.
-load("//@star/packages/star/rust.star", "rust_add")
-load("//@star/sdk/star/checkout.star", "checkout_add_repo")
-load("//@star/sdk/star/run.star", "run_add_exec")
-
-# Checkout the spaces repo
-checkout_add_repo(
-    "spaces",
-    url = "https://github.com/work-spaces/spaces",
-    rev = "main",
-)
-
-# Grab the rust toolchain
-rust_add("rust_toolchain", "1.80")
-
-run_add_exec(
-    "build_spaces",
-    command = "cargo",
-    working_directory = "spaces",
-    args =  [
-        "build",
-        "--profile=release",
-    ],
-)
+# Many more examples in this repo
+git clone https://github.com/work-spaces/workflows/
+spaces checkout --workflow=workflows:python-sdk --name=python-quick-test
+cd python-quick-test
+spaces run && spaces shell
+python -c "print('hello')"
 ```
 
 ## Installing Spaces
