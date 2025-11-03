@@ -2,29 +2,23 @@
 
 ## What is `spaces`?
 
-`spaces` is:
-
-- a reproducible workspace builder that manages
+- Reproducible workspace builder that manages
   - dev tools: `cmake`, `clang`, `cargo`, `python` and anything else you can specify
   - archives: populate your workspace from any archive on the internet
   - repos: clone one or more repositories into your workspace
   - assets: populate your workspace with IDE settings such as `.vscode/settings.json` or `.zed/setting.json`
   - environment: specify variables or inherit from the system as needed
-- a lightweight meta-build task-runner
+- Lightweight meta-build task-runner
   - Create rules that run in series or parallel using `starlark`
   - Execute anything you can call from the command line in precise folder locations and environment
   - Auto-skip rules that don't need to run again
 - An awesome inner-loop shell
   - Start a shell with an environment that exactly matches the `spaces` task runner.
 
-
 ## Demo
 
-Checkout the `spaces` sources and dependencies including an isolated `rust` toolchain.
-
-![spaces.co](https://github.com/work-spaces/work-spaces.github.io/releases/download/assets-v0.1.0/spaces_co.gif)
-
-Use the `spaces` task runner to build or use `spaces shell` to access dev tools directly in the workspace environment.
+- Checkout the `spaces` sources and dependencies including an isolated `rust` toolchain.
+- Use the `spaces` task runner to build or use `spaces shell` to access dev tools directly in the workspace environment.
 
 ![spaces.run.shell](https://github.com/work-spaces/work-spaces.github.io/releases/download/assets-v0.1.0/spaces_demo.gif)
 
@@ -44,25 +38,6 @@ spaces checkout-repo \
    --name=issue-x-fix-something
 cd issue-x-fix-something
 spaces run //spaces:check
-```
-
-## Example Python Workspace
-
-Quickly create a `python3` workspace with a dedicated virtual environment usinv `uv`.
-
-```sh
-# Install spaces at $HOME/.local/bin:$PATH
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/work-spaces/install-spaces/refs/heads/main/install.sh)"
-export PATH=$HOME/.local/bin:$PATH
-```
-
-```sh
-# Many more examples in this repo
-git clone https://github.com/work-spaces/workflows/
-spaces checkout --workflow=workflows:python-sdk --name=python-quick-test
-cd python-quick-test
-spaces run && spaces shell
-python -c "print('hello')"
 ```
 
 ## Installing Spaces
