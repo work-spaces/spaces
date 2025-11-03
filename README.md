@@ -22,11 +22,11 @@
 
 Checkout the `spaces` sources and dependencies including an isolated `rust` toolchain.
 
-[![asciicast](https://asciinema.org/a/X257gr2yfcqESfsIztH2cOaty.svg)](https://asciinema.org/a/X257gr2yfcqESfsIztH2cOaty)
+![spaces.co](https://github.com/work-spaces/work-spaces.github.io/releases/download/assets-v0.1.0/spaces_co.gif)
 
 Use the `spaces` task runner to build or use `spaces shell` to access dev tools directly in the workspace environment.
 
-[![asciicast](https://asciinema.org/a/N0sOGeGLDZK9ijTalUofRGmYv.svg)](https://asciinema.org/a/N0sOGeGLDZK9ijTalUofRGmYv)
+![spaces.run.shell](https://github.com/work-spaces/work-spaces.github.io/releases/download/assets-v0.1.0/spaces_demo.gif)
 
 ## Read the Docs
 
