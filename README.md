@@ -33,9 +33,9 @@ You can create a workspace dedicated to improving `spaces`.
 ```sh
 spaces checkout-repo \
   --url=https://github.com/work-spaces/spaces \
-   --rev=main \
-   --new-branch=spaces \
-   --name=issue-x-fix-something
+  --rev=main \
+  --new-branch=spaces \
+  --name=issue-x-fix-something
 cd issue-x-fix-something
 spaces run //spaces:check
 ```
