@@ -10,6 +10,7 @@ fn co_logger(printer: &mut printer::Printer) -> logger::Logger {
 }
 
 pub const CO_FILE_NAME: &str = "co.spaces.toml";
+pub const CO_ENV_NAME: &str = "CO_SPACES_TOML";
 
 fn handle_new_branch(new_branch: Vec<Arc<str>>) {
     // Add any new branches specified by the command line
@@ -281,13 +282,26 @@ pub enum Checkout {
 
 impl Checkout {
     pub fn load() -> anyhow::Result<HashMap<Arc<str>, Self>> {
-        let contents = std::fs::read_to_string(CO_FILE_NAME).context(format_context!(
-            "Failed to open {}. This file must exist in the current directory to use `co`",
-            CO_FILE_NAME
+        let co_file_path = std::path::Path::new(CO_FILE_NAME);
+        let effective_path = if co_file_path.exists() {
+            co_file_path.to_owned()
+        } else {
+            let env_path = std::env::var(CO_ENV_NAME).context(format_context!(
+                "{} does not exist in the current directory and {} is not set in ENV",
+                CO_FILE_NAME,
+                CO_ENV_NAME
+            ))?;
+            env_path.into()
+        };
+
+        let contents = std::fs::read_to_string(effective_path.clone()).context(format_context!(
+            "Failed to open {} while loading `co` shortcuts",
+            effective_path.display()
         ))?;
+
         let checkout = toml::from_str(&contents).context(format_context!(
             "Failed to parse toml file {}",
-            CO_FILE_NAME
+            effective_path.display()
         ))?;
         Ok(checkout)
     }
