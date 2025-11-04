@@ -132,7 +132,7 @@ pub const FUNCTIONS: &[Function] = &[
     },
     Function {
         name: "get_path_to_shell_config",
-        description: "returns the string corresponding to the shell config file",
+        description: "returns the path to the shell config file",
         return_type: "str",
         args: &[],
         example: None,
