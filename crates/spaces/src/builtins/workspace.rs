@@ -130,6 +130,13 @@ pub const FUNCTIONS: &[Function] = &[
         args: &[],
         example: None,
     },
+    Function {
+        name: "get_path_to_shell_config",
+        description: "returns the string corresponding to the shell config file",
+        return_type: "str",
+        args: &[],
+        example: None,
+    },
 ];
 
 #[starlark_module]
@@ -139,6 +146,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();
         Ok(workspace.is_reproducible())
+    }
+
+    fn get_path_to_shell_config() -> anyhow::Result<String> {
+        Ok(crate::workspace::SHELL_TOML_NAME.to_string())
     }
 
     fn get_digest() -> anyhow::Result<String> {
