@@ -69,16 +69,15 @@ pub fn checkout_repo(
     let script: Arc<str> = format!(
         r#"
 checkout.add_repo(
-rule = {{
-"name": "{repo_name}"
-}},
-repo = {{
-"url": "{url}",
-"rev": "{rev}",
-"checkout": "Revision",
-"clone": "{clone}"
-}}
-)
+    rule = {{
+        "name": "{repo_name}"
+    }},
+    repo = {{
+        "url": "{url}",
+        "rev": "{rev}",
+        "checkout": "Revision",
+        "clone": "{clone}"
+    }})
 "#
     )
     .into();
