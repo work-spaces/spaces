@@ -162,10 +162,17 @@ impl Git {
                 }
 
                 if existing_repo.is_head_branch(progress) {
-                    existing_repo.pull(progress).context(format_context!(
-                        "{name} - Failed to pull repository {}",
-                        self.spaces_key
-                    ))?;
+                    // only pull if the remote branch is being tracked
+
+                    if existing_repo.is_remote_branch_tracked(progress) {
+                        existing_repo.pull(progress).context(format_context!(
+                            "{name} - Failed to pull repository {}",
+                            self.spaces_key
+                        ))?;
+                    } else {
+                        logger(progress, self.url.clone())
+                            .warning("Remote not tracked - not updating");
+                    }
                     return Ok(());
                 }
 
