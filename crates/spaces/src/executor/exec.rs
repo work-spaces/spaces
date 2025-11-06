@@ -172,6 +172,7 @@ impl Exec {
                     None
                 } else {
                     // if the command failed to execute, there won't be a log file
+                    let mut is_log_file_dumped = false;
                     if let Some(log_file_path) = log_file_path {
                         if std::path::Path::new(log_file_path.as_ref()).exists() {
                             let log_contents =
@@ -183,6 +184,7 @@ impl Exec {
                                     format!("See log file {log_file_path} for details").as_str(),
                                 );
                             } else {
+                                is_log_file_dumped = true;
                                 logger(progress, name).error(log_contents.as_str());
                             }
                         }
@@ -191,9 +193,12 @@ impl Exec {
                             "No log file is available (log files disabled with the --ci option)",
                         );
                     }
-                    return Err(format_error!(
-                        "Expected success but task failed because:\n {exec_error:?}"
-                    ));
+                    let error_message = if is_log_file_dumped {
+                        format_error!("Expected success but task failed")
+                    } else {
+                        format_error!("Expected success but task failed because:\n {exec_error:?}")
+                    };
+                    return Err(error_message);
                 }
             }
         };
