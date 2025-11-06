@@ -82,7 +82,7 @@ pub struct Asset {
 
 impl Asset {
     pub fn new_contents(contents: &str) -> Self {
-        let hash = Arc::new(blake3::hash(contents.as_bytes()).to_hex());
+        let hash = blake3::hash(contents.as_bytes()).to_hex();
         Self {
             hash: hash.to_string().into(),
         }
