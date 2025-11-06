@@ -570,10 +570,21 @@ impl Workspace {
 
     pub fn update_env(&mut self, env: environment::Environment) -> anyhow::Result<()> {
         self.env.vars.extend(env.vars);
-        self.env.paths.extend(env.paths);
+
+        // add to paths if not already present
+        for path in env.paths.iter() {
+            if !self.env.paths.contains(path) {
+                self.env.paths.push(path.clone());
+            }
+        }
         if let Some(inherited_vars) = env.inherited_vars {
             if let Some(existing_inherited_vars) = self.env.inherited_vars.as_mut() {
-                existing_inherited_vars.extend(inherited_vars.clone());
+                // extend if not already present
+                for var in inherited_vars.iter() {
+                    if !existing_inherited_vars.contains(var) {
+                        existing_inherited_vars.push(var.clone());
+                    }
+                }
             } else {
                 self.env.inherited_vars = Some(inherited_vars);
             }
@@ -581,7 +592,12 @@ impl Workspace {
 
         if let Some(system_paths) = env.system_paths {
             if let Some(existing_system_paths) = self.env.system_paths.as_mut() {
-                existing_system_paths.extend(system_paths.clone());
+                // extend if not already present
+                for path in system_paths.iter() {
+                    if !existing_system_paths.contains(path) {
+                        existing_system_paths.push(path.clone());
+                    }
+                }
             } else {
                 self.env.system_paths = Some(system_paths);
             }
