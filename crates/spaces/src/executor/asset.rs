@@ -103,7 +103,21 @@ impl UpdateAsset {
         ))?;
 
         save_asset(workspace_path, &self.destination, &content)
-            .context(format_context!("failed to add asset"))?;
+            .context(format_context!("failed to add asset {}", self.destination))?;
+
+        logger.debug(
+            format!(
+                "Updating asset {} with hash to workspace settings",
+                self.destination
+            )
+            .as_str(),
+        );
+
+        workspace_write_lock
+            .settings
+            .json
+            .assets
+            .insert(self.destination.clone(), ws::Asset::new_contents(&content));
 
         Ok(())
     }
@@ -193,14 +207,29 @@ pub struct AddAsset {
 impl AddAsset {
     pub fn execute(
         &self,
-        _progress: printer::MultiProgressBar,
+        mut progress: printer::MultiProgressBar,
         workspace: workspace::WorkspaceArc,
-        _name: &str,
+        name: &str,
     ) -> anyhow::Result<()> {
-        let workspace_write_lock = workspace.write();
+        let mut logger = logger::Logger::new_progress(&mut progress, name.into());
+        let mut workspace_write_lock = workspace.write();
         let workspace_path = workspace_write_lock.get_absolute_path();
         save_asset(workspace_path, &self.destination, &self.content)
             .context(format_context!("failed to add asset"))?;
+
+        logger.debug(
+            format!(
+                "Adding asset {} with hash to workspace settings",
+                self.destination
+            )
+            .as_str(),
+        );
+
+        workspace_write_lock.settings.json.assets.insert(
+            self.destination.clone().into(),
+            ws::Asset::new_contents(&self.content),
+        );
+
         Ok(())
     }
 }

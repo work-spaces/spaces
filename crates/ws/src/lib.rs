@@ -74,6 +74,21 @@ impl Member {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct Asset {
+    pub hash: Arc<str>,
+}
+
+impl Asset {
+    pub fn new_contents(contents: &str) -> Self {
+        let hash = Arc::new(blake3::hash(contents.as_bytes()).to_hex());
+        Self {
+            hash: hash.to_string().into(),
+        }
+    }
+}
+
 #[derive(Debug, Encode, Decode, Default)]
 pub struct BinDetail {
     pub hash: [u8; blake3::OUT_LEN],
@@ -166,6 +181,8 @@ pub struct JsonSettings {
     pub is_scanned: Option<bool>,
     #[serde(default = "HashMap::new")]
     pub members: HashMap<Arc<str>, Vec<Member>>,
+    #[serde(default = "HashMap::new")]
+    pub assets: HashMap<Arc<str>, Asset>,
     #[serde(skip)]
     pub bin_settings: BinSettings,
 }
@@ -185,6 +202,7 @@ impl JsonSettings {
             is_scanned: None,
             scanned_modules: HashSet::new(),
             members: HashMap::new(),
+            assets: HashMap::new(),
             bin_settings: Default::default(),
         }
     }

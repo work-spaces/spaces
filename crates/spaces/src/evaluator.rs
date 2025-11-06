@@ -632,6 +632,12 @@ pub fn execute_tasks(
                 .save_env_file(env_str.as_str())
                 .context(format_context!("Failed to save env file"))?;
 
+            star_logger(printer).debug("saving JSON workspace settings");
+            read_workspace
+                .settings
+                .save_json()
+                .context(format_context!("Failed to save settings"))?;
+
             read_workspace
                 .finalize_store()
                 .context(format_context!("Failed to finalize store"))?;
