@@ -395,7 +395,7 @@ pub const FUNCTIONS: &[Function] = &[
                 dict: &[
                     ("vars", "dict of variables to add to the environment"),
                     ("paths", "list of paths required"),
-                    ("system_paths", "list of systems paths (added after paths)"),
+                    ("system_paths", "list of system paths (added after paths)"),
                     ("inherited_vars", "list of variables to inherit from the parent environment (add ? to make it optional)"),
                 ],
             },
