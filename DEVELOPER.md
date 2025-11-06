@@ -21,8 +21,3 @@ export VERSION=x.y.z
 git tag -a v$VERSION -m "Update version"
 git push origin tag v$VERSION
 ```
-
-
-
-
-
