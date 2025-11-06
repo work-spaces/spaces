@@ -21,7 +21,7 @@ members = [
 ]
 
 [workspace.dependencies]
-anyhow-source-location = { git = "https://github.com/work-spaces/anyhow-source-location", rev = "v0.1.0" }
+anyhow-source-location = "0.2.1"
 anyhow = "1"
 printer = { git = "https://github.com/work-spaces/printer-rs", rev = "v0.1.11" }
 easy-archiver = { git = "https://github.com/work-spaces/easy-archiver", rev = "v0.1.8", features = [
