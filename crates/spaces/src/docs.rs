@@ -213,7 +213,7 @@ fn show_all(markdown: &mut printer::markdown::Markdown) -> anyhow::Result<()> {
         "`Checkout`: Assigned by default to all checkout rules".into(),
         "`Setup`: Assign to a run rule to make all other run rules depend on it".into(),
         "`Run`: Runs when running `//:all`".into(),
-        "`Optional`: Runs if specifical executed or depended on".into(),
+        "`Optional`: Runs if specified or depended on".into(),
     ])?;
 
     markdown.printer.newline()?;
