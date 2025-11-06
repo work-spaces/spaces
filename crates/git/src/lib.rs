@@ -770,6 +770,19 @@ impl Repository {
         Ok(())
     }
 
+    pub fn is_remote_branch_tracked(&self, progress_bar: &mut printer::MultiProgressBar) -> bool {
+        self.execute(
+            progress_bar,
+            vec![
+                "rev-parse".into(),
+                "--abbrev-ref".into(),
+                "--symbolic-full-name".into(),
+                "@{u}".into(),
+            ],
+        )
+        .is_ok()
+    }
+
     pub fn pull(&self, progress_bar: &mut printer::MultiProgressBar) -> anyhow::Result<()> {
         self.execute(progress_bar, vec!["pull".into()])
             .context(format_context!("while pulling from {}", self.full_path))?;
