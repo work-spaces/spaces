@@ -198,24 +198,11 @@ checkout.update_asset(
     },
 )"#;
 
-const UPDATE_ENV_DESCRIPTION: &str = r#"Creates or updates the environment file in the workspace.
-
-Spaces creates two mechanisms for managing the workspace environment.
-
-1. It generates an `env` file that can be sourced from the command line.
-2. When running `spaces run` it executes rules using the same environment values.
-
-The rules allows you to add variables and paths to the environment.
+const UPDATE_ENV_DESCRIPTION: &str = r#"Creates or updates the environment in the `run` workspace.
 
 At a minimum, `your-workspace/sysroot/bin` should be added to the path.
 
-In the workspace, you can start a workspace bash shell using:
-
-```sh
-bash # or the shell of your preference
-source env
-```
-
+The environment is used when executing `spaces run ...` or `spaces shell`.
 "#;
 
 const UPDATE_ENV_EXAMPLE: &str = r#"checkout.update_env(
@@ -226,7 +213,8 @@ const UPDATE_ENV_EXAMPLE: &str = r#"checkout.update_env(
         "vars": {
             "PS1": '"(spaces) $PS1"',
         },
-        "inherited_vars": ["HOME", "SHELL", "USER"],
+        # VARS ending in ? will be inherited if they exist
+        "inherited_vars": ["HOME", "SHELL", "USER", "TERM?"],
     },
 )"#;
 
@@ -407,6 +395,8 @@ pub const FUNCTIONS: &[Function] = &[
                 dict: &[
                     ("vars", "dict of variables to add to the environment"),
                     ("paths", "list of paths required"),
+                    ("system_paths", "list of systems paths (added after paths)"),
+                    ("inherited_vars", "list of variables to inherit from the parent environment (add ? to make it optional)"),
                 ],
             },
         ],
