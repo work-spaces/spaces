@@ -23,8 +23,8 @@ members = [
 [workspace.dependencies]
 anyhow-source-location = "0.2.1"
 anyhow = "1"
-printer = { git = "https://github.com/work-spaces/printer-rs", rev = "v0.1.11" }
-easy-archiver = { git = "https://github.com/work-spaces/easy-archiver", rev = "v0.1.8", features = [
+printer = { git = "https://github.com/work-spaces/printer-rs", rev = "v0.1.12" }
+easy-archiver = { git = "https://github.com/work-spaces/easy-archiver", rev = "v0.1.9", features = [
     "printer",
 ] }
 starlark = "0.13"
