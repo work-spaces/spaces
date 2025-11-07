@@ -155,7 +155,7 @@ checkout_update_env(
     "spaces_env",
     vars = {
         "SPACES_PRINTER_SKIP_SDK_CHECKOUT": "TRUE",
-        "SPACES_ARCHIVER_SKIP_SDK_CHECKOUT": "TRUE"
+        "SPACES_ARCHIVER_SKIP_SDK_CHECKOUT": "TRUE",
     }
 )
 
