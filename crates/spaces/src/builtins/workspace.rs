@@ -137,6 +137,19 @@ pub const FUNCTIONS: &[Function] = &[
         args: &[],
         example: None,
     },
+    Function {
+        name: "is_env_var_set",
+        description: "returns true if the workspace environment variable is set",
+        return_type: "bool",
+        args: &[
+            Arg {
+                name: "var_name",
+                description: "The name of the environment variable to check",
+                dict: &[],
+            },
+        ],
+        example: None,
+    },
 ];
 
 #[starlark_module]
