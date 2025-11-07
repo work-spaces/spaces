@@ -13,7 +13,7 @@ load(
     "checkout_add_hard_link_asset",
     "checkout_add_repo",
     "checkout_update_asset",
-    "checkout_update_env"
+    "checkout_update_env",
 )
 load(
     "//@star/sdk/star/run.star",
@@ -86,7 +86,6 @@ checkout_add_repo(
     "printer",
     url = printer_url,
     rev = "main",
-    is_evaluate_spaces_modules = False
 )
 
 checkout_add_repo(
@@ -156,7 +155,7 @@ checkout_update_env(
     vars = {
         "SPACES_PRINTER_SKIP_SDK_CHECKOUT": "TRUE",
         "SPACES_ARCHIVER_SKIP_SDK_CHECKOUT": "TRUE",
-    }
+    },
 )
 
 checkout_update_asset(
