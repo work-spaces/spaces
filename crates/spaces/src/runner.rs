@@ -249,12 +249,10 @@ pub fn run_shell_in_workspace(
         .context(format_context!("Failed to get env vars"))?;
 
     const SHELL_DIR: &str = ".spaces/shell";
-    if shell_config.startup.is_some() {
-        std::fs::create_dir_all(".spaces/shell").context(format_context!(
-            "while creating shell directory `{}`",
-            SHELL_DIR
-        ))?;
-    }
+    std::fs::create_dir_all(SHELL_DIR).context(format_context!(
+        "while creating shell directory `{}`",
+        SHELL_DIR
+    ))?;
 
     shell::run(
         &shell_config,
