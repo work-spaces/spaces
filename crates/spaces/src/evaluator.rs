@@ -612,6 +612,13 @@ pub fn execute_tasks(
                 env.paths.insert(0, sysroot_bin);
             }
 
+            // evaluate the available inherited variables
+            let vars = env
+                .get_vars()
+                .context(format_context!("Failed to get environment variables"))?;
+
+            env.vars.extend(vars);
+
             if workspace.read().is_reproducible() {
                 env.vars.insert(
                     workspace::SPACES_ENV_WORKSPACE_DIGEST.into(),
@@ -624,6 +631,7 @@ pub fn execute_tasks(
             let env_path = workspace_path.join("env");
             env.create_shell_env(env_path)
                 .context(format_context!("failed to finalize env"))?;
+
             let env_str = serde_json::to_string_pretty(&env)?;
 
             star_logger(printer).debug("saving workspace env");

@@ -186,30 +186,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let workspace_arc =
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();
-
         let env = workspace.get_env();
-        // check in env.inherited_vars (Option<Vec<str>>) contains the var_name
-        if let Some(inherited_vars) = &env.inherited_vars {
-            let var_name: std::sync::Arc<str> = var_name.into();
-            if inherited_vars.contains(&var_name) {
-                return Ok(std::env::var(var_name.as_ref()).is_ok());
-            }
-        }
-
-        let args_env = singleton::get_args_env();
-        Ok(env.vars.contains_key(var_name) || args_env.contains_key(var_name))
+        Ok(env.vars.contains_key(var_name))
     }
 
     fn get_env_var(var_name: &str) -> anyhow::Result<String> {
         let workspace_arc =
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();
-
-        // first check the command line overrides
-        let args_env = singleton::get_args_env();
-        if let Some(value) = args_env.get(var_name) {
-            return Ok(value.clone().to_string());
-        }
 
         let env = workspace.get_env();
         if var_name == "PATH" {
@@ -218,16 +202,6 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         if let Some(value) = env.vars.get(var_name) {
             return Ok(value.clone().to_string());
-        }
-
-        // check in env.inherited_vars (Option<Vec<str>>) contains the var_name
-        if let Some(inherited_vars) = &env.inherited_vars {
-            let var_name: std::sync::Arc<str> = var_name.into();
-            if inherited_vars.contains(&var_name) {
-                return std::env::var(var_name.as_ref()).context(format_error!(
-                    "Failed to get environment variable: {var_name}"
-                ));
-            }
         }
 
         Err(format_error!(
@@ -242,8 +216,22 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
 
         let mut workspace = workspace_arc.write();
-        let env = serde_json::from_value(env.to_json_value()?)
+        let mut env: environment::Environment = serde_json::from_value(env.to_json_value()?)
             .context(format_context!("Failed to parse archive arguments"))?;
+
+        // extended with command line args
+        let env_args = singleton::get_args_env();
+        env.vars.extend(env_args);
+
+        // This checks for workspaces created with previous versions
+        // It brings in PATH and inherited variables to match
+        // the previous behavior
+        if !env.vars.contains_key("PATH") {
+            let vars = env
+                .get_vars()
+                .context(format_context!("Failed to get environment variables"))?;
+            env.vars.extend(vars);
+        }
 
         workspace.set_env(env);
 
