@@ -2,7 +2,7 @@ use crate::{co, completions, docs, evaluator, rules, runner, singleton, task, wo
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
-use std::sync::Arc;
+use std::{io::IsTerminal, sync::Arc};
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
 pub enum Level {
@@ -75,7 +75,7 @@ fn handle_verbosity(
 
 pub fn execute() -> anyhow::Result<()> {
     if std::env::args().len() == 1 {
-        if atty::isnt(atty::Stream::Stdin) {
+        if !std::io::stdin().is_terminal() {
             let mut stdin_contents = String::new();
             use std::io::Read;
             std::io::stdin().read_to_string(&mut stdin_contents)?;
