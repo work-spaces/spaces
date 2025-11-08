@@ -75,12 +75,21 @@ fn handle_verbosity(
 
 pub fn execute() -> anyhow::Result<()> {
     if std::env::args().len() == 1 {
-        let mut stdin_contents = String::new();
-        use std::io::Read;
-        std::io::stdin().read_to_string(&mut stdin_contents)?;
-        evaluator::run_starlark_script(workspace::SPACES_STDIN_NAME.into(), stdin_contents.into())
+        if atty::isnt(atty::Stream::Stdin) {
+            let mut stdin_contents = String::new();
+            use std::io::Read;
+            std::io::stdin().read_to_string(&mut stdin_contents)?;
+            evaluator::run_starlark_script(
+                workspace::SPACES_STDIN_NAME.into(),
+                stdin_contents.into(),
+            )
             .context(format_context!("Failed to run starlark script"))?;
-        return Ok(());
+            return Ok(());
+        }
+
+        return Err(format_error!(
+            "Use `spaces help` for details or pipe a script to standard input"
+        ));
     }
 
     if std::env::args().len() >= 2 {
