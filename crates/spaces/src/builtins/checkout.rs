@@ -198,11 +198,16 @@ checkout.update_asset(
     },
 )"#;
 
-const UPDATE_ENV_DESCRIPTION: &str = r#"Creates or updates the environment in the `run` workspace.
+const UPDATE_ENV_DESCRIPTION: &str = r#"Creates or updates the environment in the workspace during checkout.
 
-At a minimum, `your-workspace/sysroot/bin` should be added to the path.
+During `spaces checkout ...`, `checkout.update_env()` creates a rule that is executed after the
+current module is evaluated. Variables cannot be referenced using `workspace.get_env_var()`
+in the same `[*.]spaces.star` module but can be referenced in subsequent modules during checkout.
 
-The environment is used when executing `spaces run ...` or `spaces shell`.
+During `spaces run ...`, all variables created during `checkout.update_env()` are available. Inherited
+variables are fixed when `spaces checkout ...` is executed. `spaces run ...` env variables can be
+overwritten from the command line using `--env=<var>=<value>`. The `env.spaces.star` file in the
+workspace can be manually modified (`vars` section only).
 "#;
 
 const UPDATE_ENV_EXAMPLE: &str = r#"checkout.update_env(
