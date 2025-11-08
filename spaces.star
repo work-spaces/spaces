@@ -45,7 +45,7 @@ SHORTCUTS = {
 
 starship_add_bash("starship0", shortcuts = SHORTCUTS)
 
-# Add spaces, printer, and easy-archiver source repositories to the workspace
+# Add spaces, printer, and archiver source repositories to the workspace
 printer_url = "https://github.com/work-spaces/spaces-printer"
 archiver_url = "https://github.com/work-spaces/spaces-archiver"
 
