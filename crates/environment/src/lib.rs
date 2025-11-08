@@ -52,6 +52,51 @@ impl Environment {
         Ok(env_vars)
     }
 
+    pub fn merge(&mut self, other: Environment) -> anyhow::Result<()> {
+        self.vars.extend(other.vars);
+
+        // add to paths if not already present
+        for path in other.paths.iter() {
+            if !self.paths.contains(path) {
+                self.paths.push(path.clone());
+            }
+        }
+
+        if let Some(inherited_vars) = other.inherited_vars {
+            if let Some(existing_inherited_vars) = self.inherited_vars.as_mut() {
+                // extend if not already present
+                for var in inherited_vars.iter() {
+                    if !existing_inherited_vars.contains(var) {
+                        existing_inherited_vars.push(var.clone());
+                    }
+                }
+            } else {
+                self.inherited_vars = Some(inherited_vars);
+            }
+        }
+
+        if let Some(system_paths) = other.system_paths {
+            if let Some(existing_system_paths) = self.system_paths.as_mut() {
+                // extend if not already present
+                for path in system_paths.iter() {
+                    if !existing_system_paths.contains(path) {
+                        existing_system_paths.push(path.clone());
+                    }
+                }
+            } else {
+                self.system_paths = Some(system_paths);
+            }
+        }
+
+        let vars = self
+            .get_vars()
+            .context(format_context!("Failed to get environment variables"))?;
+
+        self.vars.extend(vars);
+
+        Ok(())
+    }
+
     pub fn get_vars(&self) -> anyhow::Result<HashMap<Arc<str>, Arc<str>>> {
         let mut env_vars = HashMap::new();
 

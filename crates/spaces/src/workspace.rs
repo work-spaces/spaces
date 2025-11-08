@@ -536,6 +536,8 @@ impl Workspace {
         );
 
         if !singleton::get_args_env().is_empty() {
+            let env_args = singleton::get_args_env();
+            env.vars.extend(env_args);
             // scripts may read ENV variables
             // so they need to rerun if any are passed on the command line
             settings.bin.is_always_evaluate = true;
@@ -569,39 +571,9 @@ impl Workspace {
     }
 
     pub fn update_env(&mut self, env: environment::Environment) -> anyhow::Result<()> {
-        self.env.vars.extend(env.vars);
-
-        // add to paths if not already present
-        for path in env.paths.iter() {
-            if !self.env.paths.contains(path) {
-                self.env.paths.push(path.clone());
-            }
-        }
-        if let Some(inherited_vars) = env.inherited_vars {
-            if let Some(existing_inherited_vars) = self.env.inherited_vars.as_mut() {
-                // extend if not already present
-                for var in inherited_vars.iter() {
-                    if !existing_inherited_vars.contains(var) {
-                        existing_inherited_vars.push(var.clone());
-                    }
-                }
-            } else {
-                self.env.inherited_vars = Some(inherited_vars);
-            }
-        }
-
-        if let Some(system_paths) = env.system_paths {
-            if let Some(existing_system_paths) = self.env.system_paths.as_mut() {
-                // extend if not already present
-                for path in system_paths.iter() {
-                    if !existing_system_paths.contains(path) {
-                        existing_system_paths.push(path.clone());
-                    }
-                }
-            } else {
-                self.env.system_paths = Some(system_paths);
-            }
-        }
+        self.env
+            .merge(env)
+            .context(format_context!("Failed to merge workspace environment"))?;
         Ok(())
     }
 
