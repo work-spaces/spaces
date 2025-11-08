@@ -168,7 +168,7 @@ pub fn download_string(url: &str) -> anyhow::Result<Arc<str>> {
 pub struct HttpArchive {
     pub spaces_key: Arc<str>,
     pub archive: Archive,
-    archive_driver: Option<easy_archiver::driver::Driver>,
+    archive_driver: Option<archiver::driver::Driver>,
     pub full_path_to_archive: String,
     tools_path: String,
     allow_gh_for_download: bool,
@@ -214,7 +214,7 @@ impl HttpArchive {
         let effective_sha256 = effective_sha256.unwrap_or(archive.sha256.clone());
 
         let archive_driver_result =
-            easy_archiver::driver::Driver::from_filename(archive_file_name.as_str()).context(
+            archiver::driver::Driver::from_filename(archive_file_name.as_str()).context(
                 format_context!("Failed to get driver for {archive_file_name}"),
             );
 
@@ -517,7 +517,7 @@ impl HttpArchive {
         let mut extracted_files = HashSet::new();
 
         let next_progress_bar = if self.archive_driver.is_some() {
-            let decoder = easy_archiver::Decoder::new(
+            let decoder = archiver::Decoder::new(
                 &self.full_path_to_archive,
                 Some(self.archive.sha256.to_string()),
                 &self.get_path_to_extracted_files(),

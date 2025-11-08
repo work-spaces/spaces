@@ -340,7 +340,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule_name: &str,
         #[starlark(require = named)] archive: starlark::values::Value,
     ) -> anyhow::Result<String> {
-        let create_archive: easy_archiver::CreateArchive =
+        let create_archive: archiver::CreateArchive =
             serde_json::from_value(archive.to_json_value()?)
                 .context(format_context!("bad options for archive"))?;
 
@@ -357,7 +357,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] archive: starlark::values::Value,
         heap: &'v Heap,
     ) -> anyhow::Result<Value<'v>> {
-        let create_archive: easy_archiver::CreateArchive =
+        let create_archive: archiver::CreateArchive =
             serde_json::from_value(archive.to_json_value()?)
                 .context(format_context!("bad options for archive"))?;
 

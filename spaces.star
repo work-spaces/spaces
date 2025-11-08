@@ -1,5 +1,5 @@
 """
-Spaces starlark checkout script to make changes to spaces, printer, and easy-archiver.
+Spaces starlark checkout/run script to make changes to spaces, printer, and archiver.
 With VSCode/Zed integration
 """
 
@@ -45,30 +45,31 @@ SHORTCUTS = {
 
 starship_add_bash("starship0", shortcuts = SHORTCUTS)
 
-# This is needed for easy-archiver to pickup the local version of printer
+# Add spaces, printer, and easy-archiver source repositories to the workspace
+printer_url = "https://github.com/work-spaces/spaces-printer"
+archiver_url = "https://github.com/work-spaces/spaces-archiver"
+
+# This is needed for spaces-archiver to pickup the local version of printer
 checkout_update_asset(
     "cargo_config",
     destination = ".cargo/config.toml",
     value = {
         "patch": {
-            "https://github.com/work-spaces/printer-rs": {
+            printer_url: {
                 "printer": {
+                    "package": "spaces-printer",
                     "path": "./printer",
                 },
             },
-            "https://github.com/work-spaces/easy-archiver": {
-                "easy-archiver": {
-                    "path": "./easy-archiver",
+            archiver_url: {
+                "archiver": {
+                    "package": "spaces-archiver",
+                    "path": "./archiver",
                 },
             },
         },
     },
 )
-
-# Add spaces, printer, and easy-archiver source repositories to the workspace
-
-printer_url = "https://github.com/work-spaces/printer-rs"
-easy_archiver_url = "https://github.com/work-spaces/easy-archiver"
 
 checkout_add_hard_link_asset(
     "rust_toolchain",
@@ -89,8 +90,8 @@ checkout_add_repo(
 )
 
 checkout_add_repo(
-    "easy-archiver",
-    url = easy_archiver_url,
+    "archiver",
+    url = archiver_url,
     rev = "main",
 )
 
