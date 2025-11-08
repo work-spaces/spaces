@@ -171,8 +171,9 @@ checksum = "b0674a1ddeecb70197781e945de4b3b8ffb61fa939a5597bcf48503737663100"
 
 [[package]]
 name = "anyhow-source-location"
-version = "0.1.0"
-source = "git+https://github.com/work-spaces/anyhow-source-location?rev=v0.1.0#60142d827a1926fb2685d48d8811106acbc41603"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a09f1c6304242cd9577e0e3364db2871f093b3a8e35a5372439ab13e9d7b9b8"
 dependencies = [
  "anyhow",
 ]
@@ -431,7 +432,7 @@ dependencies = [
  "blake3",
  "glob-match",
  "logger",
- "printer",
+ "spaces-printer",
  "walkdir",
 ]
 
@@ -446,7 +447,7 @@ dependencies = [
  "js-sys",
  "num-traits",
  "wasm-bindgen",
- "windows-link",
+ "windows-link 0.1.3",
 ]
 
 [[package]]
@@ -531,15 +532,15 @@ checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 
 [[package]]
 name = "console"
-version = "0.15.11"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "054ccb5b10f9f2cbf51eb355ca1d05c2d279ce1804688d0db74b4733a5aeafd8"
+checksum = "b430743a6eb14e9764d4260d4c0d8123087d504eeb9c48f2b2a5e810dd369df4"
 dependencies = [
  "encode_unicode",
  "libc",
  "once_cell",
  "unicode-width 0.2.1",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -564,8 +565,8 @@ dependencies = [
  "anyhow",
  "anyhow-source-location",
  "logger",
- "printer",
  "reflink-copy",
+ "spaces-printer",
  "walkdir",
 ]
 
@@ -815,25 +816,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.106",
-]
-
-[[package]]
-name = "easy-archiver"
-version = "0.1.7"
-dependencies = [
- "anyhow",
- "anyhow-source-location",
- "bzip2 0.4.4",
- "flate2",
- "glob-match",
- "printer",
- "serde",
- "sevenz-rust",
- "sha256",
- "tar",
- "walkdir",
- "xz2",
- "zip",
 ]
 
 [[package]]
@@ -1138,11 +1120,12 @@ version = "0.9.0"
 dependencies = [
  "anyhow",
  "anyhow-source-location",
+ "clap",
  "lock",
  "logger",
- "printer",
  "semver",
  "serde",
+ "spaces-printer",
  "state",
  "strum",
  "url",
@@ -1276,13 +1259,14 @@ dependencies = [
  "anyhow",
  "anyhow-source-location",
  "changes",
- "easy-archiver",
  "glob-match",
  "logger",
- "printer",
  "reqwest",
  "serde",
  "serde_json",
+ "sha256",
+ "spaces-archiver",
+ "spaces-printer",
  "state",
  "tokio",
  "url",
@@ -1544,14 +1528,14 @@ dependencies = [
 
 [[package]]
 name = "indicatif"
-version = "0.17.11"
+version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "183b3088984b400f4cfac3620d5e076c84da5364016b4f49473de574b2586235"
+checksum = "ade6dfcba0dfb62ad59e59e7241ec8912af34fd29e0e743e3db992bd278e8b65"
 dependencies = [
  "console",
- "number_prefix",
  "portable-atomic",
  "unicode-width 0.2.1",
+ "unit-prefix",
  "web-time",
 ]
 
@@ -1573,7 +1557,7 @@ dependencies = [
  "bincode",
  "blake3",
  "logger",
- "printer",
+ "spaces-printer",
  "walkdir",
 ]
 
@@ -1778,9 +1762,9 @@ dependencies = [
  "anyhow-source-location",
  "chrono",
  "logger",
- "printer",
  "serde",
  "serde_json",
+ "spaces-printer",
 ]
 
 [[package]]
@@ -1803,7 +1787,7 @@ checksum = "13dc2df351e3202783a1fe0d44375f7295ffb4049267b0f3018346dc122a1d94"
 name = "logger"
 version = "0.1.0"
 dependencies = [
- "printer",
+ "spaces-printer",
 ]
 
 [[package]]
@@ -2082,12 +2066,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "number_prefix"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "830b246a0e5f20af87141b25c173cd1b609bd7779a4617d6ec582abaf90870f3"
-
-[[package]]
 name = "object"
 version = "0.36.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2260,23 +2238,6 @@ name = "precomputed-hash"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "925383efa346730478fb4838dbe9137d2a47675ad789c546d150a6e1dd4ab31c"
-
-[[package]]
-name = "printer"
-version = "0.1.10"
-dependencies = [
- "anyhow",
- "anyhow-source-location",
- "console",
- "indicatif",
- "owo-colors",
- "serde",
- "serde_json",
- "serde_yaml",
- "state",
- "strum",
- "terminal_size",
-]
 
 [[package]]
 name = "proc-macro2"
@@ -2554,9 +2515,9 @@ dependencies = [
  "anyhow-source-location",
  "logger",
  "platform",
- "printer",
  "serde",
  "serde_json",
+ "spaces-printer",
 ]
 
 [[package]]
@@ -2861,6 +2822,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "shell"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "anyhow-source-location",
+ "serde",
+ "toml",
+]
+
+[[package]]
 name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2912,7 +2883,7 @@ dependencies = [
 
 [[package]]
 name = "spaces"
-version = "0.14.15"
+version = "0.15.5"
 dependencies = [
  "anyhow",
  "anyhow-source-location",
@@ -2924,7 +2895,6 @@ dependencies = [
  "clap",
  "clap_complete",
  "copy",
- "easy-archiver",
  "environment",
  "flume",
  "fs2",
@@ -2944,9 +2914,9 @@ dependencies = [
  "lsp-types 0.97.0",
  "maplit",
  "num_cpus",
+ "once_cell",
  "petgraph 0.8.2",
  "platform",
- "printer",
  "regex",
  "rule",
  "semver",
@@ -2954,11 +2924,15 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha256",
+ "shell",
+ "spaces-archiver",
+ "spaces-printer",
  "starlark",
  "starlark_lsp",
  "starlark_syntax",
  "starstd",
  "state",
+ "store",
  "strum",
  "thiserror 2.0.14",
  "toml",
@@ -2967,6 +2941,42 @@ dependencies = [
  "which",
  "workflows",
  "ws",
+]
+
+[[package]]
+name = "spaces-archiver"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "anyhow-source-location",
+ "bzip2 0.4.4",
+ "flate2",
+ "glob-match",
+ "serde",
+ "sevenz-rust",
+ "sha256",
+ "spaces-printer",
+ "tar",
+ "walkdir",
+ "xz2",
+ "zip",
+]
+
+[[package]]
+name = "spaces-printer"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "anyhow-source-location",
+ "console",
+ "indicatif",
+ "owo-colors",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "state",
+ "strum",
+ "terminal_size",
 ]
 
 [[package]]
@@ -3124,6 +3134,16 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
+name = "store"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "anyhow-source-location",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "string_cache"
@@ -3614,6 +3634,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
+name = "unit-prefix"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "323402cff2dd658f39ca17c789b502021b3f18707c91cdf22e3838e1b4023817"
+
+[[package]]
 name = "unsafe-libyaml"
 version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3874,7 +3900,7 @@ dependencies = [
  "windows-collections",
  "windows-core",
  "windows-future",
- "windows-link",
+ "windows-link 0.1.3",
  "windows-numerics",
 ]
 
@@ -3895,7 +3921,7 @@ checksum = "c0fdd3ddb90610c7638aa2b3a3ab2904fb9e5cdbecc643ddb3647212781c4ae3"
 dependencies = [
  "windows-implement",
  "windows-interface",
- "windows-link",
+ "windows-link 0.1.3",
  "windows-result",
  "windows-strings",
 ]
@@ -3907,7 +3933,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc6a41e98427b19fe4b73c550f060b59fa592d7d686537eebf9385621bfbad8e"
 dependencies = [
  "windows-core",
- "windows-link",
+ "windows-link 0.1.3",
  "windows-threading",
 ]
 
@@ -3940,13 +3966,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e6ad25900d524eaabdbbb96d20b4311e1e7ae1699af4fb28c17ae66c80d798a"
 
 [[package]]
+name = "windows-link"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
+
+[[package]]
 name = "windows-numerics"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9150af68066c4c5c07ddc0ce30421554771e528bde427614c61038bc2c92c2b1"
 dependencies = [
  "windows-core",
- "windows-link",
+ "windows-link 0.1.3",
 ]
 
 [[package]]
@@ -3955,7 +3987,7 @@ version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "56f42bd332cc6c8eac5af113fc0c1fd6a8fd2aa08a0119358686e5160d0586c6"
 dependencies = [
- "windows-link",
+ "windows-link 0.1.3",
 ]
 
 [[package]]
@@ -3964,7 +3996,7 @@ version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "56e6c93f3a0c3b36176cb1327a4958a0353d5d166c2a35cb268ace15e91d3b57"
 dependencies = [
- "windows-link",
+ "windows-link 0.1.3",
 ]
 
 [[package]]
@@ -3992,6 +4024,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2f500e4d28234f72040990ec9d39e3a6b950f9f22d3dba18416c35882612bcb"
 dependencies = [
  "windows-targets 0.53.3",
+]
+
+[[package]]
+name = "windows-sys"
+version = "0.61.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
+dependencies = [
+ "windows-link 0.2.1",
 ]
 
 [[package]]
@@ -4031,7 +4072,7 @@ version = "0.53.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d5fe6031c4041849d7c496a8ded650796e7b6ecc19df1a431c1a363342e5dc91"
 dependencies = [
- "windows-link",
+ "windows-link 0.1.3",
  "windows_aarch64_gnullvm 0.53.0",
  "windows_aarch64_msvc 0.53.0",
  "windows_i686_gnu 0.53.0",
@@ -4048,7 +4089,7 @@ version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b66463ad2e0ea3bbf808b7f1d371311c80e115c0b71d60efc142cafbcfb057a6"
 dependencies = [
- "windows-link",
+ "windows-link 0.1.3",
 ]
 
 [[package]]
@@ -4228,7 +4269,7 @@ checksum = "ea2f10b9bb0928dfb1b42b65e1f9e36f7f54dbdf08457afefb38afcdec4fa2bb"
 
 [[package]]
 name = "ws"
-version = "0.14.15"
+version = "0.15.5"
 dependencies = [
  "anyhow",
  "anyhow-source-location",
@@ -4239,10 +4280,10 @@ dependencies = [
  "homedir",
  "inputs",
  "logger",
- "printer",
  "semver",
  "serde",
  "serde_json",
+ "spaces-printer",
 ]
 
 [[package]]

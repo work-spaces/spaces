@@ -20,7 +20,7 @@ libc = { version = "0.2", optional = true }
 
 copy.workspace = true
 changes.workspace = true
-easy-archiver.workspace = true
+archiver.workspace = true
 environment.workspace = true
 git.workspace = true
 glob-match.workspace = true

@@ -228,7 +228,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             ));
         }
 
-        let mut create_archive: easy_archiver::CreateArchive =
+        let mut create_archive: archiver::CreateArchive =
             serde_json::from_value(archive.to_json_value()?)
                 .context(format_context!("bad options for archive"))?;
 
