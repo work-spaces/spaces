@@ -48,7 +48,7 @@ inputs.path = "spaces/crates/inputs"
 lock.path = "spaces/crates/lock"
 logger.path = "spaces/crates/logger"
 platform.path = "spaces/crates/platform"
-printer { package = "spaces-printer", path = "printer" }
+printer = { package = "spaces-printer", path = "printer" }
 rule.path = "spaces/crates/rule"
 shell.path = "spaces/crates/shell"
 starstd.path = "spaces/crates/starstd"
