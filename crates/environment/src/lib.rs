@@ -52,7 +52,7 @@ impl Environment {
         Ok(env_vars)
     }
 
-    pub fn merge(&mut self, other: Environment) -> anyhow::Result<()> {
+    pub fn merge(&mut self, other: Environment) {
         self.vars.extend(other.vars);
 
         // add to paths if not already present
@@ -87,14 +87,6 @@ impl Environment {
                 self.system_paths = Some(system_paths);
             }
         }
-
-        let vars = self
-            .get_vars()
-            .context(format_context!("Failed to get environment variables"))?;
-
-        self.vars.extend(vars);
-
-        Ok(())
     }
 
     pub fn get_vars(&self) -> anyhow::Result<HashMap<Arc<str>, Arc<str>>> {
