@@ -55,13 +55,11 @@ checkout_update_asset(
     destination = ".cargo/config.toml",
     value = {
         "patch": {
-            printer_url: {
+            "crates-io": {
                 "printer": {
                     "package": "spaces-printer",
                     "path": "./printer",
                 },
-            },
-            archiver_url: {
                 "archiver": {
                     "package": "spaces-archiver",
                     "path": "./archiver",
