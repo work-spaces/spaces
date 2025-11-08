@@ -535,9 +535,9 @@ impl Workspace {
             is_reproducible.into(),
         );
 
-        if !singleton::get_args_env().is_empty() {
-            let env_args = singleton::get_args_env();
-            env.vars.extend(env_args);
+        let args_env = singleton::get_args_env();
+        if !args_env.is_empty() {
+            env.vars.extend(args_env);
             // scripts may read ENV variables
             // so they need to rerun if any are passed on the command line
             settings.bin.is_always_evaluate = true;
@@ -571,9 +571,14 @@ impl Workspace {
     }
 
     pub fn update_env(&mut self, env: environment::Environment) -> anyhow::Result<()> {
-        self.env
-            .merge(env)
-            .context(format_context!("Failed to merge workspace environment"))?;
+        self.env.merge(env);
+
+        let vars = self
+            .env
+            .get_vars()
+            .context(format_context!("Failed to get environment variables"))?;
+
+        self.env.vars.extend(vars);
         Ok(())
     }
 
