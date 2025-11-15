@@ -802,7 +802,10 @@ impl Repository {
                 format!("origin/{branch}").into(),
             ],
         )
-        .context(format_context!("while pulling from {}", self.full_path))?;
+        .context(format_context!(
+            "while resetting to origin from {}",
+            self.full_path
+        ))?;
         Ok(())
     }
 
