@@ -176,6 +176,7 @@ pub fn execute() -> anyhow::Result<()> {
                     new_branch,
                     create_lock_file,
                     force_install_tools,
+                    keep_workspace_on_failure,
                 },
         } => {
             handle_verbosity(
@@ -198,6 +199,7 @@ pub fn execute() -> anyhow::Result<()> {
                 new_branch,
                 create_lock_file,
                 force_install_tools,
+                keep_workspace_on_failure,
             )
             .context(format_context!("while checking out repo"))?;
         }
@@ -208,7 +210,12 @@ pub fn execute() -> anyhow::Result<()> {
             show_elapsed_time,
             ci,
             rescan,
-            commands: Commands::Co { checkout, name },
+            commands:
+                Commands::Co {
+                    checkout,
+                    name,
+                    keep_workspace_on_failure,
+                },
         } => {
             handle_verbosity(
                 &mut stdout_printer,
@@ -230,7 +237,7 @@ pub fn execute() -> anyhow::Result<()> {
 
             checkout
                 .clone()
-                .checkout(&mut stdout_printer, name)
+                .checkout(&mut stdout_printer, name, keep_workspace_on_failure)
                 .context(format_context!("while checking out repo"))?;
         }
         Arguments {
@@ -692,6 +699,9 @@ This can be used if the repository defines all of its own dependencies."#)]
         /// Force install the tools spaces needs to run.
         #[arg(long)]
         force_install_tools: bool,
+        /// Do not delete the workspace directory if checkout fails.
+        #[arg(long)]
+        keep_workspace_on_failure: bool,
     },
     #[command(about = r#"
 The shortform version of `checkout` and `checkout-repo`. The details of the command are
@@ -722,6 +732,9 @@ create-lock-file = false # optionally create a lock file
         checkout: Arc<str>,
         /// The name of the workspace to create.
         name: Arc<str>,
+        /// Do not delete the workspace directory if checkout fails.
+        #[arg(long)]
+        keep_workspace_on_failure: bool,
     },
     /// Runs checkout rules within an existing workspace (experimental)
     Sync {},

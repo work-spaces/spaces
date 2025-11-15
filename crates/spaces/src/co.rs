@@ -48,6 +48,7 @@ pub fn checkout_repo(
     new_branch: Vec<Arc<str>>,
     create_lock_file: bool,
     force_install_tools: bool,
+    keep_workspace_on_failure: bool,
 ) -> anyhow::Result<()> {
     set_workspace_env(env).context(format_context!("While checking out repo"))?;
     let clone = clone.unwrap_or(git::Clone::Default);
@@ -102,7 +103,7 @@ checkout.add_repo(
         vec![],
         Some(script),
         create_lock_file.into(),
-        false,
+        keep_workspace_on_failure,
     )
     .context(format_context!("during runner checkout"))?;
 
@@ -220,7 +221,12 @@ pub struct CheckoutWorkflow {
 }
 
 impl CheckoutWorkflow {
-    fn checkout(self, printer: &mut printer::Printer, name: Arc<str>) -> anyhow::Result<()> {
+    fn checkout(
+        self,
+        printer: &mut printer::Printer,
+        name: Arc<str>,
+        keep_workspace_on_failure: bool,
+    ) -> anyhow::Result<()> {
         checkout_workflow(
             printer,
             name,
@@ -231,7 +237,7 @@ impl CheckoutWorkflow {
             None,
             self.create_lock_file.unwrap_or_default(),
             false,
-            false,
+            keep_workspace_on_failure,
         )
         .context(format_context!("in CheckoutWorkflow"))?;
         Ok(())
@@ -254,7 +260,12 @@ pub struct CheckoutRepo {
 }
 
 impl CheckoutRepo {
-    fn checkout(self, printer: &mut printer::Printer, name: Arc<str>) -> anyhow::Result<()> {
+    fn checkout(
+        self,
+        printer: &mut printer::Printer,
+        name: Arc<str>,
+        keep_workspace_on_failure: bool,
+    ) -> anyhow::Result<()> {
         checkout_repo(
             printer,
             name,
@@ -266,6 +277,7 @@ impl CheckoutRepo {
             self.new_branch.unwrap_or_default(),
             self.create_lock_file.unwrap_or_default(),
             false,
+            keep_workspace_on_failure,
         )
         .context(format_context!("in CheckoutRepo"))?;
         Ok(())
@@ -305,10 +317,17 @@ impl Checkout {
         Ok(checkout)
     }
 
-    pub fn checkout(self, printer: &mut printer::Printer, name: Arc<str>) -> anyhow::Result<()> {
+    pub fn checkout(
+        self,
+        printer: &mut printer::Printer,
+        name: Arc<str>,
+        keep_workspace_on_failure: bool,
+    ) -> anyhow::Result<()> {
         match self {
-            Checkout::Workflow(workflow) => workflow.checkout(printer, name),
-            Checkout::Repo(repo) => repo.checkout(printer, name),
+            Checkout::Workflow(workflow) => {
+                workflow.checkout(printer, name, keep_workspace_on_failure)
+            }
+            Checkout::Repo(repo) => repo.checkout(printer, name, keep_workspace_on_failure),
         }
         .context(format_context!("during repo checkout"))?;
         Ok(())
