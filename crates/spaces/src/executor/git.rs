@@ -285,22 +285,24 @@ impl Git {
             ))?;
         }
 
-        // now use reflink-copy to copy the repository to the workspace
-        copy::copy_with_cow_semantics(progress, &store_repository.full_path, &self.spaces_key)
-            .context(format_context!(
-                "{name} - Failed to copy repository {working_directory}/{store_repo_name} to {}",
-                self.spaces_key,
-            ))?;
+        // This is a local clone from the store repository to the workspace repository
+        let clone_arguments: Vec<Arc<str>> = vec![
+            "clone".into(),
+            store_repository.full_path.clone(),
+            self.spaces_key.clone(),
+        ];
 
-        // now execute checkout in the workspace
-        let workspace_repository = git::Repository::new(self.url.clone(), self.spaces_key.clone());
-        let args: Vec<Arc<str>> = vec!["reset".into(), "--hard".into(), "HEAD".into()];
-        workspace_repository
-            .execute(progress, args)
-            .context(format_context!(
-                "{name} - Failed to reset repository {}",
-                self.spaces_key
-            ))?;
+        git::Repository::new_clone(
+            progress,
+            self.url.clone(),
+            ".".into(),
+            self.spaces_key.clone(),
+            clone_arguments,
+        )
+        .context(format_context!(
+            "{name} - Failed to clone repository local repo {} to {store_repo_name}",
+            store_repository.full_path
+        ))?;
 
         Ok(())
     }

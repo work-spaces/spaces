@@ -789,6 +789,23 @@ impl Repository {
         Ok(())
     }
 
+    pub fn reset_hard_origin_branch(
+        &self,
+        progress_bar: &mut printer::MultiProgressBar,
+        branch: &str,
+    ) -> anyhow::Result<()> {
+        self.execute(
+            progress_bar,
+            vec![
+                "reset".into(),
+                "--hard".into(),
+                format!("origin/{branch}").into(),
+            ],
+        )
+        .context(format_context!("while pulling from {}", self.full_path))?;
+        Ok(())
+    }
+
     pub fn fetch(&self, progress_bar: &mut printer::MultiProgressBar) -> anyhow::Result<()> {
         self.execute(progress_bar, vec!["fetch".into()])
             .context(format_context!("while fetching from {}", self.full_path))?;
