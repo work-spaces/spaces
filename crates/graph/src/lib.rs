@@ -67,6 +67,13 @@ impl Graph {
         &self,
         target: Option<Arc<str>>,
     ) -> anyhow::Result<Vec<petgraph::prelude::NodeIndex>> {
+        let mut topo_tasks =
+            petgraph::algo::toposort(&self.directed_graph, None).map_err(|err| {
+                // get the name of the node
+                let name = self.directed_graph[err.node_id()].clone();
+                format_error!("Found a circular dependency involving {name}")
+            })?;
+
         let sorted_tasks = if let Some(target) = target {
             let target_node = self
                 .directed_graph
@@ -84,10 +91,8 @@ impl Graph {
             }
             tasks
         } else {
-            let mut tasks = petgraph::algo::toposort(&self.directed_graph, None)
-                .map_err(|err| format_error!("Found a circular dependency in the graph {err:?}"))?;
-            tasks.reverse();
-            tasks
+            topo_tasks.reverse();
+            topo_tasks
         };
 
         Ok(sorted_tasks)
