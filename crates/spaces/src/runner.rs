@@ -242,7 +242,14 @@ pub fn run_shell_in_workspace(
     let shell_config = shell::Config::load(shell_config_path_option, path)
         .context(format_context!("while loading shell config"))?;
 
-    let environment_map = workspace_arc.read().get_env().vars.clone();
+    let environment_map =
+        workspace_arc
+            .read()
+            .get_env()
+            .get_run_vars()
+            .context(format_context!(
+                "while getting runtime environment for shell"
+            ))?;
 
     const SHELL_DIR: &str = ".spaces/shell";
     std::fs::create_dir_all(SHELL_DIR).context(format_context!(
