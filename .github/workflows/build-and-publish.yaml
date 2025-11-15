@@ -25,13 +25,19 @@ jobs:
           target: x86_64-unknown-linux-musl
           components: rustfmt, clippy
 
+      - name: Install musl tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: rustup add musl
+        run: rustup target add x86_64-unknown-linux-musl
+
       - name: Build for Ubuntu
         run: cargo build --target=x86_64-unknown-linux-musl --profile=release
 
       - name: Create binary artifact
         run: |
           mkdir -p artifacts
-          (cd target/release; zip ../../artifacts/spaces-linux-x86_64-${{ github.ref_name }}.zip spaces)
+          (cd target/x86_64-unknown-linux-musl; zip ../../artifacts/spaces-linux-x86_64-${{ github.ref_name }}.zip spaces)
 
       - name: Publish release with Ubuntu binary
         env:
