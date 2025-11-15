@@ -300,7 +300,7 @@ impl Git {
             self.spaces_key.clone(),
         ];
 
-        git::Repository::new_clone(
+        let workspace_repository = git::Repository::new_clone(
             progress,
             self.url.clone(),
             ".".into(),
@@ -312,6 +312,21 @@ impl Git {
             store_repository.full_path,
             self.spaces_key
         ))?;
+
+        workspace_repository
+            .execute(
+                progress,
+                vec![
+                    "remote".into(),
+                    "set-url".into(),
+                    "origin".into(),
+                    workspace_repository.url.clone(),
+                ],
+            )
+            .context(format_context!(
+                "Failed to set remote URL for workspace repository to {}",
+                self.url
+            ))?;
 
         Ok(())
     }
