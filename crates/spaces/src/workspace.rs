@@ -575,7 +575,7 @@ impl Workspace {
 
         let vars = self
             .env
-            .get_vars()
+            .get_checkout_vars()
             .context(format_context!("Failed to get environment variables"))?;
 
         self.env.vars.extend(vars);

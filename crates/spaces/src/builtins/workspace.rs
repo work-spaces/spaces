@@ -228,7 +228,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         // the previous behavior
         if !env.vars.contains_key("PATH") {
             let vars = env
-                .get_vars()
+                .get_checkout_vars()
                 .context(format_context!("Failed to get environment variables"))?;
             env.vars.extend(vars);
         }

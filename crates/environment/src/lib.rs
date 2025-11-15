@@ -4,6 +4,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+#[derive(Clone, Copy, PartialEq)]
+enum GetVars {
+    Checkout,
+    Run,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct Environment {
@@ -31,17 +37,26 @@ impl Environment {
         path.into()
     }
 
-    fn get_inherited_vars(&self) -> anyhow::Result<HashMap<Arc<str>, Arc<str>>> {
+    fn get_inherited_vars(&self, get_vars: GetVars) -> anyhow::Result<HashMap<Arc<str>, Arc<str>>> {
         let mut env_vars = HashMap::new();
         if let Some(inherited) = &self.inherited_vars {
             for key in inherited {
                 // if key ends in ? it is optional
                 if key.ends_with('?') {
-                    let trimmed_key = key.trim_end_matches('?');
-                    if let Ok(value) = std::env::var(trimmed_key) {
+                    if get_vars == GetVars::Checkout {
+                        let trimmed_key = key.trim_end_matches('?');
+                        if let Ok(value) = std::env::var(trimmed_key) {
+                            env_vars.insert(trimmed_key.into(), value.into());
+                        }
+                    }
+                } else if key.ends_with('!') {
+                    if get_vars == GetVars::Run {
+                        let trimmed_key = key.trim_end_matches('!');
+                        let value = std::env::var(trimmed_key).context(format_context!(
+                        "failed to get env var {trimmed_key} from calling env to pass to workspace env"))?;
                         env_vars.insert(trimmed_key.into(), value.into());
                     }
-                } else {
+                } else if get_vars == GetVars::Checkout {
                     let value = std::env::var(key.as_ref()).context(format_context!(
                         "failed to get env var {key} from calling env to pass to workspace env"
                     ))?;
@@ -89,11 +104,11 @@ impl Environment {
         }
     }
 
-    pub fn get_vars(&self) -> anyhow::Result<HashMap<Arc<str>, Arc<str>>> {
+    pub fn get_checkout_vars(&self) -> anyhow::Result<HashMap<Arc<str>, Arc<str>>> {
         let mut env_vars = HashMap::new();
 
         env_vars.extend(
-            self.get_inherited_vars()
+            self.get_inherited_vars(GetVars::Checkout)
                 .context(format_context!("Failed to get inherited vars"))?,
         );
 
@@ -104,11 +119,26 @@ impl Environment {
         Ok(env_vars)
     }
 
+    pub fn get_run_vars(&self) -> anyhow::Result<HashMap<Arc<str>, Arc<str>>> {
+        let mut env_vars = HashMap::new();
+
+        for (key, value) in self.vars.iter() {
+            env_vars.insert(key.clone(), value.clone());
+        }
+
+        env_vars.extend(
+            self.get_inherited_vars(GetVars::Run)
+                .context(format_context!("Failed to get inherited vars"))?,
+        );
+
+        Ok(env_vars)
+    }
+
     pub fn create_shell_env(&self, path: std::path::PathBuf) -> anyhow::Result<()> {
         let mut content = String::new();
 
         let vars = self
-            .get_vars()
+            .get_checkout_vars()
             .context(format_context!("Failed to get vars"))?;
 
         for (key, value) in vars {

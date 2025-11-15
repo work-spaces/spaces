@@ -70,7 +70,9 @@ impl Exec {
         let mut arguments = self.args.clone().unwrap_or_default();
         let workspace_env = workspace.read().get_env();
 
-        let mut environment_map = workspace_env.vars.clone();
+        let mut environment_map = workspace_env
+            .get_run_vars()
+            .context(format_context!("Failed to get run env variables"))?;
 
         let absolute_path_to_workspace = workspace.read().get_absolute_path();
         let (working_directory, pwd) = if let Some(directory) = self.working_directory.as_ref() {
