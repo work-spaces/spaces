@@ -271,18 +271,26 @@ impl Git {
             repository
         };
 
+        store_repository.fetch(progress).context(format_context!(
+            "{name} - Failed to fetch repository {working_directory}/{store_repo_name}",
+        ))?;
+
         store_repository
             .checkout(progress, &self.checkout)
             .context(format_context!(
                 "{name} - Failed to checkout repository {}",
-                self.spaces_key
+                store_repository.full_path
             ))?;
 
-        if store_repository.is_head_branch(progress) {
-            store_repository.pull(progress).context(format_context!(
-                "{name} - Failed to pull repository {}",
-                self.spaces_key
-            ))?;
+        if let git::Checkout::Revision(rev) = &self.checkout {
+            if store_repository.is_branch(progress, rev) {
+                store_repository
+                    .reset_hard_origin_branch(progress, rev)
+                    .context(format_context!(
+                        "Failed to git reset --hard origin/{rev} for {}",
+                        store_repository.full_path
+                    ))?;
+            }
         }
 
         // This is a local clone from the store repository to the workspace repository
