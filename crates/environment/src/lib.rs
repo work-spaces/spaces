@@ -107,14 +107,15 @@ impl Environment {
     pub fn get_checkout_vars(&self) -> anyhow::Result<HashMap<Arc<str>, Arc<str>>> {
         let mut env_vars = HashMap::new();
 
+        for (key, value) in self.vars.iter() {
+            env_vars.insert(key.clone(), value.clone());
+        }
+
         env_vars.extend(
             self.get_inherited_vars(GetVars::Checkout)
                 .context(format_context!("Failed to get inherited vars"))?,
         );
 
-        for (key, value) in self.vars.iter() {
-            env_vars.insert(key.clone(), value.clone());
-        }
         env_vars.insert("PATH".into(), self.get_path());
         Ok(env_vars)
     }
