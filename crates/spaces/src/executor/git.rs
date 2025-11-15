@@ -300,8 +300,9 @@ impl Git {
             clone_arguments,
         )
         .context(format_context!(
-            "{name} - Failed to clone repository local repo {} to {store_repo_name}",
-            store_repository.full_path
+            "{name} - Failed to clone repository local repo {} to {}",
+            store_repository.full_path,
+            self.spaces_key
         ))?;
 
         Ok(())
