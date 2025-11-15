@@ -3,7 +3,7 @@ name: Build and Publish Binaries
 on:
   push:
     tags:
-      - 'v*.*.*'  # Trigger on version tags
+      - "v*.*.*" # Trigger on version tags
 
 jobs:
   build-ubuntu:
@@ -22,11 +22,11 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-          target: x86_64-unknown-linux-gnu
+          target: x86_64-unknown-linux-musl
           components: rustfmt, clippy
 
       - name: Build for Ubuntu
-        run: cargo build --profile=release
+        run: cargo build --target=x86_64-unknown-linux-musl --profile=release
 
       - name: Create binary artifact
         run: |
@@ -39,7 +39,7 @@ jobs:
         run: |
           gh release create ${{ github.ref_name }} \
             artifacts/spaces-linux-x86_64-${{ github.ref_name }}.zip --title "${{ github.ref_name }}" --generate-notes
-            
+
   build-matrix-windows:
     name: Build and Upload Other OS Binaries
     needs: build-ubuntu
@@ -120,4 +120,3 @@ jobs:
         run: |
           gh release upload ${{ github.ref_name }} \
             artifacts/spaces-macos-${{ matrix.arch }}-${{ github.ref_name }}.zip --clobber
-
