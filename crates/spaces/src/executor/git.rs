@@ -142,12 +142,22 @@ impl Git {
         let spaces_name_path = std::path::Path::new(self.spaces_key.as_ref());
         if std::path::Path::new(spaces_name_path).exists() {
             // check if the directory is empty
+            // if the target directory is empty for submodules
+
             let entries = std::fs::read_dir(spaces_name_path).context(format_context!(
                 "Internal Error: failed to read directory {}",
                 self.spaces_key
             ))?;
 
             if entries.count() > 0 {
+                logger(progress, self.url.clone()).debug(
+                    format!(
+                        "{} already exists and is populated - try to update",
+                        spaces_name_path.display()
+                    )
+                    .as_str(),
+                );
+
                 let existing_repo = git::Repository::new(self.url.clone(), self.spaces_key.clone());
 
                 if existing_repo.is_dirty(progress) {
@@ -191,6 +201,14 @@ impl Git {
 
                 return Ok(());
             }
+
+            logger(progress, self.url.clone()).debug(
+                format!(
+                    "{} already exists, but is not populated, try to clone",
+                    spaces_name_path.display()
+                )
+                .as_str(),
+            );
         }
 
         let suffix: Arc<str> = if let Some(sparse_checkout) = self.sparse_checkout.as_ref() {
@@ -200,6 +218,9 @@ impl Git {
             }
             // do a blake3 hash of sparse_string for the suffix
             let hash = blake3::hash(sparse_string.as_bytes());
+
+            logger(progress, self.url.clone())
+                .debug(format!("Sparse checkout mode will use {hash}",).as_str());
             hash.to_string().into()
         } else {
             "".into()
@@ -231,6 +252,9 @@ impl Git {
 
         let repo_path: Arc<str> = format!("{working_directory}/{store_repo_name}").into();
         let store_repository = if !std::path::Path::new(repo_path.as_ref()).exists() {
+            logger(progress, self.url.clone())
+                .debug(format!("{repo_path} does not exist, cloning for the first time").as_str());
+
             let mut clone_arguments: Vec<Arc<str>> = vec!["clone".into()];
             if let Some(filter) = filter {
                 clone_arguments.push(format!("--filter={filter}").into());
@@ -264,16 +288,18 @@ impl Git {
 
             repository
         } else {
-            let repository = git::Repository::new(self.url.clone(), repo_path.clone());
-            repository.fetch(progress).context(format_context!(
-                "{name} - Failed to fetch repository {working_directory}/{store_repo_name}",
-            ))?;
-            repository
+            git::Repository::new(self.url.clone(), repo_path.clone())
         };
+
+        logger(progress, self.url.clone())
+            .debug(format!("{repo_path} is cloned, fetching latest changes").as_str());
 
         store_repository.fetch(progress).context(format_context!(
             "{name} - Failed to fetch repository {working_directory}/{store_repo_name}",
         ))?;
+
+        logger(progress, self.url.clone())
+            .debug(format!("{repo_path} is fetched, checking out {:?}", self.checkout).as_str());
 
         store_repository
             .checkout(progress, &self.checkout)
@@ -284,6 +310,10 @@ impl Git {
 
         if let git::Checkout::Revision(rev) = &self.checkout {
             if store_repository.is_branch(progress, rev) {
+                logger(progress, self.url.clone()).debug(
+                    format!("{repo_path} is on a branch, doing a hard reset to origin/{rev}")
+                        .as_str(),
+                );
                 store_repository
                     .reset_hard_origin_branch(progress, rev)
                     .context(format_context!(
@@ -299,6 +329,14 @@ impl Git {
             store_repository.full_path.clone(),
             self.spaces_key.clone(),
         ];
+
+        logger(progress, self.url.clone()).debug(
+            format!(
+                "{repo_path} now being cloned into the workspace at {}",
+                self.spaces_key
+            )
+            .as_str(),
+        );
 
         let workspace_repository = git::Repository::new_clone(
             progress,

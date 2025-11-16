@@ -624,24 +624,18 @@ impl Repository {
         clone_name: Arc<str>,
         arguments: Vec<Arc<str>>,
     ) -> anyhow::Result<Self> {
-        let clone_path = std::path::Path::new(clone_name.as_ref());
-        if clone_path.exists() {
-            url_logger(progress, url.as_ref())
-                .warning(format!("{clone_name} already exists").as_str());
-        } else {
-            url_logger(progress, url.as_ref())
-                .message(format!("git {}", arguments.join(" ")).as_str());
+        url_logger(progress, url.as_ref()).message(format!("git {}", arguments.join(" ")).as_str());
 
-            let clone_options = printer::ExecuteOptions {
-                arguments,
-                working_directory: Some(working_directory.clone()),
-                ..Default::default()
-            };
+        let clone_options = printer::ExecuteOptions {
+            arguments,
+            working_directory: Some(working_directory.clone()),
+            ..Default::default()
+        };
 
-            progress
-                .execute_process("git", clone_options)
-                .context(format_context!("Failed to clone repository {}", clone_name))?;
-        }
+        progress
+            .execute_process("git", clone_options)
+            .context(format_context!("Failed to clone repository {}", clone_name))?;
+
         let full_path: Arc<str> = format!("{working_directory}/{clone_name}").into();
 
         Ok(Self::new(url, full_path))
