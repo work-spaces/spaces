@@ -1,5 +1,5 @@
 use anyhow::Context;
-use anyhow_source_location::format_context;
+use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -57,10 +57,15 @@ impl Environment {
                         env_vars.insert(trimmed_key.into(), value.into());
                     }
                 } else if get_vars == GetVars::Checkout {
-                    let value = std::env::var(key.as_ref()).context(format_context!(
-                        "failed to get env var {key} from calling env to pass to workspace env"
-                    ))?;
-                    env_vars.insert(key.clone(), value.into());
+                    if let Ok(value) = std::env::var(key.as_ref()) {
+                        env_vars.insert(key.clone(), value.into());
+                    } else if let Some(value) = self.vars.get(key.as_ref()) {
+                        env_vars.insert(key.clone(), value.clone());
+                    } else {
+                        return Err(format_error!(
+                            "failed to get env var {key} from calling env to pass to workspace env"
+                        ));
+                    }
                 }
             }
         }
