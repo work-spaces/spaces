@@ -419,8 +419,9 @@ pub fn evaluate_starlark_modules(
                 new_modules.push((module, content));
             }
 
-            // sorts the modules lexicographically by the filename
-            new_modules.sort_by(|first, second| first.0.cmp(&second.0));
+            // sorts the modules lexicographically by the filename from back to front.
+            // push_front below will execute the modules in lexicographical order.
+            new_modules.sort_by(|first, second| second.0.cmp(&first.0));
             star_logger(printer).debug(
                 format!(
                     "Adding new modules: {:?}",
@@ -436,7 +437,7 @@ pub fn evaluate_starlark_modules(
                 let hash = blake3::hash(content.as_bytes()).to_string();
                 if !known_modules.contains(&hash) {
                     known_modules.insert(hash);
-                    module_queue.push_back((module, content.into()));
+                    module_queue.push_front((module, content.into()));
                 }
             }
         }
