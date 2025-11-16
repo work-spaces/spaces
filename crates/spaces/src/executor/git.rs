@@ -142,7 +142,7 @@ impl Git {
         let spaces_name_path = std::path::Path::new(self.spaces_key.as_ref());
         if std::path::Path::new(spaces_name_path).exists() {
             // check if the directory is empty
-            // if the target directory is empty for submodules
+            // For submodules, the target directory may exist but be empty before initialization.
 
             let entries = std::fs::read_dir(spaces_name_path).context(format_context!(
                 "Internal Error: failed to read directory {}",
