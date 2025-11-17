@@ -324,46 +324,20 @@ impl Git {
         }
 
         // This is a local clone from the store repository to the workspace repository
-        let clone_arguments: Vec<Arc<str>> = vec![
-            "clone".into(),
-            store_repository.full_path.clone(),
-            self.spaces_key.clone(),
-        ];
-
-        logger(progress, self.url.clone()).debug(
-            format!(
-                "{repo_path} now being cloned into the workspace at {}",
-                self.spaces_key
-            )
-            .as_str(),
-        );
-
-        let workspace_repository = git::Repository::new_clone(
-            progress,
-            self.url.clone(),
-            ".".into(),
-            self.spaces_key.clone(),
-            clone_arguments,
-        )
-        .context(format_context!(
-            "{name} - Failed to clone repository local repo {} to {}",
-            store_repository.full_path,
-            self.spaces_key
-        ))?;
-
-        workspace_repository
-            .execute(
-                progress,
-                vec![
-                    "remote".into(),
-                    "set-url".into(),
-                    "origin".into(),
-                    workspace_repository.url.clone(),
-                ],
-            )
+        copy::copy_with_cow_semantics(progress, &store_repository.full_path, &self.spaces_key)
             .context(format_context!(
-                "Failed to set remote URL for workspace repository to {}",
-                self.url
+                "{name} - Failed to copy repository {working_directory}/{store_repo_name} to {}",
+                self.spaces_key,
+            ))?;
+
+        // now execute checkout in the workspace
+        let workspace_repository = git::Repository::new(self.url.clone(), self.spaces_key.clone());
+        let args: Vec<Arc<str>> = vec!["reset".into(), "--hard".into(), "HEAD".into()];
+        workspace_repository
+            .execute(progress, args)
+            .context(format_context!(
+                "{name} - Failed to reset repository {}",
+                self.spaces_key
             ))?;
 
         Ok(())
