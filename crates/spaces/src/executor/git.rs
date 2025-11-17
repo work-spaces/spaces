@@ -330,7 +330,7 @@ impl Git {
                 self.spaces_key,
             ))?;
 
-        // now execute checkout in the workspace
+        // Reset the workspace to ensure it matches the current HEAD
         let workspace_repository = git::Repository::new(self.url.clone(), self.spaces_key.clone());
         let args: Vec<Arc<str>> = vec!["reset".into(), "--hard".into(), "HEAD".into()];
         workspace_repository
