@@ -323,7 +323,7 @@ impl Git {
             }
         }
 
-        // This is a local clone from the store repository to the workspace repository
+        // Copy the store repository to the workspace using copy-on-write semantics
         copy::copy_with_cow_semantics(progress, &store_repository.full_path, &self.spaces_key)
             .context(format_context!(
                 "{name} - Failed to copy repository {working_directory}/{store_repo_name} to {}",
