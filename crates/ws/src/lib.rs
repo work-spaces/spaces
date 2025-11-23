@@ -282,7 +282,7 @@ impl JsonSettings {
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct CheckoutSettings {
     pub links: HashSet<Arc<str>>,
-    pub assets: HashMap<Arc<str>, Blake3Hash>,
+    pub assets: HashMap<Arc<str>, Arc<str>>,
     pub updated_assets: HashSet<Arc<str>>,
 }
 
@@ -318,7 +318,7 @@ impl CheckoutSettings {
 
     pub fn insert_asset(&mut self, path: Arc<str>, contents: Arc<str>) {
         let content_hash = blake3::hash(contents.as_bytes());
-        let _ = self.assets.insert(path, content_hash.into());
+        let _ = self.assets.insert(path, content_hash.to_string().into());
     }
 }
 

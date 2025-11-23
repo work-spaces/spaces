@@ -488,14 +488,6 @@ pub fn execute_tasks(
             .settings
             .save_json()
             .context(format_context!("Failed to save settings"))?;
-
-        if phase == task::Phase::Checkout {
-            workspace
-                .read()
-                .settings
-                .save_checkout()
-                .context(format_context!("Failed to save checkout settings"))?;
-        }
     }
 
     match phase {
@@ -667,6 +659,14 @@ pub fn execute_tasks(
     let is_clean = target
         .map(|t| t.as_ref() == rule::CLEAN_RULE_NAME)
         .unwrap_or(false);
+
+    if phase == task::Phase::Checkout {
+        workspace
+            .read()
+            .settings
+            .save_checkout()
+            .context(format_context!("Failed to save checkout settings"))?;
+    }
 
     if workspace.read().is_bin_dirty || is_clean {
         star_logger(printer).debug("saving BIN workspace settings");
