@@ -57,6 +57,11 @@ impl UpdateAsset {
 
         let mut logger = logger::Logger::new_progress(&mut progress, name.into());
         let mut workspace_write_lock = workspace.write();
+        let _ = workspace_write_lock
+            .settings
+            .checkout
+            .updated_assets
+            .insert(self.destination.clone());
         let workspace_path = workspace_write_lock.get_absolute_path();
 
         let dest_path = get_destination_path(workspace_path.clone(), &self.destination).context(
@@ -142,8 +147,15 @@ impl AddWhichAsset {
             self.which
         ))?;
 
+        let mut workspace_write_lock = workspace.write();
+        let _ = workspace_write_lock
+            .settings
+            .checkout
+            .links
+            .insert(self.destination.clone().into());
+
         // create the hard link to sysroot
-        let workspace = workspace.read().get_absolute_path();
+        let workspace = workspace_write_lock.get_absolute_path();
         let destination = format!("{}/{}", workspace, self.destination);
 
         let source = path.to_string_lossy().to_string();
@@ -178,7 +190,14 @@ impl AddHardLink {
         _name: &str,
     ) -> anyhow::Result<()> {
         // create the hard link to sysroot
-        let workspace = workspace.read().get_absolute_path();
+        let mut workspace_write_lock = workspace.write();
+        let _ = workspace_write_lock
+            .settings
+            .checkout
+            .links
+            .insert(self.destination.clone().into());
+
+        let workspace = workspace_write_lock.get_absolute_path();
         let destination = format!("{}/{}", workspace, self.destination);
         let source = self.source.clone();
 
@@ -213,6 +232,8 @@ impl AddAsset {
     ) -> anyhow::Result<()> {
         let mut logger = logger::Logger::new_progress(&mut progress, name.into());
         let mut workspace_write_lock = workspace.write();
+        workspace_write_lock
+            .add_checkout_asset(self.destination.clone().into(), self.content.clone().into());
         let workspace_path = workspace_write_lock.get_absolute_path();
         save_asset(workspace_path, &self.destination, &self.content)
             .context(format_context!("failed to add asset"))?;
@@ -249,7 +270,14 @@ impl AddSoftLink {
         _name: &str,
     ) -> anyhow::Result<()> {
         // create the hard link to sysroot
-        let workspace = workspace.read().get_absolute_path();
+        let mut workspace_write_lock = workspace.write();
+        workspace_write_lock
+            .settings
+            .checkout
+            .links
+            .insert(self.destination.clone().into());
+
+        let workspace = workspace_write_lock.get_absolute_path();
         let destination = format!("{}/{}", workspace, self.destination);
         let source = self.source.clone();
 

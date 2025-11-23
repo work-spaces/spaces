@@ -281,6 +281,7 @@ impl HttpArchive {
         mut progress_bar: printer::MultiProgressBar,
         workspace_directory: &str,
         space_directory: &str,
+        link_set: &mut HashSet<Arc<str>>,
     ) -> anyhow::Result<()> {
         //construct a list of files to link
         let mut files = Vec::new();
@@ -331,6 +332,7 @@ impl HttpArchive {
                         label_logger(&mut progress_bar, "hardlink").trace(
                             format!("Creating hard link {full_target_path} -> {source}").as_str(),
                         );
+                        let _ = link_set.insert(full_target_path.clone().into());
                         Self::create_hard_link(
                             full_target_path.clone(),
                             source.clone(),

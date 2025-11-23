@@ -488,6 +488,14 @@ pub fn execute_tasks(
             .settings
             .save_json()
             .context(format_context!("Failed to save settings"))?;
+
+        if phase == task::Phase::Checkout {
+            workspace
+                .read()
+                .settings
+                .save_checkout()
+                .context(format_context!("Failed to save checkout settings"))?;
+        }
     }
 
     match phase {

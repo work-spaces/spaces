@@ -31,6 +31,7 @@ fn download_and_install(
                 .context(format_context!("Failed to create http archive"))?;
 
         http_archive.allow_gh_for_download(false);
+        let mut links = std::collections::HashSet::new();
 
         let progress_bar = if http_archive.is_download_required() {
             let progress_bar = multi_progress.add_progress(name, Some(200), Some("Complete"));
@@ -39,7 +40,7 @@ fn download_and_install(
                 .context(format_context!("Failed to sync http archive"))?;
 
             http_archive
-                .create_links(progress_bar, spaces_tools.as_ref(), "unused")
+                .create_links(progress_bar, spaces_tools.as_ref(), "unused", &mut links)
                 .context(format_context!("Failed to create links"))?;
             None
         } else {
@@ -54,7 +55,7 @@ fn download_and_install(
 
         if let Some(progress_bar) = progress_bar {
             http_archive
-                .create_links(progress_bar, spaces_tools.as_ref(), "unused")
+                .create_links(progress_bar, spaces_tools.as_ref(), "unused", &mut links)
                 .context(format_context!("Failed to create links"))?;
         }
     } else {
