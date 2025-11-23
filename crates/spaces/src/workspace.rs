@@ -23,6 +23,12 @@ Spaces Workspace file
 """
 "#;
 
+#[derive(Copy, Clone, PartialEq)]
+pub enum IsCheckoutPhase {
+    No,
+    Yes,
+}
+
 pub type WorkspaceArc = std::sync::Arc<lock::StateLock<Workspace>>;
 
 fn logger_printer(printer: &mut printer::Printer) -> logger::Logger<'_> {
@@ -295,6 +301,7 @@ impl Workspace {
         absolute_path_to_workspace: Option<Arc<str>>,
         is_clear_inputs: bool,
         input_script_names: Option<Vec<Arc<str>>>,
+        is_checkout_phase: IsCheckoutPhase,
     ) -> anyhow::Result<Self> {
         let date = chrono::Local::now();
 
@@ -360,7 +367,7 @@ impl Workspace {
                             .context(format_context!("Failed to read file {}", path))?;
 
                         logger(&mut progress)
-                            .trace(format!("Loading module from sync order: {module}").as_str());
+                            .debug(format!("Loading module from sync order: {module}").as_str());
                         loaded_modules.insert(module.clone());
                         modules.push((module.clone(), content.into()));
                     }
@@ -407,9 +414,10 @@ impl Workspace {
         // The workspace is not scanned on every run, only on the first run or when --rescan is passed
         // For large workspaces, this can be a significant time saver
         // is_scanned starts as None then Some(false) then Some(true) to finish the state machine
-        if !settings.json.is_scanned.unwrap_or(false)
+        if (!settings.json.is_scanned.unwrap_or(false)
             || singleton::get_is_rescan()
-            || settings.bin.star_files.is_empty()
+            || settings.bin.star_files.is_empty())
+            && is_checkout_phase == IsCheckoutPhase::No
         {
             // if the workspace is scanned, this will save settings on exit
             singleton::set_rescan(true);
@@ -476,6 +484,10 @@ impl Workspace {
             progress.set_ending_message(
                 "Loaded modules from settings. Use `--rescan` to check for new modules.",
             );
+
+            if is_checkout_phase == IsCheckoutPhase::Yes {
+                settings.json.is_scanned = None;
+            }
         }
 
         // checks if any of the modules have changed

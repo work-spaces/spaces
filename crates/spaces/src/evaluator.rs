@@ -371,7 +371,7 @@ pub fn evaluate_starlark_modules(
         if let Some((name, content)) = module_queue.pop_front() {
             let mut _workspace_lock = get_state().write();
             singleton::set_active_workspace(workspace.clone());
-            star_logger(printer).message(format!("evaluating {name}").as_str());
+            star_logger(printer).message(format!("evaluating {name} from front of queue").as_str());
 
             let eval_name = name.clone();
             let workspace_arc = workspace.clone();
@@ -436,6 +436,8 @@ pub fn evaluate_starlark_modules(
             for (module, content) in new_modules {
                 let hash = blake3::hash(content.as_bytes()).to_string();
                 if !known_modules.contains(&hash) {
+                    star_logger(printer)
+                        .debug(format!("Pushing: {module} on front of queue").as_str());
                     known_modules.insert(hash);
                     module_queue.push_front((module, content.into()));
                 }

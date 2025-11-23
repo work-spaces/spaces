@@ -73,6 +73,7 @@ fn get_workspace(
     run_workspace: RunWorkspace,
     absolute_path_to_workspace: Option<Arc<str>>,
     is_clear_inputs: IsClearInputs,
+    is_checkout_phase: workspace::IsCheckoutPhase,
 ) -> anyhow::Result<workspace::Workspace> {
     let checkout_scripts: Option<Vec<Arc<str>>> = match &run_workspace {
         RunWorkspace::Target(_, _) => None,
@@ -87,6 +88,7 @@ fn get_workspace(
         absolute_path_to_workspace,
         is_clear_inputs.into(),
         checkout_scripts,
+        is_checkout_phase,
     )
     .context(format_context!("while running workspace"))
 }
@@ -122,8 +124,14 @@ pub fn foreach_repo(
     for_each_repo: ForEachRepo,
     command_arguments: &[Arc<str>],
 ) -> anyhow::Result<()> {
-    let workspace = get_workspace(printer, run_workspace, None, IsClearInputs::No)
-        .context(format_context!("while getting workspace"))?;
+    let workspace = get_workspace(
+        printer,
+        run_workspace,
+        None,
+        IsClearInputs::No,
+        workspace::IsCheckoutPhase::No,
+    )
+    .context(format_context!("while getting workspace"))?;
 
     let workspace_arc = workspace::WorkspaceArc::new(lock::StateLock::new(workspace));
     evaluate_environment(printer, workspace_arc.clone())
@@ -225,6 +233,7 @@ pub fn run_shell_in_workspace(
         RunWorkspace::Target(None, vec![]),
         None,
         IsClearInputs::No,
+        workspace::IsCheckoutPhase::No,
     )
     .context(format_context!("while getting workspace"))?;
 
@@ -276,11 +285,17 @@ pub fn run_starlark_modules_in_workspace(
     is_create_lock_file: IsCreateLockFile,
     is_execute_tasks: IsExecuteTasks,
 ) -> anyhow::Result<()> {
+    let is_checkout_phase = if phase == task::Phase::Checkout {
+        workspace::IsCheckoutPhase::Yes
+    } else {
+        workspace::IsCheckoutPhase::No
+    };
     let workspace = get_workspace(
         printer,
         run_workspace.clone(),
         absolute_path_to_workspace,
         is_clear_inputs,
+        is_checkout_phase,
     )
     .context(format_context!("while getting workspace"))?;
 
