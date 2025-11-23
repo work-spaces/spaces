@@ -172,10 +172,16 @@ impl OrasArchive {
             .sync(progress)
             .context(format_context!("Failed to sync http_archive {}", name))?;
 
-        let workspace_directory = workspace.read().absolute_path.clone();
+        let mut workspace_write_lock = workspace.write();
+        let workspace_directory = workspace_write_lock.absolute_path.clone();
 
         http_archive
-            .create_links(next_progress_bar, workspace_directory.as_ref(), name)
+            .create_links(
+                next_progress_bar,
+                workspace_directory.as_ref(),
+                name,
+                &mut workspace_write_lock.settings.checkout.links,
+            )
             .context(format_context!(
                 "Failed to create hard links for oras http_archive {}",
                 name

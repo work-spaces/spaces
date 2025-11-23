@@ -203,6 +203,10 @@ impl Workspace {
         self.settings.json.push_member(member);
     }
 
+    pub fn add_checkout_asset(&mut self, path: Arc<str>, contents: Arc<str>) {
+        self.settings.checkout.insert_asset(path, contents);
+    }
+
     pub fn get_absolute_path(&self) -> Arc<str> {
         self.absolute_path.clone()
     }

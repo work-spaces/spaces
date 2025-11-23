@@ -8,6 +8,7 @@ use std::sync::Arc;
 pub const SPACES_LOGS_NAME: &str = ".spaces/logs";
 pub const METRICS_FILE_NAME: &str = ".spaces/metrics.spaces.json";
 const SETTINGS_FILE_NAME: &str = ".spaces/settings.spaces.json";
+const CHECKOUT_FILE_NAME: &str = ".spaces/checkout.spaces.json";
 const BIN_SETTINGS_FILE_NAME: &str = "build/workspace.settings.spaces";
 pub const SPACES_WORKSPACE_ENV_VAR: &str = "SPACES_WORKSPACE";
 const SPACES_HOME_ENV_VAR: &str = "SPACES_HOME";
@@ -89,9 +90,11 @@ impl Asset {
     }
 }
 
+pub type Blake3Hash = [u8; blake3::OUT_LEN];
+
 #[derive(Debug, Encode, Decode, Default)]
 pub struct BinDetail {
-    pub hash: [u8; blake3::OUT_LEN],
+    pub hash: Blake3Hash,
     pub modified: Option<std::time::SystemTime>,
 }
 
@@ -276,6 +279,47 @@ impl JsonSettings {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct CheckoutSettings {
+    pub links: HashSet<Arc<str>>,
+    pub assets: HashMap<Arc<str>, Blake3Hash>,
+    pub updated_assets: HashSet<Arc<str>>,
+}
+
+impl CheckoutSettings {
+    #[allow(unused)]
+    fn load(path: &str) -> anyhow::Result<Self> {
+        let content = std::fs::read_to_string(path)
+            .context(format_context!("Failed to read load order file {path}"))?;
+        let settings: Self = serde_json::from_str(content.as_str())
+            .context(format_context!("Failed to parse load order file {path}"))?;
+        Ok(settings)
+    }
+
+    pub fn save(&self, path: &str) -> anyhow::Result<()> {
+        let path = std::path::Path::new(path);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).context(format_context!(
+                "Failed to create parent directory {}",
+                parent.display()
+            ))?;
+        }
+
+        let content = serde_json::to_string_pretty(&self)
+            .context(format_context!("Failed to serialize load order"))?;
+        std::fs::write(path, content.as_str()).context(format_context!(
+            "Failed to save settings file {}",
+            path.display()
+        ))?;
+        Ok(())
+    }
+
+    pub fn insert_asset(&mut self, path: Arc<str>, contents: Arc<str>) {
+        let content_hash = blake3::hash(contents.as_bytes());
+        let _ = self.assets.insert(path, content_hash.into());
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub enum IsJsonAvailable {
     No,
@@ -286,6 +330,7 @@ pub enum IsJsonAvailable {
 pub struct Settings {
     pub json: JsonSettings,
     pub bin: BinSettings,
+    pub checkout: CheckoutSettings,
 }
 
 impl Settings {
@@ -301,6 +346,8 @@ impl Settings {
             }
         };
 
+        let checkout_settings = CheckoutSettings::default();
+
         let mut bin_settings = BinSettings::new(BIN_SETTINGS_FILE_NAME);
         if bin_settings.changes.skip_folders.is_empty() {
             bin_settings.changes.skip_folders = vec![SPACES_LOGS_NAME.into()];
@@ -310,6 +357,7 @@ impl Settings {
             Self {
                 json: json_settings,
                 bin: bin_settings,
+                checkout: checkout_settings,
             },
             is_json_available,
         )
@@ -318,14 +366,21 @@ impl Settings {
     pub fn save_bin(&self) -> anyhow::Result<()> {
         self.bin
             .save(BIN_SETTINGS_FILE_NAME)
-            .context(format_context!("Bin settings"))?;
+            .context(format_context!("Bin settings: {BIN_SETTINGS_FILE_NAME}"))?;
         Ok(())
     }
 
     pub fn save_json(&self) -> anyhow::Result<()> {
         self.json
             .save(SETTINGS_FILE_NAME)
-            .context(format_context!("Bin settings"))?;
+            .context(format_context!("JSON settings: {SETTINGS_FILE_NAME}"))?;
+        Ok(())
+    }
+
+    pub fn save_checkout(&self) -> anyhow::Result<()> {
+        self.checkout
+            .save(CHECKOUT_FILE_NAME)
+            .context(format_context!("Checkout settings: {CHECKOUT_FILE_NAME}"))?;
         Ok(())
     }
 
