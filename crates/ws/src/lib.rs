@@ -289,10 +289,12 @@ pub struct CheckoutSettings {
 impl CheckoutSettings {
     #[allow(unused)]
     fn load(path: &str) -> anyhow::Result<Self> {
-        let content = std::fs::read_to_string(path)
-            .context(format_context!("Failed to read checkout settings file {path}"))?;
-        let settings: Self = serde_json::from_str(content.as_str())
-            .context(format_context!("Failed to parse checkout settings file {path}"))?;
+        let content = std::fs::read_to_string(path).context(format_context!(
+            "Failed to read checkout settings file {path}"
+        ))?;
+        let settings: Self = serde_json::from_str(content.as_str()).context(format_context!(
+            "Failed to parse checkout settings file {path}"
+        ))?;
         Ok(settings)
     }
 
