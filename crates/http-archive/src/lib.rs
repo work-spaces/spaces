@@ -332,7 +332,10 @@ impl HttpArchive {
                         label_logger(&mut progress_bar, "hardlink").trace(
                             format!("Creating hard link {full_target_path} -> {source}").as_str(),
                         );
-                        let _ = link_set.insert(full_target_path.clone().into());
+                        let workspace_path_to_target = full_target_path
+                            .strip_prefix(format!("{workspace_directory}/").as_str())
+                            .unwrap_or(&full_target_path);
+                        let _ = link_set.insert(workspace_path_to_target.into());
                         Self::create_hard_link(
                             full_target_path.clone(),
                             source.clone(),
