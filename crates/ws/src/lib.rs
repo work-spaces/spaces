@@ -306,7 +306,7 @@ impl CheckoutSettings {
         }
 
         let content = serde_json::to_string_pretty(&self)
-            .context(format_context!("Failed to serialize load order"))?;
+            .context(format_context!("Failed to serialize checkout settings"))?;
         std::fs::write(path, content.as_str()).context(format_context!(
             "Failed to save settings file {}",
             path.display()
