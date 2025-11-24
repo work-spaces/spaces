@@ -279,7 +279,7 @@ impl JsonSettings {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
 pub struct CheckoutSettings {
     pub links: HashSet<Arc<str>>,
     pub assets: HashMap<Arc<str>, Arc<str>>,
@@ -287,13 +287,12 @@ pub struct CheckoutSettings {
 }
 
 impl CheckoutSettings {
-    #[allow(unused)]
-    fn load(path: &str) -> anyhow::Result<Self> {
-        let content = std::fs::read_to_string(path).context(format_context!(
-            "Failed to read checkout settings file {path}"
+    pub fn load() -> anyhow::Result<Self> {
+        let content = std::fs::read_to_string(CHECKOUT_FILE_NAME).context(format_context!(
+            "Failed to read checkout settings file {CHECKOUT_FILE_NAME}"
         ))?;
         let settings: Self = serde_json::from_str(content.as_str()).context(format_context!(
-            "Failed to parse checkout settings file {path}"
+            "Failed to parse checkout settings file {CHECKOUT_FILE_NAME}"
         ))?;
         Ok(settings)
     }
@@ -316,6 +315,20 @@ impl CheckoutSettings {
         Ok(())
     }
 
+    pub fn is_asset_modified(&self, path: Arc<str>) -> bool {
+        if let Some(entry) = self.assets.get(path.as_ref()) {
+            match std::fs::read_to_string(path.as_ref()) {
+                Ok(contents) => {
+                    let file_hash = blake3::hash(contents.as_bytes());
+                    file_hash.to_string() != entry.as_ref()
+                }
+                _ => false,
+            }
+        } else {
+            false
+        }
+    }
+
     pub fn insert_asset(&mut self, path: Arc<str>, contents: Arc<str>) {
         let content_hash = blake3::hash(contents.as_bytes());
         let _ = self.assets.insert(path, content_hash.to_string().into());
@@ -333,6 +346,7 @@ pub struct Settings {
     pub json: JsonSettings,
     pub bin: BinSettings,
     pub checkout: CheckoutSettings,
+    pub existing_checkout: Option<CheckoutSettings>,
 }
 
 impl Settings {
@@ -360,6 +374,7 @@ impl Settings {
                 json: json_settings,
                 bin: bin_settings,
                 checkout: checkout_settings,
+                existing_checkout: None,
             },
             is_json_available,
         )
@@ -389,5 +404,37 @@ impl Settings {
     pub fn clear_inputs(&mut self) -> anyhow::Result<()> {
         self.bin.inputs.clear();
         Ok(())
+    }
+
+    pub fn clone_existing_checkout(&mut self) -> CheckoutSettings {
+        if self.existing_checkout.is_none() {
+            self.existing_checkout = Some(CheckoutSettings::load().unwrap_or_default());
+        }
+        self.existing_checkout.as_ref().unwrap().clone()
+    }
+
+    pub fn get_extraneous_files(&mut self) -> Vec<Arc<str>> {
+        // which files exist in previous but not self
+        let previous = self.clone_existing_checkout();
+        let mut result = Vec::new();
+        for (key, _hash) in previous.assets.iter() {
+            if !self.checkout.assets.contains_key(key) && !previous.is_asset_modified(key.clone()) {
+                result.push(key.clone());
+            }
+        }
+
+        for value in previous.links.iter() {
+            if !self.checkout.links.contains(value) {
+                result.push(value.clone());
+            }
+        }
+
+        for value in previous.updated_assets.iter() {
+            if !self.checkout.updated_assets.contains(value) {
+                result.push(value.clone());
+            }
+        }
+
+        result
     }
 }

@@ -661,6 +661,18 @@ pub fn execute_tasks(
         .unwrap_or(false);
 
     if phase == task::Phase::Checkout {
+        // is there a checkout file already available
+        let extraneous_files = {
+            let mut workspace_write_lock = workspace.write();
+            workspace_write_lock.settings.get_extraneous_files()
+        };
+
+        for file in extraneous_files {
+            star_logger(printer).warning(format!("Expired, removing: {file}").as_str());
+            std::fs::remove_file(file.as_ref())
+                .context(format_context!("Failed to remove {file}"))?;
+        }
+
         workspace
             .read()
             .settings
