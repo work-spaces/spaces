@@ -668,9 +668,11 @@ pub fn execute_tasks(
         };
 
         for file in extraneous_files {
-            star_logger(printer).warning(format!("Expired, removing: {file}").as_str());
-            std::fs::remove_file(file.as_ref())
-                .context(format_context!("Failed to remove {file}"))?;
+            let path = std::path::Path::new(file.as_ref());
+            if path.exists() {
+                star_logger(printer).warning(format!("Expired, removing: {file}").as_str());
+                std::fs::remove_file(path).context(format_context!("Failed to remove {file}"))?;
+            }
         }
 
         workspace
