@@ -708,7 +708,7 @@ pub fn run_starlark_modules(
     let is_dirty = workspace.read().is_dirty;
     let is_always_evaluate = workspace.read().settings.bin.is_always_evaluate;
 
-    if is_dirty || is_always_evaluate {
+    if is_dirty || is_always_evaluate || phase == task::Phase::Checkout {
         if is_always_evaluate {
             star_logger(printer).message("always evaluate modules enabled");
         } else {
