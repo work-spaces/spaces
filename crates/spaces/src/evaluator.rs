@@ -661,7 +661,7 @@ pub fn execute_tasks(
         .unwrap_or(false);
 
     if phase == task::Phase::Checkout {
-        // is there a checkout file already available
+        // Remove files from previous checkout that are no longer needed
         let extraneous_files = {
             let mut workspace_write_lock = workspace.write();
             workspace_write_lock.settings.get_extraneous_files()
