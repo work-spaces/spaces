@@ -219,8 +219,8 @@ impl AddHardLink {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AddAsset {
-    pub destination: String,
-    pub content: String,
+    pub destination: Arc<str>,
+    pub content: Arc<str>,
 }
 
 impl AddAsset {
@@ -232,8 +232,16 @@ impl AddAsset {
     ) -> anyhow::Result<()> {
         let mut logger = logger::Logger::new_progress(&mut progress, name.into());
         let mut workspace_write_lock = workspace.write();
-        workspace_write_lock
-            .add_checkout_asset(self.destination.clone().into(), self.content.clone().into());
+        workspace_write_lock.add_checkout_asset(self.destination.clone(), self.content.clone());
+
+        let previous_checkout = workspace_write_lock.settings.clone_existing_checkout();
+        // does this already exist and has it been modified
+        if previous_checkout.is_asset_modified(self.destination.clone()) {
+            logger
+                .warning(format!("Asset {} is modified. Not updating", self.destination).as_str());
+            return Ok(());
+        }
+
         let workspace_path = workspace_write_lock.get_absolute_path();
         save_asset(workspace_path, &self.destination, &self.content)
             .context(format_context!("failed to add asset"))?;
@@ -247,7 +255,7 @@ impl AddAsset {
         );
 
         workspace_write_lock.settings.json.assets.insert(
-            self.destination.clone().into(),
+            self.destination.clone(),
             ws::Asset::new_contents(&self.content),
         );
 
