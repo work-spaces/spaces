@@ -279,6 +279,7 @@ pub struct LogStatus {
 #[derive(Debug)]
 pub struct State {
     pub tasks: lock::StateLock<HashMap<Arc<str>, task::Task>>,
+    pub workspace_destinations: lock::StateLock<HashMap<Arc<str>, Arc<str>>>,
     pub graph: graph::Graph,
     pub sorted: Vec<petgraph::prelude::NodeIndex>,
     pub latest_starlark_module: Option<Arc<str>>,
@@ -295,7 +296,7 @@ impl State {
         label::sanitize_working_directory(rule_name, self.latest_starlark_module.clone())
     }
 
-    pub fn insert_task(&self, mut task: task::Task) -> anyhow::Result<()> {
+    pub fn insert_task(&self, mut task_to_insert: task::Task) -> anyhow::Result<()> {
         // update the rule name to have the starlark module name
 
         // don't insert tasks in lsp mode
@@ -303,11 +304,38 @@ impl State {
             return Ok(());
         }
 
-        let rule_label = label::sanitize_rule(task.rule.name, self.latest_starlark_module.clone());
-        task.rule.name = rule_label.clone();
-        task.signal = task::SignalArc::new(rule_label.clone());
+        // check to see if the task will cause a conflict
+        let workspace_destination = match &task_to_insert.executor {
+            executor::Task::Git(repo) => Some(repo.spaces_key.clone()),
+            executor::Task::AddAsset(asset) => Some(asset.destination.clone()),
+            executor::Task::AddHardLink(asset) => Some(asset.destination.clone().into()),
+            executor::Task::AddSoftLink(asset) => Some(asset.destination.clone().into()),
+            executor::Task::AddWhichAsset(asset) => Some(asset.destination.clone().into()),
+            // UpdateAsset by design will edit the same destination
+            _ => None,
+        };
 
-        if let Some(inputs) = task.rule.inputs.clone() {
+        let rule_label = label::sanitize_rule(
+            task_to_insert.rule.name,
+            self.latest_starlark_module.clone(),
+        );
+
+        if let Some(ws_dest) = workspace_destination {
+            if let Some(rule_name) = self.workspace_destinations.read().get(&ws_dest) {
+                return Err(format_error!(
+                    "The workspace destination `{ws_dest}` is already being used by rule `{rule_name}`"
+                ));
+            }
+            let _ = self
+                .workspace_destinations
+                .write()
+                .insert(ws_dest, rule_label.clone());
+        }
+
+        task_to_insert.rule.name = rule_label.clone();
+        task_to_insert.signal = task::SignalArc::new(rule_label.clone());
+
+        if let Some(inputs) = task_to_insert.rule.inputs.clone() {
             let mut new_inputs = HashSet::new();
             for input in inputs.iter() {
                 let value = label::sanitize_glob_value(
@@ -318,11 +346,11 @@ impl State {
                 .context(format_context!("Failed to sanitize inputs: {}", input))?;
                 new_inputs.insert(value);
             }
-            task.rule.inputs = Some(new_inputs);
+            task_to_insert.rule.inputs = Some(new_inputs);
         }
 
         // update deps that refer to rules in the same starlark module
-        if let Some(deps) = task.rule.deps.as_mut() {
+        if let Some(deps) = task_to_insert.rule.deps.as_mut() {
             for dep in deps.iter_mut() {
                 if label::is_rule_sanitized(dep) {
                     continue;
@@ -339,7 +367,7 @@ impl State {
                 "Rule already exists {rule_label} with {task:?}"
             ));
         } else {
-            tasks.insert(rule_label, task);
+            tasks.insert(rule_label, task_to_insert);
         }
 
         Ok(())
@@ -718,6 +746,7 @@ fn get_state() -> &'static lock::StateLock<State> {
 
     STATE.set(lock::StateLock::new(State {
         tasks: lock::StateLock::new(HashMap::new()),
+        workspace_destinations: lock::StateLock::new(HashMap::new()),
         graph: graph::Graph::default(),
         sorted: Vec::new(),
         latest_starlark_module: None,
