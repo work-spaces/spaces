@@ -6,7 +6,6 @@ exclude = ["zed-starlark"]
 members = [
     "spaces/crates/spaces",
     "spaces/crates/starstd",
-    "spaces/crates/spaces-platform",
     "spaces/crates/spaces-utils",
 ]
 
@@ -27,7 +26,6 @@ strum = { version = "0.26", features = ["derive"] }
 archiver = { package = "spaces-archiver", path = "./archiver", features = ["printer"] }
 utils = { path = "spaces/crates/spaces-utils", package = "spaces-utils" }
 printer = { package = "spaces-printer", path = "./printer" }
-platform = { path = "spaces/crates/spaces-platform", package = "spaces-platform" }
 starstd.path = "spaces/crates/starstd"
 
 

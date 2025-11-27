@@ -7,6 +7,7 @@ pub mod http_archive;
 pub mod inputs;
 pub mod lock;
 pub mod logger;
+pub mod platform;
 pub mod rule;
 pub mod shell;
 pub mod store;

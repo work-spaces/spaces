@@ -6,6 +6,7 @@ use starlark::values::none::NoneType;
 use starlark::values::{Heap, Value};
 use starstd::{Arg, Function};
 use std::sync::Arc;
+use utils::platform;
 
 pub const FUNCTIONS: &[Function] = &[
     Function {
