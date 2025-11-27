@@ -1,6 +1,6 @@
 [package]
 name = "spaces"
-version = "0.15.11"
+version = "0.15.12"
 edition = "2021"
 
 [dependencies]
@@ -18,34 +18,21 @@ lsp-types = { version = "0.97", optional = true }
 thiserror = "2"
 libc = { version = "0.2", optional = true }
 
-copy.workspace = true
-changes.workspace = true
+utils.workspace = true
 archiver.workspace = true
-environment.workspace = true
-git.workspace = true
 glob-match.workspace = true
-graph.workspace = true
-http-archive.workspace = true
-inputs.workspace = true
-lock.workspace = true
-logger.workspace = true
 petgraph.workspace = true
-platform.workspace = true
 printer.workspace = true
-rule.workspace = true
+platform.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
 serde.workspace = true
-shell.workspace = true
 starlark.workspace = true
 starstd.workspace = true
 state.workspace = true
-store.workspace = true
 strum.workspace = true
 toml.workspace = true
 url.workspace = true
-workflows.workspace = true
-ws.workspace = true
 
 semver = "1"
 num_cpus = "1"

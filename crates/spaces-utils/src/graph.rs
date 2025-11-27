@@ -1,3 +1,4 @@
+use crate::suggest;
 use anyhow_source_location::format_error;
 use std::sync::Arc;
 

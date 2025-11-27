@@ -4,6 +4,7 @@ use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::Arc;
+use utils::{http_archive, logger};
 
 fn get_oras_command(tools_path: &str) -> Arc<str> {
     format!("{tools_path}/sysroot/bin/oras").into()

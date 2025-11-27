@@ -4,6 +4,7 @@ use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use utils::{environment, lock, logger, store, ws};
 
 pub const WORKFLOW_TOML_NAME: &str = "workflows.spaces.toml";
 pub const SHELL_TOML_NAME: &str = "shell.spaces.toml";

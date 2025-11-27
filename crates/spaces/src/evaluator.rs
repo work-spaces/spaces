@@ -7,6 +7,7 @@ use starlark::eval::{Evaluator, ReturnFileLoader};
 use starlark::syntax::{AstModule, Dialect};
 use std::collections::HashSet;
 use std::sync::Arc;
+use utils::{lock, logger, rule, ws};
 
 #[derive(Debug)]
 struct State {}

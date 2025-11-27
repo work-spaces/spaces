@@ -3,6 +3,7 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
 use std::{io::IsTerminal, sync::Arc};
+use utils::git;
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
 pub enum Level {
