@@ -4,7 +4,6 @@ members = [
     "crates/spaces",
     "crates/starstd",
     "crates/spaces-utils",
-    "crates/spaces-platform"
 ]
 
 [workspace.dependencies]
@@ -26,7 +25,6 @@ serde_yaml = "0.9"
 strum = { version = "0.26", features = ["derive"] }
 
 utils = { path = "crates/spaces-utils", package = "spaces-utils" }
-platform = { path = "crates/spaces-platform", package = "spaces-platform" }
 starstd.path = "crates/starstd"
 
 

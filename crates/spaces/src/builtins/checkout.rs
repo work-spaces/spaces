@@ -8,7 +8,7 @@ use starlark::environment::GlobalsBuilder;
 use starlark::values::none::NoneType;
 use starstd::{get_rule_argument, Arg, Function};
 use std::sync::Arc;
-use utils::{changes, environment, git, http_archive, rule};
+use utils::{changes, environment, git, http_archive, platform, rule};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
