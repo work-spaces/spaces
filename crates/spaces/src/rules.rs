@@ -5,6 +5,7 @@ use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use utils::{changes, environment, graph, lock, logger, rule};
 
 fn rules_printer_logger(printer: &mut printer::Printer) -> logger::Logger {
     logger::Logger::new_printer(printer, "rules".into())

@@ -2,22 +2,9 @@
 resolver = "2"
 members = [
     "crates/spaces",
-    "crates/graph",
-    "crates/git",
-    "crates/platform",
     "crates/starstd",
-    "crates/changes",
-    "crates/environment",
-    "crates/lock",
-    "crates/logger",
-    "crates/suggest",
-    "crates/shell",
-    "crates/ws",
-    "crates/inputs",
-    "crates/rule",
-    "crates/copy",
-    "crates/workflows",
-    "crates/store",
+    "crates/spaces-utils",
+    "crates/spaces-platform"
 ]
 
 [workspace.dependencies]
@@ -38,23 +25,10 @@ toml = "0.9"
 serde_yaml = "0.9"
 strum = { version = "0.26", features = ["derive"] }
 
-changes.path = "crates/changes"
-copy.path = "crates/copy"
-environment.path = "crates/environment"
-git.path = "crates/git"
-graph.path = "crates/graph"
-http-archive.path = "crates/http-archive"
-inputs.path = "crates/inputs"
-lock.path = "crates/lock"
-logger.path = "crates/logger"
-platform.path = "crates/platform"
-rule.path = "crates/rule"
+utils = { path = "crates/spaces-utils", package = "spaces-utils" }
+platform = { path = "crates/spaces-platform", package = "spaces-platform" }
 starstd.path = "crates/starstd"
-shell.path = "crates/shell"
-store.path = "crates/store"
-suggest.path = "crates/suggest"
-ws.path = "crates/ws"
-workflows.path = "crates/workflows"
+
 
 [profile.dev]
 opt-level = 3

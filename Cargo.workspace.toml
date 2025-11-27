@@ -5,20 +5,9 @@ resolver = "2"
 exclude = ["zed-starlark"]
 members = [
     "spaces/crates/spaces",
-    "spaces/crates/copy",
-    "spaces/crates/graph",
-    "spaces/crates/git",
-    "spaces/crates/platform",
     "spaces/crates/starstd",
-    "spaces/crates/shell",
-    "spaces/crates/store",
-    "spaces/crates/changes",
-    "spaces/crates/environment",
-    "spaces/crates/lock",
-    "spaces/crates/logger",
-    "spaces/crates/suggest",
-    "spaces/crates/ws",
-    "spaces/crates/workflows",
+    "spaces/crates/spaces-platform",
+    "spaces/crates/spaces-utils",
 ]
 
 [workspace.dependencies]
@@ -36,26 +25,11 @@ serde_yaml = "0.9"
 strum = { version = "0.26", features = ["derive"] }
 
 archiver = { package = "spaces-archiver", path = "./archiver", features = ["printer"] }
-
-capsule.path = "spaces/crates/capsule"
-changes.path = "spaces/crates/changes"
-copy.path = "spaces/crates/copy"
-environment.path = "spaces/crates/environment"
-git.path = "spaces/crates/git"
-graph.path = "spaces/crates/graph"
-http-archive.path = "spaces/crates/http-archive"
-inputs.path = "spaces/crates/inputs"
-lock.path = "spaces/crates/lock"
-logger.path = "spaces/crates/logger"
-platform.path = "spaces/crates/platform"
+utils = { path = "spaces/crates/spaces-utils", package = "spaces-utils" }
 printer = { package = "spaces-printer", path = "./printer" }
-rule.path = "spaces/crates/rule"
-shell.path = "spaces/crates/shell"
+platform = { path = "spaces/crates/spaces-platform", package = "spaces-platform" }
 starstd.path = "spaces/crates/starstd"
-suggest.path = "spaces/crates/suggest"
-store.path = "spaces/crates/store"
-ws.path = "spaces/crates/ws"
-workflows.path = "spaces/crates/workflows"
+
 
 [profile.dev]
 opt-level = 3

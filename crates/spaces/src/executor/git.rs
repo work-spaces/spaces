@@ -3,6 +3,7 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use utils::{copy, git, lock, logger, ws};
 
 fn logger(progress: &mut printer::MultiProgressBar, url: Arc<str>) -> logger::Logger<'_> {
     logger::Logger::new_progress(progress, url)

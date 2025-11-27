@@ -2,6 +2,7 @@ use crate::workspace;
 use anyhow_source_location::format_error;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use utils::lock;
 
 #[derive(Debug)]
 struct State {

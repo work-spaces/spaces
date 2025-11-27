@@ -2,6 +2,7 @@ use crate::{evaluator, executor, task, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use std::sync::Arc;
+use utils::{git, lock, logger, shell};
 
 #[cfg(feature = "lsp")]
 use crate::{lsp_context, singleton};

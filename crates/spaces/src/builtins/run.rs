@@ -3,6 +3,7 @@ use anyhow_source_location::{format_context, format_error};
 use starlark::{environment::GlobalsBuilder, values::none::NoneType};
 use starstd::{get_rule_argument, Arg, Function};
 use std::collections::HashSet;
+use utils::{inputs, rule};
 
 use crate::{executor, rules, singleton, task};
 

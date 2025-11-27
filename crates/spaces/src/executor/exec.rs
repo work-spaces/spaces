@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use strum::Display;
+use utils::{lock, logger};
 
 #[derive(Debug, Clone, Default)]
 struct State {

@@ -2,6 +2,7 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use utils::{http_archive, logger, ws};
 
 use crate::workspace;
 

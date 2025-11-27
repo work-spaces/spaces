@@ -1,0 +1,37 @@
+[package]
+name = "spaces-utils"
+version = "0.15.12"
+edition = "2021"
+
+[dependencies]
+blake3 = "1"
+walkdir = "2"
+bincode = { version = "2", features = ["derive"] }
+glob-match = "0.2"
+levenshtein = "1"
+reflink-copy = "0.1"
+reqwest = { version = "0.12", default-features = false, features = [
+    "blocking",
+    "rustls-tls",
+] }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+which = "7"
+sha256 = "1"
+semver = "1"
+clap = { version = "4", features = ["derive"] }
+chrono = "0.4"
+homedir = "0.3"
+
+anyhow.workspace = true
+archiver.workspace = true
+printer.workspace = true
+petgraph.workspace = true
+
+anyhow-source-location.workspace = true
+platform.workspace = true
+toml.workspace = true
+serde.workspace = true
+strum.workspace = true
+serde_json.workspace = true
+state.workspace = true
+url.workspace = true

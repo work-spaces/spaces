@@ -2,6 +2,7 @@ use crate::workspace;
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
+use utils::http_archive;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpArchive {
