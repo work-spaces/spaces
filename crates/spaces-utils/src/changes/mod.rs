@@ -117,7 +117,7 @@ impl Changes {
     ) -> anyhow::Result<Vec<String>> {
         let mut result = Vec::new();
         for input in inputs {
-            changes_logger(progress).trace(format!("Update changes for {input}").as_str());
+            changes_logger(progress).trace(format!("Inspecting input {input}").as_str());
             if let Some(path) = input_includes_no_asterisk(input.as_ref()) {
                 result.push(path.display().to_string());
             } else {
