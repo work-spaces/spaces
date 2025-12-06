@@ -672,6 +672,18 @@ impl Workspace {
         Ok(())
     }
 
+    pub fn inspect_inputs(
+        &self,
+        progress: &mut printer::MultiProgressBar,
+        inputs: &HashSet<Arc<str>>,
+    ) -> anyhow::Result<Vec<String>> {
+        self.settings
+            .bin
+            .changes
+            .inspect_inputs(progress, inputs)
+            .context(format_context!("Failed to inspect workspace inputs"))
+    }
+
     pub fn add_git_commit_lock(&mut self, rule_name: &str, commit: Arc<str>) {
         self.locks.insert(rule_name.into(), commit);
     }

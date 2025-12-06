@@ -110,8 +110,4 @@ impl Task {
             }
         }
     }
-
-    //pub fn add_signal_dependency(&mut self, task: &Task) {
-    //    self.deps_signals.push(task.signal.clone());
-    //}
 }
