@@ -184,14 +184,13 @@ impl Git {
                         logger(progress, self.url.clone())
                             .warning("Remote not tracked - not updating");
                     }
-                    return Ok(());
+                } else {
+                    // fetch to ensure any new tags are made available
+                    existing_repo.fetch(progress).context(format_context!(
+                        "{name} - Failed to fetch repository {}",
+                        self.spaces_key
+                    ))?;
                 }
-
-                // fetch to ensure any new tags are made available
-                existing_repo.fetch(progress).context(format_context!(
-                    "{name} - Failed to fetch repository {}",
-                    self.spaces_key
-                ))?;
 
                 existing_repo
                     .checkout(progress, &self.checkout)
@@ -199,6 +198,16 @@ impl Git {
                         "{name} - Failed to checkout repository {}",
                         self.spaces_key
                     ))?;
+
+                // check again if switched to a branch
+                if existing_repo.is_head_branch(progress)
+                    && existing_repo.is_remote_branch_tracked(progress)
+                {
+                    existing_repo.pull(progress).context(format_context!(
+                        "{name} - Failed to pull repository {} after switching to a branch",
+                        self.spaces_key
+                    ))?;
+                }
 
                 return Ok(());
             }
