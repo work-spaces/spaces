@@ -9,7 +9,7 @@ members = [
 [workspace.dependencies]
 anyhow-source-location = "0.2.1"
 anyhow = "1"
-printer = { package = "spaces-printer", version = "0.3" }
+printer = { package = "spaces-printer", version = "0.3.1" }
 archiver = { package = "spaces-archiver", version = "0.3", features = [
     "printer",
 ] }

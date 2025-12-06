@@ -113,6 +113,12 @@ pub fn execute() -> anyhow::Result<()> {
         }
     }
 
+    // terminal immediately if ctrl+c is received twice
+    use signal_hook::consts::SIGINT;
+    let term_now = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    signal_hook::flag::register_conditional_shutdown(SIGINT, 1, Arc::clone(&term_now))?;
+    signal_hook::flag::register(SIGINT, Arc::clone(&term_now))?;
+
     let args = Arguments::parse();
     let mut stdout_printer = printer::Printer::new_stdout();
 
