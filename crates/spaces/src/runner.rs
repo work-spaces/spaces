@@ -11,29 +11,6 @@ use itertools::Itertools;
 
 pub use evaluator::IsExecuteTasks;
 
-pub enum IsClearInputs {
-    No,
-    Yes,
-}
-
-impl From<IsClearInputs> for bool {
-    fn from(is_clear_inputs: IsClearInputs) -> bool {
-        match is_clear_inputs {
-            IsClearInputs::No => false,
-            IsClearInputs::Yes => true,
-        }
-    }
-}
-
-impl From<bool> for IsClearInputs {
-    fn from(is_clear_inputs: bool) -> Self {
-        match is_clear_inputs {
-            false => IsClearInputs::No,
-            true => IsClearInputs::Yes,
-        }
-    }
-}
-
 pub enum IsCreateLockFile {
     No,
     Yes,
@@ -73,7 +50,7 @@ fn get_workspace(
     printer: &mut printer::Printer,
     run_workspace: RunWorkspace,
     absolute_path_to_workspace: Option<Arc<str>>,
-    is_clear_inputs: IsClearInputs,
+    is_clear_inputs: workspace::IsClearInputs,
     is_checkout_phase: workspace::IsCheckoutPhase,
 ) -> anyhow::Result<workspace::Workspace> {
     let checkout_scripts: Option<Vec<Arc<str>>> = match &run_workspace {
@@ -87,7 +64,7 @@ fn get_workspace(
     workspace::Workspace::new(
         progress,
         absolute_path_to_workspace,
-        is_clear_inputs.into(),
+        is_clear_inputs,
         checkout_scripts,
         is_checkout_phase,
     )
@@ -129,7 +106,7 @@ pub fn foreach_repo(
         printer,
         run_workspace,
         None,
-        IsClearInputs::No,
+        workspace::IsClearInputs::No,
         workspace::IsCheckoutPhase::No,
     )
     .context(format_context!("while getting workspace"))?;
@@ -233,7 +210,7 @@ pub fn run_shell_in_workspace(
         printer,
         RunWorkspace::Target(None, vec![]),
         None,
-        IsClearInputs::No,
+        workspace::IsClearInputs::No,
         workspace::IsCheckoutPhase::No,
     )
     .context(format_context!("while getting workspace"))?;
@@ -281,7 +258,7 @@ pub fn run_starlark_modules_in_workspace(
     printer: &mut printer::Printer,
     phase: task::Phase,
     absolute_path_to_workspace: Option<Arc<str>>,
-    is_clear_inputs: IsClearInputs,
+    is_clear_inputs: workspace::IsClearInputs,
     run_workspace: RunWorkspace,
     is_create_lock_file: IsCreateLockFile,
     is_execute_tasks: IsExecuteTasks,
@@ -495,7 +472,7 @@ pub fn checkout(
         printer,
         task::Phase::Checkout,
         Some(absolute_path_to_workspace.clone()),
-        IsClearInputs::No,
+        workspace::IsClearInputs::No,
         RunWorkspace::Script(scripts),
         create_lock_file,
         IsExecuteTasks::Yes,

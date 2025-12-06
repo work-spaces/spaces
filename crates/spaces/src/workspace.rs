@@ -30,6 +30,22 @@ pub enum IsCheckoutPhase {
     Yes,
 }
 
+#[derive(Copy, Clone, PartialEq)]
+pub enum IsClearInputs {
+    No,
+    Yes,
+}
+
+impl From<bool> for IsClearInputs {
+    fn from(value: bool) -> Self {
+        if value {
+            IsClearInputs::Yes
+        } else {
+            IsClearInputs::No
+        }
+    }
+}
+
 pub type WorkspaceArc = std::sync::Arc<lock::StateLock<Workspace>>;
 
 fn logger_printer(printer: &mut printer::Printer) -> logger::Logger<'_> {
@@ -304,7 +320,7 @@ impl Workspace {
     pub fn new(
         mut progress: printer::MultiProgressBar,
         absolute_path_to_workspace: Option<Arc<str>>,
-        is_clear_inputs: bool,
+        is_clear_inputs: IsClearInputs,
         input_script_names: Option<Vec<Arc<str>>>,
         is_checkout_phase: IsCheckoutPhase,
     ) -> anyhow::Result<Self> {
@@ -355,6 +371,10 @@ impl Workspace {
 
         let mut is_run_or_inspect = true;
         let (mut settings, is_json_available) = ws::Settings::load();
+
+        if is_checkout_phase == IsCheckoutPhase::Yes {
+            settings.json.scanned_modules = HashSet::default();
+        }
 
         settings.json.assets.insert(
             ENV_FILE_NAME.into(),
@@ -532,7 +552,7 @@ impl Workspace {
 
         // The inputs use the hashes calculated by Changes to keep
         // track of file hashes at the time a rule is executed
-        if is_clear_inputs {
+        if is_clear_inputs == IsClearInputs::Yes {
             settings
                 .clear_inputs()
                 .context(format_context!("Failed to clear inputs"))?;
