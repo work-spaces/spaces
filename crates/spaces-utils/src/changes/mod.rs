@@ -342,7 +342,7 @@ fn get_glob_path(input: Arc<str>) -> Arc<str> {
             path.into()
         }
     } else {
-        // check if input is a file or directory
+        // no asterisk found, return input as-is
         input.clone()
     }
 }
