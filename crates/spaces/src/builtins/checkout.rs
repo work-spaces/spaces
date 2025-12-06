@@ -29,7 +29,7 @@ pub struct PlatformArchive {
 
 const fn get_archive_dict() -> &'static [(&'static str, &'static str)] {
     &[
-        ("url", "urla to zip|tar.xz|tar.gz|tar.bz2 file (can also be an uncompressed file with no suffix)"),
+        ("url", "url to zip|tar.xz|tar.gz|tar.bz2 file (can also be an uncompressed file with no suffix)"),
         ("sha256", "hash of the file"),
         ("link", "None|Hard: create hardlinks of the archive from the spaces store to the workspace"),
         ("globs", "optional list of globs prefix with `+` to include and `-` to exclude"),
