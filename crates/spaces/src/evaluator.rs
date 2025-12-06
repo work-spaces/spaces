@@ -561,6 +561,7 @@ pub fn execute_tasks(
                 if printer.verbosity.level <= printer::Level::Message {
                     rules::show_tasks(
                         printer,
+                        workspace.clone(),
                         task::Phase::Checkout,
                         target.clone(),
                         &globs,
@@ -570,6 +571,7 @@ pub fn execute_tasks(
                 }
                 rules::show_tasks(
                     printer,
+                    workspace.clone(),
                     task::Phase::Run,
                     target.clone(),
                     &globs,

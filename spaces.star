@@ -75,7 +75,6 @@ checkout_add_hard_link_asset(
     destination = "rust-toolchain.toml",
 )
 
-
 checkout_add_hard_link_asset(
     "cargo_workspace_toml",
     source = "{}/Cargo.workspace.toml".format(SPACES_CHECKOUT_PATH),
@@ -190,6 +189,14 @@ run_add_exec(
 run_add_exec(
     "build",
     command = "cargo",
+    inputs = [
+        "+//spaces/Cargo.toml",
+        "+//spaces/Cargo.workspace.toml",
+        "+//spaces/**/*.rs",
+        "-//spaces/target/**",
+        "+//printer/**/*.rs",
+        "+//archiver/**/*.rs",
+    ],
     args = ["build"],
     help = "Run cargo build on workspace",
 )

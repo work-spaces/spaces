@@ -533,6 +533,7 @@ impl State {
     pub fn show_tasks(
         &self,
         printer: &mut printer::Printer,
+        workspace: WorkspaceArc,
         phase: task::Phase,
         _target: Option<Arc<str>>,
         filter: &HashSet<Arc<str>>,
@@ -544,7 +545,10 @@ impl State {
         struct TaskInfo {
             source: String,
             help: String,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            inputs: Option<Vec<String>>,
         }
+
         let mut task_info_list: HashMap<Arc<str>, _> = std::collections::HashMap::new();
         for node_index in self.sorted.iter() {
             let task_name = self.graph.get_task(*node_index);
@@ -585,8 +589,34 @@ impl State {
                             task_name = stripped.strip_prefix("/").unwrap_or(stripped);
                         }
                     }
+
+                    let inputs = if printer.verbosity.level <= printer::Level::Message {
+                        if let Some(inputs) = &task.rule.inputs {
+                            let mut progress = printer::MultiProgress::new(printer);
+                            let mut progress_bar =
+                                progress.add_progress("inspecting inputs", None, Some("Complete"));
+                            Some(
+                                workspace
+                                    .read()
+                                    .inspect_inputs(&mut progress_bar, inputs)
+                                    .context(format_context!("Failed to inspect inputs"))?,
+                            )
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
                     let source = label::get_source_from_label(task_name);
-                    task_info_list.insert(task_name.into(), TaskInfo { help, source });
+                    task_info_list.insert(
+                        task_name.into(),
+                        TaskInfo {
+                            help,
+                            source,
+                            inputs,
+                        },
+                    );
                 }
             }
         }
@@ -800,13 +830,14 @@ pub fn set_latest_starlark_module(name: Arc<str>) {
 
 pub fn show_tasks(
     printer: &mut printer::Printer,
+    workspace: WorkspaceArc,
     phase: task::Phase,
     target: Option<Arc<str>>,
     filter: &HashSet<Arc<str>>,
     strip_prefix: Option<Arc<str>>,
 ) -> anyhow::Result<()> {
     let state = get_state().read();
-    state.show_tasks(printer, phase, target, filter, strip_prefix)
+    state.show_tasks(printer, workspace, phase, target, filter, strip_prefix)
 }
 
 pub fn get_run_targets() -> anyhow::Result<Vec<Arc<str>>> {

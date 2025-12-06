@@ -44,6 +44,12 @@ pub fn is_modified(
         .unwrap_or(true)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum CheckIsModified {
+    No,
+    Yes,
+}
+
 #[derive(Clone, Debug, Encode, Decode, Default)]
 pub struct Changes {
     pub path: Arc<str>,
@@ -52,76 +58,6 @@ pub struct Changes {
 }
 
 impl Changes {
-    fn skip_hashing(entry: &walkdir::DirEntry, skip_folders: &[Arc<str>]) -> bool {
-        let file_name: Arc<str> = entry.file_name().to_string_lossy().into();
-        !skip_folders.contains(&file_name)
-    }
-
-    fn process_entry(
-        progress: &mut printer::MultiProgressBar,
-        path: &std::path::Path,
-    ) -> anyhow::Result<ChangeDetail> {
-        progress.set_message(format!("Processing {path:?}").as_str());
-
-        let detail_type = if path.is_file() {
-            let contents =
-                std::fs::read(path).context(format_context!("failed to load {path:?}"))?;
-            let hash = blake3::hash(&contents);
-            ChangeDetailType::File(hash.to_string().into())
-        } else if path.is_dir() {
-            ChangeDetailType::Directory
-        } else {
-            ChangeDetailType::None
-        };
-
-        let modified = path
-            .metadata()
-            .context(format_context!("failed to get metadata for {path:?}"))?
-            .modified()
-            .context(format_context!("failed to get modified time for {path:?}"))?;
-
-        let change_detail = ChangeDetail {
-            detail_type,
-            modified: Some(modified),
-        };
-
-        Ok(change_detail)
-    }
-
-    fn filter_update(
-        progress: &mut printer::MultiProgressBar,
-        entry: &walkdir::DirEntry,
-        entries: &HashMap<Arc<str>, ChangeDetail>,
-        skip_folders: &[Arc<str>],
-        globs: &HashSet<Arc<str>>,
-    ) -> bool {
-        if !Self::skip_hashing(entry, skip_folders) {
-            return false;
-        }
-
-        if entry.file_type().is_dir() {
-            let file_name = entry.file_name().to_string_lossy();
-            if file_name == ".git" || file_name == ".spaces" {
-                return false;
-            }
-            return true;
-        }
-
-        let file_path: Arc<str> = entry.path().to_string_lossy().into();
-
-        if !glob::match_globs(globs, file_path.as_ref()) {
-            changes_logger(progress).trace(format!("filtered `{file_path}`").as_str());
-            return false;
-        }
-
-        if let Some(change_detail) = entries.get(file_path.as_ref()) {
-            let modified_time = get_modified_time(entry.metadata());
-            return is_modified(modified_time, change_detail.modified);
-        }
-
-        true
-    }
-
     fn update_entry(
         &mut self,
         progress: &mut printer::MultiProgressBar,
@@ -148,6 +84,67 @@ impl Changes {
         false
     }
 
+    fn walk_glob_dir(
+        &self,
+        progress: &mut printer::MultiProgressBar,
+        glob_include_path: Arc<str>,
+        check_is_modified: CheckIsModified,
+        inputs: &HashSet<Arc<str>>,
+    ) -> Vec<walkdir::DirEntry> {
+        walkdir::WalkDir::new(glob_include_path.as_ref())
+            .into_iter()
+            .filter_entry(|e| {
+                filter_update(
+                    progress,
+                    e,
+                    if check_is_modified == CheckIsModified::Yes {
+                        Some(&self.entries)
+                    } else {
+                        None
+                    },
+                    &self.skip_folders,
+                    inputs,
+                )
+            })
+            .filter_map(|entry| entry.ok())
+            .collect()
+    }
+
+    pub fn inspect_inputs(
+        &self,
+        progress: &mut printer::MultiProgressBar,
+        inputs: &HashSet<Arc<str>>,
+    ) -> anyhow::Result<Vec<String>> {
+        let mut result = Vec::new();
+        for input in inputs {
+            changes_logger(progress).trace(format!("Update changes for {input}").as_str());
+            if let Some(path) = input_includes_no_asterisk(input.as_ref()) {
+                result.push(path.display().to_string());
+            } else {
+                let input_path = get_glob_path(input.clone());
+                changes_logger(progress)
+                    .trace(format!("inspect include input path `{input_path}`").as_str());
+                if let Some(glob_include_path) = glob::is_glob_include(input_path.as_ref()) {
+                    changes_logger(progress)
+                        .trace(format!("inspect include glob path `{glob_include_path}`").as_str());
+                    let walk_dir = self.walk_glob_dir(
+                        progress,
+                        glob_include_path,
+                        CheckIsModified::No,
+                        inputs,
+                    );
+                    for entry in walk_dir.into_iter() {
+                        if !entry.file_type().is_dir() {
+                            result.push(entry.path().display().to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
     pub fn update_from_inputs(
         &mut self,
         progress: &mut printer::MultiProgressBar,
@@ -158,45 +155,22 @@ impl Changes {
 
             let mut count = 0usize;
             // convert input from a glob expression to a parent directory
-            if input.starts_with('+') && input.find('*').is_none() {
-                let path = std::path::Path::new(input.as_ref());
-                if path.exists() && path.is_file() {
-                    let change_detail = Self::process_entry(progress, path)
-                        .context(format_context!("Failed to process entry"))?;
-
-                    self.update_entry(progress, path.to_string_lossy().into(), change_detail);
-
-                    progress.increment(1);
-
-                    continue;
-                }
+            if let Some(path) = input_includes_no_asterisk(input.as_ref()) {
+                let change_detail = process_entry(progress, &path)
+                    .context(format_context!("Failed to process entry"))?;
+                self.update_entry(progress, path.to_string_lossy().into(), change_detail);
+                progress.increment(1);
+                continue;
             }
 
-            let input_path = if let Some(asterisk_postion) = input.find('*') {
-                let mut path = input.to_string();
-                path.truncate(asterisk_postion);
-                if path.is_empty() {
-                    ".".into()
-                } else {
-                    path.into()
-                }
-            } else {
-                // check if input is a file or directory
-                input.clone()
-            };
-
+            let input_path = get_glob_path(input.clone());
             changes_logger(progress).trace(format!("include input path `{input_path}`").as_str());
             if let Some(glob_include_path) = glob::is_glob_include(input_path.as_ref()) {
                 changes_logger(progress)
                     .trace(format!("Update glob `{glob_include_path}`").as_str());
 
-                let walk_dir: Vec<_> = walkdir::WalkDir::new(glob_include_path.as_ref())
-                    .into_iter()
-                    .filter_entry(|e| {
-                        Self::filter_update(progress, e, &self.entries, &self.skip_folders, inputs)
-                    })
-                    .filter_map(|entry| entry.ok())
-                    .collect();
+                let walk_dir =
+                    self.walk_glob_dir(progress, glob_include_path, CheckIsModified::Yes, inputs);
 
                 changes_logger(progress)
                     .trace(format!("walked {} entries", walk_dir.len()).as_str());
@@ -210,7 +184,7 @@ impl Changes {
                     let path_string: Arc<str> = path.to_string_lossy().into();
                     changes_logger(progress).trace(format!("process {}", path.display()).as_str());
 
-                    let change_detail = Self::process_entry(progress, path)
+                    let change_detail = process_entry(progress, path)
                         .context(format_context!("Failed to process entry"))?;
 
                     if self.update_entry(progress, path_string.clone(), change_detail) {
@@ -271,5 +245,104 @@ impl Changes {
         }
 
         Ok(hasher.finalize().to_string().into())
+    }
+}
+
+fn input_includes_no_asterisk(input: &str) -> Option<std::path::PathBuf> {
+    if input.starts_with('+') && input.find('*').is_none() {
+        let path = std::path::Path::new(input);
+        if path.exists() && path.is_file() {
+            return Some(path.to_path_buf());
+        }
+    }
+    None
+}
+
+// callback used when walking a directory to filter out directory entries
+// that do not match the globs specified in globs
+fn filter_update(
+    progress: &mut printer::MultiProgressBar,
+    entry: &walkdir::DirEntry,
+    entries: Option<&HashMap<Arc<str>, ChangeDetail>>,
+    skip_folders: &[Arc<str>],
+    globs: &HashSet<Arc<str>>,
+) -> bool {
+    if !skip_hashing(entry, skip_folders) {
+        return false;
+    }
+
+    if entry.file_type().is_dir() {
+        let file_name = entry.file_name().to_string_lossy();
+        if file_name == ".git" || file_name == ".spaces" {
+            return false;
+        }
+        return true;
+    }
+
+    let file_path: Arc<str> = entry.path().to_string_lossy().into();
+
+    if !glob::match_globs(globs, file_path.as_ref()) {
+        changes_logger(progress).trace(format!("filtered `{file_path}`").as_str());
+        return false;
+    }
+
+    if let Some(entries) = entries {
+        if let Some(change_detail) = entries.get(file_path.as_ref()) {
+            let modified_time = get_modified_time(entry.metadata());
+            return is_modified(modified_time, change_detail.modified);
+        }
+    }
+
+    true
+}
+
+fn skip_hashing(entry: &walkdir::DirEntry, skip_folders: &[Arc<str>]) -> bool {
+    let file_name: Arc<str> = entry.file_name().to_string_lossy().into();
+    !skip_folders.contains(&file_name)
+}
+
+fn process_entry(
+    progress: &mut printer::MultiProgressBar,
+    path: &std::path::Path,
+) -> anyhow::Result<ChangeDetail> {
+    progress.set_message(format!("Processing {path:?}").as_str());
+
+    let detail_type = if path.is_file() {
+        let contents = std::fs::read(path).context(format_context!("failed to load {path:?}"))?;
+        let hash = blake3::hash(&contents);
+        ChangeDetailType::File(hash.to_string().into())
+    } else if path.is_dir() {
+        ChangeDetailType::Directory
+    } else {
+        ChangeDetailType::None
+    };
+
+    let modified = path
+        .metadata()
+        .context(format_context!("failed to get metadata for {path:?}"))?
+        .modified()
+        .context(format_context!("failed to get modified time for {path:?}"))?;
+
+    let change_detail = ChangeDetail {
+        detail_type,
+        modified: Some(modified),
+    };
+
+    Ok(change_detail)
+}
+
+// This is used to limit globbing to a subset of the workspace
+fn get_glob_path(input: Arc<str>) -> Arc<str> {
+    if let Some(asterisk_position) = input.find('*') {
+        let mut path = input.to_string();
+        path.truncate(asterisk_position);
+        if path.is_empty() {
+            ".".into()
+        } else {
+            path.into()
+        }
+    } else {
+        // check if input is a file or directory
+        input.clone()
     }
 }
