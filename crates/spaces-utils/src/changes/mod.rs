@@ -115,11 +115,11 @@ impl Changes {
         progress: &mut printer::MultiProgressBar,
         inputs: &HashSet<Arc<str>>,
     ) -> anyhow::Result<Vec<String>> {
-        let mut result = Vec::new();
+        let mut set = HashSet::new();
         for input in inputs {
             changes_logger(progress).trace(format!("Inspecting input {input}").as_str());
             if let Some(path) = input_includes_no_asterisk(input.as_ref()) {
-                result.push(path.display().to_string());
+                set.insert(path.display().to_string());
             } else {
                 let input_path = get_glob_path(input.clone());
                 changes_logger(progress)
@@ -135,12 +135,15 @@ impl Changes {
                     );
                     for entry in walk_dir.into_iter() {
                         if !entry.file_type().is_dir() {
-                            result.push(entry.path().display().to_string());
+                            set.insert(entry.path().display().to_string());
                         }
                     }
                 }
             }
         }
+
+        let mut result: Vec<_> = set.into_iter().collect();
+        result.sort();
 
         Ok(result)
     }
@@ -154,15 +157,6 @@ impl Changes {
             changes_logger(progress).trace(format!("Update changes for {input}").as_str());
 
             let mut count = 0usize;
-            // convert input from a glob expression to a parent directory
-            if let Some(path) = input_includes_no_asterisk(input.as_ref()) {
-                let change_detail = process_entry(progress, &path)
-                    .context(format_context!("Failed to process entry"))?;
-                self.update_entry(progress, path.to_string_lossy().into(), change_detail);
-                progress.increment(1);
-                continue;
-            }
-
             let input_path = get_glob_path(input.clone());
             changes_logger(progress).trace(format!("include input path `{input_path}`").as_str());
             if let Some(glob_include_path) = glob::is_glob_include(input_path.as_ref()) {
@@ -249,10 +243,12 @@ impl Changes {
 }
 
 fn input_includes_no_asterisk(input: &str) -> Option<std::path::PathBuf> {
-    if input.starts_with('+') && input.find('*').is_none() {
-        let path = std::path::Path::new(input);
-        if path.exists() && path.is_file() {
-            return Some(path.to_path_buf());
+    if input.find('*').is_none() {
+        if let Some(input) = input.strip_prefix('+') {
+            let path = std::path::Path::new(input);
+            if path.exists() && path.is_file() {
+                return Some(path.to_path_buf());
+            }
         }
     }
     None
