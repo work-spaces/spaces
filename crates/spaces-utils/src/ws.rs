@@ -170,11 +170,11 @@ impl BinSettings {
 
         for module_path in remove_list {
             self.star_files.remove(&module_path);
-            result = IsDirty::Yes
+            result = IsDirty::Yes;
         }
 
         if self.env_json.is_empty() || self.tasks_json.is_empty() {
-            result = IsDirty::Yes
+            result = IsDirty::Yes;
         }
 
         Ok((updated_modules, result))
