@@ -143,23 +143,34 @@ impl BinSettings {
         let mut result = IsDirty::No;
         let mut updated_modules = Vec::new();
         logger(progress).debug(format!("Checking {:?} star files", self.star_files.len()).as_str());
+        let mut remove_list = Vec::new();
         for (module_path, bin_detail) in self.star_files.iter_mut() {
             progress.increment(1);
             let mod_path = std::path::Path::new(module_path.as_ref());
             logger(progress).debug(format!("Checking {mod_path:?} for changes").as_str());
             let modified = changes::get_modified_time(mod_path.metadata());
             if changes::is_modified(modified, bin_detail.modified) {
-                let content: Arc<str> = std::fs::read_to_string(module_path.as_ref())
-                    .context(format_context!("Failed to read file {module_path}"))?
-                    .into();
-                let content_hash = blake3::hash(content.as_bytes());
-                if content_hash.as_bytes() != &bin_detail.hash {
-                    bin_detail.hash = content_hash.into();
-                    bin_detail.modified = modified;
-                    result = IsDirty::Yes;
-                    updated_modules.push(module_path.clone());
+                if mod_path.exists() {
+                    let content: Arc<str> = std::fs::read_to_string(module_path.as_ref())
+                        .context(format_context!("Failed to read file {module_path}"))?
+                        .into();
+                    let content_hash = blake3::hash(content.as_bytes());
+                    if content_hash.as_bytes() != &bin_detail.hash {
+                        bin_detail.hash = content_hash.into();
+                        bin_detail.modified = modified;
+                        result = IsDirty::Yes;
+                        updated_modules.push(module_path.clone());
+                    }
+                } else {
+                    remove_list.push(module_path.clone());
+                    logger(progress).warning(format!("{mod_path:?} has been removed").as_str());
                 }
             }
+        }
+
+        for module_path in remove_list {
+            self.star_files.remove(&module_path);
+            result = IsDirty::Yes
         }
 
         if self.env_json.is_empty() || self.tasks_json.is_empty() {
