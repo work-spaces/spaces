@@ -298,6 +298,9 @@ impl Workspace {
                 if file_name.starts_with('.') {
                     return false;
                 }
+            } else {
+                // skip directories with non UTF-8 names
+                return false;
             }
 
             let workflows_path = entry.path().join(WORKFLOW_TOML_NAME);
