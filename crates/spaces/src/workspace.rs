@@ -294,8 +294,10 @@ impl Workspace {
         }
 
         if entry.file_type().is_dir() {
-            if entry.path().starts_with(".") {
-                return false;
+            if let Some(file_name) = entry.file_name().to_str() {
+                if file_name.starts_with('.') {
+                    return false;
+                }
             }
 
             let workflows_path = entry.path().join(WORKFLOW_TOML_NAME);
