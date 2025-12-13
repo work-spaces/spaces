@@ -346,12 +346,27 @@ impl Git {
             }
         }
 
+        let git_lock_file_filter = Box::new(|path: &std::path::Path| {
+            if !path.starts_with(".git/") {
+                true // do not filter outside the of the .git folder
+            } else {
+                // don't try to copy .lock files in the .git folder
+                // if a file is locked, resetting hard to origin will fix it
+                path.ends_with(".lock")
+            }
+        });
+
         // Copy the store repository to the workspace using copy-on-write semantics
-        copy::copy_with_cow_semantics(progress, &store_repository.full_path, &self.spaces_key)
-            .context(format_context!(
-                "{name} - Failed to copy repository {working_directory}/{store_repo_name} to {}",
-                self.spaces_key,
-            ))?;
+        copy::copy_with_cow_semantics(
+            progress,
+            &store_repository.full_path,
+            &self.spaces_key,
+            Some(git_lock_file_filter),
+        )
+        .context(format_context!(
+            "{name} - Failed to copy repository {working_directory}/{store_repo_name} to {}",
+            self.spaces_key,
+        ))?;
 
         // Reset the workspace to ensure it matches the current HEAD
         let workspace_repository = git::Repository::new(self.url.clone(), self.spaces_key.clone());
