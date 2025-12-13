@@ -347,9 +347,10 @@ impl Git {
         }
 
         let git_lock_file_filter = Box::new(|path: &std::path::Path| {
-            // Check if the path is inside a `.git` directory
-            let in_git = path.components().any(|c| c.as_os_str() == ".git");
-            if !in_git {
+            let is_git = path
+                .components()
+                .any(|component| component.as_os_str() == ".git");
+            if !is_git {
                 true // do not filter outside of the .git folder
             } else {
                 // Don't try to copy .lock files in the .git folder
