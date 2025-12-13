@@ -9,6 +9,12 @@ fn logger(progress: &mut printer::MultiProgressBar, url: Arc<str>) -> logger::Lo
     logger::Logger::new_progress(progress, url)
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum IsNewBranch {
+    No,
+    Yes,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Git {
@@ -136,9 +142,15 @@ impl Git {
         workspace: workspace::WorkspaceArc,
         name: &str,
         filter: Option<String>,
+        is_new_branch: IsNewBranch,
     ) -> anyhow::Result<()> {
         logger(progress, self.url.clone())
             .debug(format!("execute clone to store with filter {filter:?}").as_str());
+
+        if is_new_branch == IsNewBranch::Yes && singleton::is_sync() {
+            logger(progress, self.url.clone()).warning("is workspace dev branch, not updating.");
+            return Ok(());
+        }
 
         let spaces_name_path = std::path::Path::new(self.spaces_key.as_ref());
         if std::path::Path::new(spaces_name_path).exists() {
@@ -414,13 +426,19 @@ impl Git {
     ) -> anyhow::Result<()> {
         // The logic in Repo::is_cow_semantics() needs to stay in sync
         // with the logic here. Default and Blobless use cow semantics.
+        //
+        let is_new_branch = if workspace.read().is_dev_branch(name) {
+            IsNewBranch::Yes
+        } else {
+            IsNewBranch::No
+        };
 
         match self.clone {
             git::Clone::Worktree => self
                 .execute_worktree_clone(progress, workspace.clone(), name)
                 .context(format_context!("spaces clone failed"))?,
             git::Clone::Default => self
-                .execute_default_clone(progress, workspace.clone(), name, None)
+                .execute_default_clone(progress, workspace.clone(), name, None, is_new_branch)
                 .context(format_context!("default clone failed"))?,
             git::Clone::Blobless => self
                 .execute_default_clone(
@@ -428,6 +446,7 @@ impl Git {
                     workspace.clone(),
                     name,
                     Some("blob:none".to_string()),
+                    is_new_branch,
                 )
                 .context(format_context!("default clone failed"))?,
             git::Clone::Shallow => self
@@ -502,7 +521,7 @@ impl Git {
             is_locked = true;
         }
 
-        if singleton::get_new_branches().contains(&name.into()) {
+        if is_new_branch == IsNewBranch::Yes && !singleton::is_sync() {
             logger(progress, self.url.clone()).message("creating new branch");
             let new_branch = workspace.read().get_new_branch_name();
             let options = printer::ExecuteOptions {
@@ -522,7 +541,7 @@ impl Git {
             workspace.write().set_is_reproducible(false);
         }
 
-        // after possibly applying the lock commit, check for reproducibility
+        // after possibly checking out the lock commit, check for reproducibility
         if !is_locked {
             // check if checkout is on a branch or commit
             let is_branch =
