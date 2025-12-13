@@ -2,14 +2,18 @@ use crate::logger;
 use anyhow::Context;
 use anyhow_source_location::format_context;
 
+pub type FilterCallback = Box<dyn Fn(&std::path::Path) -> bool>;
+
 pub fn copy_with_cow_semantics(
     progress: &mut printer::MultiProgressBar,
     source: &str,
     destination: &str,
+    filter: Option<FilterCallback>,
 ) -> anyhow::Result<()> {
     let all_files = walkdir::WalkDir::new(source)
         .into_iter()
         .filter_map(|e| e.ok())
+        .filter(|entry| filter.as_ref().is_none_or(|f| f(entry.path())))
         .collect::<Vec<_>>();
     progress.set_total(all_files.len() as u64);
 
