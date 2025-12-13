@@ -1,4 +1,4 @@
-use crate::{changes, logger, ws};
+use crate::{changes, lock, logger, ws};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -246,6 +246,13 @@ impl HttpArchive {
             allow_gh_for_download: true,
             tools_path: tools_path.to_owned(),
         })
+    }
+
+    pub fn get_file_lock(&self) -> lock::FileLock {
+        let path = std::path::Path::new(&self.full_path_to_archive);
+        let path = path.parent().unwrap_or(path);
+        let path = path.join(format!("{}.{}", self.spaces_key, lock::LOCK_FILE_SUFFIX).as_str());
+        lock::FileLock::new(path.into())
     }
 
     pub fn get_member(&self) -> ws::Member {

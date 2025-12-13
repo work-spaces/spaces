@@ -150,6 +150,12 @@ impl OrasArchive {
 
         let full_path = std::path::Path::new(&http_archive.full_path_to_archive);
 
+        let mut lock_file = http_archive.get_file_lock();
+        lock_file.lock(&mut progress).context(format_context!(
+            "{name} - Failed to lock the spaces store for {}",
+            http_archive.archive.url
+        ))?;
+
         if !full_path.exists() {
             let parent = full_path
                 .parent()
