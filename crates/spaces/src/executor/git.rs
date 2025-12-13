@@ -148,7 +148,7 @@ impl Git {
             .debug(format!("execute clone to store with filter {filter:?}").as_str());
 
         if is_new_branch == IsNewBranch::Yes && singleton::is_sync() {
-            logger(progress, self.url.clone()).warning("is workspace dev branch, not updating.");
+            logger(progress, self.url.clone()).warning("Skipping update for dev branch during sync operation.");
             return Ok(());
         }
 
