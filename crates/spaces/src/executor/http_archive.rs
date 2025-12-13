@@ -12,10 +12,16 @@ pub struct HttpArchive {
 impl HttpArchive {
     pub fn execute(
         &self,
-        progress: printer::MultiProgressBar,
+        mut progress: printer::MultiProgressBar,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
+        let mut lock_file = self.http_archive.get_file_lock();
+        lock_file.lock(&mut progress).context(format_context!(
+            "{name} - Failed to lock the spaces store for {}",
+            self.http_archive.archive.url
+        ))?;
+
         let next_progress_bar = self
             .http_archive
             .sync(progress)

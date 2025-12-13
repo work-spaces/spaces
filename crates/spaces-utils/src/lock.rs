@@ -4,6 +4,8 @@ use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
+pub const LOCK_FILE_SUFFIX: &str = "spaces.lock";
+
 #[derive(Debug)]
 pub struct StateLock<ModuleState: std::fmt::Debug> {
     lock: RwLock<ModuleState>,
@@ -62,12 +64,12 @@ pub enum LockStatus {
 
 #[derive(Debug)]
 pub struct FileLock {
-    pub path: Arc<str>,
+    pub path: Arc<std::path::Path>,
     is_locked: bool,
 }
 
 impl FileLock {
-    pub fn new(path: Arc<str>) -> Self {
+    pub fn new(path: Arc<std::path::Path>) -> Self {
         Self {
             path,
             is_locked: false,
@@ -77,10 +79,8 @@ impl FileLock {
     pub fn try_lock(&mut self) -> anyhow::Result<LockStatus> {
         let path_as_path = std::path::Path::new(self.path.as_ref());
         if let Some(parent) = path_as_path.parent() {
-            std::fs::create_dir_all(parent).context(format_context!(
-                "Failed to create {}",
-                parent.to_str().unwrap()
-            ))?;
+            std::fs::create_dir_all(parent)
+                .context(format_context!("Failed to create {}", parent.display()))?;
         }
 
         match std::fs::OpenOptions::new()
@@ -93,18 +93,18 @@ impl FileLock {
                     process_group_id: get_process_group_id(),
                 };
                 serde_json::to_writer(file, &contents)
-                    .context(format_context!("Failed to write {}", self.path))?;
+                    .context(format_context!("Failed to write {}", self.path.display()))?;
             }
             Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
                 std::thread::sleep(std::time::Duration::from_millis(20));
                 let contents_result = std::fs::read_to_string(self.path.as_ref())
-                    .context(format_context!("Failed to read {}", self.path));
+                    .context(format_context!("Failed to read {}", self.path.display()));
 
                 if let Ok(contents) = contents_result {
                     let existing_info_result = serde_json::from_str::<LockFileContents>(&contents)
                         .context(format_context!(
                             "failed to parse `{contents}` from {} - delete the file and try again",
-                            self.path
+                            self.path.display()
                         ));
 
                     if let Ok(existing_info) = existing_info_result {
@@ -119,8 +119,9 @@ impl FileLock {
                                 .context(format_context!("Failed to serialize run info"))?;
 
                             // over write the file
-                            std::fs::write(self.path.as_ref(), lock_contents.as_str())
-                                .context(format_context!("Failed to create file {}", self.path))?;
+                            std::fs::write(self.path.as_ref(), lock_contents.as_str()).context(
+                                format_context!("Failed to create file {}", self.path.display()),
+                            )?;
                         }
                     } else {
                         return Ok(LockStatus::Busy);
@@ -132,7 +133,7 @@ impl FileLock {
             Err(err) => {
                 return Err(format_error!(
                     "Failed to create file '{}': {err:?} - delete the file and try again",
-                    self.path
+                    self.path.display()
                 ));
             }
         }
@@ -154,7 +155,7 @@ impl FileLock {
 
     pub fn unlock(&mut self) -> anyhow::Result<()> {
         std::fs::remove_file(self.path.as_ref())
-            .context(format_context!("Failed to remove {}", self.path))?;
+            .context(format_context!("Failed to remove {}", self.path.display()))?;
         Ok(())
     }
 
@@ -169,13 +170,13 @@ impl FileLock {
 
             // the holding process may have deleted the file by now.
             let contents_result = std::fs::read_to_string(lock_file_path)
-                .context(format_context!("Failed to read {}", self.path));
+                .context(format_context!("Failed to read {}", self.path.display()));
 
             if let Ok(contents) = contents_result {
                 let lock_info: LockFileContents =
                     serde_json::from_str(&contents).context(format_context!(
                         "failed to parse {} - delete the file and try again",
-                        self.path
+                        self.path.display()
                     ))?;
 
                 if lock_info.process_group_id != get_process_group_id() {
@@ -187,8 +188,9 @@ impl FileLock {
             std::thread::sleep(std::time::Duration::from_millis(500));
             log_count += 1;
             if log_count == 10 {
-                logger::Logger::new_progress(progress, "lock".into())
-                    .debug(format!("Still waiting for to finish at {}", self.path).as_str());
+                logger::Logger::new_progress(progress, "lock".into()).debug(
+                    format!("Still waiting for to finish at {}", self.path.display()).as_str(),
+                );
                 log_count = 0;
             }
         }
