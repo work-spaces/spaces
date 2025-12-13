@@ -347,12 +347,14 @@ impl Git {
         }
 
         let git_lock_file_filter = Box::new(|path: &std::path::Path| {
-            if !path.starts_with(".git/") {
-                true // do not filter outside the of the .git folder
+            // Check if the path is inside a `.git` directory
+            let in_git = path.components().any(|c| c.as_os_str() == ".git");
+            if !in_git {
+                true // do not filter outside of the .git folder
             } else {
-                // don't try to copy .lock files in the .git folder
-                // if a file is locked, resetting hard to origin will fix it
-                path.ends_with(".lock")
+                // Don't try to copy .lock files in the .git folder
+                // If a file is locked, resetting hard to origin will fix it
+                !path.ends_with(".lock")
             }
         });
 
