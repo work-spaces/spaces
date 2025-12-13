@@ -189,7 +189,7 @@ impl FileLock {
             log_count += 1;
             if log_count == 10 {
                 logger::Logger::new_progress(progress, "lock".into()).debug(
-                    format!("Still waiting for to finish at {}", self.path.display()).as_str(),
+                    format!("Still waiting for it to finish at {}", self.path.display()).as_str(),
                 );
                 log_count = 0;
             }
