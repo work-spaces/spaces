@@ -189,6 +189,10 @@ impl Workspace {
         );
     }
 
+    pub fn is_dev_branch(&self, rule_name: &str) -> bool {
+        self.settings.json.dev_branches.contains(&rule_name.into())
+    }
+
     pub fn get_new_branch_name(&self) -> Arc<str> {
         let path = self.absolute_path.clone();
         let directory_name = std::path::Path::new(path.as_ref())
@@ -385,6 +389,11 @@ impl Workspace {
             ENV_FILE_NAME.into(),
             ws::Asset::new_contents(env_content.as_ref()),
         );
+
+        settings
+            .json
+            .dev_branches
+            .extend(singleton::get_new_branches());
 
         if is_json_available == ws::IsJsonAvailable::Yes {
             logger(&mut progress).debug("Loading modules from sync order");

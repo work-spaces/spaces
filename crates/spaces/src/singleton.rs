@@ -7,6 +7,7 @@ use utils::lock;
 #[derive(Debug)]
 struct State {
     active_workspace: Option<workspace::WorkspaceArc>,
+    is_sync: bool,
     is_ci: bool,
     is_rescan: bool,
     is_lsp: bool,
@@ -30,6 +31,7 @@ fn get_state() -> &'static lock::StateLock<State> {
     }
     STATE.set(lock::StateLock::new(State {
         is_ci: false,
+        is_sync: false,
         is_rescan: false,
         is_lsp: false,
         is_skip_deps: false,
@@ -135,6 +137,16 @@ pub fn get_new_branches() -> Vec<Arc<str>> {
 pub fn set_new_branches(new_branches: Vec<Arc<str>>) {
     let mut state = get_state().write();
     state.new_branches = new_branches;
+}
+
+pub fn is_sync() -> bool {
+    let state = get_state().read();
+    state.is_sync
+}
+
+pub fn set_is_sync() {
+    let mut state = get_state().write();
+    state.is_sync = true;
 }
 
 pub fn set_has_help(has_help: bool) {

@@ -266,6 +266,7 @@ pub fn execute() -> anyhow::Result<()> {
 
             // Always need to evaluate when doing a sync
             singleton::set_rescan(true);
+            singleton::set_is_sync();
 
             runner::run_starlark_modules_in_workspace(
                 &mut stdout_printer,
