@@ -4,6 +4,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+pub const IS_SPACES_SHELL_ENV_NAME: &str = "SPACES_IS_SPACES_SHELL";
+pub const IS_SPACES_SHELL_ENV_VALUE: &str = "SPACES_IS_RUNNING_IN_A_SPACES_SHELL";
+const SHORTCUTS_SCRIPTS_NAME: &str = "shortcuts.sh";
+
 enum ShellType {
     Bash,
     Zsh,
@@ -114,7 +118,7 @@ pub fn run(
             .context(format_context!("While creating shortcuts"))?;
         let mut contents = shortcuts.join("\n\n");
         contents.push_str("\n\n");
-        let shortcuts_file = startup_directory.join("shortcuts.sh");
+        let shortcuts_file = startup_directory.join(SHORTCUTS_SCRIPTS_NAME);
         std::fs::write(&shortcuts_file, contents).context(format_context!(
             "Failed to write shell shortcuts file to {}",
             shortcuts_file.display()
@@ -140,6 +144,11 @@ pub fn run(
         process.env(key.as_ref(), value.as_ref());
     }
 
+    if !is_spaces_shell() {
+        // Set environment variable to indicate that this is a Spaces shell
+        process.env(IS_SPACES_SHELL_ENV_NAME, IS_SPACES_SHELL_ENV_VALUE);
+    }
+
     for arg in config.args.iter() {
         process.arg(arg.as_ref());
     }
@@ -155,4 +164,8 @@ pub fn run(
         .context(format_context!("failed to launch shell: {}", config.path))?;
 
     Ok(())
+}
+
+pub fn is_spaces_shell() -> bool {
+    std::env::var(IS_SPACES_SHELL_ENV_NAME).is_ok_and(|value| value == IS_SPACES_SHELL_ENV_VALUE)
 }
