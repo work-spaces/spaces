@@ -3,7 +3,7 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
 use std::{io::IsTerminal, sync::Arc};
-use utils::git;
+use utils::{git, shell};
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
 pub enum Level {
@@ -263,6 +263,10 @@ pub fn execute() -> anyhow::Result<()> {
                 hide_progress_bars,
                 show_elapsed_time,
             );
+
+            if shell::is_spaces_shell() {
+                return Err(format_error!("Exit the spaces shell to run `spaces sync`"));
+            }
 
             // Always need to evaluate when doing a sync
             singleton::set_rescan(true);
