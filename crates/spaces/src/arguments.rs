@@ -343,6 +343,10 @@ pub fn execute() -> anyhow::Result<()> {
                 show_elapsed_time,
             );
 
+            if shell::is_spaces_shell() {
+                return Err(format_error!("Already running in a `spaces shell`"));
+            }
+
             runner::run_shell_in_workspace(&mut stdout_printer, path)
                 .context(format_context!("while running user shell"))?;
         }

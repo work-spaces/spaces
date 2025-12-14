@@ -144,10 +144,7 @@ pub fn run(
         process.env(key.as_ref(), value.as_ref());
     }
 
-    if !is_spaces_shell() {
-        // Set environment variable to indicate that this is a Spaces shell
-        process.env(IS_SPACES_SHELL_ENV_NAME, IS_SPACES_SHELL_ENV_VALUE);
-    }
+    process.env(IS_SPACES_SHELL_ENV_NAME, IS_SPACES_SHELL_ENV_VALUE);
 
     for arg in config.args.iter() {
         process.arg(arg.as_ref());
