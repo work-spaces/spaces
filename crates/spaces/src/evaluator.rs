@@ -279,7 +279,7 @@ fn insert_setup_and_all_rules(
         help: Some("Builtin rule to run pre-commit checks".into()),
         inputs: None,
         outputs: None,
-        type_: Some(rule::RuleType::Test),
+        type_: Some(rule::RuleType::PreCommit),
         platforms: None,
         deps: Some(rules::get_pre_commit_rules()),
     };
