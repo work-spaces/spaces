@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 pub const SETUP_RULE_NAME: &str = "//:setup";
 pub const TEST_RULE_NAME: &str = "//:test";
+pub const PRE_COMMIT_RULE_NAME: &str = "//:pre-commit";
 pub const CLEAN_RULE_NAME: &str = "//:clean";
 pub const ALL_RULE_NAME: &str = "//:all";
 
@@ -14,6 +15,7 @@ pub enum RuleType {
     Setup,
     Run,
     Test,
+    PreCommit,
     Clean,
     Optional,
 }

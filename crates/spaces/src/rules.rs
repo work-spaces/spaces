@@ -922,6 +922,10 @@ pub fn get_test_rules() -> Vec<Arc<str>> {
     get_rules_by_type(rule::RuleType::Test)
 }
 
+pub fn get_pre_commit_rules() -> Vec<Arc<str>> {
+    get_rules_by_type(rule::RuleType::PreCommit)
+}
+
 pub fn get_clean_rules() -> Vec<Arc<str>> {
     get_rules_by_type(rule::RuleType::Clean)
 }
