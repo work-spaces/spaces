@@ -274,6 +274,23 @@ fn insert_setup_and_all_rules(
     ))
     .context(format_context!("Failed to insert task `//:test`"))?;
 
+    let pre_commit_rule = rule::Rule {
+        name: rule::PRE_COMMIT_RULE_NAME.into(),
+        help: Some("Builtin rule to run pre-commit checks".into()),
+        inputs: None,
+        outputs: None,
+        type_: Some(rule::RuleType::Test),
+        platforms: None,
+        deps: Some(rules::get_pre_commit_rules()),
+    };
+
+    rules::insert_task(task::Task::new(
+        pre_commit_rule,
+        task::Phase::Run,
+        executor::Task::Target,
+    ))
+    .context(format_context!("Failed to insert task `//:pre-commit`"))?;
+
     let clean_rule = rule::Rule {
         name: rule::CLEAN_RULE_NAME.into(),
         help: Some("Builtin rule to cleanup the workspace".into()),
