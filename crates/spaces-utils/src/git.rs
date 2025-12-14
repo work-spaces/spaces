@@ -290,7 +290,7 @@ pub fn get_latest_tag(
     directory: &str,
 ) -> anyhow::Result<Option<Arc<str>>> {
     if !is_head_branch(progress_bar, url, directory) {
-        return Ok(None);
+        return Ok(get_commit_tag(progress_bar, url, directory));
     }
 
     let logs = get_branch_log(progress_bar, url, directory, "HEAD")
