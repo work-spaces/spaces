@@ -19,6 +19,7 @@ which = "7"
 sha256 = "1"
 semver = "1"
 clap = { version = "4", features = ["derive"] }
+clap_complete = { version = "4" }
 chrono = "0.4"
 homedir = "0.3"
 

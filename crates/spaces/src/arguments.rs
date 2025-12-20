@@ -1,4 +1,4 @@
-use crate::{co, completions, docs, evaluator, rules, runner, singleton, task, workspace};
+use crate::{co, completions, docs, evaluator, runner, singleton, task, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
@@ -335,7 +335,7 @@ pub fn execute() -> anyhow::Result<()> {
             show_elapsed_time,
             ci,
             rescan,
-            commands: Commands::Shell { path },
+            commands: Commands::Shell { path, completions },
         } => {
             handle_verbosity(
                 &mut stdout_printer,
@@ -350,7 +350,13 @@ pub fn execute() -> anyhow::Result<()> {
                 return Err(format_error!("Already running in a `spaces shell`"));
             }
 
-            runner::run_shell_in_workspace(&mut stdout_printer, path)
+            let completions_command = if completions {
+                Some(Arguments::command())
+            } else {
+                None
+            };
+
+            runner::run_shell_in_workspace(&mut stdout_printer, path, completions_command)
                 .context(format_context!("while running user shell"))?;
         }
 
@@ -537,20 +543,9 @@ pub fn execute() -> anyhow::Result<()> {
                 show_elapsed_time,
             );
 
-            runner::run_starlark_modules_in_workspace(
-                &mut stdout_printer,
-                task::Phase::Inspect,
-                None,
-                workspace::IsClearInputs::No,
-                runner::RunWorkspace::Target(None, vec![]),
-                runner::IsCreateLockFile::No,
-                runner::IsExecuteTasks::No,
-            )
-            .context(format_context!("while executing run rules"))?;
-
             // rules are now available
-            let run_targets =
-                rules::get_run_targets().context(format_context!("Failed to get run targets"))?;
+            let run_targets = runner::run_starlark_get_targets(&mut stdout_printer)
+                .context(format_context!("Failed to get targets"))?;
 
             let completion_content = completions::generate_workspace_completions(
                 &Arguments::command(),
@@ -559,7 +554,7 @@ pub fn execute() -> anyhow::Result<()> {
             )
             .context(format_context!("Failed to generate workspace completions"))?;
 
-            //write content to stdout
+            //write content to output
             std::fs::write(std::path::Path::new(output.as_ref()), completion_content).context(
                 format_context!("Failed to write workspace completions to file {output}"),
             )?;
@@ -838,6 +833,9 @@ create-lock-file = false # optionally create a lock file
         /// Path to the shell to run. Default is /bin/bash
         #[arg(long)]
         path: Option<Arc<str>>,
+        /// Generate and source completions for the shell
+        #[arg(long)]
+        completions: bool,
     },
     /// Run the Spaces language server protocol. Not currently functional.
     #[cfg(feature = "lsp")]
