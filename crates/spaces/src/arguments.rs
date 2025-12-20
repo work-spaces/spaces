@@ -306,6 +306,9 @@ pub fn execute() -> anyhow::Result<()> {
             let (for_each_repo, command_args) = match &mode {
                 ForEachMode::Repo { command_args } => (runner::ForEachRepo::Repo, command_args),
                 ForEachMode::Branch { command_args } => (runner::ForEachRepo::Branch, command_args),
+                ForEachMode::DevBranch { command_args } => {
+                    (runner::ForEachRepo::DevBranch, command_args)
+                }
                 ForEachMode::DirtyBranch { command_args } => {
                     (runner::ForEachRepo::DirtyBranch, command_args)
                 }
@@ -606,7 +609,17 @@ enum ForEachMode {
         )]
         command_args: Vec<Arc<str>>,
     },
+    /// Run the command in each repository where the branch is dirty.
     DirtyBranch {
+        /// The arguments to pass to the command.
+        #[arg(
+            trailing_var_arg = true,
+            help = r"Command plus arguments to run in each repo on a dirty branch (passed after `--`)"
+        )]
+        command_args: Vec<Arc<str>>,
+    },
+    /// Run the command in each repository that was checked out as a development branch.
+    DevBranch {
         /// The arguments to pass to the command.
         #[arg(
             trailing_var_arg = true,
