@@ -286,6 +286,7 @@ pub fn execute() -> anyhow::Result<()> {
 
         Arguments {
             verbosity,
+            #[allow(unused)]
             hide_progress_bars,
             show_elapsed_time,
             ci,
@@ -297,7 +298,7 @@ pub fn execute() -> anyhow::Result<()> {
                 verbosity.into(),
                 ci,
                 rescan,
-                hide_progress_bars,
+                true,
                 show_elapsed_time,
             );
 

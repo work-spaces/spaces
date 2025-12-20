@@ -182,28 +182,32 @@ pub fn foreach_repo(
     let command_string = command_arguments.join(" ");
     let command_label = command_arguments.join("_");
     for member in repos.iter() {
-        let args = Some(command_arguments.to_owned().split_off(1));
+        let mut args = command_arguments.to_owned().split_off(1);
         let command = command_arguments[0].clone();
-        let working_directory = format!("//{}", member.path).into();
+        if command.as_ref() == "git" {
+            args.insert(0, "-c".into());
+            args.insert(1, "color.ui=always".into());
+        }
+        let working_directory: Arc<str> = format!("//{}", member.path).into();
 
         let mut exec_progress =
             multi_progress.add_progress(command.as_ref(), Some(100), Some("Complete"));
 
         exec_progress.log(
-            printer::Level::App,
-            format!("[{working_directory}] {command_string}").as_str(),
+            printer::Level::Passthrough,
+            format!(">>> {working_directory} $ {command_string}").as_str(),
         );
 
         let name = format!("__foreach_{working_directory}_{command_label}");
 
         let exec = executor::exec::Exec {
             command: command.clone(),
-            args,
+            args: Some(args),
             env: None,
-            working_directory: Some(working_directory),
+            working_directory: Some(working_directory.clone()),
             redirect_stdout: None,
             expect: None,
-            log_level: Some(printer::Level::App),
+            log_level: Some(printer::Level::Passthrough),
             timeout: None,
         };
 
