@@ -1,4 +1,4 @@
-use crate::{evaluator, executor, task, workspace};
+use crate::{evaluator, executor, label, task, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use std::sync::Arc;
@@ -34,10 +34,12 @@ impl From<bool> for IsCreateLockFile {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ForEachRepo {
     Repo,
     Branch,
     DirtyBranch,
+    DevBranch,
 }
 
 #[derive(Debug, Clone)]
@@ -117,6 +119,7 @@ pub fn foreach_repo(
 
     let mut multi_progress = printer::MultiProgress::new(printer);
     let workspace_members = workspace_arc.read().settings.json.members.clone();
+    let dev_branch_rules = workspace_arc.read().settings.json.dev_branches.clone();
 
     let mut repos = Vec::new();
 
@@ -153,6 +156,17 @@ pub fn foreach_repo(
                     }
                 } else {
                     repo_progress.set_ending_message("Skipping: rev is not a branch");
+                }
+            } else if for_each_repo == ForEachRepo::DevBranch {
+                // get the dev-branches from the workspace settings
+                for dev_branch_rule in dev_branch_rules.iter() {
+                    if let Some(location_in_workspace) =
+                        label::get_rule_name_from_label(dev_branch_rule.as_ref())
+                    {
+                        if location_in_workspace == member.path.as_ref() {
+                            repos.push(member.clone());
+                        }
+                    }
                 }
             } else {
                 // check if member.path is an existing directory
