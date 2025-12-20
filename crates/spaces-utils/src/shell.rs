@@ -136,13 +136,16 @@ pub fn run(
         let mut contents = shortcuts.join("\n\n");
         contents.push_str("\n\n");
         let shortcuts_file = startup_directory.join(SHORTCUTS_SCRIPTS_NAME);
+
+        let completion_content_str = String::from_utf8(completion_content).context(
+            format_context!("Failed to convert completion content to string"),
+        )?;
+
+        contents.push_str(completion_content_str.as_str());
+        contents.push_str("\n\n");
+
         std::fs::write(&shortcuts_file, contents).context(format_context!(
             "Failed to write shell shortcuts file to {}",
-            shortcuts_file.display()
-        ))?;
-
-        std::fs::write(&shortcuts_file, completion_content).context(format_context!(
-            "Failed to write shell completion content to {}",
             shortcuts_file.display()
         ))?;
     }
