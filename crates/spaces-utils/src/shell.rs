@@ -82,6 +82,22 @@ impl Config {
             })
         }
     }
+
+    pub fn get_shell(&self) -> anyhow::Result<clap_complete::Shell> {
+        let program_name = std::path::Path::new(self.path.as_ref())
+            .file_name()
+            .ok_or(format_error!("Failed to get Shell from {}", self.path))?;
+        match program_name.to_str() {
+            Some("bash") => Ok(clap_complete::Shell::Bash),
+            Some("zsh") => Ok(clap_complete::Shell::Zsh),
+            Some("fish") => Ok(clap_complete::Shell::Fish),
+            Some("pwsh") => Ok(clap_complete::Shell::PowerShell),
+            _ => Err(format_error!(
+                "Unsupported shell: {}",
+                program_name.display()
+            )),
+        }
+    }
 }
 
 fn create_shortcuts(
@@ -108,6 +124,7 @@ pub fn run(
     config: &Config,
     environment_map: &std::collections::HashMap<Arc<str>, Arc<str>>,
     startup_directory: &std::path::Path,
+    completion_content: Vec<u8>,
 ) -> anyhow::Result<()> {
     // Create the command
     let mut process = std::process::Command::new(config.path.as_ref());
@@ -121,6 +138,11 @@ pub fn run(
         let shortcuts_file = startup_directory.join(SHORTCUTS_SCRIPTS_NAME);
         std::fs::write(&shortcuts_file, contents).context(format_context!(
             "Failed to write shell shortcuts file to {}",
+            shortcuts_file.display()
+        ))?;
+
+        std::fs::write(&shortcuts_file, completion_content).context(format_context!(
+            "Failed to write shell completion content to {}",
             shortcuts_file.display()
         ))?;
     }

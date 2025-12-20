@@ -1,4 +1,4 @@
-use crate::{evaluator, executor, label, task, workspace};
+use crate::{completions, evaluator, executor, label, rules, task, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use std::sync::Arc;
@@ -15,7 +15,6 @@ pub enum IsCreateLockFile {
     No,
     Yes,
 }
-
 impl From<IsCreateLockFile> for bool {
     fn from(is_create_lock_file: IsCreateLockFile) -> bool {
         match is_create_lock_file {
@@ -221,6 +220,7 @@ pub fn foreach_repo(
 pub fn run_shell_in_workspace(
     printer: &mut printer::Printer,
     path: Option<Arc<str>>,
+    completions_command: Option<clap::Command>,
 ) -> anyhow::Result<()> {
     let workspace = get_workspace(
         printer,
@@ -260,14 +260,45 @@ pub fn run_shell_in_workspace(
         SHELL_DIR
     ))?;
 
+    let completion_content = if let Some(command) = completions_command {
+        // rules are now available
+        let clap_shell = shell_config
+            .get_shell()
+            .context(format_context!("Shell does not support completions"))?;
+
+        let run_targets =
+            run_starlark_get_targets(printer).context(format_context!("Failed to get targets"))?;
+
+        completions::generate_workspace_completions(&command, clap_shell, run_targets)
+            .context(format_context!("Failed to generate workspace completions"))?
+    } else {
+        Vec::new()
+    };
+
     shell::run(
         &shell_config,
         &environment_map,
         std::path::Path::new(SHELL_DIR),
+        completion_content,
     )
     .context(format_context!("while running shell"))?;
 
     Ok(())
+}
+
+pub fn run_starlark_get_targets(printer: &mut printer::Printer) -> anyhow::Result<Vec<Arc<str>>> {
+    run_starlark_modules_in_workspace(
+        printer,
+        task::Phase::Inspect,
+        None,
+        workspace::IsClearInputs::No,
+        RunWorkspace::Target(None, vec![]),
+        IsCreateLockFile::No,
+        IsExecuteTasks::No,
+    )
+    .context(format_context!("while executing run rules"))?;
+
+    rules::get_run_targets().context(format_context!("Failed to get run targets"))
 }
 
 pub fn run_starlark_modules_in_workspace(
