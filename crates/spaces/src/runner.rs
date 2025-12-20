@@ -165,6 +165,8 @@ pub fn foreach_repo(
                     {
                         if location_in_workspace == member.path.as_ref() {
                             repos.push(member.clone());
+                            // skip the rest of the loop
+                            break;
                         }
                     }
                 }
