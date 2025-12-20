@@ -73,7 +73,7 @@ pub fn generate_workspace_completions(
 
     if shell == clap_complete::Shell::Fish {
         let line = format!(
-            r#"complete -c spaces -n "__fish_spaces_using_subcommand run" --no-files -a "{}""#,
+            r#"complete -c spaces -n "__fish_spaces_using_subcommand run" --no-files -a "{}"\n"#,
             pinned_strings.join(" ")
         );
         buffer.extend(line.bytes());
