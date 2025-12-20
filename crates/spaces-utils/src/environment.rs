@@ -19,6 +19,10 @@ pub struct Environment {
     pub system_paths: Option<Vec<Arc<str>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub inherited_vars: Option<Vec<Arc<str>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub optional_inherited_vars: Option<Vec<Arc<str>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_inherited_vars: Option<Vec<Arc<str>>>,
 }
 
 impl Environment {
@@ -38,7 +42,7 @@ impl Environment {
     }
 
     fn get_inherited_vars(&self, get_vars: GetVars) -> anyhow::Result<HashMap<Arc<str>, Arc<str>>> {
-        let mut env_vars = HashMap::new();
+        let mut env_vars: HashMap<Arc<str>, Arc<str>> = HashMap::new();
         if let Some(inherited) = &self.inherited_vars {
             for key in inherited {
                 // if key ends in ? it is optional
@@ -58,8 +62,10 @@ impl Environment {
                     }
                 } else if get_vars == GetVars::Checkout {
                     if let Ok(value) = std::env::var(key.as_ref()) {
+                        // first try to re-inherit from calling env
                         env_vars.insert(key.clone(), value.into());
-                    } else if let Some(value) = self.vars.get(key.as_ref()) {
+                    } else if let Some(value) = self.vars.get(key) {
+                        // second try to grab the value from the workspace env
                         env_vars.insert(key.clone(), value.clone());
                     } else {
                         return Err(format_error!(
@@ -69,6 +75,29 @@ impl Environment {
                 }
             }
         }
+
+        if get_vars == GetVars::Checkout {
+            if let Some(optional_inherited) = &self.optional_inherited_vars {
+                for key in optional_inherited {
+                    if let Ok(value) = std::env::var(key.as_ref()) {
+                        env_vars.insert(key.clone(), value.into());
+                    }
+                }
+            }
+        }
+
+        if get_vars == GetVars::Run {
+            if let Some(run_inherited) = &self.run_inherited_vars {
+                for key in run_inherited {
+                    let value =
+                        std::env::var(key.as_ref())
+                            .context(format_context!(
+                    "failed to get env var {key} from calling env to pass to workspace env"))?;
+                    env_vars.insert(key.clone(), value.into());
+                }
+            }
+        }
+
         Ok(env_vars)
     }
 
@@ -92,6 +121,32 @@ impl Environment {
                 }
             } else {
                 self.inherited_vars = Some(inherited_vars);
+            }
+        }
+
+        if let Some(run_inherited_vars) = other.run_inherited_vars {
+            if let Some(existing_run_inherited_vars) = self.run_inherited_vars.as_mut() {
+                // extend if not already present
+                for var in run_inherited_vars.iter() {
+                    if !existing_run_inherited_vars.contains(var) {
+                        existing_run_inherited_vars.push(var.clone());
+                    }
+                }
+            } else {
+                self.run_inherited_vars = Some(run_inherited_vars);
+            }
+        }
+
+        if let Some(optional_inherited_vars) = other.optional_inherited_vars {
+            if let Some(existing_optional_inherited_vars) = self.optional_inherited_vars.as_mut() {
+                // extend if not already present
+                for var in optional_inherited_vars.iter() {
+                    if !existing_optional_inherited_vars.contains(var) {
+                        existing_optional_inherited_vars.push(var.clone());
+                    }
+                }
+            } else {
+                self.optional_inherited_vars = Some(optional_inherited_vars);
             }
         }
 

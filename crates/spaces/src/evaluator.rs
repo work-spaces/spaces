@@ -641,6 +641,7 @@ pub fn execute_tasks(
                 .context(format_context!("Failed to get environment variables"))?;
 
             env.vars.extend(vars);
+            star_logger(printer).debug(format!("env vars: {:?}", env.vars).as_str());
 
             if workspace.read().is_reproducible() {
                 env.vars.insert(
