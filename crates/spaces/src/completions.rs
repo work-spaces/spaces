@@ -1,5 +1,11 @@
 use std::sync::Arc;
 
+const HANDLE_COLON_BASH: &str = "COMP_WORDBREAKS=${COMP_WORDBREAKS//:/}";
+const HANDLE_STARTUP_ZSH: &str = r#"
+autoload -Uz compinit
+compinit
+"#;
+
 pub fn generate_workspace_completions(
     command: &clap::Command,
     shell: clap_complete::Shell,
@@ -50,7 +56,28 @@ pub fn generate_workspace_completions(
 
     // write to a buffer
     let mut buffer = Vec::new();
+
+    match shell {
+        clap_complete::Shell::Bash => {
+            let line = format!("{HANDLE_COLON_BASH}\n");
+            buffer.extend(line.bytes());
+        }
+        clap_complete::Shell::Zsh => {
+            let line = format!("{HANDLE_STARTUP_ZSH}\n");
+            buffer.extend(line.bytes());
+        }
+        _ => {}
+    }
+
     clap_complete::generate(shell, &mut new_command, "spaces", &mut buffer);
+
+    if shell == clap_complete::Shell::Fish {
+        let line = format!(
+            r#"complete -c spaces -n "__fish_spaces_using_subcommand run" --no-files -a "{}""#,
+            pinned_strings.join(" ")
+        );
+        buffer.extend(line.bytes());
+    }
 
     Ok(buffer)
 }
