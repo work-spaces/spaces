@@ -353,9 +353,9 @@ impl Git {
             if !is_git {
                 true // do not filter outside of the .git folder
             } else {
-                // Don't try to copy .lock files in the .git folder
+                // Don't try to copy .lock files or the gc.pid file in the .git folder
                 // If a file is locked, resetting hard to origin will fix it
-                !path.ends_with(".lock")
+                !(path.ends_with(".lock") || path.ends_with("gc.pid"))
             }
         });
 
