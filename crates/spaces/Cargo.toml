@@ -9,6 +9,7 @@ clap_complete = { version = "4" }
 once_cell = "1"
 anyhow = "1"
 signal-hook = "0.3"
+symlink = "0.1"
 anyhow-source-location.workspace = true
 
 starlark_syntax = { version = "0.13", optional = true }

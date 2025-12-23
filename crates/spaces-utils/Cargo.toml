@@ -10,6 +10,7 @@ bincode = { version = "2", features = ["derive"] }
 glob-match = "0.2"
 levenshtein = "1"
 reflink-copy = "0.1"
+symlink = "0.1"
 reqwest = { version = "0.12", default-features = false, features = [
     "blocking",
     "rustls-tls",
