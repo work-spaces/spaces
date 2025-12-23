@@ -321,6 +321,8 @@ impl HttpArchive {
 
         progress_bar.set_total(files.len() as u64);
 
+        let mut soft_links = Vec::new();
+
         for file in files {
             let source = format!("{}/{}", self.get_path_to_extracted_files(), file);
 
@@ -344,10 +346,12 @@ impl HttpArchive {
                             .strip_prefix(format!("{workspace_directory}/").as_str())
                             .unwrap_or(&full_target_path);
                         let _ = link_set.insert(workspace_path_to_target.into());
-                        Self::create_hard_link(
+
+                        Self::create_link(
                             full_target_path.clone(),
                             source.clone(),
                             MakeReadOnly::Yes,
+                            Some(&mut soft_links),
                         )
                         .context(format_context!("hard link {full_target_path} -> {source}",))?;
                     }
@@ -365,13 +369,20 @@ impl HttpArchive {
             progress_bar.increment(1);
         }
 
+        for (original, link) in soft_links {
+            symlink::symlink_file(&original, &link).context(format_context!(
+                "failed to create symlink {original:?} -> {link:?}"
+            ))?;
+        }
+
         Ok(())
     }
 
-    pub fn create_hard_link(
+    pub fn create_link(
         target_path: String,
         source: String,
         make_read_only: MakeReadOnly,
+        soft_links: Option<&mut Vec<(std::path::PathBuf, std::path::PathBuf)>>,
     ) -> anyhow::Result<()> {
         let target = std::path::Path::new(target_path.as_str());
         let original = std::path::Path::new(source.as_str());
@@ -404,16 +415,17 @@ impl HttpArchive {
 
         //if the source is a symlink, read the symlink and create a symlink
         if original.is_symlink() {
-            #[cfg(unix)]
-            std::os::unix::fs::symlink(original, target).context(format_context!(
-                "failed to create symlink {original:?} -> {target_path}"
-            ))?;
+            let link = std::fs::read_link(original)
+                .context(format_context!("failed to read symlink {original:?}"))?;
 
-            #[cfg(windows)]
-            #[cfg(unix)]
-            std::os::windows::fs::symlink_file(link.clone(), target).context(format_context!(
-                "failed to create symlink {link:?} -> {target_path}"
-            ))?;
+            if let Some(soft_links) = soft_links {
+                // defer creation of soft links if a list is provided
+                soft_links.push((link, target.into()));
+            } else {
+                symlink::symlink_file(link.clone(), target).context(format_context!(
+                    "failed to create symlink {original:?} -> {link:?}"
+                ))?;
+            }
 
             return Ok(());
         }

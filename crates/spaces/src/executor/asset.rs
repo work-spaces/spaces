@@ -161,10 +161,11 @@ impl AddWhichAsset {
 
         let source = path.to_string_lossy().to_string();
 
-        http_archive::HttpArchive::create_hard_link(
+        http_archive::HttpArchive::create_link(
             destination.clone(),
             source,
             http_archive::MakeReadOnly::No,
+            None,
         )
         .context(format_context!(
             "Failed to create hard link from {} to {}",
@@ -202,10 +203,11 @@ impl AddHardLink {
         let destination = format!("{}/{}", workspace, self.destination);
         let source = self.source.clone();
 
-        http_archive::HttpArchive::create_hard_link(
+        http_archive::HttpArchive::create_link(
             destination.clone(),
             source.clone(),
             http_archive::MakeReadOnly::No,
+            None,
         )
         .context(format_context!(
             "Failed to create hard link from {} to {}",
@@ -305,37 +307,20 @@ impl AddSoftLink {
             ))?;
         }
 
-        // create a soft link
-        #[cfg(windows)]
-        {
-            let source_path = std::path::Path::new(&source);
-            if source_path.is_dir() {
-                std::os::windows::fs::symlink_dir(source.clone(), destination.clone()).context(
-                    format_context!(
-                        "Failed to create soft link from {} to {}",
-                        source,
-                        destination
-                    ),
-                )?;
-            } else {
-                std::os::windows::fs::symlink_file(source.clone(), destination.clone()).context(
-                    format_context!(
-                        "Failed to create soft link from {} to {}",
-                        source,
-                        destination
-                    ),
-                )?;
-            }
-        }
-
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(source.clone(), destination.clone()).context(
-            format_context!(
+        let source_path = std::path::Path::new(&source);
+        if source_path.is_dir() {
+            symlink::symlink_dir(source.clone(), destination.clone()).context(format_context!(
                 "Failed to create soft link from {} to {}",
                 source,
                 destination
-            ),
-        )?;
+            ))?;
+        } else {
+            symlink::symlink_file(source.clone(), destination.clone()).context(format_context!(
+                "Failed to create soft link from {} to {}",
+                source,
+                destination
+            ))?;
+        }
 
         Ok(())
     }
