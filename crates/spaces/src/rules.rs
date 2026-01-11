@@ -7,6 +7,12 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use utils::{changes, environment, graph, lock, logger, platform, rule};
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum HasHelp {
+    No,
+    Yes,
+}
+
 fn rules_printer_logger(printer: &mut printer::Printer) -> logger::Logger {
     logger::Logger::new_printer(printer, "rules".into())
 }
@@ -660,14 +666,22 @@ impl State {
         Ok(())
     }
 
-    fn get_run_targets(&self) -> anyhow::Result<Vec<Arc<str>>> {
+    fn get_run_targets(&self, has_help: HasHelp) -> anyhow::Result<Vec<Arc<str>>> {
         let tasks = self.tasks.read();
 
         let run_rules = tasks
             .values()
             .filter_map(|task| {
                 if task.phase == task::Phase::Run {
-                    Some(task.rule.name.clone())
+                    if has_help == HasHelp::Yes {
+                        if task.rule.help.is_some() {
+                            Some(task.rule.name.clone())
+                        } else {
+                            None
+                        }
+                    } else {
+                        Some(task.rule.name.clone())
+                    }
                 } else {
                     None
                 }
@@ -840,9 +854,9 @@ pub fn show_tasks(
     state.show_tasks(printer, workspace, phase, target, filter, strip_prefix)
 }
 
-pub fn get_run_targets() -> anyhow::Result<Vec<Arc<str>>> {
+pub fn get_run_targets(has_help: HasHelp) -> anyhow::Result<Vec<Arc<str>>> {
     let state = get_state().read();
-    state.get_run_targets()
+    state.get_run_targets(has_help)
 }
 
 pub fn export_tasks_as_mardown(path: &str) -> anyhow::Result<()> {
