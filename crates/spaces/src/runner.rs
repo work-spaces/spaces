@@ -224,7 +224,7 @@ pub fn foreach_repo(
 pub fn run_shell_in_workspace(
     printer: &mut printer::Printer,
     path: Option<Arc<str>>,
-    completions_command: Option<clap::Command>,
+    completions_command: Option<(clap::Command, rules::HasHelp)>,
 ) -> anyhow::Result<()> {
     let workspace = get_workspace(
         printer,
@@ -264,14 +264,14 @@ pub fn run_shell_in_workspace(
         SHELL_DIR
     ))?;
 
-    let completion_content = if let Some(command) = completions_command {
+    let completion_content = if let Some((command, has_help)) = completions_command {
         // rules are now available
         let clap_shell = shell_config
             .get_shell()
             .context(format_context!("Shell does not support completions"))?;
 
-        let run_targets =
-            run_starlark_get_targets(printer).context(format_context!("Failed to get targets"))?;
+        let run_targets = run_starlark_get_targets(printer, has_help)
+            .context(format_context!("Failed to get targets"))?;
 
         completions::generate_workspace_completions(&command, clap_shell, run_targets)
             .context(format_context!("Failed to generate workspace completions"))?
@@ -290,7 +290,10 @@ pub fn run_shell_in_workspace(
     Ok(())
 }
 
-pub fn run_starlark_get_targets(printer: &mut printer::Printer) -> anyhow::Result<Vec<Arc<str>>> {
+pub fn run_starlark_get_targets(
+    printer: &mut printer::Printer,
+    has_help: rules::HasHelp,
+) -> anyhow::Result<Vec<Arc<str>>> {
     run_starlark_modules_in_workspace(
         printer,
         task::Phase::Inspect,
@@ -302,7 +305,7 @@ pub fn run_starlark_get_targets(printer: &mut printer::Printer) -> anyhow::Resul
     )
     .context(format_context!("while executing run rules"))?;
 
-    rules::get_run_targets().context(format_context!("Failed to get run targets"))
+    rules::get_run_targets(has_help).context(format_context!("Failed to get run targets"))
 }
 
 pub fn run_starlark_modules_in_workspace(

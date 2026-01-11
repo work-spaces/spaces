@@ -1,4 +1,4 @@
-use crate::{co, completions, docs, evaluator, runner, singleton, task, workspace};
+use crate::{co, completions, docs, evaluator, rules, runner, singleton, task, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
@@ -336,7 +336,12 @@ pub fn execute() -> anyhow::Result<()> {
             show_elapsed_time,
             ci,
             rescan,
-            commands: Commands::Shell { path, completions },
+            commands:
+                Commands::Shell {
+                    path,
+                    completions,
+                    all_targets,
+                },
         } => {
             handle_verbosity(
                 &mut stdout_printer,
@@ -352,7 +357,13 @@ pub fn execute() -> anyhow::Result<()> {
             }
 
             let completions_command = if completions {
-                Some(Arguments::command())
+                let has_help = if all_targets {
+                    rules::HasHelp::No
+                } else {
+                    rules::HasHelp::Yes
+                };
+
+                Some((Arguments::command(), has_help))
             } else {
                 None
             };
@@ -533,7 +544,12 @@ pub fn execute() -> anyhow::Result<()> {
             show_elapsed_time,
             ci,
             rescan,
-            commands: Commands::Completions { shell, output },
+            commands:
+                Commands::Completions {
+                    shell,
+                    output,
+                    all_targets,
+                },
         } => {
             handle_verbosity(
                 &mut stdout_printer,
@@ -544,8 +560,14 @@ pub fn execute() -> anyhow::Result<()> {
                 show_elapsed_time,
             );
 
+            let has_help = if all_targets {
+                rules::HasHelp::No
+            } else {
+                rules::HasHelp::Yes
+            };
+
             // rules are now available
-            let run_targets = runner::run_starlark_get_targets(&mut stdout_printer)
+            let run_targets = runner::run_starlark_get_targets(&mut stdout_printer, has_help)
                 .context(format_context!("Failed to get targets"))?;
 
             let completion_content = completions::generate_workspace_completions(
@@ -816,6 +838,9 @@ create-lock-file = false # optionally create a lock file
         /// Output file path
         #[arg(long)]
         output: Arc<str>,
+        /// Show rules for all run targets not just those with help populated
+        #[arg(long)]
+        all_targets: bool,
     },
     /// Shows the documentation for spaces starlark modules.
     Docs {
@@ -837,6 +862,9 @@ create-lock-file = false # optionally create a lock file
         /// Generate and source completions for the shell
         #[arg(long)]
         completions: bool,
+        /// Include all run targets in completions not just those with help populated
+        #[arg(long)]
+        all_targets: bool,
     },
     /// Run the Spaces language server protocol. Not currently functional.
     #[cfg(feature = "lsp")]
