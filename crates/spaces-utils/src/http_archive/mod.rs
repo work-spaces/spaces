@@ -445,12 +445,24 @@ impl HttpArchive {
 
         if link_type == ArchiveLink::Hard {
             std::fs::hard_link(original, target).context(format_context!(
-            "If you get 'Operation Not Permitted' on mac try enabling 'Full Disk Access' for the terminal",
-        ))?;
+            "If you get 'Operation Not Permitted' on mac try enabling 'Full Disk Access' for the terminal"))?;
         } else {
             std::fs::copy(original, target).context(format_context!(
-            "If you get 'Operation Not Permitted' on mac try enabling 'Full Disk Access' for the terminal",
-        ))?;
+            "If you get 'Operation Not Permitted' on mac try enabling 'Full Disk Access' for the terminal"))?;
+
+            let target_metadata = std::fs::metadata(target)
+                .context(format_context!("Failed to get metadata for {target:?}"))?;
+
+            // Update the metadata to be read-only
+            let mut read_write_permissions = target_metadata.permissions();
+
+            #[allow(clippy::permissions_set_readonly_false)]
+            read_write_permissions.set_readonly(false);
+
+            // Set the permissions to read-write
+            std::fs::set_permissions(original, read_write_permissions).context(format_context!(
+                "Failed to set permissions for {original:?}"
+            ))?;
         }
 
         Ok(())
