@@ -166,6 +166,7 @@ impl AddWhichAsset {
             source,
             http_archive::MakeReadOnly::No,
             None,
+            http_archive::ArchiveLink::Hard,
         )
         .context(format_context!(
             "Failed to create hard link from {} to {}",
@@ -208,6 +209,7 @@ impl AddHardLink {
             source.clone(),
             http_archive::MakeReadOnly::No,
             None,
+            http_archive::ArchiveLink::Hard,
         )
         .context(format_context!(
             "Failed to create hard link from {} to {}",

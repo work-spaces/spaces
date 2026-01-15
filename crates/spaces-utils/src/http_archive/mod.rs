@@ -22,11 +22,12 @@ fn get_state() -> &'static RwLock<State> {
     STATE.get()
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default, strum::Display)]
 pub enum ArchiveLink {
     None,
     #[default]
     Hard,
+    Copy,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -338,20 +339,31 @@ impl HttpArchive {
                 let full_target_path = format!("{target_prefix}/{relative_target_path}");
 
                 match self.archive.link {
-                    ArchiveLink::Hard => {
-                        label_logger(&mut progress_bar, "hardlink").trace(
-                            format!("Creating hard link {full_target_path} -> {source}").as_str(),
+                    ArchiveLink::Hard | ArchiveLink::Copy => {
+                        label_logger(&mut progress_bar, "link").trace(
+                            format!(
+                                "Creating link: {} {full_target_path} -> {source}",
+                                self.archive.link
+                            )
+                            .as_str(),
                         );
                         let workspace_path_to_target = full_target_path
                             .strip_prefix(format!("{workspace_directory}/").as_str())
                             .unwrap_or(&full_target_path);
                         let _ = link_set.insert(workspace_path_to_target.into());
 
+                        let make_read_only = if self.archive.link == ArchiveLink::Hard {
+                            MakeReadOnly::Yes
+                        } else {
+                            MakeReadOnly::No
+                        };
+
                         Self::create_link(
                             full_target_path.clone(),
                             source.clone(),
-                            MakeReadOnly::Yes,
+                            make_read_only,
                             Some(&mut soft_links),
+                            self.archive.link.clone(),
                         )
                         .context(format_context!("hard link {full_target_path} -> {source}",))?;
                     }
@@ -383,6 +395,7 @@ impl HttpArchive {
         source: String,
         make_read_only: MakeReadOnly,
         soft_links: Option<&mut Vec<(std::path::PathBuf, std::path::PathBuf)>>,
+        link_type: ArchiveLink,
     ) -> anyhow::Result<()> {
         let target = std::path::Path::new(target_path.as_str());
         let original = std::path::Path::new(source.as_str());
@@ -430,9 +443,15 @@ impl HttpArchive {
             return Ok(());
         }
 
-        std::fs::hard_link(original, target).context(format_context!(
+        if link_type == ArchiveLink::Hard {
+            std::fs::hard_link(original, target).context(format_context!(
             "If you get 'Operation Not Permitted' on mac try enabling 'Full Disk Access' for the terminal",
         ))?;
+        } else {
+            std::fs::copy(original, target).context(format_context!(
+            "If you get 'Operation Not Permitted' on mac try enabling 'Full Disk Access' for the terminal",
+        ))?;
+        }
 
         Ok(())
     }
