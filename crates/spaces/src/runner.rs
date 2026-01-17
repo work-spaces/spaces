@@ -512,9 +512,12 @@ pub fn checkout(
         ))?;
     }
 
-    std::fs::write(format!("{}/{}", name, workspace::ENV_FILE_NAME), "").context(
-        format_context!("while creating {} file", workspace::ENV_FILE_NAME),
-    )?;
+    // ENV file is empty at the beginning of checkout
+    let env_path = std::path::Path::new(name.as_ref()).join(workspace::ENV_FILE_NAME);
+    std::fs::write(env_path, "").context(format_context!(
+        "while creating {} file",
+        workspace::ENV_FILE_NAME
+    ))?;
 
     let current_working_directory = std::env::current_dir()
         .context(format_context!("Failed to get current working directory"))?;
