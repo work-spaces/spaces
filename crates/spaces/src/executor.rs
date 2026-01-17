@@ -42,6 +42,7 @@ pub enum Task {
     UpdateAsset(asset::UpdateAsset),
     UpdateEnv(env::UpdateEnv),
     AddAsset(asset::AddAsset),
+    AddAnyAssets(asset::AddAnyAssets),
     Git(git::Git),
 }
 
@@ -60,11 +61,14 @@ impl Task {
             Task::Kill(kill) => kill.execute(name, &mut progress),
             Task::CreateArchive(archive) => archive.execute(progress, workspace.clone(), name),
             Task::UpdateAsset(asset) => asset.execute(progress, workspace.clone(), name),
-            Task::AddWhichAsset(asset) => asset.execute(progress, workspace.clone(), name),
-            Task::AddHardLink(asset) => asset.execute(progress, workspace.clone(), name),
-            Task::AddSoftLink(asset) => asset.execute(progress, workspace.clone(), name),
+            Task::AddWhichAsset(asset) => asset.execute(&mut progress, workspace.clone(), name),
+            Task::AddHardLink(asset) => asset.execute(&mut progress, workspace.clone(), name),
+            Task::AddSoftLink(asset) => asset.execute(&mut progress, workspace.clone(), name),
             Task::UpdateEnv(update_env) => update_env.execute(progress, workspace.clone(), name),
-            Task::AddAsset(asset) => asset.execute(progress, workspace.clone(), name),
+            Task::AddAsset(asset) => asset.execute(&mut progress, workspace.clone(), name),
+            Task::AddAnyAssets(any_assets) => {
+                any_assets.execute(&mut progress, workspace.clone(), name)
+            }
             Task::Git(git) => {
                 check_new_modules =
                     git.is_evaluate_spaces_modules && git.working_directory.is_none();

@@ -373,6 +373,28 @@ pub const FUNCTIONS: &[Function] = &[
         example: Some(ADD_HARD_LINK_ASSET_EXAMPLE)
     },
     Function {
+        name: "add_any_assets",
+        description: r#"Adds a group of assets as a single rule
+The following assets are supported:
+{ type: Asset, content: <value>, destination: <destination> }
+{ type: HardLink, source: <source>, destination: <destination> }
+{ type: SoftLink, source: <source>, destination: <destination> }
+{ type: Which, which: <which arg>, destination: <destination> }
+"#,
+        return_type: "None",
+        args: &[
+            get_rule_argument(),
+            Arg {
+                name: "assets",
+                description: "dict with",
+                dict: &[
+                    ("any", "list of dicts (see the example above)"),
+                ],
+            },
+        ],
+        example: Some(ADD_HARD_LINK_ASSET_EXAMPLE)
+    },
+    Function {
         name: "update_asset",
         description: UPDATE_ASSET_DESCRIPTION,
         return_type: "None",
@@ -686,6 +708,27 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             rule,
             task::Phase::Checkout,
             executor::Task::AddSoftLink(asset),
+        ))
+        .context(format_context!("Failed to insert task {rule_name}"))?;
+
+        Ok(NoneType)
+    }
+
+    fn add_any_assets(
+        #[starlark(require = named)] rule: starlark::values::Value,
+        #[starlark(require = named)] assets: starlark::values::Value,
+    ) -> anyhow::Result<NoneType> {
+        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+            .context(format_context!("bad options for which asset rule"))?;
+
+        let any_assets: asset::AddAnyAssets = serde_json::from_value(assets.to_json_value()?)
+            .context(format_context!("Failed to parse add_any_assets arguments"))?;
+
+        let rule_name = rule.name.clone();
+        rules::insert_task(task::Task::new(
+            rule,
+            task::Phase::Checkout,
+            executor::Task::AddAnyAssets(any_assets),
         ))
         .context(format_context!("Failed to insert task {rule_name}"))?;
 
