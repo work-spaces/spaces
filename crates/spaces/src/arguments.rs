@@ -67,13 +67,15 @@ fn handle_verbosity(
 ) {
     singleton::set_rescan(rescan);
     singleton::set_logging_disabled(disable_logs);
+    printer.verbosity.level = verbosity;
     if is_ci {
         singleton::set_ci(true);
-        printer.verbosity.level = printer::Level::Trace;
+        if verbosity == printer::Level::App {
+            printer.verbosity.level = printer::Level::Message;
+        }
         printer.verbosity.is_show_progress_bars = false;
         printer.verbosity.is_show_elapsed_time = true;
     } else {
-        printer.verbosity.level = verbosity;
         printer.verbosity.is_show_progress_bars = !is_hide_progress_bars;
         printer.verbosity.is_show_elapsed_time = show_elapsed_time;
     }

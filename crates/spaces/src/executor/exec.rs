@@ -140,7 +140,7 @@ impl Exec {
             timeout: self.timeout.map(std::time::Duration::from_secs_f64),
         };
 
-        logger(progress, name).debug(
+        logger(progress, name).message(
             format!(
                 "Executing: {} {}",
                 self.command,
@@ -153,7 +153,7 @@ impl Exec {
 
         handle_process_ended(name);
 
-        logger(progress, name).message(format!("log file: {log_file_path:?}").as_str());
+        logger(progress, name).debug(format!("log file: {log_file_path:?}").as_str());
 
         let stdout_content = match result {
             Ok(content) => {

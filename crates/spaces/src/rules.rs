@@ -195,7 +195,7 @@ pub fn execute_task(
                     .context(format_context!("Failed to check inputs for {rule_name}"))?;
                 if digest.is_none() {
                     // the digest has not changed - not need to execute
-                    skip_execute_message = Some("Skipping: same inputs".into());
+                    skip_execute_message = Some("skipping: same inputs".into());
                 }
                 task_logger(&mut progress, name.clone())
                     .debug(format!("New digest for {rule_name}={digest:?}").as_str());
