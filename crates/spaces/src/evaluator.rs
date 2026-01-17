@@ -692,7 +692,15 @@ pub fn execute_tasks(
             let path = std::path::Path::new(file.as_ref());
             if path.exists() {
                 star_logger(printer).warning(format!("Expired, removing: {file}").as_str());
-                std::fs::remove_file(path).context(format_context!("Failed to remove {file}"))?;
+                match std::fs::remove_file(path).context(format_context!("Failed to remove {file}"))
+                {
+                    Ok(_) => {}
+                    Err(err) => star_logger(printer)
+                        .warning(format!("Failed to remove: {file} because {err}").as_str()),
+                }
+            } else {
+                star_logger(printer)
+                    .warning(format!("Expired file already removed: {file}").as_str())
             }
         }
 
