@@ -46,6 +46,9 @@ pub struct Arguments {
     /// If this is passed, info.is_ci() returns true in scripts.
     #[arg(long)]
     ci: bool,
+    /// Disables creating log files
+    #[arg(long)]
+    disable_logs: bool,
     /// Rescan the workspace for *spaces.star files
     #[arg(long)]
     rescan: bool,
@@ -57,11 +60,13 @@ fn handle_verbosity(
     printer: &mut printer::Printer,
     verbosity: printer::Level,
     is_ci: bool,
+    disable_logs: bool,
     rescan: bool,
     is_hide_progress_bars: bool,
     show_elapsed_time: bool,
 ) {
     singleton::set_rescan(rescan);
+    singleton::set_logging_disabled(disable_logs);
     if is_ci {
         singleton::set_ci(true);
         printer.verbosity.level = printer::Level::Trace;
@@ -128,6 +133,7 @@ pub fn execute() -> anyhow::Result<()> {
             hide_progress_bars,
             show_elapsed_time,
             ci,
+            disable_logs,
             rescan,
             commands:
                 Commands::Checkout {
@@ -146,6 +152,7 @@ pub fn execute() -> anyhow::Result<()> {
                 &mut stdout_printer,
                 verbosity.into(),
                 ci,
+                disable_logs,
                 rescan,
                 hide_progress_bars,
                 show_elapsed_time,
@@ -171,6 +178,7 @@ pub fn execute() -> anyhow::Result<()> {
             hide_progress_bars,
             show_elapsed_time,
             ci,
+            disable_logs,
             rescan,
             commands:
                 Commands::CheckoutRepo {
@@ -190,6 +198,7 @@ pub fn execute() -> anyhow::Result<()> {
                 &mut stdout_printer,
                 verbosity.into(),
                 ci,
+                disable_logs,
                 rescan,
                 hide_progress_bars,
                 show_elapsed_time,
@@ -216,6 +225,7 @@ pub fn execute() -> anyhow::Result<()> {
             hide_progress_bars,
             show_elapsed_time,
             ci,
+            disable_logs,
             rescan,
             commands:
                 Commands::Co {
@@ -228,6 +238,7 @@ pub fn execute() -> anyhow::Result<()> {
                 &mut stdout_printer,
                 verbosity.into(),
                 ci,
+                disable_logs,
                 rescan,
                 hide_progress_bars,
                 show_elapsed_time,
@@ -252,6 +263,7 @@ pub fn execute() -> anyhow::Result<()> {
             hide_progress_bars,
             show_elapsed_time,
             ci,
+            disable_logs,
             rescan,
             commands: Commands::Sync {},
         } => {
@@ -259,6 +271,7 @@ pub fn execute() -> anyhow::Result<()> {
                 &mut stdout_printer,
                 verbosity.into(),
                 ci,
+                disable_logs,
                 rescan,
                 hide_progress_bars,
                 show_elapsed_time,
@@ -290,6 +303,7 @@ pub fn execute() -> anyhow::Result<()> {
             hide_progress_bars,
             show_elapsed_time,
             ci,
+            disable_logs,
             rescan,
             commands: Commands::Foreach { mode },
         } => {
@@ -297,6 +311,7 @@ pub fn execute() -> anyhow::Result<()> {
                 &mut stdout_printer,
                 verbosity.into(),
                 ci,
+                disable_logs,
                 rescan,
                 true,
                 show_elapsed_time,
@@ -335,6 +350,7 @@ pub fn execute() -> anyhow::Result<()> {
             hide_progress_bars,
             show_elapsed_time,
             ci,
+            disable_logs,
             rescan,
             commands:
                 Commands::Shell {
@@ -347,6 +363,7 @@ pub fn execute() -> anyhow::Result<()> {
                 &mut stdout_printer,
                 verbosity.into(),
                 ci,
+                disable_logs,
                 rescan,
                 hide_progress_bars,
                 show_elapsed_time,
@@ -378,6 +395,7 @@ pub fn execute() -> anyhow::Result<()> {
             hide_progress_bars,
             show_elapsed_time,
             ci,
+            disable_logs,
             rescan,
             commands: Commands::RunLsp {},
         } => {
@@ -416,6 +434,7 @@ pub fn execute() -> anyhow::Result<()> {
             hide_progress_bars,
             show_elapsed_time,
             ci,
+            disable_logs,
             rescan,
             commands:
                 Commands::Run {
@@ -430,6 +449,7 @@ pub fn execute() -> anyhow::Result<()> {
                 &mut stdout_printer,
                 verbosity.into(),
                 ci,
+                disable_logs,
                 rescan,
                 hide_progress_bars,
                 show_elapsed_time,
@@ -472,6 +492,7 @@ pub fn execute() -> anyhow::Result<()> {
             hide_progress_bars,
             show_elapsed_time,
             ci,
+            disable_logs,
             rescan,
             commands:
                 Commands::Inspect {
@@ -486,6 +507,7 @@ pub fn execute() -> anyhow::Result<()> {
                 &mut stdout_printer,
                 verbosity.into(),
                 ci,
+                disable_logs,
                 rescan,
                 hide_progress_bars,
                 show_elapsed_time,
@@ -543,6 +565,7 @@ pub fn execute() -> anyhow::Result<()> {
             hide_progress_bars,
             show_elapsed_time,
             ci,
+            disable_logs,
             rescan,
             commands:
                 Commands::Completions {
@@ -555,6 +578,7 @@ pub fn execute() -> anyhow::Result<()> {
                 &mut stdout_printer,
                 verbosity.into(),
                 ci,
+                disable_logs,
                 rescan,
                 hide_progress_bars,
                 show_elapsed_time,
@@ -588,6 +612,7 @@ pub fn execute() -> anyhow::Result<()> {
             hide_progress_bars,
             show_elapsed_time,
             ci,
+            disable_logs,
             rescan,
             commands: Commands::Docs { item },
         } => {
@@ -595,6 +620,7 @@ pub fn execute() -> anyhow::Result<()> {
                 &mut stdout_printer,
                 verbosity.into(),
                 ci,
+                disable_logs,
                 rescan,
                 hide_progress_bars,
                 show_elapsed_time,

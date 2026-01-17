@@ -243,6 +243,8 @@ pub fn execute_task(
                 duration: elapsed_time,
                 file: if skip_execute_message.is_some() {
                     "<skipped>".into()
+                } else if singleton::get_is_logging_disabled() {
+                    "<logging disabled>".into()
                 } else {
                     workspace.read().get_log_file(&rule_name)
                 },

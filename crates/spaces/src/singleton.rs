@@ -9,6 +9,7 @@ struct State {
     active_workspace: Option<workspace::WorkspaceArc>,
     is_sync: bool,
     is_ci: bool,
+    is_logging_disabled: bool,
     is_rescan: bool,
     is_lsp: bool,
     is_skip_deps: bool,
@@ -31,6 +32,7 @@ fn get_state() -> &'static lock::StateLock<State> {
     }
     STATE.set(lock::StateLock::new(State {
         is_ci: false,
+        is_logging_disabled: false,
         is_sync: false,
         is_rescan: false,
         is_lsp: false,
@@ -192,6 +194,16 @@ pub fn get_inspect_globs() -> HashSet<Arc<str>> {
 pub fn get_is_rescan() -> bool {
     let state = get_state().read();
     state.is_rescan
+}
+
+pub fn set_logging_disabled(disable_logs: bool) {
+    let mut state = get_state().write();
+    state.is_logging_disabled = disable_logs;
+}
+
+pub fn get_is_logging_disabled() -> bool {
+    let state = get_state().read();
+    state.is_logging_disabled
 }
 
 pub fn set_rescan(is_rescan: bool) {
