@@ -118,7 +118,7 @@ impl Exec {
 
         let environment = environment_map.into_iter().collect::<Vec<_>>();
 
-        let log_file_path = if singleton::get_is_ci() {
+        let log_file_path = if singleton::get_is_logging_disabled() {
             None
         } else {
             Some(workspace.read().get_log_file(name))
