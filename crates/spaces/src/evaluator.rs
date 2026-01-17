@@ -677,11 +677,12 @@ pub fn execute_tasks(
         _ => {}
     }
 
-    let is_clean = target
+    let is_checkout = phase == task::Phase::Checkout;
+    let is_clean_or_checkout = target
         .map(|t| t.as_ref() == rule::CLEAN_RULE_NAME)
-        .unwrap_or(false);
+        .unwrap_or(is_checkout);
 
-    if phase == task::Phase::Checkout {
+    if is_checkout {
         // Remove files from previous checkout that are no longer needed
         let extraneous_files = {
             let mut workspace_write_lock = workspace.write();
@@ -711,10 +712,10 @@ pub fn execute_tasks(
             .context(format_context!("Failed to save checkout settings"))?;
     }
 
-    if workspace.read().is_bin_dirty || is_clean {
+    if workspace.read().is_bin_dirty || is_clean_or_checkout {
         star_logger(printer).debug("saving BIN workspace settings");
-        if is_clean {
-            star_logger(printer).message("Cleaning workspace: forgetting inputs");
+        if is_clean_or_checkout {
+            star_logger(printer).message("cleaning workspace: forgetting inputs");
             workspace.write().settings.bin = ws::BinSettings::default();
         }
         workspace
