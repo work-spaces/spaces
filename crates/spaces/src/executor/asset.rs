@@ -139,7 +139,7 @@ pub struct AddWhichAsset {
 impl AddWhichAsset {
     pub fn execute(
         &self,
-        _progress: printer::MultiProgressBar,
+        _progress: &mut printer::MultiProgressBar,
         workspace: workspace::WorkspaceArc,
         _name: &str,
     ) -> anyhow::Result<()> {
@@ -188,7 +188,7 @@ pub struct AddHardLink {
 impl AddHardLink {
     pub fn execute(
         &self,
-        _progress: printer::MultiProgressBar,
+        _progress: &mut printer::MultiProgressBar,
         workspace: workspace::WorkspaceArc,
         _name: &str,
     ) -> anyhow::Result<()> {
@@ -231,11 +231,11 @@ pub struct AddAsset {
 impl AddAsset {
     pub fn execute(
         &self,
-        mut progress: printer::MultiProgressBar,
+        progress: &mut printer::MultiProgressBar,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
-        let mut logger = logger::Logger::new_progress(&mut progress, name.into());
+        let mut logger = logger::Logger::new_progress(progress, name.into());
         let mut workspace_write_lock = workspace.write();
         workspace_write_lock.add_checkout_asset(self.destination.clone(), self.content.clone());
 
@@ -278,7 +278,7 @@ pub struct AddSoftLink {
 impl AddSoftLink {
     pub fn execute(
         &self,
-        _progress: printer::MultiProgressBar,
+        _progress: &mut printer::MultiProgressBar,
         workspace: workspace::WorkspaceArc,
         _name: &str,
     ) -> anyhow::Result<()> {
@@ -324,6 +324,40 @@ impl AddSoftLink {
             ))?;
         }
 
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, tag = "type")]
+pub enum AnyAsset {
+    SoftLink(AddSoftLink),
+    Asset(AddAsset),
+    HardLink(AddHardLink),
+    Which(AddWhichAsset),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AddAnyAssets {
+    pub any: Vec<AnyAsset>,
+}
+
+impl AddAnyAssets {
+    pub fn execute(
+        &self,
+        progress: &mut printer::MultiProgressBar,
+        workspace: workspace::WorkspaceArc,
+        name: &str,
+    ) -> anyhow::Result<()> {
+        for asset in self.any.iter() {
+            match asset {
+                AnyAsset::SoftLink(asset) => asset.execute(progress, workspace.clone(), name)?,
+                AnyAsset::Asset(asset) => asset.execute(progress, workspace.clone(), name)?,
+                AnyAsset::HardLink(asset) => asset.execute(progress, workspace.clone(), name)?,
+                AnyAsset::Which(asset) => asset.execute(progress, workspace.clone(), name)?,
+            }
+        }
         Ok(())
     }
 }
