@@ -424,7 +424,7 @@ impl Workspace {
         // command line. If any repos are on tip of branch, the workspace
         // is marked as not-reproducible
         for (name, _) in modules.iter() {
-            logger(&mut progress).message(format!("Digesting {name}").as_str());
+            logger(&mut progress).debug(format!("Digesting {name}").as_str());
         }
         let workspace_digest = calculate_digest(&modules);
 

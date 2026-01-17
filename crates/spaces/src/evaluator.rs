@@ -389,7 +389,7 @@ pub fn evaluate_starlark_modules(
         if let Some((name, content)) = module_queue.pop_front() {
             let mut _workspace_lock = get_state().write();
             singleton::set_active_workspace(workspace.clone());
-            star_logger(printer).message(format!("evaluating {name} from front of queue").as_str());
+            star_logger(printer).debug(format!("evaluating {name} from front of queue").as_str());
 
             let eval_name = name.clone();
             let workspace_arc = workspace.clone();
