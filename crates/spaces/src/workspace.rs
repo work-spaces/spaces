@@ -105,9 +105,12 @@ pub fn get_short_digest(digest: &str) -> Arc<str> {
 
 pub fn calculate_digest(modules: &[(Arc<str>, Arc<str>)]) -> Arc<str> {
     let mut hasher = blake3::Hasher::new();
+    let env_digest = environment::calculate_digest(&singleton::get_args_env());
+    hasher.update(env_digest.as_bytes());
     for (_, content) in modules {
         hasher.update(content.as_bytes());
     }
+
     hasher.finalize().to_string().into()
 }
 
@@ -155,6 +158,20 @@ fn get_unique() -> anyhow::Result<String> {
 
 pub fn build_directory() -> &'static str {
     "build"
+}
+
+pub fn save_env_file_at(dir_path: &std::path::Path, env: &str) -> anyhow::Result<()> {
+    let mut workspace_file_content = String::new();
+    workspace_file_content.push_str(WORKSPACE_FILE_HEADER);
+    workspace_file_content.push('\n');
+    workspace_file_content.push_str("WORKSPACE_ENV = ");
+    workspace_file_content.push_str(env);
+    workspace_file_content.push_str("\n\nworkspace.set_env(env = WORKSPACE_ENV) \n");
+    let workspace_file_path = dir_path.join(ENV_FILE_NAME);
+    std::fs::write(workspace_file_path, workspace_file_content)
+        .context(format_context!("Failed to write workspace file"))?;
+
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -576,15 +593,8 @@ impl Workspace {
         // that is not reproducible - such as a repo on tip of branch
         let mut env = environment::Environment::default();
 
-        let is_reproducible = if singleton::get_args_env().is_empty() {
-            "true"
-        } else {
-            "false"
-        };
-        env.vars.insert(
-            SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE.into(),
-            is_reproducible.into(),
-        );
+        env.vars
+            .insert(SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE.into(), "true".into());
 
         let args_env = singleton::get_args_env();
         if !args_env.is_empty() {
@@ -658,16 +668,8 @@ impl Workspace {
     }
 
     pub fn save_env_file(&self, env: &str) -> anyhow::Result<()> {
-        let mut workspace_file_content = String::new();
-        workspace_file_content.push_str(WORKSPACE_FILE_HEADER);
-        workspace_file_content.push('\n');
-        workspace_file_content.push_str("WORKSPACE_ENV = ");
-        workspace_file_content.push_str(env);
-        workspace_file_content.push_str("\n\nworkspace.set_env(env = WORKSPACE_ENV) \n");
-        let workspace_file_path = format!("{}/{}", self.absolute_path, ENV_FILE_NAME);
-        std::fs::write(workspace_file_path.as_str(), workspace_file_content)
-            .context(format_context!("Failed to write workspace file"))?;
-
+        save_env_file_at(std::path::Path::new(self.absolute_path.as_ref()), env)
+            .context(format_context!("Failed to save workspace env file"))?;
         Ok(())
     }
 

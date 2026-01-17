@@ -10,6 +10,19 @@ enum GetVars {
     Run,
 }
 
+pub fn calculate_digest(vars: &std::collections::HashMap<Arc<str>, Arc<str>>) -> String {
+    let mut hasher = blake3::Hasher::new();
+    let mut vars_list: Vec<String> = vars
+        .iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect();
+    vars_list.sort();
+    for item in vars_list {
+        hasher.update(item.as_bytes());
+    }
+    hasher.finalize().to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct Environment {
