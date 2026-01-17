@@ -218,7 +218,11 @@ pub fn execute_task(
 
         progress.reset_elapsed();
         let task_result = if let Some(message) = skip_execute_message.as_ref() {
-            progress.set_ending_message(message);
+            if task.rule.type_ == Some(rule::RuleType::Setup) {
+                progress.set_ending_message_none();
+            } else {
+                progress.set_ending_message(message);
+            }
             Ok(executor::TaskResult::new())
         } else {
             task.executor
