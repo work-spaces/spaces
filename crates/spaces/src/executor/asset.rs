@@ -282,7 +282,6 @@ impl AddSoftLink {
         workspace: workspace::WorkspaceArc,
         _name: &str,
     ) -> anyhow::Result<()> {
-        // create the hard link to sysroot
         let mut workspace_write_lock = workspace.write();
         workspace_write_lock
             .settings
@@ -312,13 +311,13 @@ impl AddSoftLink {
         let source_path = std::path::Path::new(&source);
         if source_path.is_dir() {
             symlink::symlink_dir(source.clone(), destination.clone()).context(format_context!(
-                "Failed to create soft link from {} to {}",
+                "Failed to create soft link dir from {} to {}",
                 source,
                 destination
             ))?;
         } else {
             symlink::symlink_file(source.clone(), destination.clone()).context(format_context!(
-                "Failed to create soft link from {} to {}",
+                "Failed to create soft link file from {} to {}",
                 source,
                 destination
             ))?;
