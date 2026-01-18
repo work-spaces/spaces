@@ -190,7 +190,7 @@ impl Changes {
 
                 if count > 0 {
                     changes_logger(progress)
-                        .message(format!("Updated {count} items from {input}").as_str());
+                        .debug(format!("Updated {count} items from {input}").as_str());
                 }
             }
 
@@ -235,7 +235,7 @@ impl Changes {
         }
 
         if count > 0 {
-            changes_logger(progress).message(format!("Hashed {count} items").as_str());
+            changes_logger(progress).debug(format!("Hashed {count} items").as_str());
         }
 
         Ok(hasher.finalize().to_string().into())

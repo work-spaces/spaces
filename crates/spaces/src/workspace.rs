@@ -481,7 +481,7 @@ impl Workspace {
             // if this is a checkout, we need to scan on first run/inspect
             settings.json.is_scanned = Some(is_run_or_inspect);
 
-            logger(&mut progress).message(format!("Scanning {absolute_path}").as_str());
+            logger(&mut progress).debug(format!("Scanning {absolute_path}").as_str());
 
             // walkdir and find all .star files in the workspace
             // skip sysroot/build/logs directories
@@ -511,8 +511,7 @@ impl Workspace {
                     if let Some(stripped_path) =
                         path.strip_prefix(format!("{absolute_path}/").as_str())
                     {
-                        logger(&mut progress)
-                            .message(format!("star file {stripped_path}").as_str());
+                        logger(&mut progress).debug(format!("star file {stripped_path}").as_str());
 
                         // all star files are hashed and tracked when modified
                         settings.bin.star_files.insert(
@@ -563,7 +562,7 @@ impl Workspace {
 
         // message the user of changed modules
         for updated in updated_modules {
-            logger(&mut progress).message(format!("dirty {updated}").as_str());
+            logger(&mut progress).debug(format!("dirty {updated}").as_str());
         }
 
         // load the modules scanned from the workspace
