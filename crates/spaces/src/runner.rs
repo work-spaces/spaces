@@ -350,7 +350,7 @@ pub fn run_starlark_modules_in_workspace(
         }
         RunWorkspace::Script(scripts) => {
             for (name, _) in scripts.iter() {
-                logger::Logger::new_printer(printer, name.clone()).message("Digesting");
+                logger::Logger::new_printer(printer, name.clone()).debug("Digesting");
             }
 
             workspace_arc.write().is_create_lock_file = is_create_lock_file.into();

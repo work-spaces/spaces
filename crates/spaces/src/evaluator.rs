@@ -715,7 +715,7 @@ pub fn execute_tasks(
     if workspace.read().is_bin_dirty || is_clean_or_checkout {
         star_logger(printer).debug("saving BIN workspace settings");
         if is_clean_or_checkout {
-            star_logger(printer).message("cleaning workspace: forgetting inputs");
+            star_logger(printer).debug("cleaning workspace: forgetting inputs");
             workspace.write().settings.bin = ws::BinSettings::default();
         }
         workspace

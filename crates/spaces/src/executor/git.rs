@@ -87,7 +87,7 @@ impl Git {
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
-        logger(progress, self.url.clone()).debug("execute worktree clone");
+        logger(progress, self.url.clone()).message("execute worktree clone");
 
         let (relative_bare_store_path, name_dot_git) =
             git::BareRepository::url_to_relative_path_and_name(&self.url)
@@ -144,8 +144,13 @@ impl Git {
         filter: Option<String>,
         is_new_branch: IsNewBranch,
     ) -> anyhow::Result<()> {
-        logger(progress, self.url.clone())
-            .debug(format!("execute clone to store with filter {filter:?}").as_str());
+        logger(progress, self.url.clone()).message(
+            format!(
+                "execute default clone with filter {:?}",
+                filter.clone().unwrap_or("None".to_string())
+            )
+            .as_str(),
+        );
 
         if is_new_branch == IsNewBranch::Yes && singleton::is_sync() {
             logger(progress, self.url.clone())
@@ -390,7 +395,7 @@ impl Git {
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
-        logger(progress, self.url.clone()).debug("execute shallow clone");
+        logger(progress, self.url.clone()).message("execute shallow clone");
 
         let branch = match &self.checkout {
             git::Checkout::NewBranch(branch_name) => {

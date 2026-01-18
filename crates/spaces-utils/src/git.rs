@@ -726,7 +726,7 @@ impl Repository {
         };
 
         url_logger(progress_bar, self.url.as_ref())
-            .message(format!("git {}", options.arguments.join(" ")).as_str());
+            .debug(format!("git {}", options.arguments.join(" ")).as_str());
 
         execute_git_command(progress_bar, &self.url, options)
             .context(format_context!("while executing git command"))?;

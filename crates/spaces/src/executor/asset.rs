@@ -72,7 +72,7 @@ impl UpdateAsset {
             ),
         )?;
 
-        logger.message(format!("update asset {}", self.destination).as_str());
+        logger.debug(format!("update asset {}", self.destination).as_str());
 
         let new_value = if workspace_write_lock
             .updated_assets

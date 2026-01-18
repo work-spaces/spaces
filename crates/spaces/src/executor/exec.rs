@@ -140,7 +140,7 @@ impl Exec {
             timeout: self.timeout.map(std::time::Duration::from_secs_f64),
         };
 
-        logger(progress, name).message(
+        logger(progress, name).info(
             format!(
                 "Executing: {} {}",
                 self.command,
