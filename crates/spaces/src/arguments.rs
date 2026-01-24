@@ -234,6 +234,10 @@ pub fn execute() -> anyhow::Result<()> {
                     checkout,
                     name,
                     keep_workspace_on_failure,
+                    rule_name,
+                    url,
+                    rev,
+                    env,
                 },
         } => {
             handle_verbosity(
@@ -254,6 +258,42 @@ pub fn execute() -> anyhow::Result<()> {
                 checkout,
                 co::CO_FILE_NAME
             ))?;
+
+            let mut checkout = checkout.clone();
+
+            // override co.spaces.toml with command line arg
+            match &mut checkout {
+                co::Checkout::Repo(repo) => {
+                    if let Some(rule_name) = rule_name {
+                        repo.rule_name = Some(rule_name);
+                    }
+                    if let Some(url) = url {
+                        repo.url = url;
+                    }
+                    if let Some(rev) = rev {
+                        repo.rev = rev;
+                    }
+                    for entry in env {
+                        repo.env.get_or_insert_default().push(entry);
+                    }
+                }
+                co::Checkout::Workflow(workflow) => {
+                    if rule_name.is_some() {
+                        return Err(format_error!(
+                            "--rule-name can only be used with CheckoutRepo"
+                        ));
+                    }
+                    if url.is_some() {
+                        return Err(format_error!("--url can only be used with CheckoutRepo"));
+                    }
+                    if rev.is_some() {
+                        return Err(format_error!("--rev can only be used with CheckoutRepo"));
+                    }
+                    for entry in env {
+                        workflow.env.get_or_insert_default().push(entry);
+                    }
+                }
+            }
 
             checkout
                 .clone()
@@ -810,6 +850,18 @@ create-lock-file = false # optionally create a lock file
         /// Do not delete the workspace directory if checkout fails.
         #[arg(long)]
         keep_workspace_on_failure: bool,
+        /// Override the checkout-repo revision in co.spaces.toml
+        #[arg(long)]
+        rev: Option<Arc<str>>,
+        /// Override the checkout-repo rule-name in co.spaces.toml
+        #[arg(long)]
+        rule_name: Option<Arc<str>>,
+        /// Override the checkout-repo url in co.spaces.toml
+        #[arg(long)]
+        url: Option<Arc<str>>,
+        /// Additional env values to augment co.spaces.toml
+        #[arg(long)]
+        env: Vec<Arc<str>>,
     },
     /// Runs checkout rules within an existing workspace (experimental)
     Sync {},
