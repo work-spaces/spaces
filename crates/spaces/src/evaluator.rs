@@ -657,6 +657,7 @@ pub fn execute_tasks(
             let absolute_path = workspace.read().get_absolute_path();
             let workspace_path = std::path::Path::new(absolute_path.as_ref());
             let env_path = workspace_path.join("env");
+            env.remove_secret_vars();
             env.create_shell_env(env_path)
                 .context(format_context!("failed to finalize env"))?;
 

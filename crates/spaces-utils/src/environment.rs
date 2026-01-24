@@ -38,6 +38,8 @@ pub struct Environment {
     pub optional_inherited_vars: Option<Vec<Arc<str>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_inherited_vars: Option<Vec<Arc<str>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secret_inherited_vars: Option<Vec<Arc<str>>>,
 }
 
 impl Environment {
@@ -114,6 +116,15 @@ impl Environment {
             }
         }
 
+        if let Some(secret_inherited) = &self.secret_inherited_vars {
+            for key in secret_inherited {
+                let value = std::env::var(key.as_ref()).context(format_context!(
+                    "failed to get env var {key} from calling env to pass to workspace env"
+                ))?;
+                env_vars.insert(key.clone(), value.into());
+            }
+        }
+
         Ok(env_vars)
     }
 
@@ -148,16 +159,29 @@ impl Environment {
             }
         }
 
-        if let Some(run_inherited_vars) = other.run_inherited_vars {
-            if let Some(existing_run_inherited_vars) = self.run_inherited_vars.as_mut() {
+        if let Some(other_vars) = other.secret_inherited_vars {
+            if let Some(existing) = self.secret_inherited_vars.as_mut() {
                 // extend if not already present
-                for var in run_inherited_vars.iter() {
-                    if !existing_run_inherited_vars.contains(var) {
-                        existing_run_inherited_vars.push(var.clone());
+                for var in other_vars.iter() {
+                    if !existing.contains(var) {
+                        existing.push(var.clone());
                     }
                 }
             } else {
-                self.run_inherited_vars = Some(run_inherited_vars);
+                self.secret_inherited_vars = Some(other_vars);
+            }
+        }
+
+        if let Some(other_vars) = other.run_inherited_vars {
+            if let Some(existing) = self.run_inherited_vars.as_mut() {
+                // extend if not already present
+                for var in other_vars.iter() {
+                    if !existing.contains(var) {
+                        existing.push(var.clone());
+                    }
+                }
+            } else {
+                self.run_inherited_vars = Some(other_vars);
             }
         }
 
@@ -221,6 +245,16 @@ impl Environment {
         );
 
         Ok(env_vars)
+    }
+
+    pub fn remove_secret_vars(&mut self) {
+        if let Some(secret_inherited) = &mut self.secret_inherited_vars {
+            for key in secret_inherited {
+                if let Some(vars) = self.vars.as_mut() {
+                    vars.remove(key);
+                }
+            }
+        }
     }
 
     pub fn create_shell_env(&self, path: std::path::PathBuf) -> anyhow::Result<()> {
