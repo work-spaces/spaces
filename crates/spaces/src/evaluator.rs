@@ -760,6 +760,13 @@ pub fn run_starlark_modules(
         star_logger(printer).trace(format!("tasks {}", rules::get_pretty_tasks()).as_str());
     }
 
+    let secrets = workspace
+        .read()
+        .env
+        .get_secrets()
+        .context(format_context!("While running checkout phase"))?;
+    printer.secrets = secrets;
+
     if is_execute_tasks == IsExecuteTasks::Yes {
         execute_tasks(printer, workspace, phase, target)
             .context(format_context!("executing tasks"))?;
