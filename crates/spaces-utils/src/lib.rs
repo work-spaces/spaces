@@ -1,4 +1,5 @@
 pub mod changes;
+pub mod ci;
 pub mod copy;
 pub mod environment;
 pub mod git;

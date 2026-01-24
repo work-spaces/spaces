@@ -3,7 +3,7 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
 use std::{io::IsTerminal, sync::Arc};
-use utils::{git, shell};
+use utils::{ci, git, shell};
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
 pub enum Level {
@@ -517,7 +517,17 @@ pub fn execute() -> anyhow::Result<()> {
                 singleton::enable_skip_deps_mode();
             }
 
-            runner::run_starlark_modules_in_workspace(
+            let is_ci: ci::IsCi = singleton::get_is_ci().into();
+            let target_message = target
+                .as_ref()
+                .map(|target| format!(" {target}"))
+                .unwrap_or_default();
+            let group = ci::GithubLogGroup::new_group(
+                &mut stdout_printer,
+                is_ci,
+                format!("Spaces Run{target_message}").as_str(),
+            )?;
+            let result = runner::run_starlark_modules_in_workspace(
                 &mut stdout_printer,
                 task::Phase::Run,
                 None,
@@ -525,8 +535,9 @@ pub fn execute() -> anyhow::Result<()> {
                 runner::RunWorkspace::Target(target, extra_rule_args),
                 runner::IsCreateLockFile::No,
                 runner::IsExecuteTasks::Yes,
-            )
-            .context(format_context!("while executing run rules"))?;
+            );
+            group.end_group(&mut stdout_printer, is_ci)?;
+            result.context(format_context!("while executing run rules"))?;
         }
 
         Arguments {
