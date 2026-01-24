@@ -46,13 +46,14 @@ impl Environment {
     }
 
     pub fn get_path_with_system_paths(&self) -> Arc<str> {
-        let mut path = self.paths.as_ref().unwrap_or(&vec![]).join(":");
-        if let Some(system_paths) = &self.system_paths {
-            if !system_paths.is_empty() {
-                path.push(':');
-                path.push_str(system_paths.join(":").as_str());
-            }
+        let mut all_paths = Vec::new();
+        if let Some(paths) = self.paths.as_ref() {
+            all_paths.extend_from_slice(paths);
         }
+        if let Some(system_paths) = &self.system_paths {
+            all_paths.extend_from_slice(system_paths);
+        }
+        let path = all_paths.join(":");
         path.into()
     }
 
@@ -124,10 +125,12 @@ impl Environment {
         if let Some(other_paths) = other.paths {
             // add to paths if not already present
             for path in other_paths.iter() {
-                if let Some(paths) = self.paths.as_ref() {
-                    if !paths.contains(path) {
-                        self.paths.get_or_insert_default().push(path.clone());
-                    }
+                if self
+                    .paths
+                    .as_ref()
+                    .is_none_or(|paths| !paths.contains(path))
+                {
+                    self.paths.get_or_insert_default().push(path.clone());
                 }
             }
         }
