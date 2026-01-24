@@ -26,8 +26,10 @@ pub fn calculate_digest(vars: &std::collections::HashMap<Arc<str>, Arc<str>>) ->
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct Environment {
-    pub vars: HashMap<Arc<str>, Arc<str>>,
-    pub paths: Vec<Arc<str>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vars: Option<HashMap<Arc<str>, Arc<str>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub paths: Option<Vec<Arc<str>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_paths: Option<Vec<Arc<str>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -44,7 +46,7 @@ impl Environment {
     }
 
     pub fn get_path_with_system_paths(&self) -> Arc<str> {
-        let mut path = self.paths.join(":");
+        let mut path = self.paths.as_ref().unwrap_or(&vec![]).join(":");
         if let Some(system_paths) = &self.system_paths {
             if !system_paths.is_empty() {
                 path.push(':');
@@ -77,7 +79,7 @@ impl Environment {
                     if let Ok(value) = std::env::var(key.as_ref()) {
                         // first try to re-inherit from calling env
                         env_vars.insert(key.clone(), value.into());
-                    } else if let Some(value) = self.vars.get(key) {
+                    } else if let Some(value) = self.vars.as_ref().and_then(|e| e.get(key)) {
                         // second try to grab the value from the workspace env
                         env_vars.insert(key.clone(), value.clone());
                     } else {
@@ -115,12 +117,18 @@ impl Environment {
     }
 
     pub fn merge(&mut self, other: Environment) {
-        self.vars.extend(other.vars);
+        if let Some(other_vars) = other.vars {
+            self.vars.get_or_insert_default().extend(other_vars);
+        }
 
-        // add to paths if not already present
-        for path in other.paths.iter() {
-            if !self.paths.contains(path) {
-                self.paths.push(path.clone());
+        if let Some(other_paths) = other.paths {
+            // add to paths if not already present
+            for path in other_paths.iter() {
+                if let Some(paths) = self.paths.as_ref() {
+                    if !paths.contains(path) {
+                        self.paths.get_or_insert_default().push(path.clone());
+                    }
+                }
             }
         }
 
@@ -180,8 +188,10 @@ impl Environment {
     pub fn get_checkout_vars(&self) -> anyhow::Result<HashMap<Arc<str>, Arc<str>>> {
         let mut env_vars = HashMap::new();
 
-        for (key, value) in self.vars.iter() {
-            env_vars.insert(key.clone(), value.clone());
+        if let Some(vars) = self.vars.as_ref() {
+            for (key, value) in vars.iter() {
+                env_vars.insert(key.clone(), value.clone());
+            }
         }
 
         env_vars.extend(
@@ -196,8 +206,10 @@ impl Environment {
     pub fn get_run_vars(&self) -> anyhow::Result<HashMap<Arc<str>, Arc<str>>> {
         let mut env_vars = HashMap::new();
 
-        for (key, value) in self.vars.iter() {
-            env_vars.insert(key.clone(), value.clone());
+        if let Some(vars) = self.vars.as_ref() {
+            for (key, value) in vars.iter() {
+                env_vars.insert(key.clone(), value.clone());
+            }
         }
 
         env_vars.extend(

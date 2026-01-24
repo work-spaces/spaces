@@ -623,7 +623,11 @@ pub fn execute_tasks(
             {
                 let mut workspace_write = workspace.write();
                 for (key, value) in env_args {
-                    workspace_write.env.vars.insert(key, value);
+                    workspace_write
+                        .env
+                        .vars
+                        .get_or_insert_default()
+                        .insert(key, value);
                 }
             }
 
@@ -631,8 +635,8 @@ pub fn execute_tasks(
             let mut env = workspace.read().get_env();
             let sysroot_bin: Arc<str> =
                 format!("{}/sysroot/bin", workspace.read().absolute_path).into();
-            if !env.paths.contains(&sysroot_bin) {
-                env.paths.insert(0, sysroot_bin);
+            if !env.paths.as_ref().is_some_and(|e| e.contains(&sysroot_bin)) {
+                env.paths.get_or_insert_default().insert(0, sysroot_bin);
             }
 
             // evaluate the available inherited variables
@@ -640,11 +644,11 @@ pub fn execute_tasks(
                 .get_checkout_vars()
                 .context(format_context!("Failed to get environment variables"))?;
 
-            env.vars.extend(vars);
+            env.vars.get_or_insert_default().extend(vars);
             star_logger(printer).debug(format!("env vars: {:?}", env.vars).as_str());
 
             if workspace.read().is_reproducible() {
-                env.vars.insert(
+                env.vars.get_or_insert_default().insert(
                     workspace::SPACES_ENV_WORKSPACE_DIGEST.into(),
                     workspace.read().digest.clone(),
                 );

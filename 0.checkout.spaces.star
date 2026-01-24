@@ -16,7 +16,8 @@ checkout.add_repo(
     rule = {"name": "@star/packages"},
     repo = {
         "url": "https://github.com/work-spaces/packages",
-        "rev": "v0.2.30",
+        # Provides rust_add() zed configuration
+        "rev": "df44363711d8bb4ce14d61eb8c6ebf3c5d986f14",
         "checkout": "Revision",
         "clone": "Default",
     },

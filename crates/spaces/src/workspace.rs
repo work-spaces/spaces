@@ -222,7 +222,7 @@ impl Workspace {
     }
 
     pub fn set_is_reproducible(&mut self, value: bool) {
-        self.env.vars.insert(
+        self.env.vars.get_or_insert_default().insert(
             SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE.into(),
             value.to_string().into(),
         );
@@ -262,7 +262,12 @@ impl Workspace {
     }
 
     pub fn is_reproducible(&self) -> bool {
-        if let Some(value) = self.env.vars.get(SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE) {
+        if let Some(value) = self
+            .env
+            .vars
+            .as_ref()
+            .and_then(|e| e.get(SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE))
+        {
             return value.as_ref() == "true";
         }
         false
@@ -593,11 +598,12 @@ impl Workspace {
         let mut env = environment::Environment::default();
 
         env.vars
+            .get_or_insert_default()
             .insert(SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE.into(), "true".into());
 
         let args_env = singleton::get_args_env();
         if !args_env.is_empty() {
-            env.vars.extend(args_env);
+            env.vars.get_or_insert_default().extend(args_env);
             // scripts may read ENV variables
             // so they need to rerun if any are passed on the command line
             settings.bin.is_always_evaluate = true;
@@ -638,7 +644,7 @@ impl Workspace {
             .get_checkout_vars()
             .context(format_context!("Failed to get environment variables"))?;
 
-        self.env.vars.extend(vars);
+        self.env.vars.get_or_insert_default().extend(vars);
         Ok(())
     }
 
