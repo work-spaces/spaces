@@ -1,6 +1,6 @@
 use crate::logger;
 use anyhow::Context;
-use anyhow_source_location::format_context;
+use anyhow_source_location::{format_context, format_error};
 use bincode::{Decode, Encode};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -13,6 +13,7 @@ pub enum ChangeDetailType {
     None,
     File(Arc<str>),
     Directory,
+    Symlink(Arc<str>),
 }
 
 #[derive(Clone, Debug, Encode, Decode, Default)]
@@ -67,7 +68,8 @@ impl Changes {
         let sane_path = Self::sanitize_path(&path);
         let mut logger = logger::Logger::new_progress(progress, "Changes".into());
         if let Some(previous_entry) = self.entries.insert(sane_path.into(), change_detail.clone()) {
-            if let (ChangeDetailType::File(previous_hash), ChangeDetailType::File(new_hash)) =
+            if let (ChangeDetailType::File(previous_hash), ChangeDetailType::File(new_hash))
+            | (ChangeDetailType::Symlink(previous_hash), ChangeDetailType::Symlink(new_hash)) =
                 (&previous_entry.detail_type, &change_detail.detail_type)
             {
                 if previous_hash != new_hash {
@@ -309,22 +311,48 @@ fn process_entry(
         ChangeDetailType::File(hash.to_string().into())
     } else if path.is_dir() {
         ChangeDetailType::Directory
+    } else if path.is_symlink() {
+        // This will detect a change if the value to the symlink changes
+        // it won't hash the target which could be a file or a directory
+        ChangeDetailType::Symlink(
+            path.read_link()
+                .context(format_context!("failed to read symlink {path:?}"))?
+                .display()
+                .to_string()
+                .into(),
+        )
     } else {
         ChangeDetailType::None
     };
 
-    let modified = path
-        .metadata()
-        .context(format_context!("failed to get metadata for {path:?}"))?
-        .modified()
-        .context(format_context!("failed to get modified time for {path:?}"))?;
-
-    let change_detail = ChangeDetail {
-        detail_type,
-        modified: Some(modified),
-    };
-
-    Ok(change_detail)
+    match path.metadata() {
+        Ok(metadata) => {
+            let modified = metadata
+                .modified()
+                .context(format_context!("failed to get modified time for {path:?}"))?;
+            let change_detail = ChangeDetail {
+                detail_type,
+                modified: Some(modified),
+            };
+            Ok(change_detail)
+        }
+        Err(err) => {
+            if path.is_symlink() {
+                changes_logger(progress).warning(
+                    format!("metadata for symlink destination not found for {path:?}").as_str(),
+                );
+                Ok(ChangeDetail {
+                    detail_type,
+                    modified: None,
+                })
+            } else {
+                Err(format_error!(
+                    "Failed to get metadata for {path:?}: {}",
+                    err
+                ))
+            }
+        }
+    }
 }
 
 // This is used to limit globbing to a subset of the workspace
