@@ -220,7 +220,10 @@ const UPDATE_ENV_EXAMPLE: &str = r#"checkout.update_env(
             "PS1": '"(spaces) $PS1"',
         },
         # VARS ending in ? will be inherited if they exist
-        "inherited_vars": ["HOME", "SHELL", "USER", "TERM?"],
+        "inherited_vars": ["HOME", "SHELL", "USER"],
+        "optional_inherited_vars": ["TERM"],
+        "run_inherited_vars": ["SSH_AUTH_SOCK"],
+        "checkout_required_inherited_vars": ["GH_TOKEN"],
     },
 )"#;
 
