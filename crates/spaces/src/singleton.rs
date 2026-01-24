@@ -30,6 +30,7 @@ fn get_state() -> &'static lock::StateLock<State> {
     if let Some(state) = STATE.try_get() {
         return state;
     }
+
     STATE.set(lock::StateLock::new(State {
         is_ci: false,
         is_logging_disabled: false,

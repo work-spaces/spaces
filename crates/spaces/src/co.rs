@@ -4,7 +4,7 @@ use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use utils::{git, logger, workflows};
+use utils::{ci, git, logger, workflows};
 
 fn co_logger(printer: &mut printer::Printer) -> logger::Logger {
     logger::Logger::new_printer(printer, "co".into())
@@ -228,7 +228,13 @@ impl CheckoutWorkflow {
         name: Arc<str>,
         keep_workspace_on_failure: bool,
     ) -> anyhow::Result<()> {
-        checkout_workflow(
+        let is_ci: ci::IsCi = singleton::get_is_ci().into();
+        let group = ci::GithubLogGroup::new_group(
+            printer,
+            is_ci,
+            format!("Spaces Checkout Workflow {name}").as_str(),
+        )?;
+        let result = checkout_workflow(
             printer,
             name,
             self.env.unwrap_or_default(),
@@ -239,8 +245,9 @@ impl CheckoutWorkflow {
             self.create_lock_file.unwrap_or_default(),
             false,
             keep_workspace_on_failure,
-        )
-        .context(format_context!("in CheckoutWorkflow"))?;
+        );
+        group.end_group(printer, is_ci)?;
+        result.context(format_context!("in CheckoutWorkflow"))?;
         Ok(())
     }
 }
@@ -267,7 +274,13 @@ impl CheckoutRepo {
         name: Arc<str>,
         keep_workspace_on_failure: bool,
     ) -> anyhow::Result<()> {
-        checkout_repo(
+        let is_ci: ci::IsCi = singleton::get_is_ci().into();
+        let group = ci::GithubLogGroup::new_group(
+            printer,
+            is_ci,
+            format!("Spaces Checkout Repo {}", self.url).as_str(),
+        )?;
+        let result = checkout_repo(
             printer,
             name,
             self.rule_name,
@@ -279,8 +292,9 @@ impl CheckoutRepo {
             self.create_lock_file.unwrap_or_default(),
             false,
             keep_workspace_on_failure,
-        )
-        .context(format_context!("in CheckoutRepo"))?;
+        );
+        group.end_group(printer, is_ci)?;
+        result.context(format_context!("in CheckoutRepo"))?;
         Ok(())
     }
 }
@@ -324,13 +338,13 @@ impl Checkout {
         name: Arc<str>,
         keep_workspace_on_failure: bool,
     ) -> anyhow::Result<()> {
-        match self {
+        let result = match self {
             Checkout::Workflow(workflow) => {
                 workflow.checkout(printer, name, keep_workspace_on_failure)
             }
             Checkout::Repo(repo) => repo.checkout(printer, name, keep_workspace_on_failure),
-        }
-        .context(format_context!("during repo checkout"))?;
+        };
+        result.context(format_context!("during repo checkout"))?;
         Ok(())
     }
 }
