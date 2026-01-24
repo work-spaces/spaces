@@ -279,11 +279,17 @@ pub fn run_shell_in_workspace(
         Vec::new()
     };
 
+    let relative_directory = workspace_arc.read().relative_invoked_path.clone();
+    let working_directory =
+        std::path::Path::new(workspace_arc.read().absolute_path.clone().as_ref())
+            .join(relative_directory.as_ref());
+
     shell::run(
         &shell_config,
         &environment_map,
         std::path::Path::new(SHELL_DIR),
         completion_content,
+        &working_directory,
     )
     .context(format_context!("while running shell"))?;
 

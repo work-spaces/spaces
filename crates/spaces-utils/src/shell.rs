@@ -125,6 +125,7 @@ pub fn run(
     environment_map: &std::collections::HashMap<Arc<str>, Arc<str>>,
     startup_directory: &std::path::Path,
     completion_content: Vec<u8>,
+    working_directory: &std::path::Path,
 ) -> anyhow::Result<()> {
     // Create the command
     let mut process = std::process::Command::new(config.path.as_ref());
@@ -170,6 +171,7 @@ pub fn run(
     }
 
     process.env(IS_SPACES_SHELL_ENV_NAME, IS_SPACES_SHELL_ENV_VALUE);
+    process.current_dir(working_directory);
 
     for arg in config.args.iter() {
         process.arg(arg.as_ref());
