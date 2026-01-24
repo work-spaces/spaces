@@ -17,7 +17,7 @@ checkout.add_repo(
     repo = {
         "url": "https://github.com/work-spaces/packages",
         # Provides rust_add() zed configuration
-        "rev": "df44363711d8bb4ce14d61eb8c6ebf3c5d986f14",
+        "rev": "9d88c2db7b5577d4762054ba929ff2e92089ef94",
         "checkout": "Revision",
         "clone": "Default",
     },

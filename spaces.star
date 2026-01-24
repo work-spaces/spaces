@@ -3,13 +3,12 @@ Spaces starlark checkout/run script to make changes to spaces, printer, and arch
 With VSCode/Zed integration
 """
 
-load("//@star/packages/star/buildifier.star", "buildifier_add")
 load("//@star/packages/star/rust.star", "rust_add")
 load("//@star/packages/star/sccache.star", "sccache_add")
+load("//@star/packages/star/spaces-cli.star", "spaces_add_star_formatter", "spaces_isolate_workspace")
 load("//@star/packages/star/starship.star", "starship_add_bash")
 load(
     "//@star/sdk/star/checkout.star",
-    "checkout_add_asset",
     "checkout_add_hard_link_asset",
     "checkout_add_repo",
     "checkout_update_asset",
@@ -21,7 +20,6 @@ load(
     "run_add_exec_test",
 )
 load("//@star/sdk/star/shell.star", "shell")
-load("//@star/sdk/star/spaces-env.star", "spaces_working_env")
 load(
     "//@star/sdk/star/ws.star",
     "workspace_get_absolute_path",
@@ -98,11 +96,6 @@ rust_add(
     version = "1.80",
 )
 
-buildifier_add(
-    "buildifier",
-    version = "v8.2.1",
-)
-
 sccache_add(
     "sccache",
     version = "0.8",
@@ -154,28 +147,6 @@ checkout_update_env(
     vars = {
         "SPACES_PRINTER_SKIP_SDK_CHECKOUT": "TRUE",
         "SPACES_ARCHIVER_SKIP_SDK_CHECKOUT": "TRUE",
-    },
-)
-
-checkout_update_asset(
-    "zed_settings",
-    destination = ".zed/settings.json",
-    value = {
-        "lsp": {
-            "rust-analyzer": {
-                "initialization_options": {
-                    "cargo": {
-                        "features": [],
-                    },
-                },
-            },
-        },
-        "languages": {
-            "Starlark": {
-                "language_servers": ["!spaces-lsp", "!buck2-lsp", "!starpls", "!tilt"],
-                "tab_size": 4,
-            },
-        },
     },
 )
 
@@ -254,4 +225,5 @@ shell(
     script = "cargo install --features=lsp --force --path=spaces/crates/spaces --profile=dev --root={}".format(root),
 )
 
-spaces_working_env(add_spaces_to_sysroot = True, inherit_terminal = False)
+spaces_isolate_workspace("spaces0", "v0.15.20", system_paths = ["/usr/bin", "/bin"])
+spaces_add_star_formatter("star_formatter", configure_zed = True)
