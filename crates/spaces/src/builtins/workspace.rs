@@ -188,7 +188,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();
         let env = workspace.get_env();
-        Ok(env.vars.contains_key(var_name))
+        Ok(env
+            .vars
+            .as_ref()
+            .is_some_and(|vars| vars.contains_key(var_name)))
     }
 
     fn get_env_var(var_name: &str) -> anyhow::Result<String> {
@@ -201,7 +204,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             return Ok(env.get_path().to_string());
         }
 
-        if let Some(value) = env.vars.get(var_name) {
+        if let Some(value) = env.vars.as_ref().and_then(|e| e.get(var_name)) {
             return Ok(value.clone().to_string());
         }
 
@@ -222,16 +225,16 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         // extended with command line args
         let env_args = singleton::get_args_env();
-        env.vars.extend(env_args);
+        env.vars.get_or_insert_default().extend(env_args);
 
         // This checks for workspaces created with previous versions
         // It brings in PATH and inherited variables to match
         // the previous behavior
-        if !env.vars.contains_key("PATH") {
+        if !env.vars.as_ref().is_some_and(|e| e.contains_key("PATH")) {
             let vars = env
                 .get_checkout_vars()
                 .context(format_context!("Failed to get environment variables"))?;
-            env.vars.extend(vars);
+            env.vars.get_or_insert_default().extend(vars);
         }
 
         workspace.set_env(env);
