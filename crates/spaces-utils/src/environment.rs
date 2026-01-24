@@ -257,6 +257,19 @@ impl Environment {
         }
     }
 
+    pub fn get_secrets(&self) -> anyhow::Result<Vec<Arc<str>>> {
+        let mut result = Vec::new();
+        if let Some(secret_inherited) = &self.secret_inherited_vars {
+            for key in secret_inherited {
+                let value = std::env::var(key.as_ref()).context(format_context!(
+                    "failed to get env var {key} from calling env to pass to workspace env"
+                ))?;
+                result.push(value.into());
+            }
+        }
+        Ok(result)
+    }
+
     pub fn create_shell_env(&self, path: std::path::PathBuf) -> anyhow::Result<()> {
         let mut content = String::new();
 
