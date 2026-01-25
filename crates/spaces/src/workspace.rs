@@ -648,21 +648,24 @@ impl Workspace {
         Ok(())
     }
 
-    pub fn add_store_entry(&mut self, path_in_store: Arc<str>, size: u128) {
-        self.store.add_entry(path_in_store, size);
+    pub fn add_store_entry(&mut self, path_in_store: Arc<str>) -> anyhow::Result<()> {
+        self.store
+            .add_entry(std::path::Path::new(path_in_store.as_ref()))
+            .context(format_context!("while adding store entry"))?;
+        Ok(())
     }
 
     pub fn finalize_store(&self) -> anyhow::Result<()> {
         let store_path = ws::get_checkout_store_path();
-        let mut saved_store = store::Store::load(store_path.as_ref()).context(format_context!(
-            "Failed to load store manifest from {}",
-            store_path
-        ))?;
+        let mut saved_store =
+            store::Store::new_from_store_path(std::path::Path::new(store_path.as_ref())).context(
+                format_context!("Failed to load store manifest from {}", store_path),
+            )?;
 
         saved_store.merge(self.store.clone());
 
         saved_store
-            .save(store_path.as_ref())
+            .save(std::path::Path::new(store_path.as_ref()))
             .context(format_context!("Failed to save store in {}", store_path))?;
 
         Ok(())
