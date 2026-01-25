@@ -19,6 +19,7 @@ tokio = { version = "1", features = ["rt-multi-thread"] }
 which = "7"
 sha256 = "1"
 semver = "1"
+bytesize = "2"
 clap = { version = "4", features = ["derive"] }
 clap_complete = { version = "4" }
 chrono = "0.4"

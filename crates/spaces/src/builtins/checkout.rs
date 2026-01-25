@@ -524,7 +524,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             workspace_arc.clone(),
             url.as_ref(),
             if repo.is_cow_semantics() { "cow/" } else { "" },
-        );
+        )
+        .context(format_context!("during checkout add repo"))?;
 
         rules::insert_task(task::Task::new(
             rule,
@@ -844,23 +845,35 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     }
 }
 
-fn add_git_url_to_workspace_store_queue(workspace_arc: WorkspaceArc, url: &str, cow: &str) {
+fn add_git_url_to_workspace_store_queue(
+    workspace_arc: WorkspaceArc,
+    url: &str,
+    cow: &str,
+) -> anyhow::Result<()> {
     let mut workspace = workspace_arc.write();
     if let Ok((store_path, repo_name)) = git::BareRepository::url_to_relative_path_and_name(url) {
         let store_path = format!("{cow}{store_path}/{repo_name}");
-        workspace.add_store_entry(store_path.into(), 0_u128);
+        workspace
+            .add_store_entry(store_path.into())
+            .context(format_context!("while adding git url to store queue"))?;
     }
+    Ok(())
 }
 
 fn add_http_url_to_workspace_store_queue(
     workspace_arc: WorkspaceArc,
     url: &str,
     filename: &Option<Arc<str>>,
-) {
+) -> anyhow::Result<()> {
     let mut workspace = workspace_arc.write();
     if let Ok(relative_path) = http_archive::HttpArchive::url_to_relative_path(url, filename) {
-        workspace.add_store_entry(relative_path.into(), 0_u128);
+        workspace
+            .add_store_entry(relative_path.into())
+            .context(format_context!(
+                "while adding http url to workspace store queue"
+            ))?;
     }
+    Ok(())
 }
 
 fn add_http_archive(
@@ -917,7 +930,10 @@ fn add_http_archive(
             workspace_arc.clone(),
             archive.url.as_ref(),
             &archive.filename,
-        );
+        )
+        .context(format_context!(
+            "Failed to add http url to workspace store queue"
+        ))?;
 
         let workspace = workspace_arc.read();
 

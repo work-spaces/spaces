@@ -664,3 +664,123 @@ impl HttpArchive {
         Ok(relative_path)
     }
 }
+
+fn get_json_files(
+    path_to_archive: &std::path::Path,
+    json_path: &std::path::Path,
+) -> anyhow::Result<Files> {
+    let full_path = path_to_archive.join(json_path);
+    let json_content = std::fs::read_to_string(full_path.as_path()).context(format_context!(
+        "Failed to read JSON file contents {json_path:?}"
+    ))?;
+    let files: Files = serde_json::from_str(&json_content).context(format_context!(
+        "Failed to parse JSON from file {}",
+        full_path.display()
+    ))?;
+    Ok(files)
+}
+
+fn delete_ds_store(path_to_archive: &std::path::Path) -> anyhow::Result<()> {
+    let ds_store = path_to_archive.join(".DS_Store");
+    if ds_store.exists() {
+        std::fs::remove_file(ds_store.as_path()).context(format_context!(
+            "Failed to remove .DS_Store from {}",
+            ds_store.display()
+        ))?;
+    }
+    Ok(())
+}
+
+pub fn check_downloaded_archive(path_to_archive: &std::path::Path) -> anyhow::Result<()> {
+    delete_ds_store(path_to_archive)?;
+
+    let entries = std::fs::read_dir(path_to_archive).context(format_context!(
+        "Failed to read directory {path_to_archive:?}"
+    ))?;
+
+    let suffixes = &[
+        std::ffi::OsStr::new("zip"),
+        std::ffi::OsStr::new("gz"),
+        std::ffi::OsStr::new("bz2"),
+        std::ffi::OsStr::new("7z"),
+        std::ffi::OsStr::new("xz"),
+    ];
+    let is_compressed = path_to_archive
+        .extension()
+        .is_some_and(|suffix| suffixes.contains(&suffix));
+
+    let mut collected_entries: Vec<_> = entries.collect();
+    let mut count = collected_entries.len();
+
+    if !is_compressed {
+        if let Some(Ok(first_entry)) = collected_entries.first() {
+            if count != 1 {
+                return Err(format_error!(
+                    "Expected 1 entries in archive, found {count}",
+                ));
+            }
+            let path_to_dir = path_to_archive.join(first_entry.path());
+            delete_ds_store(path_to_dir.as_path())?;
+            let entries = std::fs::read_dir(path_to_dir.as_path()).context(format_context!(
+                "Failed to read directory contents {}",
+                path_to_dir.display()
+            ))?;
+
+            collected_entries = entries.collect();
+            count = collected_entries.len();
+        }
+    }
+
+    if count != 3 {
+        return Err(format_error!(
+            "Expected 3 entries in archive, found {count}",
+        ));
+    }
+
+    let mut hash = None;
+    let mut files = None;
+    let mut file_path = None;
+
+    for entry in collected_entries.into_iter().filter_map(|e| e.ok()) {
+        let entry_name = entry.file_name().display().to_string();
+        if let Some((current_hash, _suffix)) = entry_name.split_once(".") {
+            if is_compressed {
+                if hash.is_none() {
+                    hash = Some(current_hash.to_owned());
+                } else if let Some(hash) = hash.as_ref() {
+                    if current_hash != hash {
+                        return Err(format_error!(
+                            "Hash mismatch: expected {hash}, found {current_hash}"
+                        ));
+                    }
+                }
+            }
+        }
+
+        // JSON manifest of the files
+        if entry_name.ends_with(".json") {
+            let json_files = get_json_files(path_to_archive, entry.path().as_path())
+                .context(format_context!("Failed to get JSON files from {entry:?}"))?;
+            files = Some(json_files);
+        }
+
+        // directory containing the files
+        if entry_name.ends_with("_files") {
+            file_path = Some(entry);
+        }
+    }
+
+    // check that all the files exist
+    if let (Some(files), Some(file_path)) = (files, file_path) {
+        for file in files.files {
+            let full_path = path_to_archive.join(file_path.path()).join(file.as_ref());
+            if !full_path.exists() {
+                return Err(format_error!("File {full_path:?} does not exist"));
+            }
+        }
+    } else {
+        return Err(format_error!("No files are available in the archive"));
+    }
+
+    Ok(())
+}

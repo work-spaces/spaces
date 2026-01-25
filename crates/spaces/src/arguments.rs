@@ -127,41 +127,54 @@ pub fn execute() -> anyhow::Result<()> {
     signal_hook::flag::register(SIGINT, Arc::clone(&term_now))?;
 
     let args = Arguments::parse();
+    let Arguments {
+        verbosity,
+        hide_progress_bars,
+        show_elapsed_time,
+        ci,
+        disable_logs,
+        rescan,
+        commands,
+    } = args;
+
+    let hide_progress_bars = if matches!(commands, Commands::Foreach { .. }) {
+        true
+    } else {
+        hide_progress_bars
+    };
+
     let mut stdout_printer = printer::Printer::new_stdout();
 
-    match args {
-        Arguments {
-            verbosity,
-            hide_progress_bars,
-            show_elapsed_time,
-            ci,
-            disable_logs,
-            rescan,
-            commands:
-                Commands::Checkout {
-                    name,
-                    env,
-                    new_branch,
-                    script,
-                    workflow,
-                    wf,
-                    create_lock_file,
-                    force_install_tools,
-                    keep_workspace_on_failure,
-                },
-        } => {
-            handle_verbosity(
-                &mut stdout_printer,
-                verbosity.into(),
-                ci,
-                disable_logs,
-                rescan,
-                hide_progress_bars,
-                show_elapsed_time,
-            );
+    handle_verbosity(
+        &mut stdout_printer,
+        verbosity.into(),
+        ci,
+        disable_logs,
+        rescan,
+        hide_progress_bars,
+        show_elapsed_time,
+    );
 
+    execute_command(commands, &mut stdout_printer)?;
+
+    Ok(())
+}
+
+fn execute_command(command: Commands, stdout_printer: &mut printer::Printer) -> anyhow::Result<()> {
+    match command {
+        Commands::Checkout {
+            name,
+            env,
+            new_branch,
+            script,
+            workflow,
+            wf,
+            create_lock_file,
+            force_install_tools,
+            keep_workspace_on_failure,
+        } => {
             co::checkout_workflow(
-                &mut stdout_printer,
+                stdout_printer,
                 name,
                 env,
                 new_branch,
@@ -174,40 +187,20 @@ pub fn execute() -> anyhow::Result<()> {
             )
             .context(format_context!("While checking out workflow"))?;
         }
-
-        Arguments {
-            verbosity,
-            hide_progress_bars,
-            show_elapsed_time,
-            ci,
-            disable_logs,
-            rescan,
-            commands:
-                Commands::CheckoutRepo {
-                    name,
-                    rule_name,
-                    url,
-                    rev,
-                    clone,
-                    env,
-                    new_branch,
-                    create_lock_file,
-                    force_install_tools,
-                    keep_workspace_on_failure,
-                },
+        Commands::CheckoutRepo {
+            name,
+            rule_name,
+            url,
+            rev,
+            clone,
+            env,
+            new_branch,
+            create_lock_file,
+            force_install_tools,
+            keep_workspace_on_failure,
         } => {
-            handle_verbosity(
-                &mut stdout_printer,
-                verbosity.into(),
-                ci,
-                disable_logs,
-                rescan,
-                hide_progress_bars,
-                show_elapsed_time,
-            );
-
             co::checkout_repo(
-                &mut stdout_printer,
+                stdout_printer,
                 name,
                 rule_name,
                 url,
@@ -221,35 +214,15 @@ pub fn execute() -> anyhow::Result<()> {
             )
             .context(format_context!("while checking out repo"))?;
         }
-
-        Arguments {
-            verbosity,
-            hide_progress_bars,
-            show_elapsed_time,
-            ci,
-            disable_logs,
-            rescan,
-            commands:
-                Commands::Co {
-                    checkout,
-                    name,
-                    keep_workspace_on_failure,
-                    rule_name,
-                    url,
-                    rev,
-                    env,
-                },
+        Commands::Co {
+            checkout,
+            name,
+            keep_workspace_on_failure,
+            rule_name,
+            url,
+            rev,
+            env,
         } => {
-            handle_verbosity(
-                &mut stdout_printer,
-                verbosity.into(),
-                ci,
-                disable_logs,
-                rescan,
-                hide_progress_bars,
-                show_elapsed_time,
-            );
-
             let checkout_map =
                 co::Checkout::load().context(format_context!("Failed to load co file"))?;
 
@@ -297,28 +270,10 @@ pub fn execute() -> anyhow::Result<()> {
 
             checkout
                 .clone()
-                .checkout(&mut stdout_printer, name, keep_workspace_on_failure)
+                .checkout(stdout_printer, name, keep_workspace_on_failure)
                 .context(format_context!("while checking out repo"))?;
         }
-        Arguments {
-            verbosity,
-            hide_progress_bars,
-            show_elapsed_time,
-            ci,
-            disable_logs,
-            rescan,
-            commands: Commands::Sync {},
-        } => {
-            handle_verbosity(
-                &mut stdout_printer,
-                verbosity.into(),
-                ci,
-                disable_logs,
-                rescan,
-                hide_progress_bars,
-                show_elapsed_time,
-            );
-
+        Commands::Sync {} => {
             if shell::is_spaces_shell() {
                 return Err(format_error!("Exit the spaces shell to run `spaces sync`"));
             }
@@ -328,7 +283,7 @@ pub fn execute() -> anyhow::Result<()> {
             singleton::set_is_sync();
 
             runner::run_starlark_modules_in_workspace(
-                &mut stdout_printer,
+                stdout_printer,
                 task::Phase::Checkout,
                 None,
                 workspace::IsClearInputs::Yes,
@@ -339,26 +294,7 @@ pub fn execute() -> anyhow::Result<()> {
             .context(format_context!("during runner sync"))?;
         }
 
-        Arguments {
-            verbosity,
-            #[allow(unused)]
-            hide_progress_bars,
-            show_elapsed_time,
-            ci,
-            disable_logs,
-            rescan,
-            commands: Commands::Foreach { mode },
-        } => {
-            handle_verbosity(
-                &mut stdout_printer,
-                verbosity.into(),
-                ci,
-                disable_logs,
-                rescan,
-                true,
-                show_elapsed_time,
-            );
-
+        Commands::Foreach { mode } => {
             // Extract command_args from the mode
 
             let (for_each_repo, command_args) = match &mode {
@@ -379,7 +315,7 @@ pub fn execute() -> anyhow::Result<()> {
             }
 
             runner::foreach_repo(
-                &mut stdout_printer,
+                stdout_printer,
                 runner::RunWorkspace::Target(None, vec![]),
                 for_each_repo,
                 command_args,
@@ -387,30 +323,11 @@ pub fn execute() -> anyhow::Result<()> {
             .context(format_context!("while running command in each repo"))?;
         }
 
-        Arguments {
-            verbosity,
-            hide_progress_bars,
-            show_elapsed_time,
-            ci,
-            disable_logs,
-            rescan,
-            commands:
-                Commands::Shell {
-                    path,
-                    completions,
-                    all_targets,
-                },
+        Commands::Shell {
+            path,
+            completions,
+            all_targets,
         } => {
-            handle_verbosity(
-                &mut stdout_printer,
-                verbosity.into(),
-                ci,
-                disable_logs,
-                rescan,
-                hide_progress_bars,
-                show_elapsed_time,
-            );
-
             if shell::is_spaces_shell() {
                 return Err(format_error!("Already running in a `spaces shell`"));
             }
@@ -427,20 +344,12 @@ pub fn execute() -> anyhow::Result<()> {
                 None
             };
 
-            runner::run_shell_in_workspace(&mut stdout_printer, path, completions_command)
+            runner::run_shell_in_workspace(stdout_printer, path, completions_command)
                 .context(format_context!("while running user shell"))?;
         }
 
         #[cfg(feature = "lsp")]
-        Arguments {
-            verbosity,
-            hide_progress_bars,
-            show_elapsed_time,
-            ci,
-            disable_logs,
-            rescan,
-            commands: Commands::RunLsp {},
-        } => {
+        Commands::RunLsp {} => {
             let mut null_printer = printer::Printer::new_null_term();
 
             // Open (or create) a log file for append
@@ -471,32 +380,13 @@ pub fn execute() -> anyhow::Result<()> {
             runner::run_lsp(&mut null_printer).context(format_context!("during runner sync"))?;
         }
 
-        Arguments {
-            verbosity,
-            hide_progress_bars,
-            show_elapsed_time,
-            ci,
-            disable_logs,
-            rescan,
-            commands:
-                Commands::Run {
-                    target,
-                    env,
-                    forget_inputs,
-                    skip_deps,
-                    extra_rule_args,
-                },
+        Commands::Run {
+            target,
+            env,
+            forget_inputs,
+            skip_deps,
+            extra_rule_args,
         } => {
-            handle_verbosity(
-                &mut stdout_printer,
-                verbosity.into(),
-                ci,
-                disable_logs,
-                rescan,
-                hide_progress_bars,
-                show_elapsed_time,
-            );
-
             if target.is_none() && skip_deps {
                 return Err(format_error!(
                     "Skipping dependencies is only allowed when a target is specified."
@@ -523,12 +413,12 @@ pub fn execute() -> anyhow::Result<()> {
                 .map(|target| format!(" {target}"))
                 .unwrap_or_default();
             let group = ci::GithubLogGroup::new_group(
-                &mut stdout_printer,
+                stdout_printer,
                 is_ci,
                 format!("Spaces Run{target_message}").as_str(),
             )?;
             let result = runner::run_starlark_modules_in_workspace(
-                &mut stdout_printer,
+                stdout_printer,
                 task::Phase::Run,
                 None,
                 forget_inputs.into(),
@@ -536,36 +426,17 @@ pub fn execute() -> anyhow::Result<()> {
                 runner::IsCreateLockFile::No,
                 runner::IsExecuteTasks::Yes,
             );
-            group.end_group(&mut stdout_printer, is_ci)?;
+            group.end_group(stdout_printer, is_ci)?;
             result.context(format_context!("while executing run rules"))?;
         }
 
-        Arguments {
-            verbosity,
-            hide_progress_bars,
-            show_elapsed_time,
-            ci,
-            disable_logs,
-            rescan,
-            commands:
-                Commands::Inspect {
-                    target,
-                    filter,
-                    has_help,
-                    markdown,
-                    stardoc,
-                },
+        Commands::Inspect {
+            target,
+            filter,
+            has_help,
+            markdown,
+            stardoc,
         } => {
-            handle_verbosity(
-                &mut stdout_printer,
-                verbosity.into(),
-                ci,
-                disable_logs,
-                rescan,
-                hide_progress_bars,
-                show_elapsed_time,
-            );
-
             if stdout_printer.verbosity.level > printer::Level::Info {
                 stdout_printer.verbosity.level = printer::Level::Info;
             }
@@ -602,7 +473,7 @@ pub fn execute() -> anyhow::Result<()> {
             singleton::set_inspect_stardoc_path(stardoc);
 
             runner::run_starlark_modules_in_workspace(
-                &mut stdout_printer,
+                stdout_printer,
                 task::Phase::Inspect,
                 None,
                 workspace::IsClearInputs::No,
@@ -613,30 +484,11 @@ pub fn execute() -> anyhow::Result<()> {
             .context(format_context!("while executing run rules"))?;
         }
 
-        Arguments {
-            verbosity,
-            hide_progress_bars,
-            show_elapsed_time,
-            ci,
-            disable_logs,
-            rescan,
-            commands:
-                Commands::Completions {
-                    shell,
-                    output,
-                    all_targets,
-                },
+        Commands::Completions {
+            shell,
+            output,
+            all_targets,
         } => {
-            handle_verbosity(
-                &mut stdout_printer,
-                verbosity.into(),
-                ci,
-                disable_logs,
-                rescan,
-                hide_progress_bars,
-                show_elapsed_time,
-            );
-
             let has_help = if all_targets {
                 rules::HasHelp::No
             } else {
@@ -644,7 +496,7 @@ pub fn execute() -> anyhow::Result<()> {
             };
 
             // rules are now available
-            let run_targets = runner::run_starlark_get_targets(&mut stdout_printer, has_help)
+            let run_targets = runner::run_starlark_get_targets(stdout_printer, has_help)
                 .context(format_context!("Failed to get targets"))?;
 
             let completion_content = completions::generate_workspace_completions(
@@ -659,30 +511,17 @@ pub fn execute() -> anyhow::Result<()> {
                 format_context!("Failed to write workspace completions to file {output}"),
             )?;
         }
-
-        Arguments {
-            verbosity,
-            hide_progress_bars,
-            show_elapsed_time,
-            ci,
-            disable_logs,
-            rescan,
-            commands: Commands::Docs { item },
-        } => {
-            handle_verbosity(
-                &mut stdout_printer,
-                verbosity.into(),
-                ci,
-                disable_logs,
-                rescan,
-                hide_progress_bars,
-                show_elapsed_time,
-            );
-
-            docs::show(&mut stdout_printer, item)?;
+        Commands::Docs { item } => {
+            docs::show(stdout_printer, item)?;
+        }
+        Commands::Store { command } => {
+            if stdout_printer.verbosity.level > printer::Level::Info {
+                stdout_printer.verbosity.level = printer::Level::Info;
+            }
+            runner::run_store_command_in_workspace(stdout_printer, command)
+                .context(format_context!("Failed to run store command"))?
         }
     }
-
     Ok(())
 }
 
@@ -956,6 +795,11 @@ create-lock-file = false # optionally create a lock file
         /// Include all run targets in completions not just those with help populated
         #[arg(long)]
         all_targets: bool,
+    },
+    Store {
+        /// The mode to run the command in.
+        #[command(subcommand)]
+        command: runner::StoreCommand,
     },
     /// Run the Spaces language server protocol. Not currently functional.
     #[cfg(feature = "lsp")]
