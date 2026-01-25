@@ -3,7 +3,7 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
 use std::{io::IsTerminal, sync::Arc};
-use utils::{ci, git, shell};
+use utils::{ci, git, shell, store};
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
 pub enum Level {
@@ -799,7 +799,7 @@ create-lock-file = false # optionally create a lock file
     Store {
         /// The mode to run the command in.
         #[command(subcommand)]
-        command: runner::StoreCommand,
+        command: store::StoreCommand,
     },
     /// Run the Spaces language server protocol. Not currently functional.
     #[cfg(feature = "lsp")]
