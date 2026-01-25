@@ -296,20 +296,9 @@ pub fn run_shell_in_workspace(
     Ok(())
 }
 
-#[derive(Debug, clap::Subcommand, Clone)]
-pub enum StoreCommand {
-    /// Walk the store directories.
-    Info {
-        /// Sorty by name/age/size
-        #[clap(long, default_value = "name")]
-        sort_by: store::SortBy,
-    },
-    Fix {},
-}
-
 pub fn run_store_command_in_workspace(
     printer: &mut printer::Printer,
-    store_command: StoreCommand,
+    store_command: store::StoreCommand,
 ) -> anyhow::Result<()> {
     let workspace_result = get_workspace(
         printer,
@@ -329,11 +318,11 @@ pub fn run_store_command_in_workspace(
     ))?;
 
     match store_command {
-        StoreCommand::Info { sort_by } => {
+        store::StoreCommand::Info { sort_by } => {
             store.show_info(printer, sort_by);
         }
-        StoreCommand::Fix {} => {
-            store.fix(printer);
+        store::StoreCommand::Fix { dry_run } => {
+            store.fix(printer, dry_run);
 
             store
                 .save(store_path)

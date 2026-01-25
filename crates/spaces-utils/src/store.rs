@@ -13,9 +13,28 @@ pub fn logger(printer: &mut printer::Printer) -> logger::Logger {
 
 #[derive(Debug, Clone, PartialEq, clap::ValueEnum)]
 pub enum SortBy {
+    /// Sort by name
     Name,
+    /// Sort by size
     Size,
+    /// Sort by age (time since last used)
     Age,
+}
+
+#[derive(Debug, clap::Subcommand, Clone)]
+pub enum StoreCommand {
+    /// Show information about the data in the store
+    Info {
+        /// Sorty by name/age/size
+        #[clap(long, default_value = "name")]
+        sort_by: SortBy,
+    },
+    /// Check the store for errors and delete any entries that have an error.
+    Fix {
+        /// Show which entries have errors and will be deleted without deleting the data
+        #[clap(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -150,7 +169,7 @@ impl Store {
         logger(printer).info(format!("Total Size: {}", total_bytesize.display()).as_str());
     }
 
-    pub fn fix(&mut self, printer: &mut printer::Printer) {
+    pub fn fix(&mut self, printer: &mut printer::Printer, is_dry_run: bool) {
         let mut remove_entries = Vec::new();
         let mut delete_directories = Vec::new();
         let path_to_store = self.path_to_store.clone();
@@ -160,10 +179,17 @@ impl Store {
             if !path.exists() {
                 remove_entries.push(key.clone());
             }
-            if value.size == 0 {
-                value.size = get_size_of_path(path.as_path()).unwrap_or(0);
-                let bytesize = bytesize::ByteSize(value.size);
-                logger(printer).info(format!(" Updated size {}", bytesize.display()).as_str());
+
+            let updated_size = get_size_of_path(path.as_path()).unwrap_or(0);
+            let bytesize = bytesize::ByteSize(value.size);
+            if updated_size != value.size {
+                if !is_dry_run {
+                    logger(printer).info(format!(" Updated size {}", bytesize.display()).as_str());
+                    value.size = updated_size;
+                } else {
+                    logger(printer)
+                        .info(format!(" Size needs updating {}", bytesize.display()).as_str());
+                }
             }
 
             if !key.ends_with(".git") {
@@ -176,23 +202,28 @@ impl Store {
             }
         }
 
-        for key in remove_entries {
-            logger(printer).info(format!("Removing entry: {key}").as_str());
-            self.entries.remove(&key);
-        }
+        if !is_dry_run {
+            for key in remove_entries {
+                logger(printer).info(format!("Removing entry: {key}").as_str());
+                self.entries.remove(&key);
+            }
 
-        for path in delete_directories {
-            if path.starts_with(path_to_store.as_path()) {
-                logger(printer).info(format!("Deleting directory: {}", path.display()).as_str());
-                std::fs::remove_dir_all(path.as_path()).unwrap_or_else(|err| {
-                    logger(printer).warning(
-                        format!("Failed to delete directory {}: {err}", path.display()).as_str(),
+            for path in delete_directories {
+                if path.starts_with(path_to_store.as_path()) {
+                    logger(printer)
+                        .info(format!("Deleting directory: {}", path.display()).as_str());
+                    std::fs::remove_dir_all(path.as_path()).unwrap_or_else(|err| {
+                        logger(printer).warning(
+                            format!("Failed to delete directory {}: {err}", path.display())
+                                .as_str(),
+                        );
+                    });
+                } else {
+                    logger(printer).error(
+                        format!("Cannot delete out of store directory: {}", path.display())
+                            .as_str(),
                     );
-                });
-            } else {
-                logger(printer).error(
-                    format!("Cannot delete out of store directory: {}", path.display()).as_str(),
-                );
+                }
             }
         }
     }
