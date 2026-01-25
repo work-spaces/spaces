@@ -93,8 +93,10 @@ impl Git {
             git::BareRepository::url_to_relative_path_and_name(&self.url)
                 .context(format_context!("Failed to parse {name} url: {}", self.url))?;
         let store_path = workspace.read().get_store_path();
-        let lock_file_path =
-            format!("{store_path}/{relative_bare_store_path}/{name_dot_git}.spaces.lock");
+        let lock_file_path = format!(
+            "{store_path}/{relative_bare_store_path}/{name_dot_git}.{}",
+            lock::LOCK_FILE_SUFFIX
+        );
         let mut lock_file = lock::FileLock::new(std::path::Path::new(&lock_file_path).into());
 
         lock_file.lock(progress).context(format_context!(
