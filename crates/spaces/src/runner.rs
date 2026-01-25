@@ -299,7 +299,11 @@ pub fn run_shell_in_workspace(
 #[derive(Debug, clap::Subcommand, Clone)]
 pub enum StoreCommand {
     /// Walk the store directories.
-    Info {},
+    Info {
+        /// Sorty by name/age/size
+        #[clap(long, default_value = "name")]
+        sort_by: store::SortBy,
+    },
     Fix {},
 }
 
@@ -325,8 +329,8 @@ pub fn run_store_command_in_workspace(
     ))?;
 
     match store_command {
-        StoreCommand::Info {} => {
-            store.show_info(printer);
+        StoreCommand::Info { sort_by } => {
+            store.show_info(printer, sort_by);
         }
         StoreCommand::Fix {} => {
             store.fix(printer);
