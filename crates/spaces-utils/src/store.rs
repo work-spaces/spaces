@@ -11,10 +11,23 @@ pub fn logger(printer: &mut printer::Printer) -> logger::Logger {
     logger::Logger::new_printer(printer, "store".into())
 }
 
+#[derive(Debug, Clone, PartialEq, clap::ValueEnum)]
+pub enum SortBy {
+    Name,
+    Size,
+    Age,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Entry {
     last_used: u128,
     size: u64,
+}
+
+impl Entry {
+    fn get_age(&self, now: u128) -> u128 {
+        (now - self.last_used) / (24 * 60 * 60 * 1000)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -92,14 +105,25 @@ impl Store {
         Ok(())
     }
 
-    pub fn show_info(&self, printer: &mut printer::Printer) {
+    pub fn show_info(&self, printer: &mut printer::Printer, sort_by: SortBy) {
         let mut is_fix_needed = false;
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|duration| duration.as_millis())
             .unwrap_or(0);
 
-        for (key, value) in self.entries.iter() {
+        let mut entries: Vec<_> = self.entries.iter().collect();
+
+        match sort_by {
+            SortBy::Name => entries.sort_by(|a, b| a.0.cmp(b.0)),
+            // largest to smallest
+            SortBy::Size => entries.sort_by(|a, b| b.1.size.cmp(&a.1.size)),
+            // oldest to newest
+            SortBy::Age => entries.sort_by(|a, b| b.1.get_age(now).cmp(&a.1.get_age(now))),
+        }
+
+        let mut total_size = 0;
+        for (key, value) in entries.iter() {
             logger(printer).info(format!("Path: {key}").as_str());
             let path = self.get_path_in_store(std::path::Path::new(key.as_ref()));
             if !path.exists() {
@@ -114,13 +138,16 @@ impl Store {
                 let bytesize = bytesize::ByteSize(value.size);
                 logger(printer).info(format!("  Size: {}", bytesize.display()).as_str());
             }
+            total_size += value.size;
 
-            let age = (now - value.last_used) / (1000 * 60 * 60 * 24);
+            let age = value.get_age(now);
             logger(printer).info(format!("  Age: {age} days").as_str());
         }
         if is_fix_needed {
             logger(printer).info("run `spaces store fix` to fix the issues");
         }
+        let total_bytesize = bytesize::ByteSize(total_size);
+        logger(printer).info(format!("Total Size: {}", total_bytesize.display()).as_str());
     }
 
     pub fn fix(&mut self, printer: &mut printer::Printer) {
@@ -157,8 +184,10 @@ impl Store {
         for path in delete_directories {
             if path.starts_with(path_to_store.as_path()) {
                 logger(printer).info(format!("Deleting directory: {}", path.display()).as_str());
-                std::fs::remove_dir_all(path).unwrap_or_else(|err| {
-                    logger(printer).error(format!("Failed to delete directory: {err}").as_str());
+                std::fs::remove_dir_all(path.as_path()).unwrap_or_else(|err| {
+                    logger(printer).warning(
+                        format!("Failed to delete directory {}: {err}", path.display()).as_str(),
+                    );
                 });
             } else {
                 logger(printer).error(
