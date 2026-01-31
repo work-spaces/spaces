@@ -222,6 +222,7 @@ fn execute_command(command: Commands, stdout_printer: &mut printer::Printer) -> 
             url,
             rev,
             env,
+            new_branch,
         } => {
             let checkout_map =
                 co::Checkout::load().context(format_context!("Failed to load co file"))?;
@@ -248,6 +249,9 @@ fn execute_command(command: Commands, stdout_printer: &mut printer::Printer) -> 
                     }
                     for entry in env {
                         repo.env.get_or_insert_default().push(entry);
+                    }
+                    for entry in new_branch {
+                        repo.new_branch.get_or_insert_default().push(entry);
                     }
                 }
                 co::Checkout::Workflow(workflow) => {
@@ -712,6 +716,9 @@ create-lock-file = false # optionally create a lock file
         /// Additional env values to augment co.spaces.toml
         #[arg(long)]
         env: Vec<Arc<str>>,
+        /// Additional new-branch values to augment co.spaces.toml
+        #[arg(long)]
+        new_branch: Vec<Arc<str>>,
     },
     /// Runs checkout rules within an existing workspace (experimental)
     Sync {},
