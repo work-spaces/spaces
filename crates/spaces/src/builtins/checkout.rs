@@ -486,6 +486,40 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(NoneType)
     }
 
+    fn add_exec(
+        #[starlark(require = named)] rule: starlark::values::Value,
+        #[starlark(require = named)] exec: starlark::values::Value,
+    ) -> anyhow::Result<NoneType> {
+        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+            .context(format_context!("bad options for exec rule"))?;
+
+        if rule.inputs.is_some() {
+            return Err(format_error!(
+                "Cannot specify inputs for checkout.add_exec()"
+            ));
+        }
+
+        let mut exec: executor::exec::Exec = serde_json::from_value(exec.to_json_value()?)
+            .context(format_context!("bad options for exec"))?;
+
+        if let Some(working_directory) = exec.working_directory.as_mut() {
+            *working_directory = rules::get_sanitized_working_directory(working_directory.clone());
+        }
+
+        if let Some(redirect_stdout) = exec.redirect_stdout.as_mut() {
+            *redirect_stdout = format!("build/{redirect_stdout}").into();
+        }
+
+        let rule_name = rule.name.clone();
+        rules::insert_task(task::Task::new(
+            rule,
+            task::Phase::Checkout,
+            executor::Task::Exec(exec),
+        ))
+        .context(format_context!("Failed to insert task {rule_name}"))?;
+        Ok(NoneType)
+    }
+
     fn add_repo(
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] repo: starlark::values::Value,
