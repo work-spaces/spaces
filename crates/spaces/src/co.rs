@@ -87,16 +87,8 @@ checkout.add_repo(
     tools::install_tools(printer, force_install_tools)
         .context(format_context!("while installing tools"))?;
 
-    //sanitize the new branches with a //checkout: prefix
-    let mut new_branches = new_branch;
-    for branch in new_branches.iter_mut() {
-        if !branch.starts_with("//") {
-            *branch = format!("//checkout:{branch}").into();
-        }
-    }
-
-    co_logger(printer).debug(format!("Adding branches {new_branches:?}").as_str());
-    handle_new_branch(new_branches);
+    co_logger(printer).debug(format!("Adding branches {new_branch:?}").as_str());
+    handle_new_branch(new_branch);
 
     runner::checkout(
         printer,
