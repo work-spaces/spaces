@@ -181,14 +181,14 @@ impl Store {
             }
 
             let updated_size = get_size_of_path(path.as_path()).unwrap_or(0);
-            let bytesize = bytesize::ByteSize(value.size);
             if updated_size != value.size {
                 if !is_dry_run {
+                    let bytesize = bytesize::ByteSize(value.size);
                     logger(printer).info(format!(" Updated size {}", bytesize.display()).as_str());
                     value.size = updated_size;
                 } else {
-                    logger(printer)
-                        .info(format!(" Size needs updating {}", bytesize.display()).as_str());
+                    let bytesize = bytesize::ByteSize(updated_size);
+                    logger(printer).info(format!(" Updating size {}", bytesize.display()).as_str());
                 }
             }
 
