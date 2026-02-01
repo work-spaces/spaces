@@ -207,7 +207,17 @@ impl Workspace {
     }
 
     pub fn is_dev_branch(&self, rule_name: &str) -> bool {
-        self.settings.json.dev_branches.contains(&rule_name.into())
+        if self.settings.json.dev_branches.contains(&rule_name.into()) {
+            true
+        } else {
+            for item in &self.settings.json.dev_branches {
+                // dev branch can be specified as just the location of the repository
+                if rule_name.ends_with(item.as_ref()) {
+                    return true;
+                }
+            }
+            false
+        }
     }
 
     pub fn get_new_branch_name(&self) -> Arc<str> {

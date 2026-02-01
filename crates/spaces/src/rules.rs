@@ -956,6 +956,11 @@ pub fn is_git_rule(name: &str) -> bool {
     if let Some(task) = tasks.get(name) {
         matches!(task.executor, executor::Task::Git(_))
     } else {
+        for task in tasks.values() {
+            if task.rule.name.ends_with(name) && matches!(task.executor, executor::Task::Git(_)) {
+                return true;
+            }
+        }
         false
     }
 }
