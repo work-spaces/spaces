@@ -2,7 +2,7 @@ use crate::{completions, evaluator, executor, label, rules, task, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use std::sync::Arc;
-use utils::{git, lock, logger, shell, store, ws};
+use utils::{git, lock, logger, shell, store, version, ws};
 
 #[cfg(feature = "lsp")]
 use crate::{lsp_context, singleton};
@@ -327,6 +327,43 @@ pub fn run_store_command_in_workspace(
             store
                 .save(store_path)
                 .context(format_context!("Failed to save store at {store_path_str}",))?;
+        }
+    }
+
+    Ok(())
+}
+
+pub fn run_version_command_in_workspace(
+    printer: &mut printer::Printer,
+    command: version::Command,
+) -> anyhow::Result<()> {
+    let workspace_result = get_workspace(
+        printer,
+        RunWorkspace::Target(None, vec![]),
+        None,
+        workspace::IsClearInputs::No,
+        workspace::IsCheckoutPhase::No,
+    );
+    let store_path_str = match workspace_result {
+        Ok(workspace) => workspace.get_store_path(),
+        Err(_) => ws::get_checkout_store_path(),
+    };
+    let store_path = std::path::Path::new(store_path_str.as_ref());
+    let version_manager = version::Manager::new(store_path);
+
+    match command {
+        version::Command::List {} => {
+            version_manager
+                .list(printer)
+                .context(format_context!("Failed to list versions"))?;
+        }
+        version::Command::Fetch { tag } => {
+            version_manager
+                .fetch(printer, tag.clone())
+                .context(format_context!(
+                    "Failed to fetch {}",
+                    tag.as_ref().map(|e| e.as_ref()).unwrap_or("latest")
+                ))?;
         }
     }
 

@@ -143,10 +143,6 @@ pub fn get_workspace_path(workspace_path: &str, current_path: &str, target_path:
     }
 }
 
-pub fn get_spaces_tools_path(store_path: &str) -> Arc<str> {
-    format!("{store_path}/spaces_tools").into()
-}
-
 fn get_unique() -> anyhow::Result<String> {
     let duration_since_epoch = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -751,7 +747,7 @@ impl Workspace {
     }
 
     pub fn get_spaces_tools_path(&self) -> Arc<str> {
-        get_spaces_tools_path(self.get_store_path().as_ref())
+        ws::get_spaces_tools_path(self.get_store_path().as_ref())
     }
 
     pub fn get_cargo_binstall_root(&self) -> Arc<str> {

@@ -24,6 +24,7 @@ clap = { version = "4", features = ["derive"] }
 clap_complete = { version = "4" }
 chrono = "0.4"
 homedir = "0.3"
+arboard = "3"
 
 anyhow.workspace = true
 archiver.workspace = true

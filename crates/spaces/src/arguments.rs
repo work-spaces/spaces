@@ -3,7 +3,7 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
 use std::{io::IsTerminal, sync::Arc};
-use utils::{ci, git, shell, store};
+use utils::{ci, git, shell, store, version};
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
 pub enum Level {
@@ -525,6 +525,13 @@ fn execute_command(command: Commands, stdout_printer: &mut printer::Printer) -> 
             runner::run_store_command_in_workspace(stdout_printer, command)
                 .context(format_context!("Failed to run store command"))?
         }
+        Commands::Version { command } => {
+            if stdout_printer.verbosity.level > printer::Level::Info {
+                stdout_printer.verbosity.level = printer::Level::Info;
+            }
+            runner::run_version_command_in_workspace(stdout_printer, command)
+                .context(format_context!("Failed to run version command"))?
+        }
     }
     Ok(())
 }
@@ -807,6 +814,11 @@ create-lock-file = false # optionally create a lock file
         /// The mode to run the command in.
         #[command(subcommand)]
         command: store::StoreCommand,
+    },
+    Version {
+        /// The mode to run the command in.
+        #[command(subcommand)]
+        command: version::Command,
     },
     /// Run the Spaces language server protocol. Not currently functional.
     #[cfg(feature = "lsp")]
