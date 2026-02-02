@@ -28,6 +28,21 @@ pub fn get_checkout_store_path() -> Arc<str> {
     panic!("Failed to get home directory");
 }
 
+pub fn get_spaces_tools_path(store_path: &str) -> Arc<str> {
+    format!("{store_path}/spaces_tools").into()
+}
+
+pub fn get_spaces_tools_path_as_path(store_path: &std::path::Path) -> Arc<std::path::Path> {
+    store_path.join("spaces_tools").into()
+}
+
+pub fn get_spaces_tools_path_to_sysroot_bin(store_path: &std::path::Path) -> Arc<std::path::Path> {
+    get_spaces_tools_path_as_path(store_path)
+        .join("sysroot")
+        .join("bin")
+        .into()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RequiredType {
     Revision(Arc<str>),

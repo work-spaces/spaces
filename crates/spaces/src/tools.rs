@@ -1,4 +1,4 @@
-use crate::{builtins, workspace};
+use crate::builtins;
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use utils::{http_archive, logger, platform, ws};
@@ -24,7 +24,7 @@ fn download_and_install(
         platform::Platform::WindowsAarch64 => platform_archive.windows_aarch64,
     };
     let store_path = ws::get_checkout_store_path();
-    let spaces_tools = workspace::get_spaces_tools_path(store_path.as_ref());
+    let spaces_tools = ws::get_spaces_tools_path(store_path.as_ref());
 
     if let Some(archive) = archive.as_ref() {
         let mut http_archive =
@@ -70,7 +70,7 @@ fn download_and_install(
 pub fn install_tools(printer: &mut printer::Printer, is_force_link: bool) -> anyhow::Result<()> {
     // install gh in the store bin if it does not exist
     let store_path = ws::get_checkout_store_path();
-    let store_sysroot_bin = workspace::get_spaces_tools_path(store_path.as_ref());
+    let store_sysroot_bin = ws::get_spaces_tools_path(store_path.as_ref());
     std::fs::create_dir_all(store_sysroot_bin.as_ref()).context(format_context!(
         "Failed to create directory {store_sysroot_bin}"
     ))?;

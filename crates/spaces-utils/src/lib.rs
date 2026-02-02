@@ -13,5 +13,6 @@ pub mod rule;
 pub mod shell;
 pub mod store;
 pub mod suggest;
+pub mod version;
 pub mod workflows;
 pub mod ws;
