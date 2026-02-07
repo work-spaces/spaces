@@ -124,6 +124,13 @@ pub const FUNCTIONS: &[Function] = &[
         ],
         example: None,
     },
+    Function {
+        name: "get_execution_phase",
+        description: "gets the current execution phase: Run | Checkout | Inspect",
+        return_type: "str",
+        args: &[],
+        example: None,
+    },
 ];
 
 fn check_required_semver(required: &str) -> anyhow::Result<bool> {
@@ -157,6 +164,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
     fn is_ci() -> anyhow::Result<bool> {
         Ok(singleton::get_is_ci())
+    }
+
+    fn get_execution_phase() -> anyhow::Result<String> {
+        let phase = singleton::get_execution_phase();
+        Ok(format!("{phase}"))
     }
 
     fn is_platform_windows() -> anyhow::Result<bool> {

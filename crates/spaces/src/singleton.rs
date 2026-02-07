@@ -1,4 +1,4 @@
-use crate::workspace;
+use crate::{task, workspace};
 use anyhow_source_location::format_error;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -22,6 +22,7 @@ struct State {
     inspect_markdown_path: Option<Arc<str>>,
     inspect_stardoc_path: Option<Arc<str>>,
     glob_warnings: Vec<Arc<str>>,
+    execution_phase: task::Phase,
 }
 
 static STATE: state::InitCell<lock::StateLock<State>> = state::InitCell::new();
@@ -48,6 +49,7 @@ fn get_state() -> &'static lock::StateLock<State> {
         inspect_stardoc_path: None,
         args_env: HashMap::new(),
         glob_warnings: Vec::new(),
+        execution_phase: task::Phase::Complete,
     }));
 
     STATE.get()
@@ -110,6 +112,16 @@ pub fn enable_skip_deps_mode() {
 pub fn is_skip_deps_mode() -> bool {
     let state = get_state().read();
     state.is_skip_deps
+}
+
+pub fn set_execution_phase(phase: task::Phase) {
+    let mut state = get_state().write();
+    state.execution_phase = phase;
+}
+
+pub fn get_execution_phase() -> task::Phase {
+    let state = get_state().read();
+    state.execution_phase
 }
 
 pub fn get_args_env() -> HashMap<Arc<str>, Arc<str>> {

@@ -199,6 +199,8 @@ fn execute_command(command: Commands, stdout_printer: &mut printer::Printer) -> 
             force_install_tools,
             keep_workspace_on_failure,
         } => {
+            singleton::set_execution_phase(task::Phase::Checkout);
+
             let is_ci = singleton::get_is_ci().into();
             let group = ci::GithubLogGroup::new_group(
                 stdout_printer,
@@ -288,6 +290,8 @@ fn execute_command(command: Commands, stdout_printer: &mut printer::Printer) -> 
                 .context(format_context!("while checking out repo"))?;
         }
         Commands::Sync {} => {
+            singleton::set_execution_phase(task::Phase::Checkout);
+
             if shell::is_spaces_shell() {
                 return Err(format_error!("Exit the spaces shell to run `spaces sync`"));
             }
@@ -401,6 +405,8 @@ fn execute_command(command: Commands, stdout_printer: &mut printer::Printer) -> 
             skip_deps,
             extra_rule_args,
         } => {
+            singleton::set_execution_phase(task::Phase::Run);
+
             if target.is_none() && skip_deps {
                 return Err(format_error!(
                     "Skipping dependencies is only allowed when a target is specified."
@@ -451,6 +457,8 @@ fn execute_command(command: Commands, stdout_printer: &mut printer::Printer) -> 
             markdown,
             stardoc,
         } => {
+            singleton::set_execution_phase(task::Phase::Inspect);
+
             if stdout_printer.verbosity.level > printer::Level::Info {
                 stdout_printer.verbosity.level = printer::Level::Info;
             }

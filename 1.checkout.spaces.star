@@ -36,6 +36,12 @@ SHORTCUTS = {
 
 starship_add_bash("starship0", shortcuts = SHORTCUTS)
 
+spaces_isolate_workspace("spaces0", "v0.15.22", system_paths = ["/usr/bin", "/bin"])
+spaces_add_star_formatter("star_formatter", configure_zed = True)
+
+coreutils_add_rs_tools("coreutils0")
+
+
 # Add spaces, printer, and archiver source repositories to the workspace
 printer_url = "https://github.com/work-spaces/spaces-printer"
 archiver_url = "https://github.com/work-spaces/spaces-archiver"
@@ -87,6 +93,7 @@ checkout_add_repo(
 rust_add(
     "rust_toolchain",
     version = "1.80",
+    deps = ["spaces0_coreutils"]
 )
 
 sccache_add(
@@ -142,8 +149,3 @@ checkout_update_env(
         "SPACES_ARCHIVER_SKIP_SDK_CHECKOUT": "TRUE",
     },
 )
-
-coreutils_add_rs_tools("coreutils0")
-
-spaces_isolate_workspace("spaces0", "v0.15.22", system_paths = ["/usr/bin", "/bin"])
-spaces_add_star_formatter("star_formatter", configure_zed = True)
