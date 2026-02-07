@@ -199,7 +199,14 @@ fn execute_command(command: Commands, stdout_printer: &mut printer::Printer) -> 
             force_install_tools,
             keep_workspace_on_failure,
         } => {
-            co::checkout_repo(
+            let is_ci = singleton::get_is_ci().into();
+            let group = ci::GithubLogGroup::new_group(
+                stdout_printer,
+                is_ci,
+                format!("Spaces Checkout Repo {url}").as_str(),
+            )?;
+
+            let result = co::checkout_repo(
                 stdout_printer,
                 name,
                 rule_name,
@@ -212,7 +219,10 @@ fn execute_command(command: Commands, stdout_printer: &mut printer::Printer) -> 
                 force_install_tools,
                 keep_workspace_on_failure,
             )
-            .context(format_context!("while checking out repo"))?;
+            .context(format_context!("while checking out repo"));
+
+            group.end_group(stdout_printer, is_ci)?;
+            result?;
         }
         Commands::Co {
             checkout,
