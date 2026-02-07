@@ -28,6 +28,10 @@ pub fn get_checkout_store_path() -> Arc<str> {
     panic!("Failed to get home directory");
 }
 
+pub fn get_checkout_store_path_as_path() -> Arc<std::path::Path> {
+    std::path::Path::new(get_checkout_store_path().as_ref()).into()
+}
+
 pub fn get_spaces_tools_path(store_path: &str) -> Arc<str> {
     format!("{store_path}/spaces_tools").into()
 }

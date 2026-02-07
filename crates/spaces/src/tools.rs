@@ -3,6 +3,23 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use utils::{http_archive, logger, platform, ws};
 
+#[derive(Debug, clap::Subcommand, Clone)]
+pub enum Command {
+    /// Lists the available internal tools.
+    List {},
+    /// Install internal tools if they are not already installed.
+    Install {},
+}
+
+const CARGO_BINSTALL_JSON: &str = include_str!("tools/cargo-binstall.json");
+const ORAS_JSON: &str = include_str!("tools/oras.json");
+const GH_JSON: &str = include_str!("tools/gh.json");
+const TOOLS: &[(&str, &str)] = &[
+    ("gh", GH_JSON),
+    ("cargo_binstall", CARGO_BINSTALL_JSON),
+    ("oras", ORAS_JSON),
+];
+
 fn tools_logger(printer: &mut printer::Printer) -> logger::Logger<'_> {
     logger::Logger::new_printer(printer, "tools".into())
 }
@@ -67,6 +84,32 @@ fn download_and_install(
     Ok(())
 }
 
+pub fn handle_command(printer: &mut printer::Printer, command: Command) -> anyhow::Result<()> {
+    match command {
+        Command::List {} => list_tools(printer),
+        Command::Install {} => install_tools(printer, true),
+    }
+}
+
+pub fn list_tools(printer: &mut printer::Printer) -> anyhow::Result<()> {
+    let store_path = ws::get_checkout_store_path_as_path();
+    tools_logger(printer).info(
+        format!(
+            "Path: {}",
+            ws::get_spaces_tools_path_to_sysroot_bin(&store_path).display()
+        )
+        .as_str(),
+    );
+    tools_logger(printer).info("- builtin: info.get_path_to_spaces_tools()");
+    tools_logger(printer).info("Tools:");
+
+    for (name, _json) in TOOLS {
+        tools_logger(printer).info(format!("- {name}").as_str());
+    }
+
+    Ok(())
+}
+
 pub fn install_tools(printer: &mut printer::Printer, is_force_link: bool) -> anyhow::Result<()> {
     // install gh in the store bin if it does not exist
     let store_path = ws::get_checkout_store_path();
@@ -75,29 +118,12 @@ pub fn install_tools(printer: &mut printer::Printer, is_force_link: bool) -> any
         "Failed to create directory {store_sysroot_bin}"
     ))?;
 
-    let gh_json = include_str!("tools/gh.json");
-    let gh: builtins::checkout::PlatformArchive =
-        serde_json::from_str(gh_json).context(format_context!("Failed to parse gh json"))?;
-
-    let cargo_binstall_json = include_str!("tools/cargo-binstall.json");
-    let cargo_binstall: builtins::checkout::PlatformArchive =
-        serde_json::from_str(cargo_binstall_json)
-            .context(format_context!("Failed to parse cargo-binstall json"))?;
-
-    let oras_json = include_str!("tools/oras.json");
-    let oras: builtins::checkout::PlatformArchive =
-        serde_json::from_str(oras_json).context(format_context!("Failed to parse oras json"))?;
-
-    let tools = vec![
-        ("gh", gh),
-        ("cargo_binstall", cargo_binstall),
-        ("oras", oras),
-    ];
-
     let mut multi_progress = printer::MultiProgress::new(printer);
 
-    for (name, tool) in tools {
+    for (name, json) in TOOLS {
         tools_logger(multi_progress.printer).debug(format!("dowload and install {name}").as_str());
+        let tool: builtins::checkout::PlatformArchive =
+            serde_json::from_str(json).context(format_context!("Failed to parse oras json"))?;
         download_and_install(&mut multi_progress, name, tool, is_force_link)
             .context(format_context!("Failed to download and install tools"))?;
     }

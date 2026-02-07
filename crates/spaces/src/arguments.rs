@@ -1,4 +1,4 @@
-use crate::{co, completions, docs, evaluator, rules, runner, singleton, task, workspace};
+use crate::{co, completions, docs, evaluator, rules, runner, singleton, task, tools, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
@@ -518,6 +518,11 @@ fn execute_command(command: Commands, stdout_printer: &mut printer::Printer) -> 
         Commands::Docs { item } => {
             docs::show(stdout_printer, item)?;
         }
+        Commands::Tools { command } => {
+            stdout_printer.verbosity.level = printer::Level::Info;
+            tools::handle_command(stdout_printer, command)
+                .context(format_context!("Failed to handle tool command"))?;
+        }
         Commands::Store { command } => {
             if stdout_printer.verbosity.level > printer::Level::Info {
                 stdout_printer.verbosity.level = printer::Level::Info;
@@ -791,6 +796,12 @@ create-lock-file = false # optionally create a lock file
         /// What documentation do you want to see?
         #[arg(value_enum)]
         item: Option<docs::DocItem>,
+    },
+    /// Shows the documentation for spaces starlark modules.
+    Tools {
+        /// The mode to run the command in.
+        #[command(subcommand)]
+        command: tools::Command,
     },
     /// Runs a command in each repo or branch in the workspace.
     Foreach {
