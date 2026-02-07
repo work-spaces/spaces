@@ -1,4 +1,4 @@
-use crate::{runner, singleton, tools, workspace};
+use crate::{runner, singleton, task, tools, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -116,6 +116,8 @@ pub fn checkout_workflow(
     force_install_tools: bool,
     keep_workspace_on_failure: bool,
 ) -> anyhow::Result<()> {
+    singleton::set_execution_phase(task::Phase::Run);
+
     let mut script_inputs: Vec<Arc<str>> = vec![];
     script_inputs.extend(script.clone());
 
