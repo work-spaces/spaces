@@ -70,7 +70,7 @@ checkout_update_asset(
 )
 
 checkout_add_hard_link_asset(
-    "rust_toolchain",
+    "rust_toolchain_toml",
     source = "{}/rust-toolchain.toml".format(SPACES_CHECKOUT_PATH),
     destination = "rust-toolchain.toml",
 )
@@ -96,7 +96,7 @@ checkout_add_repo(
 rust_add(
     "rust_toolchain",
     version = "1.80",
-    deps = ["spaces0_coreutils"],
+    deps = ["spaces0"],
 )
 
 sccache_add(
