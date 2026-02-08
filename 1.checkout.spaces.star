@@ -16,6 +16,10 @@ load(
     "checkout_update_env",
 )
 load(
+    "//@star/sdk/star/info.star",
+    "info_get_path_to_store",
+)
+load(
     "//@star/sdk/star/ws.star",
     "workspace_get_absolute_path",
     "workspace_get_path_to_checkout",
@@ -40,7 +44,6 @@ spaces_isolate_workspace("spaces0", "v0.15.22", system_paths = ["/usr/bin", "/bi
 spaces_add_star_formatter("star_formatter", configure_zed = True)
 
 coreutils_add_rs_tools("coreutils0")
-
 
 # Add spaces, printer, and archiver source repositories to the workspace
 printer_url = "https://github.com/work-spaces/spaces-printer"
@@ -93,7 +96,7 @@ checkout_add_repo(
 rust_add(
     "rust_toolchain",
     version = "1.80",
-    deps = ["spaces0_coreutils"]
+    deps = ["spaces0_coreutils"],
 )
 
 sccache_add(
@@ -107,7 +110,7 @@ cargo_vscode_task = {
     "group": "build",
 }
 
-spaces_store = info.get_path_to_store()
+spaces_store = info_get_path_to_store()
 
 task_options = {
     "env": {

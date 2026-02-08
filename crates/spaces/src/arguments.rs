@@ -120,12 +120,6 @@ pub fn execute() -> anyhow::Result<()> {
         }
     }
 
-    // terminate immediately if ctrl+c is received twice
-    use signal_hook::consts::SIGINT;
-    let term_now = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    signal_hook::flag::register_conditional_shutdown(SIGINT, 1, Arc::clone(&term_now))?;
-    signal_hook::flag::register(SIGINT, Arc::clone(&term_now))?;
-
     let args = Arguments::parse();
     let Arguments {
         verbosity,
@@ -144,9 +138,22 @@ pub fn execute() -> anyhow::Result<()> {
     };
 
     let mut stdout_printer = printer::Printer::new_stdout();
+    let mut null_printer = printer::Printer::new_null_term();
+
+    let effective_printer = if matches!(commands, Commands::RunLsp { .. }) {
+        &mut null_printer
+    } else {
+        // terminate immediately if ctrl+c is received twice
+        use signal_hook::consts::SIGINT;
+        let term_now = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        signal_hook::flag::register_conditional_shutdown(SIGINT, 1, Arc::clone(&term_now))?;
+        signal_hook::flag::register(SIGINT, Arc::clone(&term_now))?;
+
+        &mut stdout_printer
+    };
 
     handle_verbosity(
-        &mut stdout_printer,
+        effective_printer,
         verbosity.into(),
         ci,
         disable_logs,
@@ -155,12 +162,15 @@ pub fn execute() -> anyhow::Result<()> {
         show_elapsed_time,
     );
 
-    execute_command(commands, &mut stdout_printer)?;
+    execute_command(commands, effective_printer)?;
 
     Ok(())
 }
 
-fn execute_command(command: Commands, stdout_printer: &mut printer::Printer) -> anyhow::Result<()> {
+fn execute_command(
+    command: Commands,
+    effective_printer: &mut printer::Printer,
+) -> anyhow::Result<()> {
     match command {
         Commands::Checkout {
             name,
@@ -174,7 +184,7 @@ fn execute_command(command: Commands, stdout_printer: &mut printer::Printer) -> 
             keep_workspace_on_failure,
         } => {
             co::checkout_workflow(
-                stdout_printer,
+                effective_printer,
                 name,
                 env,
                 new_branch,
@@ -203,13 +213,13 @@ fn execute_command(command: Commands, stdout_printer: &mut printer::Printer) -> 
 
             let is_ci = singleton::get_is_ci().into();
             let group = ci::GithubLogGroup::new_group(
-                stdout_printer,
+                effective_printer,
                 is_ci,
                 format!("Spaces Checkout Repo {url}").as_str(),
             )?;
 
             let result = co::checkout_repo(
-                stdout_printer,
+                effective_printer,
                 name,
                 rule_name,
                 url,
@@ -223,7 +233,7 @@ fn execute_command(command: Commands, stdout_printer: &mut printer::Printer) -> 
             )
             .context(format_context!("while checking out repo"));
 
-            group.end_group(stdout_printer, is_ci)?;
+            group.end_group(effective_printer, is_ci)?;
             result?;
         }
         Commands::Co {
@@ -286,7 +296,7 @@ fn execute_command(command: Commands, stdout_printer: &mut printer::Printer) -> 
 
             checkout
                 .clone()
-                .checkout(stdout_printer, name, keep_workspace_on_failure)
+                .checkout(effective_printer, name, keep_workspace_on_failure)
                 .context(format_context!("while checking out repo"))?;
         }
         Commands::Sync {} => {
@@ -301,7 +311,7 @@ fn execute_command(command: Commands, stdout_printer: &mut printer::Printer) -> 
             singleton::set_is_sync();
 
             runner::run_starlark_modules_in_workspace(
-                stdout_printer,
+                effective_printer,
                 task::Phase::Checkout,
                 None,
                 workspace::IsClearInputs::Yes,
@@ -333,7 +343,7 @@ fn execute_command(command: Commands, stdout_printer: &mut printer::Printer) -> 
             }
 
             runner::foreach_repo(
-                stdout_printer,
+                effective_printer,
                 runner::RunWorkspace::Target(None, vec![]),
                 for_each_repo,
                 command_args,
@@ -362,40 +372,31 @@ fn execute_command(command: Commands, stdout_printer: &mut printer::Printer) -> 
                 None
             };
 
-            runner::run_shell_in_workspace(stdout_printer, path, completions_command)
+            runner::run_shell_in_workspace(effective_printer, path, completions_command)
                 .context(format_context!("while running user shell"))?;
         }
 
-        #[cfg(feature = "lsp")]
         Commands::RunLsp {} => {
-            let mut null_printer = printer::Printer::new_null_term();
+            #[cfg(feature = "lsp")]
+            {
+                // Open (or create) a log file for append
+                let log_file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(".spaces/lsp.log")?;
 
-            // Open (or create) a log file for append
+                // Redirect the process's stderr to this file
+                use std::os::fd::IntoRawFd;
+                let fd = log_file.into_raw_fd();
+                unsafe {
+                    libc::dup2(fd, libc::STDERR_FILENO);
+                }
 
-            let log_file = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(".spaces/lsp.log")?;
+                singleton::enable_lsp_mode();
 
-            // Redirect the process's stderr to this file
-            use std::os::fd::IntoRawFd;
-            let fd = log_file.into_raw_fd();
-            unsafe {
-                libc::dup2(fd, libc::STDERR_FILENO);
+                runner::run_lsp(effective_printer)
+                    .context(format_context!("during runner sync"))?;
             }
-
-            handle_verbosity(
-                &mut null_printer,
-                verbosity.into(),
-                ci,
-                rescan,
-                hide_progress_bars,
-                show_elapsed_time,
-            );
-
-            singleton::enable_lsp_mode();
-
-            runner::run_lsp(&mut null_printer).context(format_context!("during runner sync"))?;
         }
 
         Commands::Run {
@@ -433,12 +434,12 @@ fn execute_command(command: Commands, stdout_printer: &mut printer::Printer) -> 
                 .map(|target| format!(" {target}"))
                 .unwrap_or_default();
             let group = ci::GithubLogGroup::new_group(
-                stdout_printer,
+                effective_printer,
                 is_ci,
                 format!("Spaces Run{target_message}").as_str(),
             )?;
             let result = runner::run_starlark_modules_in_workspace(
-                stdout_printer,
+                effective_printer,
                 task::Phase::Run,
                 None,
                 forget_inputs.into(),
@@ -446,7 +447,7 @@ fn execute_command(command: Commands, stdout_printer: &mut printer::Printer) -> 
                 runner::IsCreateLockFile::No,
                 runner::IsExecuteTasks::Yes,
             );
-            group.end_group(stdout_printer, is_ci)?;
+            group.end_group(effective_printer, is_ci)?;
             result.context(format_context!("while executing run rules"))?;
         }
 
@@ -459,8 +460,8 @@ fn execute_command(command: Commands, stdout_printer: &mut printer::Printer) -> 
         } => {
             singleton::set_execution_phase(task::Phase::Inspect);
 
-            if stdout_printer.verbosity.level > printer::Level::Info {
-                stdout_printer.verbosity.level = printer::Level::Info;
+            if effective_printer.verbosity.level > printer::Level::Info {
+                effective_printer.verbosity.level = printer::Level::Info;
             }
 
             let mut filter_globs = std::collections::HashSet::new();
@@ -495,7 +496,7 @@ fn execute_command(command: Commands, stdout_printer: &mut printer::Printer) -> 
             singleton::set_inspect_stardoc_path(stardoc);
 
             runner::run_starlark_modules_in_workspace(
-                stdout_printer,
+                effective_printer,
                 task::Phase::Inspect,
                 None,
                 workspace::IsClearInputs::No,
@@ -518,7 +519,7 @@ fn execute_command(command: Commands, stdout_printer: &mut printer::Printer) -> 
             };
 
             // rules are now available
-            let run_targets = runner::run_starlark_get_targets(stdout_printer, has_help)
+            let run_targets = runner::run_starlark_get_targets(effective_printer, has_help)
                 .context(format_context!("Failed to get targets"))?;
 
             let completion_content = completions::generate_workspace_completions(
@@ -534,25 +535,25 @@ fn execute_command(command: Commands, stdout_printer: &mut printer::Printer) -> 
             )?;
         }
         Commands::Docs { item } => {
-            docs::show(stdout_printer, item)?;
+            docs::show(effective_printer, item)?;
         }
         Commands::Tools { command } => {
-            stdout_printer.verbosity.level = printer::Level::Info;
-            tools::handle_command(stdout_printer, command)
+            effective_printer.verbosity.level = printer::Level::Info;
+            tools::handle_command(effective_printer, command)
                 .context(format_context!("Failed to handle tool command"))?;
         }
         Commands::Store { command } => {
-            if stdout_printer.verbosity.level > printer::Level::Info {
-                stdout_printer.verbosity.level = printer::Level::Info;
+            if effective_printer.verbosity.level > printer::Level::Info {
+                effective_printer.verbosity.level = printer::Level::Info;
             }
-            runner::run_store_command_in_workspace(stdout_printer, command)
+            runner::run_store_command_in_workspace(effective_printer, command)
                 .context(format_context!("Failed to run store command"))?
         }
         Commands::Version { command } => {
-            if stdout_printer.verbosity.level > printer::Level::Info {
-                stdout_printer.verbosity.level = printer::Level::Info;
+            if effective_printer.verbosity.level > printer::Level::Info {
+                effective_printer.verbosity.level = printer::Level::Info;
             }
-            runner::run_version_command_in_workspace(stdout_printer, command)
+            runner::run_version_command_in_workspace(effective_printer, command)
                 .context(format_context!("Failed to run version command"))?
         }
     }
@@ -850,6 +851,5 @@ create-lock-file = false # optionally create a lock file
         command: version::Command,
     },
     /// Run the Spaces language server protocol. Not currently functional.
-    #[cfg(feature = "lsp")]
     RunLsp {},
 }

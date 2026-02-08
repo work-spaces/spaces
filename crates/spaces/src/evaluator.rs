@@ -68,7 +68,7 @@ pub fn evaluate_loads(
     workspace: Option<WorkspaceArc>,
     workspace_path: Arc<str>,
     with_rules: WithRules,
-) -> anyhow::Result<Vec<(String, FrozenModule)>> {
+) -> starlark_syntax::Result<Vec<(String, FrozenModule)>> {
     // We can get the loaded modules from `ast.loads`.
     // And ultimately produce a `loader` capable of giving those modules to Starlark.
     let mut loads = Vec::new();
@@ -76,14 +76,13 @@ pub fn evaluate_loads(
         let module_load_path =
             workspace::get_workspace_path(workspace_path.as_ref(), name.as_ref(), load.module_id);
         if module_load_path.ends_with(workspace::SPACES_MODULE_NAME) {
-            return Err(format_error!("Error: Attempting to load module ending with `spaces.star` module. This is a reserved module name."));
+            return Err(format_error!("Error: Attempting to load module ending with `spaces.star` module. This is a reserved module name.").into());
         }
-        let contents = std::fs::read_to_string(module_load_path.as_ref()).with_context(|| {
-            format_context!(
-                "error: failed to load {}\n--> {name}:{}\n in workspace `{workspace_path}`",
-                load.module_id,
-                load.span.file.find_line(load.span.span.begin()) + 1,
-            )
+        let contents = std::fs::read_to_string(module_load_path.as_ref()).map_err(|e| {
+            use starlark_syntax::{Error, ErrorKind};
+            Error::new_kind(ErrorKind::Fail(format_error!(
+                "Failed to load {module_load_path} -> {e}"
+            )))
         })?;
 
         loads.push((
@@ -106,15 +105,15 @@ pub fn evaluate_ast(
     workspace: Option<WorkspaceArc>,
     workspace_path: Arc<str>,
     with_rules: WithRules,
-) -> anyhow::Result<Module> {
+) -> starlark_syntax::Result<Module> {
     let loads = evaluate_loads(
         &ast,
         name.clone(),
         workspace.clone(),
         workspace_path,
         with_rules,
-    )
-    .context(format_context!("Failed to process loads"))?;
+    )?;
+
     let modules = loads.iter().map(|(a, b)| (a.as_str(), b)).collect();
     let loader = ReturnFileLoader { modules: &modules };
 
@@ -125,8 +124,7 @@ pub fn evaluate_ast(
         let mut eval = Evaluator::new(&module);
 
         eval.set_loader(&loader);
-        eval.eval_module(ast, &globals)
-            .map_err(|e| format_error!("{e:?}"))?;
+        eval.eval_module(ast, &globals)?;
     }
 
     if let Some(workspace) = workspace {
@@ -167,39 +165,15 @@ pub fn evaluate_module(
     name: Arc<str>,
     content: String,
     with_rules: WithRules,
-) -> anyhow::Result<FrozenModule> {
+) -> starlark_syntax::Result<FrozenModule> {
     if workspace::is_rules_module(name.as_ref()) {
         rules::set_latest_starlark_module(name.clone());
     }
 
     let dialect = get_dialect();
-    let ast =
-        AstModule::parse(name.as_ref(), content, &dialect).map_err(|e| format_error!("{e:?}"))?;
+    let ast = AstModule::parse(name.as_ref(), content, &dialect)?;
     let module = evaluate_ast(ast, name, workspace, workspace_path, with_rules)?;
     Ok(module.freeze()?)
-
-    /*
-    // We can get the loaded modules from `ast.loads`.
-    // And ultimately produce a `loader` capable of giving those modules to Starlark.
-    let loads = process_loads(&ast, name.clone(), workspace_path.clone(), with_rules)
-        .context(format_context!("Failed to process loads"))?;
-    let modules = loads.iter().map(|(a, b)| (a.as_str(), b)).collect();
-    let loader = ReturnFileLoader { modules: &modules };
-
-    let globals_builder = get_globals(with_rules);
-    let globals = globals_builder.build();
-
-    let module = Module::new();
-    {
-        let mut eval = Evaluator::new(&module);
-        eval.set_loader(&loader);
-        eval.eval_module(ast, &globals)
-            .map_err(|e| format_error!("{e:?}"))?;
-    }
-    // After creating a module we freeze it, preventing further mutation.
-    // It can now be used as the input for other Starlark modules.
-    Ok(module.freeze()?)
-    */
 }
 
 fn star_logger(printer: &mut printer::Printer) -> logger::Logger {
@@ -403,7 +377,7 @@ pub fn evaluate_starlark_modules(
                     content.to_string(),
                     WithRules::Yes,
                 )
-                .context(format_context!("Failed to evaluate module {}", eval_name))?;
+                .map_err(|e| format_error!("Failed to evaluate module {}", e))?;
                 Ok(())
             });
 
@@ -787,7 +761,7 @@ pub fn run_starlark_script(name: Arc<str>, script: Arc<str>) -> anyhow::Result<(
         script.to_string(),
         WithRules::No,
     )
-    .context(format_context!("Failed to evaluate module {}", name))?;
+    .map_err(|e| format_error!("Failed to evaluate module {name}: {e}"))?;
 
     Ok(())
 }
