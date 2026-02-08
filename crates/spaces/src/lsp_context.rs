@@ -15,10 +15,9 @@
  * limitations under the License.
  */
 
-use crate::{evaluator, singleton};
+use crate::{evaluator, rules, workspace};
 use anyhow::Context;
-use anyhow_source_location::{format_context, format_error};
-use std::sync::Arc;
+use anyhow_source_location::format_context;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -26,21 +25,16 @@ use std::fs;
 use std::io;
 use std::iter;
 use std::path::Path;
-use std::path::PathBuf;
 
 use itertools::Either;
-use lsp_types::Url;
 use starlark::analysis::AstModuleLint;
 use starlark::docs::DocModule;
 use starlark::environment::FrozenModule;
 use starlark::environment::Globals;
-use starlark::environment::Module;
 use starlark::errors::EvalMessage;
 use starlark::eval::FileLoader;
-use starlark::eval::{Evaluator, ReturnFileLoader};
 use starlark::syntax::AstModule;
 use starlark::syntax::Dialect;
-use starlark::StarlarkResultExt;
 use starlark_lsp::error::eval_message_to_lsp_diagnostic;
 use starlark_lsp::server::LspContext;
 use starlark_lsp::server::LspEvalResult;
@@ -49,6 +43,7 @@ use starlark_lsp::server::StringLiteralResult;
 
 #[derive(Debug)]
 pub(crate) enum ContextMode {
+    #[allow(unused)]
     Check,
     Run,
 }
@@ -66,20 +61,16 @@ enum ContextError {
 #[derive(Debug)]
 pub(crate) struct SpacesContext {
     pub(crate) mode: ContextMode,
-    pub(crate) print_non_none: bool,
-    pub(crate) prelude: Vec<FrozenModule>,
-    pub(crate) module: Option<Module>,
     pub(crate) dialect: Dialect,
     pub(crate) globals: Globals,
     pub(crate) builtin_docs: HashMap<LspUrl, String>,
     pub(crate) builtin_symbols: HashMap<String, LspUrl>,
-    pub(crate) current_directory: Option<PathBuf>,
-    pub(crate) workspace_path: Arc<str>,
+    pub(crate) workspace: workspace::WorkspaceArc,
 }
 
 impl FileLoader for SpacesContext {
     fn load(&self, path: &str) -> starlark::Result<FrozenModule> {
-        eprintln!("Load path {:?}", path);
+        eprintln!("Load path {path:?}");
         self.load_path(Path::new(path))
     }
 }
@@ -96,10 +87,6 @@ pub(crate) struct EvalResult<T: Iterator<Item = EvalMessage>> {
 /// Errors when [`LspContext::resolve_load()`] cannot resolve a given path.
 #[derive(thiserror::Error, Debug)]
 enum ResolveLoadError {
-    /// Attempted to resolve a relative path, but no current_file_path was provided,
-    /// so it is not known what to resolve the path against.
-    #[error("Relative path `{}` provided, but current_file_path could not be determined", .0.display())]
-    MissingCurrentFilePath(PathBuf),
     /// The scheme provided was not correct or supported.
     #[error("Url `{}` was expected to be of type `{}`", .1, .0)]
     WrongScheme(String, LspUrl),
@@ -107,18 +94,15 @@ enum ResolveLoadError {
 
 impl SpacesContext {
     pub(crate) fn new(
-        workspace_path: Arc<str>,
+        workspace: workspace::WorkspaceArc,
         mode: ContextMode,
-        print_non_none: bool,
-        prelude: &[PathBuf],
-        module: bool,
     ) -> anyhow::Result<Self> {
         let mut builtin_docs: HashMap<LspUrl, String> = HashMap::new();
         let mut builtin_symbols: HashMap<String, LspUrl> = HashMap::new();
         let globals = evaluator::get_globals(evaluator::WithRules::Yes).build();
 
         for (name, item) in globals.documentation().members {
-            let uri = Url::parse(&format!("starlark:/{name}.bzl"))
+            let uri = url::Url::parse(&format!("starlark:/{name}.bzl"))
                 .context(format_context!("Failed to parse URL for {name}"))?;
             let uri = LspUrl::try_from(uri.clone())
                 .context(format_context!("Failed to convert to uri {uri:?}"))?;
@@ -128,76 +112,50 @@ impl SpacesContext {
 
         eprintln!("New spaces context -- ");
 
-        let mut ctx = Self {
-            workspace_path,
+        let ctx = Self {
+            workspace,
             mode,
-            print_non_none,
-            prelude: Vec::new(),
-            module: None,
             dialect: evaluator::get_dialect(),
             globals,
             builtin_docs,
             builtin_symbols,
-            current_directory: None,
-        };
-
-        ctx.prelude = prelude
-            .iter()
-            .map(|x| ctx.load_path(x))
-            .collect::<starlark::Result<_>>()
-            .into_anyhow_result()?;
-
-        ctx.module = if module {
-            Some(Self::new_module(&ctx.prelude))
-        } else {
-            None
         };
 
         Ok(ctx)
     }
 
     fn load_path(&self, path: &Path) -> starlark::Result<FrozenModule> {
-        let env = Module::new();
-
         eprintln!("Load path {path:?}");
+        let workspace_path = self.workspace.read().get_absolute_path();
 
         let content =
             fs::read_to_string(path).context(format_context!("Failed to read {path:?}"))?;
 
         let frozen_module = evaluator::evaluate_module(
             None,
-            self.workspace_path.clone(),
+            workspace_path,
             path.to_string_lossy().into(),
-            content.into(),
+            content,
             evaluator::WithRules::Yes,
-        )
-        .context(format_context!("Failed to evaluate {path:?}"))?;
+        )?;
 
         Ok(frozen_module)
     }
 
-    fn new_module(prelude: &[FrozenModule]) -> Module {
-        let module = Module::new();
-        eprintln!("new module");
-
-        for p in prelude {
-            module.import_public_symbols(p);
-        }
-        module
-    }
-
     fn go(&self, file: &str, ast: AstModule) -> EvalResult<impl Iterator<Item = EvalMessage>> {
-        eprintln!("go");
+        eprintln!("go: {file}");
         let mut warnings = Either::Left(iter::empty());
         let mut errors = Either::Left(iter::empty());
         let final_ast = match self.mode {
             ContextMode::Check => {
+                eprintln!("go: ContextMode::Check");
                 warnings = Either::Right(self.check(file, &ast));
                 Some(ast)
             }
             ContextMode::Run => {
-                errors = Either::Right(self.run(file, ast).messages);
-                None
+                eprintln!("go: ContextMode::Run");
+                errors = Either::Right(self.run(file, &ast).messages);
+                Some(ast)
             }
         };
         EvalResult {
@@ -208,46 +166,28 @@ impl SpacesContext {
 
     // Convert a result over iterator of EvalMessage, into an iterator of EvalMessage
     fn err(
-        file: &str,
+        name: &str,
         result: starlark::Result<EvalResult<impl Iterator<Item = EvalMessage>>>,
     ) -> EvalResult<impl Iterator<Item = EvalMessage>> {
-        eprintln!("err: {file}");
         match result {
-            Err(e) => EvalResult {
-                messages: Either::Left(iter::once(EvalMessage::from_error(Path::new(file), &e))),
-                ast: None,
-            },
-            Ok(res) => EvalResult {
-                messages: Either::Right(res.messages),
-                ast: res.ast,
-            },
+            Err(e) => {
+                eprintln!("{name}: Eval Result error: {e}");
+                EvalResult {
+                    messages: Either::Left(iter::once(EvalMessage::from_error(
+                        Path::new(name),
+                        &e,
+                    ))),
+                    ast: None,
+                }
+            }
+            Ok(res) => {
+                eprintln!("{name}: Eval Result Ok");
+                EvalResult {
+                    messages: Either::Right(res.messages),
+                    ast: res.ast,
+                }
+            }
         }
-    }
-
-    pub(crate) fn expression(
-        &self,
-        content: String,
-    ) -> EvalResult<impl Iterator<Item = EvalMessage>> {
-        eprintln!("expression: {content}");
-        let file = "expression";
-        Self::err(
-            file,
-            AstModule::parse(file, content, &self.dialect)
-                .map(|module| self.go(file, module))
-                .map_err(Into::into),
-        )
-    }
-
-    pub(crate) fn file(&self, file: &Path) -> EvalResult<impl Iterator<Item = EvalMessage>> {
-        let filename = &file.to_string_lossy();
-        eprintln!("file");
-
-        Self::err(
-            filename,
-            fs::read_to_string(file)
-                .map(|content| self.file_with_contents(filename, content))
-                .map_err(|e| anyhow::Error::from(e).into()),
-        )
     }
 
     pub(crate) fn file_with_contents(
@@ -258,56 +198,37 @@ impl SpacesContext {
         Self::err(
             filename,
             AstModule::parse(filename, content, &self.dialect)
-                .map(|module| self.go(filename, module))
-                .map_err(Into::into),
+                .map(|module| self.go(filename, module)),
         )
     }
 
-    fn run(&self, file: &str, ast: AstModule) -> EvalResult<impl Iterator<Item = EvalMessage>> {
-        let new_module;
-        let module = match self.module.as_ref() {
-            Some(module) => module,
-            None => {
-                new_module = Self::new_module(&self.prelude);
-                &new_module
-            }
-        };
+    fn run(&self, file: &str, ast: &AstModule) -> EvalResult<impl Iterator<Item = EvalMessage>> {
+        let workspace_path = self.workspace.read().get_absolute_path();
+        let name = file
+            .strip_prefix(format!("{workspace_path}").as_str())
+            .unwrap_or(file);
 
-        let loads_result = evaluator::evaluate_loads(
-            &ast,
-            file.into(),
+        let name = name.trim_start_matches("/");
+
+        rules::set_latest_starlark_module(name.into());
+        eprintln!("run: {name}");
+
+        let eval_result = evaluator::evaluate_ast(
+            ast.clone(),
+            name.into(),
             None,
-            self.workspace_path.clone(),
+            workspace_path.clone(),
             evaluator::WithRules::Yes,
         );
 
-        let module = Module::new();
-        let eval_result = match loads_result {
-            Ok(loads) => {
-                let modules = loads.iter().map(|(a, b)| (a.as_str(), b)).collect();
-                let loader = ReturnFileLoader { modules: &modules };
-                let mut eval = Evaluator::new(&module);
-                eval.enable_terminal_breakpoint_console();
-                eval.set_loader(&loader);
-                eval.eval_module(ast, &self.globals)
-                    .map_err(|e| anyhow::anyhow!("{e:?}"))
-            }
-            Err(loads_err) => Err(loads_err.into()),
-        };
+        eprintln!("run: {name} - got result");
 
         Self::err(
-            file,
-            eval_result
-                .map(|v| {
-                    if self.print_non_none && !v.is_none() {
-                        eprintln!("{}", v);
-                    }
-                    EvalResult {
-                        messages: iter::empty(),
-                        ast: None,
-                    }
-                })
-                .map_err(Into::into),
+            name,
+            eval_result.map(|_| EvalResult {
+                messages: iter::empty(),
+                ast: Some(ast.clone()),
+            }),
         )
     }
 
@@ -315,12 +236,13 @@ impl SpacesContext {
         false
     }
 
-    fn check(&self, file: &str, module: &AstModule) -> impl Iterator<Item = EvalMessage> {
+    fn check(&self, file: &str, ast: &AstModule) -> impl Iterator<Item = EvalMessage> {
+        eprintln!("check file {file:?}");
         let mut globals = HashSet::new();
         for (name, _) in self.globals.iter() {
             globals.insert(name.to_owned());
         }
-        let mut lints = module.lint(Some(&globals));
+        let mut lints = ast.lint(Some(&globals));
         lints.retain(|issue| !self.is_suppressed(file, &issue.short_name));
         lints.into_iter().map(EvalMessage::from)
     }
@@ -328,6 +250,7 @@ impl SpacesContext {
 
 impl LspContext for SpacesContext {
     fn parse_file_with_contents(&self, uri: &LspUrl, content: String) -> LspEvalResult {
+        eprintln!("parse file with contents {uri:?}");
         match uri {
             LspUrl::File(uri) => {
                 let EvalResult { messages, ast } =
@@ -337,7 +260,10 @@ impl LspContext for SpacesContext {
                     ast,
                 }
             }
-            _ => LspEvalResult::default(),
+            _ => {
+                eprintln!("Default LspEvalResult on Non-file URI");
+                LspEvalResult::default()
+            }
         }
     }
 
@@ -347,16 +273,23 @@ impl LspContext for SpacesContext {
         current_file: &LspUrl,
         _workspace_root: Option<&Path>,
     ) -> anyhow::Result<LspUrl> {
-        let path = PathBuf::from(path);
+        eprintln!("resolve load for {path}");
         match current_file {
             LspUrl::File(current_file_path) => {
-                let current_file_dir = current_file_path.parent();
-                let absolute_path = match (current_file_dir, path.is_absolute()) {
-                    (_, true) => Ok(path),
-                    (Some(current_file_dir), false) => Ok(current_file_dir.join(&path)),
-                    (None, false) => Err(ResolveLoadError::MissingCurrentFilePath(path)),
-                }?;
-                Ok(Url::from_file_path(absolute_path).unwrap().try_into()?)
+                let workspace_path_str = self.workspace.read().get_absolute_path();
+                let workspace_path = std::path::Path::new(workspace_path_str.as_ref());
+                let resolved_path = if let Some(path_in_workspace) = path.strip_prefix("//") {
+                    eprintln!("join to workspace {}", workspace_path.display());
+                    workspace_path.join(path_in_workspace)
+                } else {
+                    let parent = current_file_path.parent().unwrap_or(workspace_path);
+                    eprintln!("join to parent {}", parent.display());
+                    parent.join(path)
+                };
+
+                eprintln!("Current file path is {}", current_file_path.display());
+                eprintln!("Resolved file path is {}", resolved_path.display());
+                Ok(LspUrl::File(resolved_path))
             }
             _ => Err(
                 ResolveLoadError::WrongScheme("file://".to_owned(), current_file.clone()).into(),
@@ -381,6 +314,7 @@ impl LspContext for SpacesContext {
     }
 
     fn get_load_contents(&self, uri: &LspUrl) -> anyhow::Result<Option<String>> {
+        eprintln!("get_load_contents: {uri:?}");
         match uri {
             LspUrl::File(path) => match path.is_absolute() {
                 true => match fs::read_to_string(path) {
@@ -397,18 +331,20 @@ impl LspContext for SpacesContext {
 
     fn get_url_for_global_symbol(
         &self,
-        _current_file: &LspUrl,
+        current_file: &LspUrl,
         symbol: &str,
     ) -> anyhow::Result<Option<LspUrl>> {
+        eprintln!("get_url_for_global_symbol: Symbol: {symbol:?} Current: {current_file:?}");
         Ok(self.builtin_symbols.get(symbol).cloned())
     }
 
     fn render_as_load(
         &self,
-        _target: &LspUrl,
-        _current_file: &LspUrl,
+        target: &LspUrl,
+        current_file: &LspUrl,
         _workspace_root: Option<&Path>,
     ) -> anyhow::Result<String> {
+        eprintln!("render_as_load: Target: {target:?} Current: {current_file:?}");
         Err(anyhow::anyhow!("Not yet implemented, render_as_load"))
     }
 

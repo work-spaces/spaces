@@ -464,14 +464,20 @@ pub fn run_lsp(printer: &mut printer::Printer) -> anyhow::Result<()> {
     let workspace = {
         let mut multi_progress = printer::MultiProgress::new(printer);
         let progress = multi_progress.add_progress("workspace", Some(100), Some("Complete"));
-        workspace::Workspace::new(progress, None, false, None)
-            .context(format_context!("while running workspace"))?
+        workspace::Workspace::new(
+            progress,
+            None,
+            workspace::IsClearInputs::No,
+            None,
+            workspace::IsCheckoutPhase::No,
+        )
+        .context(format_context!("while running workspace"))?
     };
 
     let workspace_arc = workspace::WorkspaceArc::new(lock::StateLock::new(workspace));
 
     use starlark_lsp::server;
-    eprintln!("Starting Spaces Starlark server");
+    eprintln!("Starting Spaces Starlark server-");
 
     singleton::set_active_workspace(workspace_arc.clone());
 
@@ -495,26 +501,19 @@ pub fn run_lsp(printer: &mut printer::Printer) -> anyhow::Result<()> {
         }
     }
 
-    let lsp_context = lsp_context::SpacesContext::new(
-        workspace_arc.read().get_absolute_path(),
-        lsp_context::ContextMode::Run,
-        true,
-        &[],
-        true,
-    )
-    .context(format_context!(
-        "Internal Error: Failed to create spaces lsp context"
-    ))?;
+    let lsp_context = lsp_context::SpacesContext::new(workspace_arc, lsp_context::ContextMode::Run)
+        .context(format_context!(
+            "Internal Error: Failed to create spaces lsp context"
+        ))?;
 
     // Note that  we must have our logging only write out to stderr.
 
-    let (connection, io_threads) = lsp_server::Connection::stdio();
-    server::server_with_connection(connection, lsp_context)
-        .context(format_context!("spaces LSP server exited"))?;
+    //let (connection, io_threads) = lsp_server::Connection::stdio();
+    server::stdio_server(lsp_context).context(format_context!("spaces LSP server exited"))?;
     // Make sure that the io threads stop properly too.
-    io_threads
-        .join()
-        .context(format_context!("Failed to join io threads"))?;
+    //io_threads
+    //    .join()
+    //    .context(format_context!("Failed to join io threads"))?;
 
     eprintln!("Stopping Spaces Starlark server");
 
