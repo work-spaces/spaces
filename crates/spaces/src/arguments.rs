@@ -751,7 +751,7 @@ create-lock-file = false # optionally create a lock file
         #[arg(long)]
         new_branch: Vec<Arc<str>>,
     },
-    /// Runs checkout rules within an existing workspace (experimental)
+    /// Runs checkout rules within an existing workspace
     Sync {},
     #[command(about = r"Runs a spaces run rule.
   - `spaces run`: Run all non-optional rules with dependencies
@@ -798,7 +798,7 @@ create-lock-file = false # optionally create a lock file
         #[arg(long)]
         stardoc: Option<Arc<str>>,
     },
-    /// Generates shell completions for the spaces command (experimental)
+    /// Generates shell completions for the spaces command.
     Completions {
         /// Target shell
         #[arg(long, value_enum)]
@@ -828,7 +828,7 @@ create-lock-file = false # optionally create a lock file
         #[command(subcommand)]
         mode: ForEachMode,
     },
-    /// Runs an interactive shell using the workspace environment (experimental).
+    /// Runs an interactive shell using the workspace environment.
     Shell {
         /// Path to the shell to run. Default is /bin/bash
         #[arg(long)]
