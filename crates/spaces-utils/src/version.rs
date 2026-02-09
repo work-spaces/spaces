@@ -323,11 +323,14 @@ impl Manager {
                             "Failed to download spaces {}",
                             release.tag_name
                         ))?;
+                }
+                let binary_path = self.get_tools_path_to_binary(release.tag_name.as_ref());
 
+                if !binary_path.exists() {
                     self.create_hard_links_to_tools(printer, &releases)
                         .context(format_context!("Failed to update tools to store links"))?;
                 }
-                let binary_path = self.get_tools_path_to_binary(release.tag_name.as_ref());
+
                 if binary_path.exists() {
                     logger(printer).info(format!("tools path: {}", binary_path.display()).as_str());
                     let exec_path = std::env::current_exe()
@@ -345,7 +348,13 @@ impl Manager {
                         }
                     }
                 } else {
-                    logger(printer).error("Internal error: tools binary is not found");
+                    logger(printer).error(
+                        format!(
+                            "Internal error: tools binary is not found: {}",
+                            binary_path.display()
+                        )
+                        .as_str(),
+                    );
                 }
             }
         } else {
