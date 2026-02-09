@@ -840,11 +840,13 @@ create-lock-file = false # optionally create a lock file
         #[arg(long)]
         all_targets: bool,
     },
+    /// Commands for managing the spaces store (cache).
     Store {
         /// The mode to run the command in.
         #[command(subcommand)]
         command: store::StoreCommand,
     },
+    /// Commands for managing the spaces version including checking for updates.
     Version {
         /// The mode to run the command in.
         #[command(subcommand)]
