@@ -4,9 +4,7 @@ use anyhow_source_location::{format_context, format_error};
 use std::sync::Arc;
 use utils::{git, lock, logger, shell, store, version, ws};
 
-#[cfg(feature = "lsp")]
 use crate::{lsp_context, singleton};
-#[cfg(feature = "lsp")]
 use itertools::Itertools;
 
 pub use evaluator::IsExecuteTasks;
@@ -459,7 +457,6 @@ pub fn run_starlark_modules_in_workspace(
     Ok(())
 }
 
-#[cfg(feature = "lsp")]
 pub fn run_lsp(printer: &mut printer::Printer) -> anyhow::Result<()> {
     let workspace = {
         let mut multi_progress = printer::MultiProgress::new(printer);
@@ -508,13 +505,7 @@ pub fn run_lsp(printer: &mut printer::Printer) -> anyhow::Result<()> {
 
     // Note that  we must have our logging only write out to stderr.
 
-    //let (connection, io_threads) = lsp_server::Connection::stdio();
     server::stdio_server(lsp_context).context(format_context!("spaces LSP server exited"))?;
-    // Make sure that the io threads stop properly too.
-    //io_threads
-    //    .join()
-    //    .context(format_context!("Failed to join io threads"))?;
-
     eprintln!("Stopping Spaces Starlark server");
 
     Ok(())

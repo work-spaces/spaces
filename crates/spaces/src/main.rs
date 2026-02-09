@@ -9,7 +9,6 @@ mod docs;
 mod evaluator;
 mod executor;
 mod label;
-#[cfg(feature = "lsp")]
 mod lsp_context;
 mod rules;
 mod runner;

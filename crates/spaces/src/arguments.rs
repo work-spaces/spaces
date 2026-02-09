@@ -377,7 +377,7 @@ fn execute_command(
         }
 
         Commands::RunLsp {} => {
-            #[cfg(feature = "lsp")]
+            #[cfg(feature = "lsp-debug")]
             {
                 // Open (or create) a log file for append
                 let log_file = std::fs::OpenOptions::new()
@@ -391,12 +391,11 @@ fn execute_command(
                 unsafe {
                     libc::dup2(fd, libc::STDERR_FILENO);
                 }
-
-                singleton::enable_lsp_mode();
-
-                runner::run_lsp(effective_printer)
-                    .context(format_context!("during runner sync"))?;
             }
+
+            singleton::enable_lsp_mode();
+
+            runner::run_lsp(effective_printer).context(format_context!("during runner sync"))?;
         }
 
         Commands::Run {
@@ -852,6 +851,6 @@ create-lock-file = false # optionally create a lock file
         #[command(subcommand)]
         command: version::Command,
     },
-    /// Run the Spaces language server protocol. Not currently functional.
+    /// Run the Spaces language server protocol (experimental).
     RunLsp {},
 }
