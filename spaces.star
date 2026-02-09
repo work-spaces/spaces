@@ -87,5 +87,5 @@ shell(
 
 shell(
     "install_dev_lsp",
-    script = "cargo install --features=lsp --force --path=spaces/crates/spaces --profile=dev --root={}".format(root),
+    script = "cargo install --features=lsp-debug --force --path=spaces/crates/spaces --profile=dev --root={}".format(root),
 )
