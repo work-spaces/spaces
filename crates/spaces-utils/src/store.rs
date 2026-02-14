@@ -1,4 +1,4 @@
-use crate::{http_archive, logger};
+use crate::{ci, http_archive, logger};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
@@ -124,7 +124,14 @@ impl Store {
         Ok(())
     }
 
-    pub fn show_info(&self, printer: &mut printer::Printer, sort_by: SortBy) {
+    pub fn show_info(
+        &self,
+        printer: &mut printer::Printer,
+        sort_by: SortBy,
+        is_ci: ci::IsCi,
+    ) -> anyhow::Result<()> {
+        let group = ci::GithubLogGroup::new_group(printer, is_ci, "Spaces Store Info")?;
+
         let mut is_fix_needed = false;
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -167,9 +174,19 @@ impl Store {
         }
         let total_bytesize = bytesize::ByteSize(total_size);
         logger(printer).info(format!("Total Size: {}", total_bytesize.display()).as_str());
+
+        group.end_group(printer, is_ci)?;
+        Ok(())
     }
 
-    pub fn fix(&mut self, printer: &mut printer::Printer, is_dry_run: bool) {
+    pub fn fix(
+        &mut self,
+        printer: &mut printer::Printer,
+        is_dry_run: bool,
+        is_ci: ci::IsCi,
+    ) -> anyhow::Result<()> {
+        let group = ci::GithubLogGroup::new_group(printer, is_ci, "Spaces Store Fix")?;
+
         let mut remove_entries = Vec::new();
         let mut delete_directories = Vec::new();
         let path_to_store = self.path_to_store.clone();
@@ -226,6 +243,8 @@ impl Store {
                 }
             }
         }
+        group.end_group(printer, is_ci)?;
+        Ok(())
     }
 }
 
