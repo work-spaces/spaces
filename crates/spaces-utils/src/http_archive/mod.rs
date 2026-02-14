@@ -701,6 +701,7 @@ pub fn check_downloaded_archive(path_to_archive: &std::path::Path) -> anyhow::Re
     let suffixes = &[
         std::ffi::OsStr::new("zip"),
         std::ffi::OsStr::new("gz"),
+        std::ffi::OsStr::new("tgz"),
         std::ffi::OsStr::new("bz2"),
         std::ffi::OsStr::new("7z"),
         std::ffi::OsStr::new("xz"),
