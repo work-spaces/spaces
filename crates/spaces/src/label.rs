@@ -49,6 +49,7 @@ pub fn sanitize_rule(rule_name: Arc<str>, starlark_module: Option<Arc<str>>) -> 
     }
 
     if let Some(latest_module) = starlark_module {
+        let rule_name = rule_name.strip_prefix(':').unwrap_or(rule_name.as_ref());
         let slash_suffix = format!("/{}", workspace::SPACES_MODULE_NAME);
         let dot_suffix = format!(".{}", workspace::SPACES_MODULE_NAME);
 
