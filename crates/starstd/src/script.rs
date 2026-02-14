@@ -1,7 +1,8 @@
 use crate::{Arg, Function};
 use starlark::environment::GlobalsBuilder;
+use starlark::eval::Evaluator;
 use starlark::values::none::NoneType;
-use starlark::values::{Heap, Value};
+use starlark::values::Value;
 use std::collections::HashMap;
 use std::sync::RwLock;
 
@@ -119,7 +120,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     }
 
     #[allow(clippy::needless_lifetimes)]
-    fn get_args<'v>(heap: &'v Heap) -> anyhow::Result<Value<'v>> {
+    fn get_args<'v>(eval: &mut Evaluator<'v, '_, '_>) -> anyhow::Result<Value<'v>> {
+        let heap = eval.heap();
         let mut result = serde_json::Value::Object(serde_json::Map::new());
 
         let mut list_args = Vec::new();

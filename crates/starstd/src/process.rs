@@ -3,7 +3,8 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
 use starlark::environment::GlobalsBuilder;
-use starlark::values::{Heap, Value};
+use starlark::eval::Evaluator;
+use starlark::values::Value;
 use std::collections::HashMap;
 use std::process::Command;
 
@@ -41,7 +42,12 @@ pub const FUNCTIONS: &[Function] = &[Function {
 // This defines the functions that are visible to Starlark
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
-    fn exec<'v>(exec: starlark::values::Value, heap: &'v Heap) -> anyhow::Result<Value<'v>> {
+    fn exec<'v>(
+        exec: starlark::values::Value,
+        eval: &mut Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<Value<'v>> {
+        let heap = eval.heap();
+
         let exec: Exec = serde_json::from_value(exec.to_json_value()?)
             .context(format_context!("bad options for exec"))?;
 

@@ -150,6 +150,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(NoneType)
     }
 
+    /// Add an exec task to the rule.
+    ///
+    /// Args:
+    ///     rule: The rule to add the exec task to.
+    ///     exec: The exec task to add.
     fn add_exec(
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] exec: starlark::values::Value,

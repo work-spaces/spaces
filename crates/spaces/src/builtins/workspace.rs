@@ -2,8 +2,9 @@ use crate::{rules, singleton};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use starlark::environment::GlobalsBuilder;
+use starlark::eval::Evaluator;
 use starlark::values::none::NoneType;
-use starlark::values::{Heap, Value};
+use starlark::values::Value;
 use starstd::{Arg, Function};
 use std::collections::HashMap;
 use utils::{environment, ws};
@@ -208,9 +209,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             return Ok(value.clone().to_string());
         }
 
-        Err(format_error!(
-            "{var_name} is not set in the workspace environment"
-        ))
+        if singleton::is_lsp_mode() {
+            Ok("<not available to LSP>".to_string())
+        } else {
+            Err(format_error!(
+                "{var_name} is not set in the workspace environment"
+            ))
+        }
     }
 
     fn set_env(
@@ -359,8 +364,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     fn get_build_archive_info<'v>(
         #[starlark(require = named)] rule_name: &str,
         #[starlark(require = named)] archive: starlark::values::Value,
-        heap: &'v Heap,
+        eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<Value<'v>> {
+        let heap = eval.heap();
         let create_archive: archiver::CreateArchive =
             serde_json::from_value(archive.to_json_value()?)
                 .context(format_context!("bad options for archive"))?;

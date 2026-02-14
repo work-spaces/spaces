@@ -157,14 +157,12 @@ pub fn foreach_repo(
             } else if for_each_repo == ForEachRepo::DevBranch {
                 // get the dev-branches from the workspace settings
                 for dev_branch_rule in dev_branch_rules.iter() {
-                    if let Some(location_in_workspace) =
-                        label::get_rule_name_from_label(dev_branch_rule.as_ref())
-                    {
-                        if location_in_workspace == member.path.as_ref() {
-                            repos.push(member.clone());
-                            // skip the rest of the loop
-                            break;
-                        }
+                    let location_in_workspace =
+                        label::get_rule_name_from_label(dev_branch_rule.as_ref());
+                    if location_in_workspace == member.path.as_ref() {
+                        repos.push(member.clone());
+                        // skip the rest of the loop
+                        break;
                     }
                 }
             } else {

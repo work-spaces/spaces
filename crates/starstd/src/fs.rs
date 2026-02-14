@@ -2,8 +2,9 @@ use crate::{Arg, Function};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use starlark::environment::GlobalsBuilder;
+use starlark::eval::Evaluator;
 use starlark::values::none::NoneType;
-use starlark::values::{Heap, Value};
+use starlark::values::Value;
 
 pub const FUNCTIONS: &[Function] = &[
     Function {
@@ -222,7 +223,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(is_text)
     }
 
-    fn read_toml_to_dict<'v>(path: &str, heap: &'v Heap) -> anyhow::Result<Value<'v>> {
+    fn read_toml_to_dict<'v>(
+        path: &str,
+        eval: &mut Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<Value<'v>> {
+        let heap = eval.heap();
         let content = std::fs::read_to_string(path).context(format_context!(
             "Failed to read file {} all paths must be relative to the workspace root",
             path
@@ -240,7 +245,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(alloc_value)
     }
 
-    fn read_yaml_to_dict<'v>(path: &str, heap: &'v Heap) -> anyhow::Result<Value<'v>> {
+    fn read_yaml_to_dict<'v>(
+        path: &str,
+        eval: &mut Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<Value<'v>> {
+        let heap = eval.heap();
         let content = std::fs::read_to_string(path).context(format_context!(
             "Failed to read file {} all paths must be relative to the workspace root",
             path
@@ -258,7 +267,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(alloc_value)
     }
 
-    fn read_json_to_dict<'v>(path: &str, heap: &'v Heap) -> anyhow::Result<Value<'v>> {
+    fn read_json_to_dict<'v>(
+        path: &str,
+        eval: &mut Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<Value<'v>> {
+        let heap = eval.heap();
         let content = std::fs::read_to_string(path).context(format_context!(
             "Failed to read file {} all paths must be relative to the workspace root",
             path

@@ -13,7 +13,7 @@ members = [
 anyhow-source-location = "0.2.1"
 anyhow = "1.0.95"
 serde = { version = "1", features = ["derive", "rc"] }
-starlark = "0.13"
+starlark = { git = "https://github.com/facebook/starlark-rust", rev = "100f29bc1a57d344171a405e4e06bccc6b8b8e23"}
 state = "0.6.0"
 petgraph = "0.6.5"
 serde_json = "1"

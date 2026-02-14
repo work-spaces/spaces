@@ -13,7 +13,7 @@ printer = { package = "spaces-printer", version = "0.3.5" }
 archiver = { package = "spaces-archiver", version = "0.3", features = [
     "printer",
 ] }
-starlark = "0.13"
+starlark = { git = "https://github.com/facebook/starlark-rust", rev = "100f29bc1a57d344171a405e4e06bccc6b8b8e23"}
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 state = "0.6"
