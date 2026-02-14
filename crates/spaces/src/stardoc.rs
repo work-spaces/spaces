@@ -24,7 +24,14 @@ fn doc_string_to_markdown(label: Option<&str>, doc_string: Option<&DocString>) -
 
 fn doc_param_to_markdown(param: &starlark::docs::DocParam) -> Arc<str> {
     let summary = param.get_doc_summary().unwrap_or("<not provided>");
-    format!("`{}` - {summary}", param.name).into()
+    let param_type = param
+        .typ
+        .as_name()
+        .map(|e| format!(": {e}"))
+        .unwrap_or("".to_string());
+    let name = format!("{}{param_type}", param.name);
+
+    format!("`{name}`: {summary}").into()
 }
 
 #[derive(Clone, Debug)]
@@ -60,12 +67,14 @@ impl Docs {
                     result.push_str(markdown::code_block("python", def_block.as_str()).as_str());
                     result.push_str(doc_string_to_markdown(None, func.docs.as_ref()).as_ref());
 
-                    let md_params: Vec<Arc<str>> = func
+                    let mut md_params: Vec<Arc<str>> = func
                         .params
                         .pos_or_named
                         .iter()
                         .map(doc_param_to_markdown)
                         .collect();
+
+                    md_params.extend(func.params.named_only.iter().map(doc_param_to_markdown));
 
                     if !md_params.is_empty() {
                         result.push_str(markdown::bold("Args").as_str());
@@ -78,14 +87,19 @@ impl Docs {
                         func.ret.docs.as_ref(),
                     ));
                 }
-                DocMember::Property(_property) => {
-                    //result.push_str(markdown::heading(3, &self.name).as_str());
-                    //result.push_str(doc_string_to_markdown(property.docs.as_ref()).as_ref());
-                }
+                DocMember::Property(_property) => {}
             },
             DocItem::Module(module) => {
                 result.push_str(markdown::heading(2, &self.name).as_str());
-                result.push_str(doc_string_to_markdown(None, module.docs.as_ref()).as_ref());
+                result.push_str(&doc_string_to_markdown(Some("Docs"), module.docs.as_ref()));
+                for (name, doc) in module.members.iter() {
+                    let doc = Docs {
+                        name: name.to_owned().into(),
+                        doc: doc.clone(),
+                    };
+                    result.push_str(&doc.to_markdown());
+                }
+                result.push_str(markdown::hline());
             }
             DocItem::Type(_ty) => {}
         }

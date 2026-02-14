@@ -1,4 +1,3 @@
-use crate::{Arg, Function};
 use starlark::environment::GlobalsBuilder;
 use starlark::eval::Evaluator;
 use starlark::values::none::NoneType;
@@ -34,82 +33,53 @@ pub fn get_exit_code() -> i32 {
     state.exit_code
 }
 
-pub const FUNCTIONS: &[Function] = &[
-    Function {
-        name: "abort",
-        description: "Abort execution. Exit with a non-zero code. Print a message to stderr",
-        return_type: "None",
-        args: &[Arg {
-            name: "message",
-            description: "str: abort message.",
-            dict: &[],
-        }],
-        example: None,
-
-    },
-        Function {
-            name: "print",
-            description: "Prints a string to the stdout. Only use in a script.",
-            return_type: "None",
-            args: &[Arg {
-                name: "content",
-                description: "str: string content to print.",
-                dict: &[],
-            }],
-            example: None,
-
-        },
-        Function {
-            name: "get_arg",
-            description: "Gets the argument at the specified offset (an empty string is returned if the argument doesn't exist).",
-            return_type: "str",
-            args: &[Arg {
-                name: "offset",
-                description: "int: offset of the argument to get.",
-                dict: &[],
-            }],
-            example: None,
-
-        },
-        Function {
-            name: "get_args",
-            description: "Gets the arguments as a dict with 'ordered' and 'named' keys. `ordered` is a list of arguments that do not contain =, `named` is a map of key value pairs separated by =.",
-            return_type: "dict",
-            args: &[Arg {
-                name: "offset",
-                description: "int: offset of the argument to get.",
-                dict: &[],
-            }],
-            example: None,
-
-        },
-        Function {
-            name: "set_exit_code",
-            description: r#"Sets the exit code of the script.
-Use zero for success and non-zero for failure.
-This doesn't exit the script."#,
-            return_type: "none",
-            args: &[Arg {
-                name: "offset",
-                description: "int: offset of the argument to get.",
-                dict: &[],
-            }],
-            example: None,
-
-        },
-    ];
-
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
+    /// Aborts execution immediately.
+    ///
+    /// This function terminates the script with a non-zero exit code (indicating
+    /// failure) and prints the provided message to the standard error stream (stderr).
+    ///
+    /// ```python
+    /// script.abort("Failed to do something")
+    /// ```
+    ///
+    /// # Arguments
+    /// * `message`: The error message to display upon termination.
     fn abort(message: &str) -> anyhow::Result<NoneType> {
         Err(anyhow::anyhow!(format!("Aborting: {message}")))
     }
 
+    /// Outputs a string to the standard output (stdout).
+    ///
+    /// This is intended for use within script execution to provide feedback
+    /// or data to the user.
+    ///
+    /// ```python
+    /// script.print("Hello, world!")
+    /// ```
+    ///
+    /// # Arguments
+    /// * `content`: The message to print.
     fn print(content: &str) -> anyhow::Result<NoneType> {
         println!("{content}");
         Ok(NoneType)
     }
 
+    /// Retrieves a specific command-line argument by its index.
+    ///
+    /// If no argument exists at the given offset, an empty string is returned.
+    ///
+    /// ```python
+    /// first_arg = script.get_arg(0)
+    /// print(f"First argument: {first_arg}")
+    /// ```
+    ///
+    /// # Arguments
+    /// * `offset`: The positional index of the argument (0-based).
+    ///
+    /// # Returns
+    /// * `str`: The argument value or an empty string.
     fn get_arg(offset: i32) -> anyhow::Result<String> {
         let state = get_state().read().unwrap();
         let offset = offset as usize;
@@ -119,6 +89,19 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(state.args[offset].clone())
     }
 
+    /// Parses command-line arguments into structured categories.
+    ///
+    /// This function separates "ordered" arguments (standalone values) from
+    /// "named" arguments (key=value pairs).
+    ///
+    /// ```python
+    /// args = script.get_args()
+    /// for arg in args["ordered"]:
+    ///     print(arg)
+    /// ```
+    ///
+    /// # Returns
+    /// * `dict`: A dictionary containing `ordered` (`list[str]`) and `named` (`dict`).
     #[allow(clippy::needless_lifetimes)]
     fn get_args<'v>(eval: &mut Evaluator<'v, '_, '_>) -> anyhow::Result<Value<'v>> {
         let heap = eval.heap();
@@ -145,6 +128,17 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(alloc_value)
     }
 
+    /// Sets the final exit code for the script without terminating it.
+    ///
+    /// Use 0 for success and non-zero for failure. The script will continue
+    /// executing until it reaches the end or an `abort` call.
+    ///
+    /// ```python
+    /// script.set_exit_code(1)
+    /// ```
+    ///
+    /// # Arguments
+    /// * `exit_code`: The integer exit code to be returned upon completion.
     fn set_exit_code(exit_code: i32) -> anyhow::Result<NoneType> {
         let mut state = get_state().write().unwrap();
         state.exit_code = exit_code;

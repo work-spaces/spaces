@@ -1,4 +1,3 @@
-use crate::{Arg, Function};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
@@ -18,30 +17,31 @@ pub struct Exec {
     pub stdin: Option<String>,
 }
 
-pub const FUNCTIONS: &[Function] = &[Function {
-    name: "exec",
-    description: "Executes a process",
-    return_type: "dict # with members `status`, `stdout`, and `stderr`",
-    args: &[Arg {
-        name: "exec",
-        description: "dict with members",
-        dict: &[
-            ("command", "name of the command to execute"),
-            ("args", "optional list of arguments"),
-            ("env", "optional dict of environment variables"),
-            (
-                "working_directory",
-                "optional working directory (default is the workspace)",
-            ),
-            ("stdin", "optional string to pipe to the process stdin"),
-        ],
-    }],
-    example: None,
-}];
-
 // This defines the functions that are visible to Starlark
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
+    /// Executes a process and captures its output and status.
+    ///
+    /// This function launches an external command within the specified
+    /// environment and returns the results of that execution. It is the
+    /// primary way to interact with system tools from your script.
+    ///
+    /// ```python
+    /// result = process.exec({
+    ///     "command": "echo",
+    ///     "args": ["Hello from Spaces"],
+    ///     "env": {"DEBUG": "true"}
+    /// })
+    ///
+    /// if result["status"] == 0:
+    ///     print(f"Success: {result['stdout']}")
+    /// ```
+    ///
+    /// # Arguments
+    /// * `exec`: A configuration dictionary containing `command` (`str`), `args` (`list[str]`, optional), `env` (`dict`, optional), `working_directory` (`str`, optional), and `stdin` (`str`, optional).
+    ///
+    /// # Returns
+    /// * `dict`: A dictionary containing `status` (`int`), `stdout` (`str`), and `stderr` (`str`).
     fn exec<'v>(
         exec: starlark::values::Value,
         eval: &mut Evaluator<'v, '_, '_>,

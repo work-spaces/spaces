@@ -533,8 +533,8 @@ fn execute_command(
                 format_context!("Failed to write workspace completions to file {output}"),
             )?;
         }
-        Commands::Docs { item } => {
-            docs::show(effective_printer, item)?;
+        Commands::Docs {} => {
+            docs::show(effective_printer)?;
         }
         Commands::Tools { command } => {
             effective_printer.verbosity.level = printer::Level::Info;
@@ -810,11 +810,7 @@ create-lock-file = false # optionally create a lock file
         all_targets: bool,
     },
     /// Shows the documentation for spaces starlark modules.
-    Docs {
-        /// What documentation do you want to see?
-        #[arg(value_enum)]
-        item: Option<docs::DocItem>,
-    },
+    Docs {},
     /// Shows the documentation for spaces starlark modules.
     Tools {
         /// The mode to run the command in.

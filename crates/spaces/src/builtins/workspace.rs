@@ -5,157 +5,20 @@ use starlark::environment::GlobalsBuilder;
 use starlark::eval::Evaluator;
 use starlark::values::none::NoneType;
 use starlark::values::Value;
-use starstd::{Arg, Function};
 use std::collections::HashMap;
 use utils::{environment, ws};
 
-pub const FUNCTIONS: &[Function] = &[
-    Function {
-        name: "get_path_to_log_file",
-        description: "returns the relative workspace path to the log file for the target",
-        return_type: "str",
-        args: &[
-            Arg {
-                name: "name",
-                description: "The name of the rule to get the log file",
-                dict: &[],
-            },
-        ],
-        example: None,
-    },
-    Function {
-        name: "get_path_to_member",
-        description: "returns a string to the workspace member matching the specified requirement (error if not found)",
-        return_type: "str",
-        args: &[
-            Arg {
-                name: "member",
-                description: "The requirements for the member",
-                dict: &[
-                    ("url:str", "The url of the member"),
-                    ("required:dict", "{'Revision': <git/sha256 hash>}|{'SemVer': <semver requirement>}"),
-                ],
-            },
-        ],
-        example: None,
-    },
-    Function {
-        name: "is_path_to_member_available",
-        description: "returns true if the workspace satisfies the requirments",
-        return_type: "bool",
-        args: &[
-            Arg {
-                name: "member",
-                description: "The requirements for the member",
-                dict: &[
-                    ("url:str", "The url of the member"),
-                    ("required:dict", "{'Revision': <git/sha256 hash>}|{'SemVer': <semver requirement>}"),
-                ],
-            },
-        ],
-        example: None,
-    },
-    Function {
-        name: "get_absolute_path_to_workspace",
-        description: "returns the absolute path to the workspace",
-        return_type: "str",
-        args: &[],
-        example: None,
-    },
-    Function {
-        name: "get_path_to_checkout",
-        description: "returns the path where the current script is located in the workspace",
-        return_type: "str",
-        args: &[],
-        example: None,
-    },
-    Function {
-        name: "get_env_var",
-        description: "returns the value of the workspace environment variable",
-        return_type: "str",
-        args: &[
-            Arg {
-                name: "var",
-                description: "The name of the environment variable",
-                dict: &[],
-            },
-        ],
-        example: None,
-    },
-    Function {
-        name: "get_path_to_build_checkout",
-        description: "returns the path to the workspace build folder for the current script",
-        return_type: "str",
-        args: &[],
-        example: None,
-    },
-    Function {
-        name: "get_path_to_build_archive",
-        description: "returns the path to where run.create_archive() creates the output archive",
-        return_type: "str",
-        args: &[
-            Arg {
-                name: "rule_name",
-                description: "The name of the rule used to create the archive",
-                dict: &[],
-            },
-            Arg {
-                name: "archive",
-                description: "The archive info used to create the archive",
-                dict: &[],
-            },
-        ],
-        example: None,
-    },
-    Function {
-        name: "get_build_archive_info",
-        description: "returns the path to where run.create_archive() creates the sha256 txt file",
-        return_type: "dict['archive_path': str, 'sha256_path': str]",
-        args: &[
-            Arg {
-                name: "rule_name",
-                description: "The name of the rule used to create the archive",
-                dict: &[],
-            },
-            Arg {
-                name: "archive",
-                description: "The archive info used to create the archive",
-                dict: &[],
-            },
-        ],
-        example: None,
-    },
-    Function {
-        name: "get_digest",
-        description: "returns the digest of the workspace. This is only meaningful if the workspace is reproducible (which can't be known until after checkout)",
-        return_type: "str",
-        args: &[],
-        example: None,
-    },
-    Function {
-        name: "get_path_to_shell_config",
-        description: "returns the path to the shell config file",
-        return_type: "str",
-        args: &[],
-        example: None,
-    },
-    Function {
-        name: "is_env_var_set",
-        description: "returns true if the workspace environment variable is set",
-        return_type: "bool",
-        args: &[
-            Arg {
-                name: "var_name",
-                description: "The name of the environment variable to check",
-                dict: &[],
-            },
-        ],
-        example: None,
-    },
-];
-
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
+    /// Returns true if the workspace is reproducible.
+    ///
+    /// ```python
+    /// if workspace.is_reproducible():
+    ///     print("Workspace is reproducible")
+    /// ```
+    ///
+    /// # Returns
+    /// * `bool`: True if the workspace is reproducible, False otherwise.
     fn is_reproducible() -> anyhow::Result<bool> {
         let workspace_arc =
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
@@ -163,10 +26,29 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(workspace.is_reproducible())
     }
 
+    /// Returns the path to the shell config file.
+    ///
+    /// ```python
+    /// shell_config = workspace.get_path_to_shell_config()
+    /// ```
+    ///
+    /// # Returns
+    /// * `str`: The path to the shell configuration file used by the workspace.
     fn get_path_to_shell_config() -> anyhow::Result<String> {
         Ok(crate::workspace::SHELL_TOML_NAME.to_string())
     }
 
+    /// Returns the digest of the workspace.
+    ///
+    /// This is only meaningful if the workspace is reproducible, which is typically
+    /// determined after the checkout process is complete.
+    ///
+    /// ```python
+    /// digest = workspace.get_digest()
+    /// ```
+    ///
+    /// # Returns
+    /// * `str`: The unique digest string of the workspace.
     fn get_digest() -> anyhow::Result<String> {
         let workspace_arc =
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
@@ -174,6 +56,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(workspace.digest.clone().to_string())
     }
 
+    /// Returns the short digest of the workspace.
+    ///
+    /// ```python
+    /// short_digest = workspace.get_short_digest()
+    /// ```
+    ///
+    /// # Returns
+    /// * `str`: The short digest string of the workspace.
     fn get_short_digest() -> anyhow::Result<String> {
         let workspace_arc =
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
@@ -181,6 +71,18 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(workspace.get_short_digest().to_string())
     }
 
+    /// Returns true if the workspace environment variable is set.
+    ///
+    /// ```python
+    /// if workspace.is_env_var_set("DEBUG_MODE"):
+    ///     print("Debug mode is enabled")
+    /// ```
+    ///
+    /// # Arguments
+    /// * `var_name`: The name of the environment variable to check.
+    ///
+    /// # Returns
+    /// * `bool`: True if the variable exists in the workspace environment, False otherwise.
     fn is_env_var_set(var_name: &str) -> anyhow::Result<bool> {
         if var_name == "PATH" {
             return Ok(true);
@@ -195,6 +97,17 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .is_some_and(|vars| vars.contains_key(var_name)))
     }
 
+    /// Returns the value of a workspace environment variable.
+    ///
+    /// ```python
+    /// home_dir = workspace.get_env_var("HOME")
+    /// ```
+    ///
+    /// # Arguments
+    /// * `var_name`: The name of the environment variable.
+    ///
+    /// # Returns
+    /// * `str`: The value of the environment variable.
     fn get_env_var(var_name: &str) -> anyhow::Result<String> {
         let workspace_arc =
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
@@ -218,6 +131,20 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         }
     }
 
+    /// Sets the workspace environment.
+    ///
+    /// This is meant for internal use only from the `env.spaces.star` module.
+    ///
+    /// ```python
+    /// workspace.set_env(
+    ///     env = {
+    ///         "vars": {"CC": "clang", "CXX": "clang++"},
+    ///     },
+    /// )
+    /// ```
+    ///
+    /// # Arguments
+    /// * `env`: Environment definition containing `vars` (`dict`), `paths` (`list`), and `inherited` (`list`).
     fn set_env(
         #[starlark(require = named)] env: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
@@ -247,6 +174,18 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(NoneType)
     }
 
+    /// Sets the workspace locks.
+    ///
+    /// This is meant for internal use only from a lock module.
+    ///
+    /// ```python
+    /// workspace.set_locks(
+    ///     locks = {"my_lock": "lock_value"},
+    /// )
+    /// ```
+    ///
+    /// # Arguments
+    /// * `locks`: A dictionary of lock names to lock values.
     fn set_locks(
         #[starlark(require = named)] locks: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
@@ -262,6 +201,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(NoneType)
     }
 
+    /// Sets whether the workspace should always evaluate scripts.
+    ///
+    /// ```python
+    /// workspace.set_always_evaluate(True)
+    /// ```
+    ///
+    /// # Arguments
+    /// * `always_evaluate`: If True, scripts will always be evaluated regardless of caching.
     fn set_always_evaluate(always_evaluate: bool) -> anyhow::Result<NoneType> {
         let workspace_arc = singleton::get_workspace()
             .context(format_error!("Internal Error: No active workspace found"))?;
@@ -270,6 +217,23 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(NoneType)
     }
 
+    /// Returns the path to the workspace member matching the specified requirement.
+    ///
+    /// If the member cannot be found, an error is raised.
+    ///
+    /// ```python
+    /// member_req = {
+    ///     "url": "https://github.com/example/repo.git",
+    ///     "required": {"SemVer": "^1.2.0"}
+    /// }
+    /// path = workspace.get_path_to_member(member = member_req)
+    /// ```
+    ///
+    /// # Arguments
+    /// * `member`: The requirements for the member, containing `url` (`str`) and `required` (`dict`).
+    ///
+    /// # Returns
+    /// * `str`: The workspace path to the matching member.
     fn get_path_to_member(
         #[starlark(require = named)] member: starlark::values::Value,
     ) -> anyhow::Result<String> {
@@ -295,6 +259,22 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         }
     }
 
+    /// Returns true if the workspace satisfies the specified member requirements.
+    ///
+    /// ```python
+    /// member_req = {
+    ///     "url": "https://github.com/example/repo.git",
+    ///     "required": {"Revision": "a1b2c3d4e5f6"}
+    /// }
+    /// if workspace.is_path_to_member_available(member = member_req):
+    ///     print("Member is available in the workspace.")
+    /// ```
+    ///
+    /// # Arguments
+    /// * `member`: The requirements for the member, containing `url` (`str`) and `required` (`dict`).
+    ///
+    /// # Returns
+    /// * `bool`: True if the workspace contains a member matching the requirements, False otherwise.
     fn is_path_to_member_available(
         #[starlark(require = named)] member: starlark::values::Value,
     ) -> anyhow::Result<bool> {
@@ -316,6 +296,17 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         }
     }
 
+    /// Returns the relative workspace path to the log file for the specified target.
+    ///
+    /// ```python
+    /// log_file = workspace.get_path_to_log_file("build_service")
+    /// ```
+    ///
+    /// # Arguments
+    /// * `rule`: The name of the target rule.
+    ///
+    /// # Returns
+    /// * `str`: The relative path to the log file within the workspace.
     fn get_path_to_log_file(rule: &str) -> anyhow::Result<String> {
         let workspace_arc =
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
@@ -328,6 +319,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(workspace.get_log_file(rule_name.as_ref()).to_string())
     }
 
+    /// Returns the absolute path to the workspace.
+    ///
+    /// ```python
+    /// workspace_path = workspace.get_absolute_path()
+    /// ```
+    ///
+    /// # Returns
+    /// * `str`: The absolute path to the workspace.
     fn get_absolute_path() -> anyhow::Result<String> {
         let workspace_arc =
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
@@ -335,16 +334,53 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(workspace.absolute_path.clone().to_string())
     }
 
+    /// Returns the repository path in the workspace of the calling script.
+    ///
+    /// ```python
+    /// script_location = workspace.get_path_to_checkout()
+    /// ```
+    ///
+    /// # Returns
+    /// * `str`: The path to the directory containing the current script.
     fn get_path_to_checkout() -> anyhow::Result<String> {
         rules::get_checkout_path().map(|path| path.to_string())
     }
 
+    /// Returns the path to the workspace build folder for the current script.
+    ///
+    /// ```python
+    /// build_path = workspace.get_path_to_build_checkout(rule_name = "my_rule")
+    /// ```
+    ///
+    /// # Arguments
+    /// * `rule_name`: The name of the rule to get the build checkout path for.
+    ///
+    /// # Returns
+    /// * `str`: The path to the build directory associated with the current script evaluation.
     fn get_path_to_build_checkout(
         #[starlark(require = named)] rule_name: &str,
     ) -> anyhow::Result<String> {
         rules::get_path_to_build_checkout(rule_name.into()).map(|p| p.to_string())
     }
 
+    /// Returns the path to where `run.add_archive()` creates the output archive.
+    ///
+    /// ```python
+    /// archive_info = {
+    ///     "input": "dist",
+    ///     "name": "release_pkg",
+    ///     "version": "2.1.0",
+    ///     "driver": "zip",
+    /// }
+    /// path = workspace.get_path_to_build_archive(rule_name = "package_rule", archive = archive_info)
+    /// ```
+    ///
+    /// # Arguments
+    /// * `rule_name`: The name of the rule used to create the archive.
+    /// * `archive`: The archive info used to create the archive.
+    ///
+    /// # Returns
+    /// * `str`: The path to the generated output archive.
     fn get_path_to_build_archive(
         #[starlark(require = named)] rule_name: &str,
         #[starlark(require = named)] archive: starlark::values::Value,
@@ -361,6 +397,24 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         ))
     }
 
+    /// Returns the archive and sha256 file paths for a build archive.
+    ///
+    /// ```python
+    /// archive_info = {
+    ///     "input": "build/install",
+    ///     "name": "my_archive",
+    ///     "version": "1.0",
+    ///     "driver": "tar.gz",
+    /// }
+    /// info = workspace.get_build_archive_info(rule_name = "my_rule", archive = archive_info)
+    /// ```
+    ///
+    /// # Arguments
+    /// * `rule_name`: The name of the rule used to create the archive.
+    /// * `archive`: The archive info used to create the archive.
+    ///
+    /// # Returns
+    /// * `dict`: A dictionary containing `archive_path` (`str`) and `sha256_path` (`str`).
     fn get_build_archive_info<'v>(
         #[starlark(require = named)] rule_name: &str,
         #[starlark(require = named)] archive: starlark::values::Value,
