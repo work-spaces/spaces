@@ -1,6 +1,7 @@
 use crate::{ci, http_archive, logger};
 use anyhow::Context;
 use anyhow_source_location::format_context;
+use bytesize::ByteSize;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -35,6 +36,15 @@ pub enum StoreCommand {
         #[clap(long)]
         dry_run: bool,
     },
+    /// Prune the store by deleting entries that are older than a certain age.
+    Prune {
+        /// Delete entries older than this age in days
+        #[clap(long, default_value = "30")]
+        age: u16,
+        /// Show which entries will be deleted without deleting the data
+        #[clap(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -47,6 +57,13 @@ impl Entry {
     fn get_age(&self, now: u128) -> u128 {
         (now - self.last_used) / (24 * 60 * 60 * 1000)
     }
+}
+
+fn get_now() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -133,10 +150,7 @@ impl Store {
         let group = ci::GithubLogGroup::new_group(printer, is_ci, "Spaces Store Info")?;
 
         let mut is_fix_needed = false;
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_millis())
-            .unwrap_or(0);
+        let now = get_now();
 
         let mut entries: Vec<_> = self.entries.iter().collect();
 
@@ -244,6 +258,53 @@ impl Store {
             }
         }
         group.end_group(printer, is_ci)?;
+        Ok(())
+    }
+
+    pub fn prune(
+        &mut self,
+        printer: &mut printer::Printer,
+        age: u16,
+        is_dry_run: bool,
+        is_ci: ci::IsCi,
+    ) -> anyhow::Result<()> {
+        let group = ci::GithubLogGroup::new_group(printer, is_ci, "Spaces Store Prune")?;
+        let now = get_now();
+        let mut remove_entries = Vec::new();
+        let path_to_store = self.path_to_store.clone();
+
+        let mut total_size_removed = ByteSize(0);
+        for (key, entry) in self.entries.iter() {
+            let path = path_to_store.join(key.as_ref());
+            let entry_age = entry.get_age(now);
+            if entry_age > age as u128 {
+                let bytesize = bytesize::ByteSize(entry.size);
+                total_size_removed += bytesize.as_u64();
+                remove_entries.push((key.clone(), entry_age, bytesize, path.clone()));
+            }
+        }
+
+        for (key, age, size, path) in remove_entries {
+            logger(printer).info(format!("Pruning {key}: {size}").as_str());
+            logger(printer).info(format!("- Age: {age} days").as_str());
+            logger(printer).info(format!("- Size: {size}").as_str());
+            if !is_dry_run {
+                self.entries.remove(&key);
+                if let Err(e) = std::fs::remove_dir_all(&path) {
+                    logger(printer)
+                        .error(format!("Failed to remove entry: {key}, error: {e}").as_str());
+                } else {
+                    logger(printer).info("- Removed.");
+                }
+            } else {
+                logger(printer).info("- Dry run. Not removed.");
+            }
+        }
+
+        logger(printer).info(format!("Total removed: {total_size_removed}").as_str());
+
+        group.end_group(printer, is_ci)?;
+
         Ok(())
     }
 }

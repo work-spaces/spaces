@@ -331,6 +331,15 @@ pub fn run_store_command_in_workspace(
                 .save(store_path)
                 .context(format_context!("Failed to save store at {store_path_str}",))?;
         }
+        store::StoreCommand::Prune { age, dry_run } => {
+            store
+                .prune(printer, age, dry_run, is_ci)
+                .context(format_context!("While pruning store"))?;
+
+            store
+                .save(store_path)
+                .context(format_context!("Failed to save store at {store_path_str}",))?;
+        }
     }
 
     Ok(())
