@@ -36,7 +36,7 @@ pub enum StoreCommand {
         #[clap(long)]
         dry_run: bool,
     },
-    /// Prune the store by deleting entries that are older than a certain age.
+    /// Prune the store by deleting entries that are older the specified age.
     Prune {
         /// Delete entries older than this age in days
         #[clap(long, default_value = "30")]
