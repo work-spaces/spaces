@@ -12,8 +12,8 @@ signal-hook = "0.3"
 symlink = "0.1"
 anyhow-source-location.workspace = true
 
-starlark_syntax = { version = "0.13" }
-starlark_lsp = { version = "0.13" }
+starlark_syntax = { git = "https://github.com/facebook/starlark-rust", rev = "100f29bc1a57d344171a405e4e06bccc6b8b8e23" }
+starlark_lsp = { git = "https://github.com/facebook/starlark-rust", rev = "100f29bc1a57d344171a405e4e06bccc6b8b8e23" }
 lsp-server = { version = "0.7" }
 itertools = { version = "0.14" }
 lsp-types = { version = "0.97" }

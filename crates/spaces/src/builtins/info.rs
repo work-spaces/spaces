@@ -2,8 +2,9 @@ use crate::singleton;
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use starlark::environment::GlobalsBuilder;
+use starlark::eval::Evaluator;
 use starlark::values::none::NoneType;
-use starlark::values::{Heap, Value};
+use starlark::values::Value;
 use starstd::{Arg, Function};
 use std::sync::Arc;
 use utils::platform;
@@ -199,7 +200,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(num_cpus::get() as i64)
     }
 
-    fn parse_log_file<'v>(path: &str, heap: &'v Heap) -> anyhow::Result<Value<'v>> {
+    fn parse_log_file<'v>(
+        path: &str,
+        eval: &mut Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<Value<'v>> {
+        let heap = eval.heap();
+
         #[derive(serde::Serialize, serde::Deserialize)]
         struct Log {
             header: printer::LogHeader,

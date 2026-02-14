@@ -2,7 +2,8 @@ use crate::{Arg, Function};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use starlark::environment::GlobalsBuilder;
-use starlark::values::{Heap, Value};
+use starlark::eval::Evaluator;
+use starlark::values::Value;
 
 pub const FUNCTIONS: &[Function] = &[
     Function {
@@ -43,7 +44,11 @@ pub const FUNCTIONS: &[Function] = &[
 // This defines the function that is visible to Starlark
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
-    fn string_to_dict<'v>(content: &str, heap: &'v Heap) -> anyhow::Result<Value<'v>> {
+    fn string_to_dict<'v>(
+        content: &str,
+        eval: &mut Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<Value<'v>> {
+        let heap = eval.heap();
         let json_value: serde_json::Value =
             serde_json::from_str(content).context(format_context!("bad json string"))?;
 

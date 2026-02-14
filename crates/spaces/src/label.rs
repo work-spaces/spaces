@@ -3,7 +3,7 @@ use anyhow_source_location::format_error;
 use std::sync::Arc;
 
 pub fn get_source_from_label(label: &str) -> String {
-    let (source, _rule_name) = label.split_once(":").unwrap_or((label, ""));
+    let (source, _rule_name) = label.split_once(":").unwrap_or(("", label));
     let source = source.strip_prefix("//").unwrap_or(source);
     let source_dot = format!("{source}.spaces.star");
     let source_slash = format!("{source}/spaces.star");
@@ -16,12 +16,9 @@ pub fn get_source_from_label(label: &str) -> String {
     }
 }
 
-pub fn get_rule_name_from_label(label: &str) -> Option<&str> {
-    if let Some((_, rule_name)) = label.split_once(":") {
-        Some(rule_name)
-    } else {
-        None
-    }
+pub fn get_rule_name_from_label(label: &str) -> &str {
+    let (_path, rule_name) = label.split_once(":").unwrap_or(("", label));
+    rule_name
 }
 
 pub fn sanitize_rule_for_display(rule_name: Arc<str>) -> Arc<str> {
