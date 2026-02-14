@@ -1,114 +1,10 @@
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use starlark::{environment::GlobalsBuilder, values::none::NoneType};
-use starstd::{get_rule_argument, Arg, Function};
 use std::collections::HashSet;
 use utils::{inputs, rule};
 
 use crate::{executor, rules, singleton, task};
-
-const ADD_ARCHIVE_EXAMPLE: &str = r#"run.add_archive(
-    rule = {"name": name, "type": "Optional", "deps": ["sysroot-python:venv"]},
-    archive = {
-        "input": "build/install",
-        "name": "my_archive",
-        "version": "1.0",
-        "driver": "tar.gz",
-    },
-)"#;
-
-const ADD_EXEC_EXAMPLE: &str = r#"run.add_exec(
-    rule = {"name": name, "type": "Setup", "deps": ["sysroot-python:venv"]},
-    exec = {
-        "command": "pip3",
-        "args": ["install"] + packages,
-    },
-)"#;
-
-const ADD_TARGET_EXAMPLE: &str = r#"run.add_target(
-    rule = {"name": "my_rule", "deps": ["my_other_rule"]},
-)"#;
-
-pub const FUNCTIONS: &[Function] = &[
-    Function {
-        name: "add_archive",
-        description: "Adds a rule that will archive a directory.",
-        return_type: "None",
-        args: &[
-            get_rule_argument(),
-            Arg {
-                name: "archive",
-                description: "dict with",
-                dict: &[
-                    ("input", "path to the directory to archive"),
-                    ("name", "name of the archive"),
-                    ("version", "archive version (will be part of the filename)"),
-                    ("driver", "The compression driver: tar.gz|tar.bz2|zip|tar.7z|tar.xz"),
-                    ("platform", "Optionally specify the platform"),
-                    ("includes", "Optional list of glob patterns applied to the input directory for inclusion"),
-                    ("excludes", "Optional list of glob patterns applied to the input directory for exclusion"),
-                ],
-            },
-        ],
-        example: Some(ADD_ARCHIVE_EXAMPLE)},
-    Function {
-        name: "add_exec",
-        description: "Adds a rule that will execute a process.",
-        return_type: "None",
-        args: &[
-            get_rule_argument(),
-            Arg {
-                name: "exec",
-                description: "dict with",
-                dict: &[
-                    ("command", "name of the command to execute"),
-                    ("args", "optional list of arguments"),
-                    ("env", "optional dict of environment variables"),
-                    ("working_directory", "optional working directory (default is the workspace)"),
-                    ("expect", "Failure: expect non-zero return code|Success: expect zero return code|Any: don't check the return code"),
-                    ("redirect_stdout", "optional file to redirect stdout to"),
-                ],
-            },
-        ],
-        example: Some(ADD_EXEC_EXAMPLE)},
-    Function {
-        name: "add_kill_exec",
-        description: "Adds a rule that will kill the execution of another rule.",
-        return_type: "None",
-        args: &[
-            get_rule_argument(),
-            Arg {
-                name: "kill",
-                description: "dict with",
-                dict: &[
-                    ("signal", "Hup|Int|Quit|Abort|Kill|Alarm|Terminate|User1|User2"),
-                    ("target", "the name of the rule to kill"),
-                    ("expect", "Failure: expect non-zero return code|Success: expect zero return code|Any: don't check the return code"),
-                ],
-            },
-        ],
-        example: Some(ADD_EXEC_EXAMPLE)},
-    Function {
-        name: "add_target",
-        description: "Adds a target. There is no specific action for the target, but this rule can be useful for organizing dependencies.",
-        return_type: "None",
-        args: &[
-            get_rule_argument(),
-        ],
-        example: Some(ADD_TARGET_EXAMPLE)},
-    Function {
-        name: "abort",
-        description: "Abort script evaluation with a message.",
-        return_type: "None",
-        args: &[
-            Arg {
-                name: "message",
-                description: "Abort message to show the user.",
-                dict: &[],
-            },
-        ],
-        example: Some(r#"run.abort("Failed to do something")"#)}
-];
 
 fn add_rule_to_all(rule: &rule::Rule) -> anyhow::Result<()> {
     if let Some(rule::RuleType::Run) = rule.type_.as_ref() {
@@ -124,12 +20,36 @@ fn add_rule_to_all(rule: &rule::Rule) -> anyhow::Result<()> {
     Ok(())
 }
 
-// This defines the function that is visible to Starlark
+/// These are the functions available in the `run` module.
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
+    /// Abort script evaluation with a message.
+    ///
+    /// ```python
+    /// run.abort("Failed to do something")
+    /// ```
+    ///
+    /// # Arguments
+    /// * `message`: Abort message to show the user.
     fn abort(message: &str) -> anyhow::Result<NoneType> {
         Err(format_error!("Run Aborting: {}", message))
     }
+
+    /// Adds a target that depends on other targets.
+    ///
+    /// There is no specific action for the target, but this rule can be useful for organizing dependencies.
+    ///
+    /// ```python
+    /// run.add_target(
+    ///     rule = {
+    ///         "name": "my_rule",
+    ///         "deps": ["my_other_rule"],
+    ///     },
+    /// )
+    /// ```
+    ///
+    /// # Arguments
+    /// * `rule`: Rule definition containing `name` (`str`), `deps` (`list`), `platforms` (`list`), `type` (`str`), and `help` (`str`).
 
     fn add_target(
         #[starlark(require = named)] rule: starlark::values::Value,
@@ -150,11 +70,25 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(NoneType)
     }
 
-    /// Add an exec task to the rule.
+    /// Adds a rule that will execute a process.
     ///
-    /// Args:
-    ///     rule: The rule to add the exec task to.
-    ///     exec: The exec task to add.
+    /// ```python
+    /// run.add_exec(
+    ///     rule = {
+    ///         "name": name,
+    ///         "type": "Setup",
+    ///         "deps": ["sysroot-python:venv"],
+    ///     },
+    ///     exec = {
+    ///         "command": "pip3",
+    ///         "args": ["install"] + packages,
+    ///     },
+    /// )
+    /// ```
+    ///
+    /// # Arguments
+    /// * `rule`: Rule definition containing `name` (`str`), `deps` (`list`), `platforms` (`list`), `type` (`str`), and `help` (`str`).
+    /// * `exec`: Execution details containing `command` (`str`), `args` (`list`), `env` (`dict`), `working_directory` (`str`), `expect` (`Failure`|`Success`|`Any`), and `redirect_stdout` (`str`).
     fn add_exec(
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] exec: starlark::values::Value,
@@ -188,6 +122,22 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(NoneType)
     }
 
+    /// Adds a rule that will kill the execution of another rule.
+    ///
+    /// ```python
+    /// run.add_kill_exec(
+    ///     rule = {"name": "stop_service", "type": "Run"},
+    ///     kill = {
+    ///         "signal": "Terminate",
+    ///         "target": "my_long_running_service",
+    ///         "expect": "Success",
+    ///     },
+    /// )
+    /// ```
+    ///
+    /// # Arguments
+    /// * `rule`: Rule definition containing `name` (`str`), `deps` (`list`), `platforms` (`list`), `type` (`str`), and `help` (`str`).
+    /// * `kill`: Kill details containing `signal` (`Hup`|`Int`|`Quit`|`Abort`|`Kill`|`Alarm`|`Terminate`|`User1`|`User2`), `target` (`str`), and `expect` (`Failure`|`Success`|`Any`).
     fn add_kill_exec(
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] kill: starlark::values::Value,
@@ -215,6 +165,23 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(NoneType)
     }
 
+    /// Adds a rule that will archive a directory.
+    ///
+    /// ```python
+    /// run.add_archive(
+    ///     rule = {"name": name, "type": "Optional", "deps": ["sysroot-python:venv"]},
+    ///     archive = {
+    ///         "input": "build/install",
+    ///         "name": "my_archive",
+    ///         "version": "1.0",
+    ///         "driver": "tar.gz",
+    ///     },
+    /// )
+    /// ```
+    ///
+    /// # Arguments
+    /// * `rule`: Rule definition containing `name` (`str`), `deps` (`list`), `platforms` (`list`), `type` (`str`), and `help` (`str`).
+    /// * `archive`: Archive details containing `input` (`str`), `name` (`str`), `version` (`str`), `driver` (`tar.gz`|`tar.bz2`|`zip`|`tar.7z`|`tar.xz`), `platform` (`str`), `includes` (`list`), and `excludes` (`list`).
     fn add_archive(
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] archive: starlark::values::Value,
