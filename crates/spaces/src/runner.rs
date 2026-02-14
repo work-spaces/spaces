@@ -2,7 +2,7 @@ use crate::{completions, evaluator, executor, label, rules, task, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use std::sync::Arc;
-use utils::{git, lock, logger, shell, store, version, ws};
+use utils::{ci, git, lock, logger, shell, store, version, ws};
 
 use crate::{lsp_context, singleton};
 use itertools::Itertools;
@@ -314,13 +314,18 @@ pub fn run_store_command_in_workspace(
         "Failed to load store at {}",
         store_path_str
     ))?;
+    let is_ci: ci::IsCi = singleton::get_is_ci().into();
 
     match store_command {
         store::StoreCommand::Info { sort_by } => {
-            store.show_info(printer, sort_by);
+            store
+                .show_info(printer, sort_by, is_ci)
+                .context(format_context!("While getting store info"))?;
         }
         store::StoreCommand::Fix { dry_run } => {
-            store.fix(printer, dry_run);
+            store
+                .fix(printer, dry_run, is_ci)
+                .context(format_context!("While fixing store"))?;
 
             store
                 .save(store_path)
