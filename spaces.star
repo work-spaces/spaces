@@ -13,6 +13,7 @@ load("//@star/sdk/star/shell.star", "shell")
 load(
     "//@star/sdk/star/visibility.star",
     "visibility_private",
+    "visibility_rules",
 )
 load(
     "//@star/sdk/star/ws.star",
@@ -81,7 +82,7 @@ run_add_exec_test(
         "RUST_BACKTRACE": "1",
         "RUST_LOG": "trace",
     },
-    visibility = visibility_private(),
+    visibility = visibility_rules(["//:test"]),
 )
 
 SPACES_INSTALL_ROOT = "SPACES_INSTALL_ROOT"
