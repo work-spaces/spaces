@@ -5,6 +5,7 @@ use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use utils::rule::Visibility;
 use utils::{changes, environment, graph, lock, logger, platform, rule};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -373,6 +374,13 @@ impl State {
             }
         }
 
+        if let Some(Visibility::Rules(list)) = task_to_insert.rule.visibility.as_mut() {
+            for vis_rule in list.iter_mut() {
+                *vis_rule =
+                    label::sanitize_rule(vis_rule.clone(), self.latest_starlark_module.clone());
+            }
+        }
+
         let mut tasks = self.tasks.write();
 
         if let Some(task) = tasks.get(&rule_label) {
@@ -386,12 +394,67 @@ impl State {
         Ok(())
     }
 
+    fn check_task_deps_visibility(&self, task: &task::Task) -> anyhow::Result<()> {
+        let tasks = self.tasks.read();
+
+        if let Some(deps) = task.rule.deps.as_ref() {
+            let task_path = label::get_path_from_label(task.rule.name.as_ref());
+            for dep in deps.iter() {
+                if let Some(dep_task) = tasks.get(dep) {
+                    match dep_task.rule.visibility.as_ref() {
+                        None | Some(rule::Visibility::Public) => {
+                            // Do nothing if the dependency is public
+                        }
+                        Some(rule::Visibility::Rules(list)) => {
+                            // are task and dep in the same repository
+                            let mut is_match = false;
+                            for prefix in list.iter() {
+                                if task.rule.name.starts_with(prefix.as_ref()) {
+                                    is_match = true;
+                                    break;
+                                }
+                            }
+                            if !is_match {
+                                return Err(format_error!(
+                                    "Dependency {} (rules) is NOT visible to {}.",
+                                    dep_task.rule.name,
+                                    task.rule.name
+                                ));
+                            }
+                        }
+                        Some(rule::Visibility::Private) => {
+                            // are task and dep in the same module
+                            if label::get_path_from_label(dep_task.rule.name.as_ref()) != task_path
+                            {
+                                return Err(format_error!(
+                                    "Dependency {} (private) is NOT visible to {}.",
+                                    dep_task.rule.name,
+                                    task.rule.name
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn update_dependency_graph(
         &mut self,
         printer: &mut printer::Printer,
         target: Option<Arc<str>>,
         phase: task::Phase,
     ) -> anyhow::Result<()> {
+        {
+            let tasks = self.tasks.read();
+            for (name, task) in tasks.iter() {
+                self.check_task_deps_visibility(task)
+                    .with_context(|| format_context!("Visibility check failed for task {name}"))?;
+            }
+        }
+
         let mut tasks = self.tasks.write();
 
         self.graph.clear();

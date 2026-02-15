@@ -7,8 +7,13 @@ load(
     "//@star/sdk/star/run.star",
     "run_add_exec",
     "run_add_exec_test",
+    "run_add_target",
 )
 load("//@star/sdk/star/shell.star", "shell")
+load(
+    "//@star/sdk/star/visibility.star",
+    "visibility_private",
+)
 load(
     "//@star/sdk/star/ws.star",
     "workspace_get_env_var",
@@ -20,6 +25,7 @@ run_add_exec(
     command = "cargo",
     args = ["check"],
     help = "Run cargo check on workspace",
+    visibility = visibility_private(),
 )
 
 run_add_exec(
@@ -34,7 +40,14 @@ run_add_exec(
         "+//archiver/**/*.rs",
     ],
     args = ["build"],
+    visibility = visibility_private(),
     help = "Run cargo build on workspace",
+)
+
+run_add_target(
+    "test_vis",
+    deps = [":build"],
+    visibility = visibility_private(),
 )
 
 run_add_exec(
@@ -43,6 +56,7 @@ run_add_exec(
     args = ["clippy"],
     log_level = "Passthrough",
     help = "Run cargo clippy on workspace",
+    visibility = visibility_private(),
 )
 
 run_add_exec(
@@ -51,6 +65,7 @@ run_add_exec(
     args = ["fmt"],
     log_level = "Passthrough",
     help = "Run cargo fmt on workspace",
+    visibility = visibility_private(),
 )
 
 run_add_exec_test(
@@ -66,6 +81,7 @@ run_add_exec_test(
         "RUST_BACKTRACE": "1",
         "RUST_LOG": "trace",
     },
+    visibility = visibility_private(),
 )
 
 SPACES_INSTALL_ROOT = "SPACES_INSTALL_ROOT"
@@ -78,14 +94,17 @@ else:
 shell(
     "install_dev",
     script = "cargo install --force --path=spaces/crates/spaces --profile=dev --root={}".format(root),
+    visibility = visibility_private(),
 )
 
 shell(
     "install_release",
     script = "cargo install --force --path=spaces/crates/spaces --profile=release --root={}".format(root),
+    visibility = visibility_private(),
 )
 
 shell(
     "install_dev_lsp",
     script = "cargo install --features=lsp-debug --force --path=spaces/crates/spaces --profile=dev --root={}".format(root),
+    visibility = visibility_private(),
 )

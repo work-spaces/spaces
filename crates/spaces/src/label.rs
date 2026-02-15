@@ -21,6 +21,11 @@ pub fn get_rule_name_from_label(label: &str) -> &str {
     rule_name
 }
 
+pub fn get_path_from_label(label: &str) -> &str {
+    let (path, _rule_name) = label.split_once(":").unwrap_or(("", label));
+    path
+}
+
 pub fn sanitize_rule_for_display(rule_name: Arc<str>) -> Arc<str> {
     // if length > MAX_RULE_NAME_LENGTH show firtst INTRO_LENGTH chars, then ... then the rest
     const MAX_RULE_NAME_LENGTH: usize = 64;

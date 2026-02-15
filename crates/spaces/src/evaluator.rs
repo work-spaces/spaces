@@ -202,6 +202,7 @@ fn insert_setup_and_all_rules(
         type_: Some(rule::RuleType::Run),
         platforms: None,
         deps: Some(rules::get_setup_rules()),
+        visibility: Some(rule::Visibility::Public),
     };
 
     rules::insert_task(task::Task::new(
@@ -227,6 +228,7 @@ fn insert_setup_and_all_rules(
         type_: Some(rule::RuleType::Run),
         platforms: None,
         deps: Some(deps),
+        visibility: Some(rule::Visibility::Public),
     };
 
     rules::insert_task(task::Task::new(
@@ -244,6 +246,7 @@ fn insert_setup_and_all_rules(
         type_: Some(rule::RuleType::Test),
         platforms: None,
         deps: Some(rules::get_test_rules()),
+        visibility: Some(rule::Visibility::Public),
     };
 
     rules::insert_task(task::Task::new(
@@ -261,6 +264,7 @@ fn insert_setup_and_all_rules(
         type_: Some(rule::RuleType::PreCommit),
         platforms: None,
         deps: Some(rules::get_pre_commit_rules()),
+        visibility: Some(rule::Visibility::Public),
     };
 
     rules::insert_task(task::Task::new(
@@ -278,6 +282,7 @@ fn insert_setup_and_all_rules(
         type_: Some(rule::RuleType::Clean),
         platforms: None,
         deps: Some(rules::get_clean_rules()),
+        visibility: Some(rule::Visibility::Public),
     };
 
     rules::insert_task(task::Task::new(
