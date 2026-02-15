@@ -70,11 +70,10 @@ run_add_exec(
 )
 
 run_add_exec_test(
-    "capsule_test",
+    "cargo_test",
     command = "cargo",
     args = [
         "test",
-        "--package=capsule",
         "--",
         "--test-threads=1",  # Tests share state (heap) and can't be multithreaded
     ],
