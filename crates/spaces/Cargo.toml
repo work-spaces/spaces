@@ -53,6 +53,9 @@ walkdir = "2"
 globwalk = "0.9"
 maplit = "1"
 
+[dev-dependencies]
+tempfile = "3"
+
 [features]
 lsp-debug = [
     "libc",

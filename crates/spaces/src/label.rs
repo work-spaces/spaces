@@ -123,3 +123,257 @@ pub fn sanitize_working_directory(
 pub fn is_rule_sanitized(rule_name: &str) -> bool {
     rule_name.starts_with("//")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[test]
+    fn test_is_rule_sanitized() {
+        // Starts with "//" → sanitized
+        assert!(is_rule_sanitized("//some/path:rule"));
+        assert!(is_rule_sanitized("//"));
+        assert!(!is_rule_sanitized("/some/path:rule"));
+        assert!(!is_rule_sanitized("some/path:rule"));
+        assert!(!is_rule_sanitized(""));
+    }
+
+    #[test]
+    fn test_get_rule_name_from_label() {
+        assert_eq!(get_rule_name_from_label("//path/to/pkg:my_rule"), "my_rule");
+        assert_eq!(get_rule_name_from_label("my_rule"), "my_rule");
+        assert_eq!(get_rule_name_from_label(""), "");
+        assert_eq!(get_rule_name_from_label(":"), "");
+        // this label is malformed but allowed by this function
+        assert_eq!(
+            get_rule_name_from_label("//path:nested:rule"),
+            "nested:rule"
+        );
+    }
+
+    #[test]
+    fn test_get_path_from_label() {
+        assert_eq!(
+            get_path_from_label("//path/to/pkg:my_rule"),
+            "//path/to/pkg"
+        );
+        // these are malformed but allowed by this function
+        assert_eq!(get_path_from_label("my_rule"), "");
+        assert_eq!(get_path_from_label(""), "");
+        assert_eq!(get_path_from_label(":"), "");
+        assert_eq!(get_path_from_label("//path:nested:rule"), "//path");
+    }
+
+    #[test]
+    fn test_get_source_from_label() {
+        // Strips "//" prefix and returns source when no file exists on disk
+        assert_eq!(
+            get_source_from_label("//nonexistent/path:rule"),
+            "nonexistent/path"
+        );
+
+        // No colon → source portion is empty
+        assert_eq!(get_source_from_label("my_rule"), "");
+
+        // No "//" prefix → source returned as-is (no file on disk)
+        assert_eq!(get_source_from_label("plain/path:rule"), "plain/path");
+
+        // Falls through to raw source when neither file variant exists
+        assert_eq!(
+            get_source_from_label("//does/not/exist:rule"),
+            "does/not/exist"
+        );
+
+        // Prefers {source}.spaces.star when both file variants exist
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("mymod");
+        let dot_file = format!("{}.spaces.star", base.display());
+        std::fs::write(&dot_file, "").unwrap();
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::write(base.join("spaces.star"), "").unwrap();
+        let label = format!("//{}:rule", base.display());
+        assert_eq!(get_source_from_label(&label), dot_file);
+
+        // Falls back to {source}/spaces.star when only that variant exists
+        let dir2 = tempfile::tempdir().unwrap();
+        let base2 = dir2.path().join("mymod2");
+        std::fs::create_dir_all(&base2).unwrap();
+        std::fs::write(base2.join("spaces.star"), "").unwrap();
+        let label2 = format!("//{}:rule", base2.display());
+        assert_eq!(
+            get_source_from_label(&label2),
+            format!("{}/spaces.star", base2.display())
+        );
+    }
+
+    #[test]
+    fn test_sanitize_rule_for_display() {
+        // Empty name returned as-is (same Arc)
+        let empty: Arc<str> = "".into();
+        assert!(Arc::ptr_eq(
+            &empty,
+            &sanitize_rule_for_display(empty.clone())
+        ));
+
+        // Short name (< 64 chars) returned as-is (same Arc, no allocation)
+        let short: Arc<str> = "short_rule".into();
+        let short_result = sanitize_rule_for_display(short.clone());
+        assert_eq!(short_result.as_ref(), "short_rule");
+        assert!(Arc::ptr_eq(&short, &short_result));
+
+        // Exactly 63 chars → still below threshold, returned as-is
+        let name_63: Arc<str> = "a".repeat(63).into();
+        let result_63 = sanitize_rule_for_display(name_63.clone());
+        assert_eq!(result_63.len(), 63);
+        assert!(Arc::ptr_eq(&name_63, &result_63));
+
+        // 64 chars → triggers truncation with "..."
+        let name_64: Arc<str> = "a".repeat(64).into();
+        let result_64 = sanitize_rule_for_display(name_64);
+        assert!(result_64.contains("..."));
+        assert!(result_64.starts_with(&"a".repeat(16)));
+        assert!(result_64.len() < 64 + 3);
+
+        // Long name with distinct intro/tail chars preserves structure
+        // 80 chars: 16 'A' then 64 'B'
+        let long: Arc<str> = format!("{}{}", "A".repeat(16), "B".repeat(64)).into();
+        let long_result = sanitize_rule_for_display(long);
+        assert!(long_result.starts_with(&"A".repeat(16)));
+        assert!(long_result.contains("..."));
+        assert!(long_result.ends_with('B'));
+    }
+
+    #[test]
+    fn test_sanitize_rule() {
+        // Already sanitized (starts with "//") → returned as same Arc
+        let sanitized: Arc<str> = "//already/sanitized:rule".into();
+        assert!(Arc::ptr_eq(
+            &sanitized,
+            &sanitize_rule(sanitized.clone(), Some("module/spaces.star".into()))
+        ));
+
+        // None module → returned as-is
+        let unsanitized: Arc<str> = "unsanitized_rule".into();
+        assert!(Arc::ptr_eq(
+            &unsanitized,
+            &sanitize_rule(unsanitized.clone(), None)
+        ));
+
+        // Module with /spaces.star suffix → prefix extracted, colon separator
+        assert_eq!(
+            sanitize_rule("my_rule".into(), Some("path/to/pkg/spaces.star".into())).as_ref(),
+            "//path/to/pkg:my_rule"
+        );
+
+        // Module with .spaces.star suffix → prefix extracted, colon separator
+        assert_eq!(
+            sanitize_rule("my_rule".into(), Some("path/to/pkg.spaces.star".into())).as_ref(),
+            "//path/to/pkg:my_rule"
+        );
+
+        // Leading colon on rule name is stripped before formatting
+        assert_eq!(
+            sanitize_rule(":my_rule".into(), Some("path/to/pkg/spaces.star".into())).as_ref(),
+            "//path/to/pkg:my_rule"
+        );
+
+        // Rule containing colon → uses '/' separator instead of ':'
+        assert_eq!(
+            sanitize_rule("nested:rule".into(), Some("path/to/pkg/spaces.star".into())).as_ref(),
+            "//path/to/pkg/nested:rule"
+        );
+
+        // Module without a recognized suffix → empty prefix
+        assert_eq!(
+            sanitize_rule("my_rule".into(), Some("no_suffix_match.star".into())).as_ref(),
+            "//:my_rule"
+        );
+
+        // Module that is just "spaces.star" → neither suffix matches, empty prefix
+        assert_eq!(
+            sanitize_rule("my_rule".into(), Some("spaces.star".into())).as_ref(),
+            "//:my_rule"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_glob_value() {
+        // "+//" prefix is replaced with "+"
+        assert_eq!(
+            sanitize_glob_value("+//some/path/*.rs", "rule", Some("module.star".into()))
+                .unwrap()
+                .as_ref(),
+            "+some/path/*.rs"
+        );
+
+        // "-//" prefix is replaced with "-"
+        assert_eq!(
+            sanitize_glob_value("-//some/path/*.rs", "rule", Some("module.star".into()))
+                .unwrap()
+                .as_ref(),
+            "-some/path/*.rs"
+        );
+
+        // "+//**" triggers a performance warning but still succeeds
+        assert_eq!(
+            sanitize_glob_value("+//**/*.rs", "rule", Some("module.star".into()))
+                .unwrap()
+                .as_ref(),
+            "+**/*.rs"
+        );
+
+        // Invalid prefixes → error
+        assert!(sanitize_glob_value("some/path/*.rs", "rule", Some("module.star".into())).is_err());
+        assert!(sanitize_glob_value("+/some/path", "rule", Some("module.star".into())).is_err());
+        assert!(sanitize_glob_value("-/some/path", "rule", Some("module.star".into())).is_err());
+
+        // None module → error message contains "unknown"
+        let err_msg = sanitize_glob_value("bad_value", "rule", None)
+            .unwrap_err()
+            .to_string();
+        assert!(err_msg.contains("unknown"));
+    }
+
+    #[test]
+    fn test_sanitize_working_directory() {
+        // Already starts with "//" → returned as same Arc
+        let absolute: Arc<str> = "//already/absolute".into();
+        assert!(Arc::ptr_eq(
+            &absolute,
+            &sanitize_working_directory(absolute.clone(), Some("module/spaces.star".into()))
+        ));
+
+        // Relative dir + module → parent path of module is prepended
+        assert_eq!(
+            sanitize_working_directory("subdir".into(), Some("path/to/pkg/spaces.star".into()))
+                .as_ref(),
+            "//path/to/pkg/subdir"
+        );
+
+        // Deeply nested module path
+        assert_eq!(
+            sanitize_working_directory("build".into(), Some("a/b/c/d/spaces.star".into())).as_ref(),
+            "//a/b/c/d/build"
+        );
+
+        // Module in root (no parent directory) → no extra separator
+        assert_eq!(
+            sanitize_working_directory("subdir".into(), Some("spaces.star".into())).as_ref(),
+            "//subdir"
+        );
+
+        // Empty working directory with module → trailing slash from separator
+        assert_eq!(
+            sanitize_working_directory("".into(), Some("path/to/spaces.star".into())).as_ref(),
+            "//path/to/"
+        );
+
+        // None module → returned as-is
+        let relative: Arc<str> = "relative/dir".into();
+        assert!(Arc::ptr_eq(
+            &relative,
+            &sanitize_working_directory(relative.clone(), None)
+        ));
+    }
+}
