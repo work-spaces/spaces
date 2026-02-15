@@ -20,6 +20,17 @@ pub enum RuleType {
     Optional,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub enum Visibility {
+    /// Allows rules to be used anywhere.
+    #[default]
+    Public,
+    /// Allows rules that start with the given prefixes.
+    Rules(Vec<Arc<str>>),
+    /// Allows the rules only to be used within the same file.
+    Private,
+}
+
 /// A rule desribes what a task should do.
 /// It specifies named depedencies that must be executed
 /// before the task can run.
@@ -41,6 +52,8 @@ pub struct Rule {
     /// The type for the rule in the run phase
     #[serde(rename = "type")]
     pub type_: Option<RuleType>,
+    /// The visibility of the rule
+    pub visibility: Option<Visibility>,
 }
 
 type RuleMap = HashMap<Arc<str>, (Rule, Option<String>)>;
