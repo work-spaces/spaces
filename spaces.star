@@ -45,12 +45,6 @@ run_add_exec(
     help = "Run cargo build on workspace",
 )
 
-run_add_target(
-    "test_vis",
-    deps = [":build"],
-    visibility = visibility_private(),
-)
-
 run_add_exec(
     "clippy",
     command = "cargo",
