@@ -1,5 +1,5 @@
 use anyhow_source_location::format_error;
-use bincode::{Decode, Encode};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -17,7 +17,7 @@ pub fn validate_input_globs(globs: &Option<HashSet<Arc<str>>>) -> anyhow::Result
     Ok(())
 }
 
-#[derive(Debug, Clone, Encode, Decode, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Inputs {
     pub entries: HashMap<Arc<str>, Arc<str>>,
 }

@@ -1,13 +1,13 @@
 use crate::logger;
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
-use bincode::{Decode, Encode};
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 pub mod glob;
 
-#[derive(Clone, Debug, Encode, Decode, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub enum ChangeDetailType {
     #[default]
     None,
@@ -16,7 +16,7 @@ pub enum ChangeDetailType {
     Symlink(Arc<str>),
 }
 
-#[derive(Clone, Debug, Encode, Decode, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct ChangeDetail {
     pub modified: Option<std::time::SystemTime>,
     pub detail_type: ChangeDetailType,
@@ -51,7 +51,7 @@ enum CheckIsModified {
     Yes,
 }
 
-#[derive(Clone, Debug, Encode, Decode, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct Changes {
     pub path: Arc<str>,
     pub skip_folders: Vec<Arc<str>>,

@@ -1,7 +1,7 @@
 use crate::{changes, inputs, logger};
 use anyhow::Context;
 use anyhow_source_location::format_context;
-use bincode::{Decode, Encode};
+
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -10,7 +10,7 @@ pub const SPACES_LOGS_NAME: &str = ".spaces/logs";
 pub const METRICS_FILE_NAME: &str = ".spaces/metrics.spaces.json";
 const SETTINGS_FILE_NAME: &str = ".spaces/settings.spaces.json";
 const CHECKOUT_FILE_NAME: &str = ".spaces/checkout.spaces.json";
-const BIN_SETTINGS_FILE_NAME: &str = "build/workspace.settings.spaces";
+const BIN_SETTINGS_FILE_NAME: &str = "build/workspace.settings.2.spaces";
 pub const SPACES_WORKSPACE_ENV_VAR: &str = "SPACES_WORKSPACE";
 const SPACES_HOME_ENV_VAR: &str = "SPACES_HOME";
 
@@ -112,7 +112,7 @@ impl Asset {
 
 pub type Blake3Hash = [u8; blake3::OUT_LEN];
 
-#[derive(Debug, Encode, Decode, Default)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct BinDetail {
     pub hash: Blake3Hash,
     pub modified: Option<std::time::SystemTime>,
@@ -124,7 +124,7 @@ pub enum IsDirty {
     Yes,
 }
 
-#[derive(Debug, Encode, Decode, Default)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct BinSettings {
     pub tasks_json: Arc<str>,
     pub env_json: Arc<str>,
@@ -141,16 +141,15 @@ impl BinSettings {
     }
 
     fn save(&self, path: &str) -> anyhow::Result<()> {
-        let encoded = bincode::encode_to_vec(self, bincode::config::standard())
+        let encoded = postcard::to_allocvec(self)
             .context(format_context!("Failed to encode bin settings"))?;
         std::fs::write(path, encoded).context(format_context!("Failed to write to {path:?}"))?;
         Ok(())
     }
 
     fn load(path: &str) -> anyhow::Result<Self> {
-        let file = std::fs::File::open(path).context(format_context!("Failed to open {path:?}"))?;
-        let reader = std::io::BufReader::new(file);
-        let bin_settings = bincode::decode_from_reader(reader, bincode::config::standard())
+        let bytes = std::fs::read(path).context(format_context!("Failed to read {path:?}"))?;
+        let bin_settings = postcard::from_bytes(&bytes)
             .context(format_context!("Failed to deserialize {path:?}"))?;
         Ok(bin_settings)
     }

@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 blake3 = "1"
 walkdir = "2"
-bincode = { version = "2", features = ["derive"] }
+postcard = { version = "1", features = ["use-std"] }
 glob-match = "0.2"
 levenshtein = "1"
 reflink-copy = "0.1"
