@@ -141,8 +141,8 @@ impl BinSettings {
     }
 
     fn save(&self, path: &str) -> anyhow::Result<()> {
-        let encoded = postcard::to_allocvec(self)
-            .context(format_context!("Failed to encode bin settings"))?;
+        let encoded =
+            postcard::to_stdvec(self).context(format_context!("Failed to encode bin settings"))?;
         std::fs::write(path, encoded).context(format_context!("Failed to write to {path:?}"))?;
         Ok(())
     }
