@@ -42,8 +42,7 @@ fn save_artifact_to_cache(
         // Update the metadata to be read-only
         let mut read_write_permissions = artifact_metadata.permissions();
 
-        #[allow(clippy::permissions_set_readonly_false)]
-        read_write_permissions.set_readonly(false);
+        read_write_permissions.set_readonly(true);
 
         // Set the permissions to read-write
         std::fs::set_permissions(artifact_path, read_write_permissions).context(
