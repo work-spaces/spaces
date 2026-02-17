@@ -398,10 +398,15 @@ pub fn evaluate_starlark_modules(
         // During checkout phase, additional modules may be added to the queue
         // if the repo contains more spaces.star files
         if phase == task::Phase::Checkout {
-            rules::update_depedency_graph(printer, None, phase)
-                .context(format_context!("Failed to sort tasks"))?;
-
             star_logger(printer).debug("--Checkout Phase--");
+
+            rules::update_depedency_graph(printer, None, phase)
+                .context(format_context!("Failed to evaluate dependency graph"))?;
+
+            rules::update_target_dependency_graph(printer, None).context(format_context!(
+                "Failed to update run target dependency graph during checkout"
+            ))?;
+
             rules::debug_sorted_tasks(printer, phase)
                 .context(format_context!("Failed to debug sorted tasks"))?;
 
@@ -473,10 +478,9 @@ pub fn execute_tasks(
     workspace: workspace::WorkspaceArc,
     phase: task::Phase,
     target: Option<Arc<str>>,
+    run_target: Option<Arc<str>>,
 ) -> anyhow::Result<()> {
     star_logger(printer).debug("Inserting //:setup, //:all, //:test, //:clean rules");
-    let run_target = insert_setup_and_all_rules(workspace.clone(), target.clone())
-        .context(format_context!("failed to insert run all"))?;
 
     let glob_warnings = singleton::get_glob_warnings();
     for warning in glob_warnings {
@@ -490,10 +494,20 @@ pub fn execute_tasks(
             .settings
             .save_json()
             .context(format_context!("Failed to save settings"))?;
+
+        workspace
+            .read()
+            .settings
+            .save_bin()
+            .context(format_context!("Failed to save settings"))?;
     }
 
     match phase {
         task::Phase::Run => {
+            rules::update_target_dependency_graph(printer, run_target.clone()).context(
+                format_context!("Failed to update run target dependency graph for {target:?}"),
+            )?;
+
             star_logger(printer).message("--Run Phase--");
 
             let is_reproducible = workspace.read().is_reproducible();
@@ -506,9 +520,6 @@ pub fn execute_tasks(
             } else {
                 star_logger(printer).info(repro_message.as_str());
             }
-
-            rules::update_depedency_graph(printer, run_target.clone(), phase)
-                .context(format_context!("Failed to sort tasks"))?;
 
             rules::debug_sorted_tasks(printer, phase)
                 .context(format_context!("Failed to debug sorted tasks"))?;
@@ -533,8 +544,9 @@ pub fn execute_tasks(
         task::Phase::Inspect => {
             star_logger(printer).message("--Inspect Phase--");
 
-            rules::update_depedency_graph(printer, target.clone(), phase)
-                .context(format_context!("Failed to sort tasks"))?;
+            rules::update_target_dependency_graph(printer, target.clone()).context(
+                format_context!("Failed to update target dependency graph for {target:?}"),
+            )?;
 
             rules::debug_sorted_tasks(printer, task::Phase::Checkout)
                 .context(format_context!("Failed to debug sorted tasks"))?;
@@ -584,6 +596,10 @@ pub fn execute_tasks(
         task::Phase::Checkout => {
             star_logger(printer).message("--Post Checkout Phase--");
 
+            rules::update_target_dependency_graph(printer, None).context(format_context!(
+                "Failed to update target dependency graph for {target:?}"
+            ))?;
+
             // warn if any new branches don't match a git rule
             let new_branches = singleton::get_new_branches();
             for item in new_branches {
@@ -594,8 +610,6 @@ pub fn execute_tasks(
                 }
             }
 
-            rules::update_depedency_graph(printer, None, task::Phase::Checkout)
-                .context(format_context!("Failed to sort tasks"))?;
             rules::debug_sorted_tasks(printer, task::Phase::PostCheckout)
                 .context(format_context!("Failed to debug sorted tasks"))?;
 
@@ -727,7 +741,7 @@ pub fn run_starlark_modules(
     let is_dirty = workspace.read().is_dirty;
     let is_always_evaluate = workspace.read().settings.bin.is_always_evaluate;
 
-    if is_dirty || is_always_evaluate || phase == task::Phase::Checkout {
+    let run_target = if is_dirty || is_always_evaluate || phase == task::Phase::Checkout {
         if is_always_evaluate {
             star_logger(printer).message("always evaluate modules enabled");
         } else {
@@ -735,14 +749,25 @@ pub fn run_starlark_modules(
         }
         evaluate_starlark_modules(printer, workspace.clone(), modules, phase)
             .context(format_context!("evaluating modules"))?;
+
+        let run_target = insert_setup_and_all_rules(workspace.clone(), target.clone())
+            .context(format_context!("failed to insert run all"))?;
+
+        // after checkout, the dependencies need to be inserted for run rules
+        rules::update_depedency_graph(printer, Some(workspace.clone()), task::Phase::Inspect)
+            .context(format_context!("Failed to update dependency graph"))?;
+
         rules::update_tasks_digests(printer, workspace.clone())
             .context(format_context!("updating digests"))?;
+
+        run_target
     } else {
         star_logger(printer).message("workspace is clean");
-        rules::import_tasks_from_workspace_settings(workspace.clone())
+        rules::import_tasks_from_workspace_settings(printer, workspace.clone())
             .context(format_context!("importing tasks"))?;
         star_logger(printer).trace(format!("tasks {}", rules::get_pretty_tasks()).as_str());
-    }
+        None
+    };
 
     let secrets = workspace
         .read()
@@ -752,7 +777,7 @@ pub fn run_starlark_modules(
     printer.secrets = secrets;
 
     if is_execute_tasks == IsExecuteTasks::Yes {
-        execute_tasks(printer, workspace, phase, target)
+        execute_tasks(printer, workspace, phase, target, run_target)
             .context(format_context!("executing tasks"))?;
     }
     Ok(())
