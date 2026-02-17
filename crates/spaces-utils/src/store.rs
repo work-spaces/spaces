@@ -56,8 +56,8 @@ pub struct Entry {
 }
 
 impl Entry {
-    fn get_age(&self) -> u128 {
-        age::LastUsed::new(self.last_used).get_age()
+    fn get_age(&self, reference: u128) -> u128 {
+        age::LastUsed::new(self.last_used).get_age(reference)
     }
 }
 
@@ -148,12 +148,13 @@ impl Store {
 
         let mut entries: Vec<_> = self.entries.iter().collect();
 
+        let now = age::get_now();
         match sort_by {
             SortBy::Name => entries.sort_by(|a, b| a.0.cmp(b.0)),
             // largest to smallest
             SortBy::Size => entries.sort_by(|a, b| b.1.size.cmp(&a.1.size)),
             // oldest to newest
-            SortBy::Age => entries.sort_by(|a, b| b.1.get_age().cmp(&a.1.get_age())),
+            SortBy::Age => entries.sort_by(|a, b| b.1.get_age(now).cmp(&a.1.get_age(now))),
         }
 
         let mut total_size = 0;
@@ -174,7 +175,7 @@ impl Store {
             }
             total_size += value.size;
 
-            let age = value.get_age();
+            let age = value.get_age(age::get_now());
             logger(printer).info(format!("  Age: {age} days").as_str());
         }
         if is_fix_needed {
@@ -269,7 +270,7 @@ impl Store {
         let mut total_size_removed = ByteSize(0);
         for (key, entry) in self.entries.iter() {
             let path = path_to_store.join(key.as_ref());
-            let entry_age = entry.get_age();
+            let entry_age = entry.get_age(age::get_now());
             if entry_age > age as u128 {
                 let bytesize = bytesize::ByteSize(entry.size);
                 total_size_removed += bytesize.as_u64();

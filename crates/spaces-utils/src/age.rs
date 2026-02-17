@@ -23,8 +23,12 @@ impl LastUsed {
         Self { value: last_used }
     }
 
-    pub fn get_age(&self) -> u128 {
+    pub fn get_current_age(&self) -> u128 {
         (get_now() - self.value) / (24 * 60 * 60 * 1000)
+    }
+
+    pub fn get_age(&self, reference_time: u128) -> u128 {
+        (reference_time - self.value) / (24 * 60 * 60 * 1000)
     }
 
     pub fn update(&mut self) {
