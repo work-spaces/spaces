@@ -1,4 +1,3 @@
-use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
 pub fn get_now() -> u128 {
@@ -8,7 +7,7 @@ pub fn get_now() -> u128 {
         .unwrap_or(0)
 }
 
-#[derive(Clone, Copy, Serialize, Deserialize, Encode, Decode, Debug)]
+#[derive(Clone, Copy, Serialize, Deserialize, Debug)]
 pub struct LastUsed {
     value: u128,
 }

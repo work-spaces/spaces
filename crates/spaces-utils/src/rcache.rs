@@ -3,7 +3,7 @@
 use crate::age;
 use anyhow::Context;
 use anyhow_source_location::format_context;
-use bincode::{Decode, Encode};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 const ARTIFACT_CACHE_DIR: &str = "artifacts";
@@ -54,7 +54,7 @@ fn save_artifact_to_cache(
     Ok(artifact_hash.into())
 }
 
-#[derive(Debug, Clone, Encode, Decode)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CachedOutput {
     // where does the artifact exist in the cache
     path_in_cache: Arc<str>,
@@ -96,7 +96,7 @@ impl CachedOutput {
     }
 }
 
-#[derive(Debug, Clone, Encode, Decode)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RuleDigestCacheEntry {
     last_used: age::LastUsed,
     outputs: Vec<CachedOutput>,
@@ -121,20 +121,14 @@ impl RuleDigestCacheEntry {
                 )
             })?;
 
-            let (mut entry, _size) = bincode::decode_from_slice::<
-                Self,
-                bincode::config::Configuration,
-            >(contents.as_slice(), bincode::config::standard())
-            .with_context(|| {
-                format_context!(
-                    "Failed to decode cache entry for rule digest {}",
-                    rule_digest
-                )
-            })?;
+            let mut entry: Self = postcard::from_bytes(&contents).context(format_context!(
+                "Failed to decode cache entry for rule digest {}",
+                rule_digest
+            ))?;
 
             // update last used and save the entry
             entry.last_used.update();
-            let encoded = bincode::encode_to_vec(&entry, bincode::config::standard())
+            let encoded = postcard::to_stdvec(&entry)
                 .context(format_context!("Failed to encode rcache entry"))?;
             std::fs::write(path_in_cache, encoded).context(format_context!(
                 "Failed to write cache entry for rule digest {}",
@@ -174,7 +168,7 @@ impl RuleDigestCacheEntry {
             outputs,
         };
 
-        let encoded = bincode::encode_to_vec(&entry, bincode::config::standard())
+        let encoded = postcard::to_stdvec(&entry)
             .context(format_context!("Failed to encode rcache entry"))?;
 
         let path_in_cache = Self::get_path_in_cache(cache_path, rule_digest);
