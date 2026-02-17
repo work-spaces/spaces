@@ -461,7 +461,8 @@ impl HttpArchive {
 
             // Set the permissions to read-write
             std::fs::set_permissions(original, read_write_permissions).context(format_context!(
-                "Failed to set permissions for {original:?}"
+                "Failed to set permissions for {}",
+                original.display()
             ))?;
         }
 

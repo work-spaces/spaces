@@ -2,6 +2,16 @@ use anyhow_source_location::format_error;
 use std::collections::HashSet;
 use std::sync::Arc;
 
+pub struct Globs {
+    pub includes: Vec<Arc<str>>,
+    pub excludes: Vec<Arc<str>>,
+}
+
+pub enum Inputs {
+    List(Vec<Arc<str>>),
+    Globs(Globs),
+}
+
 pub fn is_glob_include(glob: &str) -> Option<Arc<str>> {
     let mut result = glob.to_owned();
     if let Some(first_char) = result.chars().next() {

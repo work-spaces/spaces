@@ -55,6 +55,7 @@ enum CheckIsModified {
 pub struct Changes {
     pub path: Arc<str>,
     pub skip_folders: Vec<Arc<str>>,
+    // map of sanitized paths to change details
     pub entries: HashMap<Arc<str>, ChangeDetail>,
 }
 
@@ -150,6 +151,7 @@ impl Changes {
         Ok(result)
     }
 
+    /// Processes all the files that are specified in the input globs
     pub fn update_from_inputs(
         &mut self,
         progress: &mut printer::MultiProgressBar,
@@ -221,6 +223,7 @@ impl Changes {
             }
         }
 
+        // sort the inputs to ensure consistent hashing
         inputs.sort();
 
         let mut count = 0usize;
@@ -306,7 +309,8 @@ fn process_entry(
     progress.set_message(format!("Processing {path:?}").as_str());
 
     let detail_type = if path.is_file() {
-        let contents = std::fs::read(path).context(format_context!("failed to load {path:?}"))?;
+        let contents =
+            std::fs::read(path).with_context(|| format_context!("failed to load {path:?}"))?;
         let hash = blake3::hash(&contents);
         ChangeDetailType::File(hash.to_string().into())
     } else if path.is_dir() {
@@ -329,7 +333,7 @@ fn process_entry(
         Ok(metadata) => {
             let modified = metadata
                 .modified()
-                .context(format_context!("failed to get modified time for {path:?}"))?;
+                .with_context(|| format_context!("failed to get modified time for {path:?}"))?;
             let change_detail = ChangeDetail {
                 detail_type,
                 modified: Some(modified),
