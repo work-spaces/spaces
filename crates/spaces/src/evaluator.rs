@@ -480,8 +480,6 @@ pub fn execute_tasks(
     target: Option<Arc<str>>,
     run_target: Option<Arc<str>>,
 ) -> anyhow::Result<()> {
-    star_logger(printer).debug("Inserting //:setup, //:all, //:test, //:clean rules");
-
     let glob_warnings = singleton::get_glob_warnings();
     for warning in glob_warnings {
         star_logger(printer).warning(warning.as_ref());
@@ -750,6 +748,7 @@ pub fn run_starlark_modules(
         evaluate_starlark_modules(printer, workspace.clone(), modules, phase)
             .context(format_context!("evaluating modules"))?;
 
+        star_logger(printer).message("Inserting //:setup, //:all, //:test, //:clean rules");
         let run_target = insert_setup_and_all_rules(workspace.clone(), target.clone())
             .context(format_context!("failed to insert run all"))?;
 
@@ -770,7 +769,7 @@ pub fn run_starlark_modules(
         rules::import_tasks_from_workspace_settings(printer, workspace.clone(), needs_graph)
             .context(format_context!("importing tasks"))?;
         star_logger(printer).trace(format!("tasks {}", rules::get_pretty_tasks()).as_str());
-        None
+        target.clone()
     };
 
     let secrets = workspace
