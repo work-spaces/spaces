@@ -1,4 +1,4 @@
-use crate::{changes, inputs, logger};
+use crate::{changes, graph, inputs, logger};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 
@@ -132,6 +132,7 @@ pub struct BinSettings {
     pub star_files: HashMap<Arc<str>, BinDetail>, // modules and hashes to detect changes
     pub changes: changes::Changes,
     pub inputs: inputs::Inputs,
+    pub graph: graph::Graph,
     pub is_always_evaluate: bool,
 }
 

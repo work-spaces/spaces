@@ -444,7 +444,7 @@ impl State {
     pub fn update_dependency_graph(
         &mut self,
         printer: &mut printer::Printer,
-        target: Option<Arc<str>>,
+        workspace: Option<WorkspaceArc>,
         phase: task::Phase,
     ) -> anyhow::Result<()> {
         {
@@ -507,6 +507,21 @@ impl State {
             }
         }
 
+        if let Some(workspace) = workspace {
+            let mut workspace_write = workspace.write();
+            rules_printer_logger(printer).debug("cloning graph to workspace bin settings");
+            workspace_write.settings.bin.graph = self.graph.clone();
+            workspace_write.is_bin_dirty = true;
+        }
+
+        Ok(())
+    }
+
+    pub fn update_target_dependency_graph(
+        &mut self,
+        printer: &mut printer::Printer,
+        target: Option<Arc<str>>,
+    ) -> anyhow::Result<()> {
         rules_printer_logger(printer)
             .debug(format!("sorting graph with for {target:?}...").as_str());
         self.sorted = self
@@ -518,6 +533,8 @@ impl State {
             .debug(format!("done with {} nodes", self.sorted.len()).as_str());
 
         if let Some(target) = target {
+            let mut tasks = self.tasks.write();
+
             // enable any optional tasks in the graph
             for node_index in self.sorted.iter() {
                 let task_name = self.graph.get_task(*node_index);
@@ -541,6 +558,7 @@ impl State {
 
     pub fn import_tasks_from_workspace_settings(
         &mut self,
+        printer: &mut printer::Printer,
         workspace: workspace::WorkspaceArc,
     ) -> anyhow::Result<()> {
         {
@@ -552,6 +570,9 @@ impl State {
             for task in tasks.values_mut() {
                 task.signal = task::SignalArc::new(task.rule.name.clone());
             }
+
+            rules_printer_logger(printer).debug("loading graph from workspace bin settings");
+            self.graph = workspace.settings.bin.graph.clone();
         }
         {
             let mut workspace = workspace.write();
@@ -577,6 +598,14 @@ impl State {
             .get_sorted_tasks(None)
             .context(format_context!("Failed to sort tasks for phase digesting",))?;
 
+        rules_printer_logger(printer).debug(
+            format!(
+                "sorted {} tasks of {:?}",
+                topo_sorted.len(),
+                self.graph.directed_graph.capacity()
+            )
+            .as_str(),
+        );
         let mut tasks = self.tasks.write();
         for node in topo_sorted.iter() {
             let task_name = self.graph.get_task(*node);
@@ -943,18 +972,27 @@ pub fn update_tasks_digests(
 
 pub fn update_depedency_graph(
     printer: &mut printer::Printer,
-    target: Option<Arc<str>>,
+    workspace: Option<workspace::WorkspaceArc>,
     phase: task::Phase,
 ) -> anyhow::Result<()> {
     let mut state = get_state().write();
-    state.update_dependency_graph(printer, target, phase)
+    state.update_dependency_graph(printer, workspace, phase)
+}
+
+pub fn update_target_dependency_graph(
+    printer: &mut printer::Printer,
+    target: Option<Arc<str>>,
+) -> anyhow::Result<()> {
+    let mut state = get_state().write();
+    state.update_target_dependency_graph(printer, target)
 }
 
 pub fn import_tasks_from_workspace_settings(
+    printer: &mut printer::Printer,
     workspace: workspace::WorkspaceArc,
 ) -> anyhow::Result<()> {
     let mut state = get_state().write();
-    state.import_tasks_from_workspace_settings(workspace)
+    state.import_tasks_from_workspace_settings(printer, workspace)
 }
 
 pub fn get_pretty_tasks() -> String {

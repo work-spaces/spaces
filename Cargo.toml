@@ -15,9 +15,10 @@ archiver = { package = "spaces-archiver", version = "0.3", features = [
 ] }
 starlark = { git = "https://github.com/facebook/starlark-rust", rev = "100f29bc1a57d344171a405e4e06bccc6b8b8e23"}
 serde = { version = "1", features = ["derive"] }
+postcard = { version = "1", features = ["use-std"] }
 serde_json = "1"
 state = "0.6"
-petgraph = "0.8"
+petgraph = { version = "0.8", features = ["serde-1"] }
 glob-match = "0.2"
 url = "2"
 toml = "0.9"

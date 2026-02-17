@@ -1,8 +1,9 @@
 use crate::suggest;
 use anyhow_source_location::format_error;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Graph {
     pub directed_graph: petgraph::graph::DiGraph<Arc<str>, ()>,
 }
