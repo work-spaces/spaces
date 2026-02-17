@@ -514,7 +514,7 @@ impl State {
         }
 
         if let Some(workspace) = workspace {
-            if phase == task::Phase::Run {
+            if phase != task::Phase::Checkout {
                 let mut workspace_write = workspace.write();
                 rules_printer_logger(printer).debug("cloning graph to workspace bin settings");
                 workspace_write.settings.bin.graph = self.graph.clone();
@@ -587,6 +587,7 @@ impl State {
         if let NeedsGraph::Yes(phase) = needs_graph {
             // if the graph is empty, populate it with the tasks
             if self.graph.directed_graph.edge_count() == 0 {
+                rules_printer_logger(printer).debug("bin settings graph is empty - updating");
                 self.update_dependency_graph(printer, None, phase)
                     .context(format_context!("Failed to updated dependency graph"))?;
 
