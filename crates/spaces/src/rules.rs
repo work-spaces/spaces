@@ -14,6 +14,12 @@ pub enum HasHelp {
     Yes,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum NeedsGraph {
+    No,
+    Yes(task::Phase),
+}
+
 fn rules_printer_logger(printer: &mut printer::Printer) -> logger::Logger {
     logger::Logger::new_printer(printer, "rules".into())
 }
@@ -508,10 +514,12 @@ impl State {
         }
 
         if let Some(workspace) = workspace {
-            let mut workspace_write = workspace.write();
-            rules_printer_logger(printer).debug("cloning graph to workspace bin settings");
-            workspace_write.settings.bin.graph = self.graph.clone();
-            workspace_write.is_bin_dirty = true;
+            if phase == task::Phase::Run {
+                let mut workspace_write = workspace.write();
+                rules_printer_logger(printer).debug("cloning graph to workspace bin settings");
+                workspace_write.settings.bin.graph = self.graph.clone();
+                workspace_write.is_bin_dirty = true;
+            }
         }
 
         Ok(())
@@ -560,6 +568,7 @@ impl State {
         &mut self,
         printer: &mut printer::Printer,
         workspace: workspace::WorkspaceArc,
+        needs_graph: NeedsGraph,
     ) -> anyhow::Result<()> {
         {
             let workspace = workspace.read();
@@ -572,7 +581,18 @@ impl State {
             }
 
             rules_printer_logger(printer).debug("loading graph from workspace bin settings");
+
             self.graph = workspace.settings.bin.graph.clone();
+        }
+        if let NeedsGraph::Yes(phase) = needs_graph {
+            // if the graph is empty, populate it with the tasks
+            if self.graph.directed_graph.edge_count() == 0 {
+                self.update_dependency_graph(printer, None, phase)
+                    .context(format_context!("Failed to updated dependency graph"))?;
+
+                self.update_tasks_digests(printer, workspace.clone())
+                    .context(format_context!("updating digests"))?;
+            }
         }
         {
             let mut workspace = workspace.write();
@@ -990,9 +1010,10 @@ pub fn update_target_dependency_graph(
 pub fn import_tasks_from_workspace_settings(
     printer: &mut printer::Printer,
     workspace: workspace::WorkspaceArc,
+    needs_graph: NeedsGraph,
 ) -> anyhow::Result<()> {
     let mut state = get_state().write();
-    state.import_tasks_from_workspace_settings(printer, workspace)
+    state.import_tasks_from_workspace_settings(printer, workspace, needs_graph)
 }
 
 pub fn get_pretty_tasks() -> String {
