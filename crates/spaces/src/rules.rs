@@ -589,7 +589,7 @@ impl State {
             if self.graph.directed_graph.edge_count() == 0 {
                 rules_printer_logger(printer).debug("bin settings graph is empty - updating");
                 self.update_dependency_graph(printer, None, phase)
-                    .context(format_context!("Failed to updated dependency graph"))?;
+                    .context(format_context!("Failed to update dependency graph"))?;
 
                 self.update_tasks_digests(printer, workspace.clone())
                     .context(format_context!("updating digests"))?;
