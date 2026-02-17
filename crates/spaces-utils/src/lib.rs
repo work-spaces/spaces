@@ -1,3 +1,4 @@
+pub mod age;
 pub mod changes;
 pub mod ci;
 pub mod copy;
@@ -9,6 +10,7 @@ pub mod inputs;
 pub mod lock;
 pub mod logger;
 pub mod platform;
+pub mod rcache;
 pub mod rule;
 pub mod shell;
 pub mod store;

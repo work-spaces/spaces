@@ -20,10 +20,10 @@ fn logger(progress: &mut printer::MultiProgressBar) -> logger::Logger<'_> {
 
 pub fn get_checkout_store_path() -> Arc<str> {
     if let Ok(spaces_home) = std::env::var(SPACES_HOME_ENV_VAR) {
-        return format!("{spaces_home}/.spaces/store").into();
+        return format!("{spaces_home}/{}", store::SPACES_STORE).into();
     }
     if let Ok(Some(home_path)) = homedir::my_home() {
-        return format!("{}/.spaces/store", home_path.to_string_lossy()).into();
+        return format!("{}/{}", home_path.to_string_lossy(), store::SPACES_STORE).into();
     }
     panic!("Failed to get home directory");
 }
@@ -34,6 +34,10 @@ pub fn get_checkout_store_path_as_path() -> Arc<std::path::Path> {
 
 pub fn get_spaces_tools_path(store_path: &str) -> Arc<str> {
     format!("{store_path}/spaces_tools").into()
+}
+
+pub fn get_rcache_path(store_path: &str) -> Arc<str> {
+    format!("{store_path}/{}", store::SPACES_STORE_RCACHE).into()
 }
 
 pub fn get_spaces_tools_path_as_path(store_path: &std::path::Path) -> Arc<std::path::Path> {

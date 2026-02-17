@@ -10,6 +10,9 @@ pub const PRE_COMMIT_RULE_NAME: &str = "//:pre-commit";
 pub const CLEAN_RULE_NAME: &str = "//:clean";
 pub const ALL_RULE_NAME: &str = "//:all";
 
+// add pub enum Inputs with globs and envs
+// add outputs as globs (includes/excludes)
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum RuleType {
     Setup,

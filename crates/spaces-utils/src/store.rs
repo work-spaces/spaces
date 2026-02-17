@@ -1,4 +1,4 @@
-use crate::{ci, http_archive, logger};
+use crate::{age, ci, http_archive, logger};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use bytesize::ByteSize;
@@ -7,6 +7,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 const MANIFEST_FILE_NAME: &str = "store.spaces.json";
+pub const SPACES_STORE: &str = ".spaces/store";
+pub const SPACES_STORE_RCACHE: &str = "rcache";
 
 pub fn logger(printer: &mut printer::Printer) -> logger::Logger {
     logger::Logger::new_printer(printer, "store".into())
@@ -54,16 +56,9 @@ pub struct Entry {
 }
 
 impl Entry {
-    fn get_age(&self, now: u128) -> u128 {
-        (now - self.last_used) / (24 * 60 * 60 * 1000)
+    fn get_age(&self) -> u128 {
+        age::LastUsed::new(self.last_used).get_age()
     }
-}
-
-fn get_now() -> u128 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_millis())
-        .unwrap_or(0)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -150,7 +145,6 @@ impl Store {
         let group = ci::GithubLogGroup::new_group(printer, is_ci, "Spaces Store Info")?;
 
         let mut is_fix_needed = false;
-        let now = get_now();
 
         let mut entries: Vec<_> = self.entries.iter().collect();
 
@@ -159,7 +153,7 @@ impl Store {
             // largest to smallest
             SortBy::Size => entries.sort_by(|a, b| b.1.size.cmp(&a.1.size)),
             // oldest to newest
-            SortBy::Age => entries.sort_by(|a, b| b.1.get_age(now).cmp(&a.1.get_age(now))),
+            SortBy::Age => entries.sort_by(|a, b| b.1.get_age().cmp(&a.1.get_age())),
         }
 
         let mut total_size = 0;
@@ -180,7 +174,7 @@ impl Store {
             }
             total_size += value.size;
 
-            let age = value.get_age(now);
+            let age = value.get_age();
             logger(printer).info(format!("  Age: {age} days").as_str());
         }
         if is_fix_needed {
@@ -269,14 +263,13 @@ impl Store {
         is_ci: ci::IsCi,
     ) -> anyhow::Result<()> {
         let group = ci::GithubLogGroup::new_group(printer, is_ci, "Spaces Store Prune")?;
-        let now = get_now();
         let mut remove_entries = Vec::new();
         let path_to_store = self.path_to_store.clone();
 
         let mut total_size_removed = ByteSize(0);
         for (key, entry) in self.entries.iter() {
             let path = path_to_store.join(key.as_ref());
-            let entry_age = entry.get_age(now);
+            let entry_age = entry.get_age();
             if entry_age > age as u128 {
                 let bytesize = bytesize::ByteSize(entry.size);
                 total_size_removed += bytesize.as_u64();
