@@ -754,7 +754,7 @@ pub fn run_starlark_modules(
             .context(format_context!("failed to insert run all"))?;
 
         // after checkout, the dependencies need to be inserted for run rules
-        rules::update_depedency_graph(printer, Some(workspace.clone()), task::Phase::Inspect)
+        rules::update_depedency_graph(printer, Some(workspace.clone()), phase)
             .context(format_context!("Failed to update dependency graph"))?;
 
         rules::update_tasks_digests(printer, workspace.clone())
@@ -763,7 +763,11 @@ pub fn run_starlark_modules(
         run_target
     } else {
         star_logger(printer).message("workspace is clean");
-        rules::import_tasks_from_workspace_settings(printer, workspace.clone())
+        let needs_graph = match is_execute_tasks {
+            IsExecuteTasks::No => rules::NeedsGraph::No,
+            IsExecuteTasks::Yes => rules::NeedsGraph::Yes(phase),
+        };
+        rules::import_tasks_from_workspace_settings(printer, workspace.clone(), needs_graph)
             .context(format_context!("importing tasks"))?;
         star_logger(printer).trace(format!("tasks {}", rules::get_pretty_tasks()).as_str());
         None
