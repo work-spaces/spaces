@@ -86,6 +86,14 @@ impl CachedOutput {
                 path_in_workspace.display()
             ))?;
         }
+
+        if path_in_workspace.exists() {
+            std::fs::remove_file(path_in_workspace).context(format_context!(
+                "Failed to remove existing workspace entry {}",
+                path_in_workspace.display()
+            ))?;
+        }
+
         std::fs::hard_link(path_in_cache, path_in_workspace).with_context(|| {
             format_context!(
                 "Failed to restore artifact to workspace at {}",
