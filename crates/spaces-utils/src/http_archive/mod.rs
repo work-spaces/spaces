@@ -692,6 +692,11 @@ fn delete_ds_store(path_to_archive: &std::path::Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub fn get_archive_suffixes() -> &'static [&'static str] {
+    const SUFFIXES: &[&str] = &["zip", "gz", "tgz", "bz2", "7z", "xz"];
+    SUFFIXES
+}
+
 pub fn check_downloaded_archive(path_to_archive: &std::path::Path) -> anyhow::Result<()> {
     delete_ds_store(path_to_archive)?;
 
@@ -699,14 +704,11 @@ pub fn check_downloaded_archive(path_to_archive: &std::path::Path) -> anyhow::Re
         "Failed to read directory {path_to_archive:?}"
     ))?;
 
-    let suffixes = &[
-        std::ffi::OsStr::new("zip"),
-        std::ffi::OsStr::new("gz"),
-        std::ffi::OsStr::new("tgz"),
-        std::ffi::OsStr::new("bz2"),
-        std::ffi::OsStr::new("7z"),
-        std::ffi::OsStr::new("xz"),
-    ];
+    let suffixes: Vec<_> = get_archive_suffixes()
+        .iter()
+        .map(std::ffi::OsStr::new)
+        .collect();
+
     let is_compressed = path_to_archive
         .extension()
         .is_some_and(|suffix| suffixes.contains(&suffix));
