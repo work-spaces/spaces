@@ -692,7 +692,7 @@ fn delete_ds_store(path_to_archive: &std::path::Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn get_archive_suffixes() -> &'static [&'static str] {
+pub(crate) fn get_archive_suffixes() -> &'static [&'static str] {
     const SUFFIXES: &[&str] = &["zip", "gz", "tgz", "bz2", "7z", "xz"];
     SUFFIXES
 }
