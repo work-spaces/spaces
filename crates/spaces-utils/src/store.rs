@@ -188,6 +188,81 @@ impl Store {
         Ok(())
     }
 
+    fn remove_unlisted_entries(
+        &mut self,
+        printer: &mut printer::Printer,
+        is_dry_run: bool,
+    ) -> anyhow::Result<()> {
+        let path_to_store = self.path_to_store.clone();
+
+        let suffixes: Vec<_> = http_archive::get_archive_suffixes()
+            .iter()
+            .map(std::ffi::OsStr::new)
+            .collect();
+
+        let http_path = path_to_store.join("http");
+        let https_path = path_to_store.join("https");
+
+        let http_entries = walkdir::WalkDir::new(&http_path)
+            .into_iter()
+            .filter_map(|e| e.ok());
+
+        let https_entries = walkdir::WalkDir::new(&https_path)
+            .into_iter()
+            .filter_map(|e| e.ok());
+
+        let entries = http_entries.chain(https_entries).filter(|e| {
+            let path = e.path();
+            if path.is_dir() {
+                let extension = path.extension().unwrap_or_default();
+                suffixes.contains(&extension)
+            } else {
+                false
+            }
+        });
+
+        for entry in entries {
+            let entry_path = entry.path();
+            if let Ok(relative_path) = entry_path.strip_prefix(&path_to_store) {
+                if !self
+                    .entries
+                    .contains_key(relative_path.to_string_lossy().as_ref())
+                {
+                    let display = relative_path.display();
+                    if is_dry_run {
+                        logger(printer).info(
+                            format!("Unlisted Entry (not removing, dry run): {display}",).as_str(),
+                        );
+                    } else {
+                        logger(printer)
+                            .info(format!("Unlisted Entry (removing): {display}").as_str());
+
+                        if entry_path.starts_with(&path_to_store) {
+                            match std::fs::remove_dir_all(entry_path) {
+                                Ok(()) => {}
+                                Err(e) => {
+                                    logger(printer).error(
+                                        format!(
+                                            "Failed to remove {display}: {e} - remove manually"
+                                        )
+                                        .as_str(),
+                                    );
+                                }
+                            }
+                        } else {
+                            logger(printer).error(
+                                format!("Internal Error: can't remove {display} - not in store")
+                                    .as_str(),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn fix(
         &mut self,
         printer: &mut printer::Printer,
@@ -209,7 +284,7 @@ impl Store {
             let updated_size = get_size_of_path(path.as_path()).unwrap_or(0);
             if updated_size != value.size {
                 if !is_dry_run {
-                    let bytesize = bytesize::ByteSize(value.size);
+                    let bytesize = bytesize::ByteSize(updated_size);
                     logger(printer).info(format!(" Updated size {}", bytesize.display()).as_str());
                     value.size = updated_size;
                 } else {
@@ -252,6 +327,10 @@ impl Store {
                 }
             }
         }
+
+        self.remove_unlisted_entries(printer, is_dry_run)
+            .context(format_context!("While checking for unlisted entries"))?;
+
         group.end_group(printer, is_ci)?;
         Ok(())
     }
