@@ -189,7 +189,7 @@ impl Store {
     }
 
     fn remove_unlisted_entries(
-        &mut self,
+        &self,
         printer: &mut printer::Printer,
         is_dry_run: bool,
     ) -> anyhow::Result<()> {
@@ -226,7 +226,9 @@ impl Store {
             if let Ok(relative_path) = entry_path.strip_prefix(&path_to_store) {
                 if !self
                     .entries
-                    .contains_key(relative_path.to_string_lossy().as_ref())
+                    .keys()
+                    .map(|e| std::path::Path::new(e.as_ref()))
+                    .any(|e| e == relative_path)
                 {
                     let display = relative_path.display();
                     if is_dry_run {
