@@ -162,9 +162,16 @@ pub fn execute() -> anyhow::Result<()> {
         show_elapsed_time,
     );
 
-    execute_command(commands, effective_printer)?;
-
-    Ok(())
+    let result = execute_command(commands, effective_printer);
+    {
+        let deferred_warnings = utils::logger::get_deferred_warnings();
+        if !deferred_warnings.is_empty() {
+            for warning in deferred_warnings {
+                let _ = effective_printer.log(printer::Level::Warning, warning.as_ref());
+            }
+        }
+    }
+    result
 }
 
 fn execute_command(
@@ -554,14 +561,6 @@ fn execute_command(
             }
             runner::run_version_command_in_workspace(effective_printer, command)
                 .context(format_context!("Failed to run version command"))?
-        }
-    }
-    {
-        let deferred_warnings = utils::logger::get_deferred_warnings();
-        if !deferred_warnings.is_empty() {
-            for warning in deferred_warnings {
-                effective_printer.log(printer::Level::Warning, warning.as_ref())?;
-            }
         }
     }
     Ok(())
