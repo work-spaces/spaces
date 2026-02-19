@@ -1,3 +1,4 @@
+use crate::lock;
 use std::sync::Arc;
 
 enum Printer<'a> {
@@ -8,6 +9,27 @@ enum Printer<'a> {
 pub struct Logger<'a> {
     printer: Printer<'a>,
     label: Arc<str>,
+}
+
+static DEFERRED_WARNINGS: state::InitCell<lock::StateLock<Vec<Arc<str>>>> = state::InitCell::new();
+
+fn get_deferred_warnings_state() -> &'static lock::StateLock<Vec<Arc<str>>> {
+    if let Some(state) = DEFERRED_WARNINGS.try_get() {
+        return state;
+    }
+
+    DEFERRED_WARNINGS.set(lock::StateLock::new(Vec::new()));
+    DEFERRED_WARNINGS.get()
+}
+
+fn push_deferred_warning(warning: Arc<str>) {
+    let mut state = get_deferred_warnings_state().write();
+    state.push(warning);
+}
+
+pub fn get_deferred_warnings() -> Vec<Arc<str>> {
+    let state = get_deferred_warnings_state().read();
+    state.clone()
 }
 
 impl Logger<'_> {
@@ -42,7 +64,8 @@ impl Logger<'_> {
     }
 
     pub fn warning(&mut self, message: &str) {
-        self.log(printer::Level::Warning, message);
+        let deferred = format!("[{}] {message}", self.label);
+        push_deferred_warning(deferred.into());
     }
 
     pub fn error(&mut self, message: &str) {

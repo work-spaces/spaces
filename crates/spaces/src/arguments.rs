@@ -556,6 +556,14 @@ fn execute_command(
                 .context(format_context!("Failed to run version command"))?
         }
     }
+    {
+        let deferred_warnings = utils::logger::get_deferred_warnings();
+        if !deferred_warnings.is_empty() {
+            for warning in deferred_warnings {
+                effective_printer.log(printer::Level::Warning, warning.as_ref())?;
+            }
+        }
+    }
     Ok(())
 }
 
