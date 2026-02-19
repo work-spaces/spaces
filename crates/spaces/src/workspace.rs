@@ -4,7 +4,7 @@ use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use utils::{environment, lock, logger, store, ws};
+use utils::{age, environment, lock, logger, store, ws};
 
 pub const WORKFLOW_TOML_NAME: &str = "workflows.spaces.toml";
 pub const SHELL_TOML_NAME: &str = "shell.spaces.toml";
@@ -112,6 +112,27 @@ pub fn calculate_digest(modules: &[(Arc<str>, Arc<str>)]) -> Arc<str> {
     }
 
     hasher.finalize().to_string().into()
+}
+
+pub fn get_age(workspace_path: &std::path::Path) -> Option<age::LastUsed> {
+    let env_path = workspace_path.join(ENV_FILE_NAME);
+    let settings_path = workspace_path.join(ws::SETTINGS_FILE_NAME);
+    if let (Some(env_age), Some(settings_age)) = (
+        age::LastUsed::new_from_file(&env_path),
+        age::LastUsed::new_from_file(&settings_path),
+    ) {
+        let now = age::get_now();
+        let current_env_age = env_age.get_age(now);
+        let current_settings_age = settings_age.get_age(now);
+        // return the youngest of the two
+        Some(if current_env_age > current_settings_age {
+            settings_age
+        } else {
+            env_age
+        })
+    } else {
+        None
+    }
 }
 
 pub fn get_current_working_directory() -> anyhow::Result<Arc<str>> {

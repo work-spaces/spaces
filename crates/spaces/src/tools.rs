@@ -1,14 +1,23 @@
-use crate::builtins;
+use crate::{builtins, singleton, workspace};
 use anyhow::Context;
 use anyhow_source_location::format_context;
-use utils::{http_archive, logger, platform, ws};
+use utils::{ci, http_archive, logger, platform, ws};
 
-#[derive(Debug, clap::Subcommand, Clone)]
+#[derive(Debug, clap::Subcommand, Clone, strum::Display)]
 pub enum Command {
     /// Lists the available internal tools.
     List {},
     /// Install internal tools if they are not already installed.
     Install {},
+    /// Cleans up old workspaces in the current directory.
+    CleanupCheckouts {
+        /// Minimum age of workspaces to clean up.
+        #[arg(long)]
+        age: u16,
+        /// Dry run mode - do not deletecle.
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 const CARGO_BINSTALL_JSON: &str = include_str!("tools/cargo-binstall.json");
@@ -85,10 +94,19 @@ fn download_and_install(
 }
 
 pub fn handle_command(printer: &mut printer::Printer, command: Command) -> anyhow::Result<()> {
-    match command {
+    let is_ci = singleton::get_is_ci().into();
+
+    let group =
+        ci::GithubLogGroup::new_group(printer, is_ci, format!("Spaces Tools {command}").as_str())?;
+    let result = match command {
         Command::List {} => list_tools(printer),
         Command::Install {} => install_tools(printer, true),
-    }
+        Command::CleanupCheckouts { age, dry_run } => cleanup_checkouts(printer, age, dry_run),
+    };
+
+    group.end_group(printer, is_ci)?;
+
+    result
 }
 
 pub fn list_tools(printer: &mut printer::Printer) -> anyhow::Result<()> {
@@ -105,6 +123,50 @@ pub fn list_tools(printer: &mut printer::Printer) -> anyhow::Result<()> {
 
     for (name, _json) in TOOLS {
         tools_logger(printer).info(format!("- {name}").as_str());
+    }
+
+    Ok(())
+}
+
+fn cleanup_checkouts(
+    printer: &mut printer::Printer,
+    age: u16,
+    is_dry_run: bool,
+) -> anyhow::Result<()> {
+    // get dirs in current dir
+    tools_logger(printer).info("Scanning for workspaces");
+    let read_dir =
+        std::fs::read_dir(".").context(format_context!("Failed to read current directory"))?;
+
+    for entry in read_dir.filter_map(|e| match e {
+        Ok(entry) => {
+            if entry.path().is_dir() {
+                Some(entry)
+            } else {
+                None
+            }
+        }
+        Err(_) => None,
+    }) {
+        if let Some(entry_age) = workspace::get_age(&entry.path()) {
+            let current_age_in_days = entry_age.get_current_age();
+            if current_age_in_days > age as u128 {
+                tools_logger(printer).info(format!("{}:", entry.path().display(),).as_str());
+                tools_logger(printer)
+                    .info(format!("  - Age: {} days", entry_age.get_current_age()).as_str());
+                if is_dry_run {
+                    tools_logger(printer).info("  - Ready to remove (dry-run)");
+                } else {
+                    tools_logger(printer).info("  - Removing");
+                    /*
+                    std::fs::remove_dir_all(entry.path()).context(format_context!(
+                        "Failed to delete {}",
+                        entry.path().display()
+                    ))?;
+                    */
+                }
+            }
+        }
     }
 
     Ok(())
