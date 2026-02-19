@@ -82,6 +82,7 @@ impl Manager {
         let options = printer::ExecuteOptions {
             arguments: vec!["api".into(), "repos/work-spaces/spaces/releases".into()],
             is_return_stdout: true,
+            environment: vec![("GH_HOST".into(), "github.com".into())],
             ..Default::default()
         };
 
