@@ -157,17 +157,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         // extended with command line args
         let env_args = singleton::get_args_env();
-        env.vars.get_or_insert_default().extend(env_args);
 
-        // This checks for workspaces created with previous versions
-        // It brings in PATH and inherited variables to match
-        // the previous behavior
-        if !env.vars.as_ref().is_some_and(|e| e.contains_key("PATH")) {
-            let vars = env
-                .get_checkout_vars()
-                .context(format_context!("Failed to get environment variables"))?;
-            env.vars.get_or_insert_default().extend(vars);
-        }
+        let checkout_vars = env
+            .get_checkout_vars()
+            .context(format_context!("Failed to get environment variables"))?;
+
+        env.vars.get_or_insert_default().extend(checkout_vars);
+        env.vars.get_or_insert_default().extend(env_args);
 
         workspace.set_env(env);
 
