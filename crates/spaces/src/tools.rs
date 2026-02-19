@@ -158,12 +158,10 @@ fn cleanup_checkouts(
                     tools_logger(printer).info("  - Ready to remove (dry-run)");
                 } else {
                     tools_logger(printer).info("  - Removing");
-                    /*
                     std::fs::remove_dir_all(entry.path()).context(format_context!(
                         "Failed to delete {}",
                         entry.path().display()
                     ))?;
-                    */
                 }
             }
         }
