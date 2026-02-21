@@ -597,7 +597,7 @@ impl State {
         }
         {
             let mut workspace = workspace.write();
-            let env: environment::Environment =
+            let env: environment::AnyEnvironment =
                 serde_json::from_str(&workspace.settings.bin.env_json)
                     .context(format_context!("Failed to parse env"))?;
             workspace.set_env(env);
@@ -953,6 +953,11 @@ pub fn get_sanitized_working_directory(rule_name: Arc<str>) -> Arc<str> {
 pub fn insert_task(task: task::Task) -> anyhow::Result<()> {
     let state = get_state().read();
     state.insert_task(task)
+}
+
+pub fn get_latest_starlark_module() -> Option<Arc<str>> {
+    let state = get_state().read();
+    state.latest_starlark_module.clone()
 }
 
 pub fn set_latest_starlark_module(name: Arc<str>) {

@@ -1,11 +1,11 @@
-use crate::{singleton, workspace};
+use crate::{singleton, task, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use strum::Display;
-use utils::{lock, logger};
+use utils::{environment, lock, logger};
 
 #[derive(Debug, Clone, Default)]
 struct State {
@@ -71,9 +71,18 @@ impl Exec {
         let mut arguments = self.args.clone().unwrap_or_default();
         let workspace_env = workspace.read().get_env();
 
-        let mut environment_map = workspace_env
-            .get_run_vars()
-            .context(format_context!("Failed to get run env variables"))?;
+        let phase = singleton::get_execution_phase();
+
+        let mut exec_env_vars = if phase == task::Phase::Checkout {
+            environment::CheckoutEnvironment::try_from(&workspace_env)
+                .context(format_context!("Failed to get run env variables"))?
+                .vars
+        } else {
+            workspace_env
+                .get_run_environment()
+                .context(format_context!("Failed to get run env variables"))?
+                .vars
+        };
 
         let absolute_path_to_workspace = workspace.read().get_absolute_path();
         let (working_directory, pwd) = if let Some(directory) = self.working_directory.as_ref() {
@@ -90,16 +99,10 @@ impl Exec {
             (None, absolute_path_to_workspace.clone())
         };
 
-        environment_map.insert("PWD".into(), pwd);
+        exec_env_vars.insert("PWD".into(), pwd);
 
         for (key, value) in self.env.clone().unwrap_or_default() {
-            environment_map.insert(key, value);
-        }
-
-        // overwrite values passed on the command line
-        let args_env = singleton::get_args_env();
-        for (key, value) in args_env {
-            environment_map.insert(key, value);
+            exec_env_vars.insert(key, value);
         }
 
         let command_line_target = workspace.read().target.clone();
@@ -116,7 +119,7 @@ impl Exec {
             }
         }
 
-        let environment = environment_map.into_iter().collect::<Vec<_>>();
+        let environment = exec_env_vars.into_iter().collect::<Vec<_>>();
 
         let log_file_path = if singleton::get_is_logging_disabled() {
             None
