@@ -417,6 +417,14 @@ pub fn evaluate_starlark_modules(
                     .trace(format!("New Modules:{:?}", task_result.new_modules).as_str());
             }
 
+            {
+                let mut workspace_write = workspace.write();
+                workspace_write
+                    .env
+                    .repopulate()
+                    .context(format_context!("While populating required inherited vars"))?;
+            }
+
             let mut new_modules = Vec::new();
             for module in task_result.new_modules {
                 let path_to_module = format!("{workspace_path}/{module}");
@@ -614,55 +622,9 @@ pub fn execute_tasks(
             rules::execute(printer, workspace.clone(), task::Phase::PostCheckout)
                 .context(format_context!("failed to execute post checkout phase"))?;
 
-            // Add command line env values
-            let env_args = singleton::get_args_env();
-            {
-                let mut workspace_write = workspace.write();
-                for (key, value) in env_args {
-                    workspace_write
-                        .env
-                        .vars
-                        .get_or_insert_default()
-                        .insert(key, value);
-                }
-            }
-
-            // prepend PATH with sysroot/bin if sysroot/bin is not already in the PATH
-            let mut env = workspace.read().get_env();
-            let sysroot_bin: Arc<str> =
-                format!("{}/sysroot/bin", workspace.read().absolute_path).into();
-            if !env.paths.as_ref().is_some_and(|e| e.contains(&sysroot_bin)) {
-                env.paths.get_or_insert_default().insert(0, sysroot_bin);
-            }
-
-            // evaluate the available inherited variables
-            let vars = env
-                .get_checkout_vars()
-                .context(format_context!("Failed to get environment variables"))?;
-
-            env.vars.get_or_insert_default().extend(vars);
-            star_logger(printer).debug(format!("env vars: {:?}", env.vars).as_str());
-
-            if workspace.read().is_reproducible() {
-                env.vars.get_or_insert_default().insert(
-                    workspace::SPACES_ENV_WORKSPACE_DIGEST.into(),
-                    workspace.read().digest.clone(),
-                );
-            }
-
-            let absolute_path = workspace.read().get_absolute_path();
-            let workspace_path = std::path::Path::new(absolute_path.as_ref());
-            let env_path = workspace_path.join("env");
-            env.remove_secret_vars();
-            env.create_shell_env(env_path)
-                .context(format_context!("failed to finalize env"))?;
-
-            let env_str = serde_json::to_string_pretty(&env)?;
-
-            star_logger(printer).debug("saving workspace env");
             let read_workspace = workspace.read();
             read_workspace
-                .save_env_file(env_str.as_str())
+                .save_env_file()
                 .context(format_context!("Failed to save env file"))?;
 
             star_logger(printer).debug("saving JSON workspace settings");
@@ -742,8 +704,10 @@ pub fn run_starlark_modules(
     let run_target = if is_dirty || is_always_evaluate || phase == task::Phase::Checkout {
         if is_always_evaluate {
             star_logger(printer).message("always evaluate modules enabled");
-        } else {
+        } else if is_dirty {
             star_logger(printer).message("workspace is dirty");
+        } else {
+            star_logger(printer).message("always evaluate during checkout/sync");
         }
         evaluate_starlark_modules(printer, workspace.clone(), modules, phase)
             .context(format_context!("evaluating modules"))?;
@@ -772,11 +736,13 @@ pub fn run_starlark_modules(
         target.clone()
     };
 
-    let secrets = workspace
-        .read()
-        .env
-        .get_secrets()
-        .context(format_context!("While running checkout phase"))?;
+    let secrets = {
+        let read_workspace = workspace.read();
+        read_workspace
+            .env
+            .get_secret_values()
+            .context(format_context!("while getting secrets for checkout phase"))?
+    };
     printer.secrets = secrets;
 
     if is_execute_tasks == IsExecuteTasks::Yes {

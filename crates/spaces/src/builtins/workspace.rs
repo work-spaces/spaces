@@ -87,14 +87,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         if var_name == "PATH" {
             return Ok(true);
         }
-        let workspace_arc =
-            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+        let workspace_arc = singleton::get_workspace()
+            .context(format_error!("Internal error: no active workspace found"))?;
         let workspace = workspace_arc.read();
         let env = workspace.get_env();
-        Ok(env
-            .vars
-            .as_ref()
-            .is_some_and(|vars| vars.contains_key(var_name)))
+        Ok(env.is_env_var_set(var_name))
     }
 
     /// Returns the value of a workspace environment variable.
@@ -113,21 +110,30 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();
 
-        let env = workspace.get_env();
-        if var_name == "PATH" {
-            return Ok(env.get_path().to_string());
-        }
+        let env_result = workspace
+            .get_env()
+            .get_run_environment()
+            .context(format_context!("Failed to get ENV"));
 
-        if let Some(value) = env.vars.as_ref().and_then(|e| e.get(var_name)) {
-            return Ok(value.clone().to_string());
-        }
-
-        if singleton::is_lsp_mode() {
-            Ok("<not available to LSP>".to_string())
-        } else {
-            Err(format_error!(
-                "{var_name} is not set in the workspace environment"
-            ))
+        match env_result {
+            Ok(env) => {
+                if let Some(value) = env.vars.get(var_name) {
+                    Ok(value.clone().to_string())
+                } else if singleton::is_lsp_mode() {
+                    Ok("<not available to LSP>".to_string())
+                } else {
+                    Err(format_error!(
+                        "{var_name} is not set in the workspace environment"
+                    ))
+                }
+            }
+            Err(e) => {
+                if singleton::is_lsp_mode() {
+                    Ok("<not available to LSP>".to_string())
+                } else {
+                    Err(e)
+                }
+            }
         }
     }
 
@@ -151,21 +157,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let workspace_arc =
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
 
+        let any_env = environment::AnyEnvironment::try_from(env.to_json_value()?)
+            .context(format_context!("Failed to parse set_env arguments"))?;
+
         let mut workspace = workspace_arc.write();
-        let mut env: environment::Environment = serde_json::from_value(env.to_json_value()?)
-            .context(format_context!("Failed to parse archive arguments"))?;
-
-        // extended with command line args
-        let env_args = singleton::get_args_env();
-
-        let checkout_vars = env
-            .get_checkout_vars()
-            .context(format_context!("Failed to get environment variables"))?;
-
-        env.vars.get_or_insert_default().extend(checkout_vars);
-        env.vars.get_or_insert_default().extend(env_args);
-
-        workspace.set_env(env);
+        workspace
+            .update_env(any_env)
+            .context(format_context!("Failed to update workspace env"))?;
 
         Ok(NoneType)
     }

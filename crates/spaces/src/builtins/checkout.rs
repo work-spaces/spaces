@@ -724,11 +724,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for update env rule"))?;
 
-        // support JSON, yaml, and toml
-        let environment: environment::Environment = serde_json::from_value(env.to_json_value()?)
+        let mut any_env = environment::AnyEnvironment::try_from(env.to_json_value()?)
             .context(format_context!("Failed to parse update_env arguments"))?;
 
-        let update_env = executor::env::UpdateEnv { environment };
+        any_env.populate_source_for_all(rules::get_latest_starlark_module());
+
+        let update_env = executor::env::UpdateEnv {
+            environment: any_env,
+        };
 
         let rule_name = rule.name.clone();
         rules::insert_task(task::Task::new(

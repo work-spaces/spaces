@@ -7,7 +7,7 @@ use utils::{environment, logger};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UpdateEnv {
-    pub environment: environment::Environment,
+    pub environment: environment::AnyEnvironment,
 }
 
 impl UpdateEnv {

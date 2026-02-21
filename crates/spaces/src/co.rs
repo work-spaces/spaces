@@ -182,7 +182,10 @@ pub fn checkout_workflow(
         if let Some(file_name) = script_as_path.file_name() {
             let file_name = file_name.to_string_lossy();
             if file_name == "env" || file_name == workspace::ENV_FILE_NAME {
-                return Err(format_error!("`env.spaces.star` is a reserved script name",));
+                return Err(format_error!(
+                    "`{}` is a reserved script name",
+                    workspace::ENV_FILE_NAME
+                ));
             }
         }
     }
