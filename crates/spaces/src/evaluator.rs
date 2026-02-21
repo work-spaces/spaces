@@ -621,6 +621,11 @@ pub fn execute_tasks(
 
             rules::execute(printer, workspace.clone(), task::Phase::PostCheckout)
                 .context(format_context!("failed to execute post checkout phase"))?;
+            {
+                let mut workspace_write = workspace.write();
+                let env_json = serde_json::to_string_pretty(&workspace_write.env)?;
+                workspace_write.settings.bin.env_json = env_json.into();
+            }
 
             let read_workspace = workspace.read();
             read_workspace
