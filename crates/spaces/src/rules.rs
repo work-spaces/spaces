@@ -600,7 +600,7 @@ impl State {
             let env: environment::AnyEnvironment =
                 serde_json::from_str(&workspace.settings.bin.env_json)
                     .context(format_context!("Failed to parse env"))?;
-            workspace.set_env(env);
+            workspace.update_env(env)?;
         }
         Ok(())
     }
