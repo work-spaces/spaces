@@ -301,14 +301,31 @@ impl AnyEnvironment {
 
     pub fn insert_or_update(&mut self, any: Any) {
         if let Some(index) = self.vars.iter().position(|v| v.name == any.name) {
-            self.vars[index] = any;
+            if matches!(self.vars[index].value, Value::List(_)) {
+                self.vars.push(any);
+            } else {
+                self.vars[index] = any;
+            }
         } else {
             self.vars.push(any);
         }
     }
 
+    pub fn insert_assign_from_args(&mut self, args_env: &HashMap<Arc<str>, Arc<str>>) {
+        for (name, value) in args_env {
+            self.insert_or_update(Any {
+                name: name.clone(),
+                value: Value::AssignFromArg(value.clone()),
+                description: None,
+                source: Some("<command line argument>".into()),
+            });
+        }
+    }
+
     pub fn append(&mut self, other: Self) {
-        self.vars.extend(other.vars.iter().cloned());
+        for any in other.vars {
+            self.insert_or_update(any);
+        }
     }
 
     pub fn populate_source_for_all(&mut self, source: Option<Arc<str>>) {

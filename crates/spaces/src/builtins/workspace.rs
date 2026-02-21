@@ -184,7 +184,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] locks: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
         let locks = serde_json::from_value(locks.to_json_value()?)
-            .context(format_context!("Failed to parse archive arguments"))?;
+            .context(format_context!("Failed to parse set_locks arguments"))?;
 
         let workspace_arc = singleton::get_workspace()
             .context(format_error!("Internal Error: No active workspace found"))?;

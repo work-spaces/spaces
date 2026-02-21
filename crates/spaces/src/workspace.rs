@@ -638,16 +638,9 @@ impl Workspace {
 
         env.insert_or_update(get_spaces_env_reproducible(true));
         let args_env = singleton::get_args_env();
+        env.insert_assign_from_args(&args_env);
+
         if !args_env.is_empty() {
-            for (name, value) in args_env {
-                logger(&mut progress).debug(format!("Inserting ENV {name}={value}").as_str());
-                env.insert_or_update(environment::Any {
-                    name,
-                    value: environment::Value::AssignFromArg(value),
-                    description: None,
-                    source: Some("<command line argument>".into()),
-                });
-            }
             // scripts may read ENV variables
             // so they need to rerun if any are passed on the command line
             settings.bin.is_always_evaluate = true;
@@ -680,13 +673,13 @@ impl Workspace {
         })
     }
 
-    pub fn set_env(&mut self, env: environment::AnyEnvironment) {
-        self.env = env;
-        self.settings.bin.env_json = serde_json::to_string(&self.env).unwrap().into();
-    }
-
+    /// This is called by checkout rules to update the environment.
     pub fn update_env(&mut self, env: environment::AnyEnvironment) -> anyhow::Result<()> {
         self.env.append(env);
+
+        let args_env = singleton::get_args_env();
+        self.env.insert_assign_from_args(&args_env);
+
         Ok(())
     }
 
