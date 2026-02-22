@@ -134,7 +134,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let env_vars = workspace
             .get_env()
             .get_vars()
-            .context(format_context!("while workspace.get_env_var({var_name}"))?;
+            .context(format_context!("while workspace.get_env_var({var_name})"))?;
 
         if let Some(value) = env_vars.get(var_name) {
             Ok(value.clone().to_string())
