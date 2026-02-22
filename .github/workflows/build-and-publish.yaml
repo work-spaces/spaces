@@ -130,15 +130,11 @@ jobs:
   build-matrix-linux-aarch64:
     name: Build and Upload Linux aarch64
     needs: build-ubuntu
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-22.04-arm
     permissions:
       contents: write
       pull-requests: write
       repository-projects: write
-    strategy:
-      matrix:
-        os: [ubunut-latest]
-        arch: [aarch64]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
