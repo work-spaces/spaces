@@ -29,7 +29,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// ```python
     /// platform = info.get_platform_name()
     /// if "linux" in platform:
-    ///     print("Running on a Linux-based system")
+    ///     # ...
     /// ```
     ///
     /// # Returns
@@ -61,7 +61,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// ```python
     /// if info.is_ci():
-    ///     print("Running in CI mode.")
+    ///     # ...
     /// ```
     ///
     /// # Returns
@@ -75,7 +75,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// ```python
     /// phase = info.get_execution_phase()
     /// if phase == "Run":
-    ///     print("System is in the execution phase.")
+    ///     # ...
     /// ```
     ///
     /// # Returns
@@ -89,7 +89,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// ```python
     /// if info.is_platform_windows():
-    ///     print("Applying Windows-specific configurations...")
+    ///     # ...
     /// ```
     ///
     /// # Returns
@@ -102,7 +102,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// ```python
     /// if info.is_platform_macos():
-    ///     print("Setting up macOS-specific environment...")
+    ///     # ...
     /// ```
     ///
     /// # Returns
@@ -115,7 +115,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// ```python
     /// if info.is_platform_linux():
-    ///     print("Applying Linux-specific configurations...")
+    ///     # ...
     /// ```
     ///
     /// # Returns
@@ -128,7 +128,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// ```python
     /// if info.is_platform_x86_64():
-    ///     print("Running on x86_64 architecture")
+    ///     # ...
     /// ```
     ///
     /// # Returns
@@ -141,7 +141,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// ```python
     /// if info.is_platform_aarch64():
-    ///     print("Running on aarch64 architecture")
+    ///     # ...
     /// ```
     ///
     /// # Returns
@@ -166,7 +166,6 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// ```python
     /// num_cpus = info.get_cpu_count()
-    /// print(f"Available CPUs: {num_cpus}")
     /// ```
     ///
     /// # Returns
@@ -179,9 +178,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// ```python
     /// log_data = info.parse_log_file("outputs/build.log")
-    /// print(f"Target: {log_data['header']['target']}")
     /// for line in log_data['lines']:
-    ///     print(line)
+    ///     # ...
     /// ```
     ///
     /// # Arguments
@@ -245,7 +243,6 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// ```python
     /// store_path = info.get_path_to_store()
-    /// print(f"Store location: {store_path}")
     /// ```
     ///
     /// # Returns
@@ -261,7 +258,6 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// ```python
     /// tools_path = info.get_path_to_spaces_tools()
-    /// print(f"Tools location: {tools_path}")
     /// ```
     ///
     /// # Returns
@@ -277,7 +273,6 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// ```python
     /// divider = info.get_log_divider_string()
-    /// print(f"Header Finished\n{divider}")
     /// ```
     ///
     /// # Returns
@@ -337,7 +332,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// ```python
     /// is_compatible = info.check_required_semver("^2.1.0")
     /// if not is_compatible:
-    ///     print("Incompatible version")
+    ///     # ...
     /// ```
     ///
     /// # Arguments
