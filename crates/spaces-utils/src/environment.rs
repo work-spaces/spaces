@@ -434,6 +434,13 @@ impl AnyEnvironment {
                     inherit_value.value = env_value;
                 }
             }
+
+            if let Value::Script(script_value) = &mut any.value {
+                let env_value = script_value
+                    .get_value(&any.name)
+                    .context(format_context!("When getting script value"))?;
+                script_value.value = env_value;
+            }
         }
         Ok(())
     }
