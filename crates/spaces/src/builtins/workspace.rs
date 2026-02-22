@@ -108,9 +108,6 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `bool`: True if the variable exists and is equal to the expected value, False otherwise.
     fn is_env_var_set_to(var_name: &str, var_value: &str) -> anyhow::Result<bool> {
-        if var_name == "PATH" {
-            return Ok(true);
-        }
         let workspace_arc = singleton::get_workspace()
             .context(format_error!("Internal error: no active workspace found"))?;
         let workspace = workspace_arc.read();
