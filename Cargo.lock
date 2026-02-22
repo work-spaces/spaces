@@ -3142,6 +3142,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "serde_yaml",
  "sha256",
  "spaces-archiver",
  "spaces-printer",

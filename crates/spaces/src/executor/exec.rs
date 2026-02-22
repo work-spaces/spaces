@@ -1,11 +1,11 @@
-use crate::{singleton, task, workspace};
+use crate::{singleton, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use strum::Display;
-use utils::{environment, lock, logger};
+use utils::{lock, logger};
 
 #[derive(Debug, Clone, Default)]
 struct State {
@@ -71,18 +71,7 @@ impl Exec {
         let mut arguments = self.args.clone().unwrap_or_default();
         let workspace_env = workspace.read().get_env();
 
-        let phase = singleton::get_execution_phase();
-
-        let mut exec_env_vars = if phase == task::Phase::Checkout {
-            environment::CheckoutEnvironment::try_from(&workspace_env)
-                .context(format_context!("Failed to get run env variables"))?
-                .vars
-        } else {
-            workspace_env
-                .get_run_environment()
-                .context(format_context!("Failed to get run env variables"))?
-                .vars
-        };
+        let mut exec_env_vars = workspace_env.get_vars();
 
         let absolute_path_to_workspace = workspace.read().get_absolute_path();
         let (working_directory, pwd) = if let Some(directory) = self.working_directory.as_ref() {

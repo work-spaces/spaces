@@ -122,10 +122,13 @@ pub struct BinDetail {
     pub modified: Option<std::time::SystemTime>,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, strum::Display)]
 pub enum IsDirty {
     No,
-    Yes,
+    YesModuleChange,
+    YesModuleRemoved,
+    YesEnvJsonMissing,
+    YesTasksJsonMissing,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -181,7 +184,10 @@ impl BinSettings {
                     if content_hash.as_bytes() != &bin_detail.hash {
                         bin_detail.hash = content_hash.into();
                         bin_detail.modified = modified;
-                        result = IsDirty::Yes;
+                        if result == IsDirty::No {
+                            logger(progress).debug(format!("`{module_path}` is dirty").as_str());
+                        }
+                        result = IsDirty::YesModuleChange;
                         updated_modules.push(module_path.clone());
                     }
                 } else {
@@ -193,11 +199,14 @@ impl BinSettings {
 
         for module_path in remove_list {
             self.star_files.remove(&module_path);
-            result = IsDirty::Yes;
+            result = IsDirty::YesModuleRemoved;
         }
 
-        if self.env_json.is_empty() || self.tasks_json.is_empty() {
-            result = IsDirty::Yes;
+        if self.env_json.is_empty() {
+            result = IsDirty::YesEnvJsonMissing;
+        }
+        if self.tasks_json.is_empty() {
+            result = IsDirty::YesTasksJsonMissing;
         }
 
         Ok((updated_modules, result))

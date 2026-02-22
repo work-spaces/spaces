@@ -387,7 +387,7 @@ pub fn evaluate_starlark_modules(
                     content.to_string(),
                     WithRules::Yes,
                 )
-                .map_err(|e| format_error!("Failed to evaluate module {}", e))?;
+                .map_err(|e| format_error!("Failed to evaluate module {:?}", e))?;
                 Ok(())
             });
 
@@ -412,6 +412,7 @@ pub fn evaluate_starlark_modules(
 
             let task_result = rules::execute(printer, workspace.clone(), phase)
                 .context(format_context!("Failed to execute tasks"))?;
+
             if !task_result.new_modules.is_empty() {
                 star_logger(printer)
                     .trace(format!("New Modules:{:?}", task_result.new_modules).as_str());
@@ -421,7 +422,7 @@ pub fn evaluate_starlark_modules(
                 let mut workspace_write = workspace.write();
                 workspace_write
                     .env
-                    .repopulate()
+                    .repopulate_inherited_vars()
                     .context(format_context!("While populating required inherited vars"))?;
             }
 
@@ -513,6 +514,12 @@ pub fn execute_tasks(
             rules::update_target_dependency_graph(printer, run_target.clone()).context(
                 format_context!("Failed to update run target dependency graph for {target:?}"),
             )?;
+
+            {
+                // apply args_env to workspace
+                let args_env = singleton::get_args_env();
+                workspace.write().env.insert_assign_from_args(&args_env);
+            }
 
             star_logger(printer).message("--Run Phase--");
 
@@ -621,11 +628,6 @@ pub fn execute_tasks(
 
             rules::execute(printer, workspace.clone(), task::Phase::PostCheckout)
                 .context(format_context!("failed to execute post checkout phase"))?;
-            {
-                let mut workspace_write = workspace.write();
-                let env_json = serde_json::to_string_pretty(&workspace_write.env)?;
-                workspace_write.settings.bin.env_json = env_json.into();
-            }
 
             let read_workspace = workspace.read();
             read_workspace
@@ -636,7 +638,13 @@ pub fn execute_tasks(
             read_workspace
                 .settings
                 .save_json()
-                .context(format_context!("Failed to save settings"))?;
+                .context(format_context!("Failed to save json settings"))?;
+
+            star_logger(printer).debug("saving BIN workspace settings");
+            read_workspace
+                .settings
+                .save_bin()
+                .context(format_context!("Failed to save bin settings"))?;
 
             read_workspace
                 .finalize_store()

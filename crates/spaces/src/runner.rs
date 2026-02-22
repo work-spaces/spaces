@@ -245,11 +245,7 @@ pub fn run_shell_in_workspace(
     let shell_config = shell::Config::load(shell_config_path_option, path)
         .context(format_context!("while loading shell config"))?;
 
-    let run_environment = workspace_arc
-        .read()
-        .get_env()
-        .get_run_environment()
-        .context(format_context!("while getting run environment"))?;
+    let run_environment = workspace_arc.read().get_env().get_vars();
 
     const SHELL_DIR: &str = ".spaces/shell";
     std::fs::create_dir_all(SHELL_DIR).context(format_context!(
@@ -279,7 +275,7 @@ pub fn run_shell_in_workspace(
 
     shell::run(
         &shell_config,
-        &run_environment.vars,
+        &run_environment,
         std::path::Path::new(SHELL_DIR),
         completion_content,
         &working_directory,
