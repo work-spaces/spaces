@@ -453,7 +453,7 @@ fn run_starlark_modules_with_workspace(
                 None,
                 is_execute_tasks,
             )
-            .context(format_context!("while evaulating starlark modules"))?;
+            .context(format_context!("while evaluating starlark modules"))?;
 
             workspace
                 .read()
