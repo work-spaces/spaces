@@ -29,7 +29,7 @@ and importing developer preferences (such as a preference for a shell or IDE).
 - is_save: If enabled, the variable will be inherited during checkout and the value saved."#;
 
 const SCRIPT_VARIABLES_DESCRIPTION: &str = r#"`Script` variables are acquired by executing a small shell script. The stdout of the script is
-assigned to the variable during checkout. The script is executed in the workspace directory using the same environment `spaces` is executed in.
+assigned to the variable during checkout. The script is executed in the current working directory with a clean environment.
 
 `Script` variables include the following options:
 
