@@ -427,6 +427,7 @@ impl AnyEnvironment {
         result.push_str(markdown::code_block("yaml", &any_yaml).as_str());
 
         result.push('\n');
+        result.push_str(markdown::heading(2, "List Variables").as_str());
         result.push_str(markdown::paragraph(LIST_VARIABLES_DESCRIPTION).as_str());
 
         let any_yaml = self
@@ -493,8 +494,6 @@ pub struct Environment {
     pub run_inherited_vars: Option<Vec<Arc<str>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub secret_inherited_vars: Option<Vec<Arc<str>>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub any: Option<Vec<Any>>,
 }
 
 impl From<&Environment> for AnyEnvironment {
@@ -528,6 +527,11 @@ impl From<&Environment> for AnyEnvironment {
             }
         }
         if let Some(vars) = &env.secret_inherited_vars {
+            for item in vars {
+                any_env.vars.push(Any::new_secret_value(item.clone()));
+            }
+        }
+        if let Some(vars) = &env.run_inherited_vars {
             for item in vars {
                 any_env.vars.push(Any::new_secret_value(item.clone()));
             }
