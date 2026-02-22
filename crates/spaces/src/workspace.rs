@@ -122,9 +122,9 @@ pub fn calculate_digest(modules: &[(Arc<str>, Arc<str>)]) -> Arc<str> {
     // AND the arguments passed on the command line.
     // This is calculated at checkout.
 
-    let args_anv_as_json_string =
+    let args_env_as_json_string =
         serde_json::to_string(&singleton::get_args_env()).unwrap_or_default();
-    hasher.update(args_anv_as_json_string.as_bytes());
+    hasher.update(args_env_as_json_string.as_bytes());
     for (_, content) in modules {
         hasher.update(content.as_bytes());
     }
