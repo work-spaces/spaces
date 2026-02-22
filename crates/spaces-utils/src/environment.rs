@@ -79,7 +79,7 @@ pub struct InheritValue {
     /// The value of the inherited variable
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<Arc<str>>,
-    /// The value of the inherited variable
+    /// Default value to use if the variable cannot be inherited
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assign_as_default: Option<Arc<str>>,
     /// if true, an error will occur if the variable is not available.
