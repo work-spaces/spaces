@@ -34,6 +34,12 @@ pub enum IsExecuteTasks {
     Yes,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum IsSaveBin {
+    No,
+    Yes,
+}
+
 pub fn get_dialect() -> Dialect {
     Dialect {
         enable_top_level_stmt: true,
@@ -483,13 +489,13 @@ pub fn evaluate_starlark_modules(
     Ok(())
 }
 
-pub fn execute_tasks(
+fn execute_tasks(
     printer: &mut printer::Printer,
     workspace: workspace::WorkspaceArc,
     phase: task::Phase,
     target: Option<Arc<str>>,
     run_target: Option<Arc<str>>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<IsSaveBin> {
     let glob_warnings = singleton::get_glob_warnings();
     for warning in glob_warnings {
         star_logger(printer).warning(warning.as_ref());
@@ -689,19 +695,17 @@ pub fn execute_tasks(
             .context(format_context!("Failed to save checkout settings"))?;
     }
 
-    if workspace.read().is_bin_dirty || is_clean_or_checkout {
-        star_logger(printer).debug("saving BIN workspace settings");
+    let is_save_bin = if workspace.read().is_bin_dirty || is_clean_or_checkout {
         if is_clean_or_checkout {
             star_logger(printer).debug("cleaning workspace: forgetting inputs");
             workspace.write().settings.bin = ws::BinSettings::default();
         }
-        workspace
-            .read()
-            .save_bin(printer)
-            .context(format_context!("Failed to save bin settings"))?;
-    }
+        IsSaveBin::Yes
+    } else {
+        IsSaveBin::No
+    };
 
-    Ok(())
+    Ok(is_save_bin)
 }
 
 pub fn run_starlark_modules(
@@ -715,40 +719,41 @@ pub fn run_starlark_modules(
     let is_dirty = workspace.read().is_dirty;
     let is_always_evaluate = workspace.read().settings.bin.is_always_evaluate;
 
-    let run_target = if is_dirty || is_always_evaluate || phase == task::Phase::Checkout {
-        if is_always_evaluate {
-            star_logger(printer).message("always evaluate modules enabled");
-        } else if is_dirty {
-            star_logger(printer).message("workspace is dirty");
+    let (run_target, is_save_bin) =
+        if is_dirty || is_always_evaluate || phase == task::Phase::Checkout {
+            if is_always_evaluate {
+                star_logger(printer).message("always evaluate modules enabled");
+            } else if is_dirty {
+                star_logger(printer).message("workspace is dirty");
+            } else {
+                star_logger(printer).message("always evaluate during checkout/sync");
+            }
+            evaluate_starlark_modules(printer, workspace.clone(), modules, phase)
+                .context(format_context!("evaluating modules"))?;
+
+            star_logger(printer).message("Inserting //:setup, //:all, //:test, //:clean rules");
+            let run_target = insert_setup_and_all_rules(workspace.clone(), target.clone())
+                .context(format_context!("failed to insert run all"))?;
+
+            // after checkout, the dependencies need to be inserted for run rules
+            rules::update_depedency_graph(printer, Some(workspace.clone()), phase)
+                .context(format_context!("Failed to update dependency graph"))?;
+
+            rules::update_tasks_digests(printer, workspace.clone())
+                .context(format_context!("updating digests"))?;
+
+            (run_target, IsSaveBin::Yes)
         } else {
-            star_logger(printer).message("always evaluate during checkout/sync");
-        }
-        evaluate_starlark_modules(printer, workspace.clone(), modules, phase)
-            .context(format_context!("evaluating modules"))?;
-
-        star_logger(printer).message("Inserting //:setup, //:all, //:test, //:clean rules");
-        let run_target = insert_setup_and_all_rules(workspace.clone(), target.clone())
-            .context(format_context!("failed to insert run all"))?;
-
-        // after checkout, the dependencies need to be inserted for run rules
-        rules::update_depedency_graph(printer, Some(workspace.clone()), phase)
-            .context(format_context!("Failed to update dependency graph"))?;
-
-        rules::update_tasks_digests(printer, workspace.clone())
-            .context(format_context!("updating digests"))?;
-
-        run_target
-    } else {
-        star_logger(printer).message("workspace is clean");
-        let needs_graph = match is_execute_tasks {
-            IsExecuteTasks::No => rules::NeedsGraph::No,
-            IsExecuteTasks::Yes => rules::NeedsGraph::Yes(phase),
+            star_logger(printer).message("workspace is clean");
+            let needs_graph = match is_execute_tasks {
+                IsExecuteTasks::No => rules::NeedsGraph::No,
+                IsExecuteTasks::Yes => rules::NeedsGraph::Yes(phase),
+            };
+            rules::import_tasks_from_workspace_settings(printer, workspace.clone(), needs_graph)
+                .context(format_context!("importing tasks"))?;
+            star_logger(printer).trace(format!("tasks {}", rules::get_pretty_tasks()).as_str());
+            (target.clone(), IsSaveBin::No)
         };
-        rules::import_tasks_from_workspace_settings(printer, workspace.clone(), needs_graph)
-            .context(format_context!("importing tasks"))?;
-        star_logger(printer).trace(format!("tasks {}", rules::get_pretty_tasks()).as_str());
-        target.clone()
-    };
 
     let secrets = {
         let read_workspace = workspace.read();
@@ -759,10 +764,21 @@ pub fn run_starlark_modules(
     };
     printer.secrets = secrets;
 
-    if is_execute_tasks == IsExecuteTasks::Yes {
-        execute_tasks(printer, workspace, phase, target, run_target)
-            .context(format_context!("executing tasks"))?;
+    let is_save_bin = if is_execute_tasks == IsExecuteTasks::Yes {
+        execute_tasks(printer, workspace.clone(), phase, target, run_target)
+            .context(format_context!("executing tasks"))?
+    } else {
+        is_save_bin
+    };
+
+    if is_save_bin == IsSaveBin::Yes {
+        star_logger(printer).debug("saving BIN workspace settings");
+        workspace
+            .read()
+            .save_bin(printer)
+            .context(format_context!("Failed to save bin settings"))?;
     }
+
     Ok(())
 }
 

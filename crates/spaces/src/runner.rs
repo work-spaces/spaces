@@ -232,9 +232,6 @@ pub fn run_shell_in_workspace(
     .context(format_context!("while getting workspace"))?;
 
     let workspace_arc = workspace::WorkspaceArc::new(lock::StateLock::new(workspace));
-    evaluate_environment(printer, workspace_arc.clone())
-        .context(format_context!("while evaluating starlark env module"))?;
-
     let shell_config_path = std::path::Path::new(workspace::SHELL_TOML_NAME);
     let shell_config_path_option = if shell_config_path.exists() {
         Some(workspace::SHELL_TOML_NAME.into())
@@ -244,6 +241,24 @@ pub fn run_shell_in_workspace(
 
     let shell_config = shell::Config::load(shell_config_path_option, path)
         .context(format_context!("while loading shell config"))?;
+
+    let completion_content = if let Some((command, has_help)) = completions_command {
+        // rules are now available
+        let clap_shell = shell_config
+            .get_shell()
+            .context(format_context!("Shell does not support completions"))?;
+
+        let run_targets =
+            run_starlark_with_workspace_get_targets(printer, workspace_arc.clone(), has_help)
+                .context(format_context!("Failed to get targets"))?;
+
+        completions::generate_workspace_completions(&command, clap_shell, run_targets)
+            .context(format_context!("Failed to generate workspace completions"))?
+    } else {
+        evaluate_environment(printer, workspace_arc.clone())
+            .context(format_context!("while evaluating starlark env module"))?;
+        Vec::new()
+    };
 
     let run_environment = workspace_arc
         .read()
@@ -256,21 +271,6 @@ pub fn run_shell_in_workspace(
         "while creating shell directory `{}`",
         SHELL_DIR
     ))?;
-
-    let completion_content = if let Some((command, has_help)) = completions_command {
-        // rules are now available
-        let clap_shell = shell_config
-            .get_shell()
-            .context(format_context!("Shell does not support completions"))?;
-
-        let run_targets = run_starlark_get_targets(printer, has_help)
-            .context(format_context!("Failed to get targets"))?;
-
-        completions::generate_workspace_completions(&command, clap_shell, run_targets)
-            .context(format_context!("Failed to generate workspace completions"))?
-    } else {
-        Vec::new()
-    };
 
     let relative_directory = workspace_arc.read().relative_invoked_path.clone();
     let working_directory =
@@ -377,6 +377,24 @@ pub fn run_version_command_in_workspace(
     Ok(())
 }
 
+fn run_starlark_with_workspace_get_targets(
+    printer: &mut printer::Printer,
+    workspace: workspace::WorkspaceArc,
+    has_help: rules::HasHelp,
+) -> anyhow::Result<Vec<Arc<str>>> {
+    run_starlark_modules_with_workspace(
+        printer,
+        workspace,
+        task::Phase::Inspect,
+        RunWorkspace::Target(None, vec![]),
+        IsCreateLockFile::No,
+        IsExecuteTasks::No,
+    )
+    .context(format_context!("while executing run rules"))?;
+
+    rules::get_run_targets(has_help).context(format_context!("Failed to get run targets"))
+}
+
 pub fn run_starlark_get_targets(
     printer: &mut printer::Printer,
     has_help: rules::HasHelp,
@@ -393,6 +411,61 @@ pub fn run_starlark_get_targets(
     .context(format_context!("while executing run rules"))?;
 
     rules::get_run_targets(has_help).context(format_context!("Failed to get run targets"))
+}
+
+fn run_starlark_modules_with_workspace(
+    printer: &mut printer::Printer,
+    workspace: workspace::WorkspaceArc,
+    phase: task::Phase,
+    run_workspace: RunWorkspace,
+    is_create_lock_file: IsCreateLockFile,
+    is_execute_tasks: IsExecuteTasks,
+) -> anyhow::Result<()> {
+    match run_workspace {
+        RunWorkspace::Target(target, trailing_args) => {
+            workspace.write().trailing_args = trailing_args;
+            let target = target.map(|e| workspace.read().transform_target_path(e));
+            workspace.write().target = target.clone();
+            let modules = workspace.read().modules.clone();
+            evaluator::run_starlark_modules(
+                printer,
+                workspace.clone(),
+                modules,
+                phase,
+                target,
+                is_execute_tasks,
+            )
+            .context(format_context!("while executing workspace rules"))?
+        }
+        RunWorkspace::Script(scripts) => {
+            for (name, _) in scripts.iter() {
+                logger::Logger::new_printer(printer, name.clone()).debug("Digesting");
+            }
+
+            workspace.write().is_create_lock_file = is_create_lock_file.into();
+            workspace.write().digest = workspace::calculate_digest(&scripts);
+
+            evaluator::run_starlark_modules(
+                printer,
+                workspace.clone(),
+                scripts,
+                phase,
+                None,
+                is_execute_tasks,
+            )
+            .context(format_context!("while evaulating starlark modules"))?;
+
+            workspace
+                .read()
+                .save_lock_file()
+                .context(format_context!("Failed to save workspace lock file"))?;
+        }
+    }
+
+    workspace::RuleMetricsFile::update(workspace.clone())
+        .context(format_context!("Failed to update rule metrics file"))?;
+
+    Ok(())
 }
 
 pub fn run_starlark_modules_in_workspace(
@@ -420,49 +493,15 @@ pub fn run_starlark_modules_in_workspace(
 
     let workspace_arc = workspace::WorkspaceArc::new(lock::StateLock::new(workspace));
 
-    match run_workspace {
-        RunWorkspace::Target(target, trailing_args) => {
-            workspace_arc.write().trailing_args = trailing_args;
-            let target = target.map(|e| workspace_arc.read().transform_target_path(e));
-            workspace_arc.write().target = target.clone();
-            let modules = workspace_arc.read().modules.clone();
-            evaluator::run_starlark_modules(
-                printer,
-                workspace_arc.clone(),
-                modules,
-                phase,
-                target,
-                is_execute_tasks,
-            )
-            .context(format_context!("while executing workspace rules"))?
-        }
-        RunWorkspace::Script(scripts) => {
-            for (name, _) in scripts.iter() {
-                logger::Logger::new_printer(printer, name.clone()).debug("Digesting");
-            }
-
-            workspace_arc.write().is_create_lock_file = is_create_lock_file.into();
-            workspace_arc.write().digest = workspace::calculate_digest(&scripts);
-
-            evaluator::run_starlark_modules(
-                printer,
-                workspace_arc.clone(),
-                scripts,
-                phase,
-                None,
-                is_execute_tasks,
-            )
-            .context(format_context!("while evaulating starlark modules"))?;
-
-            workspace_arc
-                .read()
-                .save_lock_file()
-                .context(format_context!("Failed to save workspace lock file"))?;
-        }
-    }
-
-    workspace::RuleMetricsFile::update(workspace_arc.clone())
-        .context(format_context!("Failed to update rule metrics file"))?;
+    run_starlark_modules_with_workspace(
+        printer,
+        workspace_arc,
+        phase,
+        run_workspace,
+        is_create_lock_file,
+        is_execute_tasks,
+    )
+    .context(format_context!("while running with workspace"))?;
 
     Ok(())
 }
