@@ -126,3 +126,47 @@ jobs:
         run: |
           gh release upload ${{ github.ref_name }} \
             artifacts/spaces-macos-${{ matrix.arch }}-${{ github.ref_name }}.zip --clobber
+
+  build-matrix-linux-aarch64:
+    name: Build and Upload Linux aarch64
+    needs: build-ubuntu
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+      pull-requests: write
+      repository-projects: write
+    strategy:
+      matrix:
+        os: [ubunut-latest]
+        arch: [aarch64]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: aarch64-unknown-linux-musl
+          components: rustfmt, clippy
+
+      - name: Install musl tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: rustup add musl
+        run: rustup target add aarch64-unknown-linux-musl
+
+      - name: Build for Ubuntu
+        run: cargo build --target=aarch64-unknown-linux-musl --profile=release
+
+      - name: Create binary artifact
+        run: |
+          mkdir -p artifacts
+          (cd target/aarch64-unknown-linux-musl/release; zip ../../../artifacts/spaces-linux-aarch64-${{ github.ref_name }}.zip spaces)
+
+      - name: Upload binary to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ github.ref_name }} \
+            artifacts/spaces-linux-aarch64-${{ github.ref_name }}.zip --clobber
