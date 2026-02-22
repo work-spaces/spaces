@@ -1,5 +1,5 @@
 use anyhow::Context;
-use anyhow_source_location::format_context;
+use anyhow_source_location::{format_context, format_error};
 use printer::markdown;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -77,7 +77,11 @@ pub struct AppendPrependValue {
 #[serde(deny_unknown_fields)]
 pub struct InheritValue {
     /// The value of the inherited variable
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<Arc<str>>,
+    /// The value of the inherited variable
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assign_as_default: Option<Arc<str>>,
     /// if true, an error will occur if the variable is not available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_required: Option<EnvBool>,
@@ -87,6 +91,32 @@ pub struct InheritValue {
     /// if true, save the variable value at checkout
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_save_at_checkout: Option<EnvBool>,
+}
+
+impl InheritValue {
+    fn get_value(&self, name: &str) -> anyhow::Result<Option<Arc<str>>> {
+        if let Some(value) = self.value.clone() {
+            return Ok(Some(value));
+        }
+
+        let env_result = std::env::var(name);
+        match env_result {
+            Ok(env_value) => Ok(Some(env_value.into())),
+            Err(e) => {
+                if let (Some(EnvBool::Yes), None) =
+                    (self.is_required, self.assign_as_default.clone())
+                {
+                    Err(format_error!(
+                        "{name} is required to be inherited from calling env but is not available {e}",
+                    ))
+                } else if let Some(env_value) = self.assign_as_default.clone() {
+                    Ok(Some(env_value.clone()))
+                } else {
+                    Ok(None)
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -124,13 +154,6 @@ pub struct Any {
     /// Description of the environment variable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub help: Option<Arc<str>>,
-    /// Is secret. If true this will be redacted from logs.
-    /// Use with
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_secret: Option<bool>,
-    /// I
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_inherit_allowed: Option<bool>,
 }
 
 impl Any {
@@ -205,21 +228,6 @@ impl Any {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct ReproducibleEnvironment {
-    pub vars: HashMap<Arc<str>, Arc<str>>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct CheckoutEnvironment {
-    pub vars: HashMap<Arc<str>, Arc<str>>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct RunEnvironment {
-    pub vars: HashMap<Arc<str>, Arc<str>>,
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AnyEnvironment {
     pub vars: Vec<Any>,
@@ -244,13 +252,25 @@ impl AnyEnvironment {
     }
 
     pub fn is_env_var_set(&self, name: &str) -> bool {
-        self.vars.iter().any(|v| v.name.as_ref() == name)
+        let vars = self.get_vars().unwrap_or_default();
+        vars.contains_key(name)
+    }
+
+    pub fn is_env_var_set_to(&self, name: &str, value: &str) -> bool {
+        let vars = self.get_vars().unwrap_or_default();
+        if let Some(env_value) = vars.get(name) {
+            env_value.as_ref() == value
+        } else {
+            false
+        }
     }
 
     pub fn insert_or_update(&mut self, any: Any) {
         if let Some(index) = self.vars.iter().position(|v| v.name == any.name) {
             if matches!(self.vars[index].value, Value::Prepend(_))
                 || matches!(self.vars[index].value, Value::Append(_))
+                || matches!(self.vars[index].value, Value::AssignFromArg(_))
+                || matches!(any.value, Value::AssignFromArg(_))
             {
                 self.vars.push(any);
             } else {
@@ -278,6 +298,11 @@ impl AnyEnvironment {
         }
     }
 
+    pub fn retain_vars_from_args(&mut self) {
+        self.vars
+            .retain(|var| matches!(var.value, Value::AssignFromArg(_)));
+    }
+
     /// This can be called on an AnyEnvironment passed in from a checkout rule
     /// to apply the same source module to all variables.
     pub fn populate_source_for_all(&mut self, source: Option<Arc<str>>) {
@@ -292,8 +317,12 @@ impl AnyEnvironment {
         // environment
         for any in self.vars.iter_mut() {
             if let Value::Inherit(inherit_value) = &mut any.value {
-                if let Ok(value) = std::env::var(any.name.as_ref()) {
-                    inherit_value.value = Some(value.into());
+                let env_value = inherit_value
+                    .get_value(&any.name)
+                    .context(format_context!("When getting inherit value"))?;
+
+                if let Some(EnvBool::Yes) = inherit_value.is_save_at_checkout {
+                    inherit_value.value = env_value;
                 }
             }
         }
@@ -304,9 +333,10 @@ impl AnyEnvironment {
         let mut secret_map = HashMap::new();
         for any in self.vars.iter() {
             if let Value::Inherit(inherit_value) = &any.value {
-                if let (Some(EnvBool::Yes), Some(value)) =
-                    (inherit_value.is_secret, inherit_value.value.as_ref())
-                {
+                if let (Some(EnvBool::Yes), Some(value)) = (
+                    inherit_value.is_secret,
+                    inherit_value.get_value(any.name.as_ref()).ok().flatten(),
+                ) {
                     secret_map.insert(any.name.clone(), value.clone());
                 }
             }
@@ -324,7 +354,7 @@ impl AnyEnvironment {
         Ok(result)
     }
 
-    pub fn get_vars(&self) -> HashMap<Arc<str>, Arc<str>> {
+    pub fn get_vars(&self) -> anyhow::Result<HashMap<Arc<str>, Arc<str>>> {
         let mut result = HashMap::new();
         let mut assign_from_args = HashMap::new();
         for any in self.vars.iter() {
@@ -335,7 +365,11 @@ impl AnyEnvironment {
                     result.insert(name, assign_value.value.clone());
                 }
                 Value::Inherit(inherit_value) => {
-                    if let Some(value) = &inherit_value.value {
+                    let env_value = inherit_value
+                        .get_value(&name)
+                        .context(format_context!("while getting value for env {name}"))?;
+
+                    if let Some(value) = env_value {
                         result.insert(name, value.clone());
                     }
                 }
@@ -366,7 +400,7 @@ impl AnyEnvironment {
             result.insert(name, value);
         }
 
-        result
+        Ok(result)
     }
 
     fn to_yaml(&self, predicate: impl Fn(&Any) -> bool) -> anyhow::Result<String> {
@@ -421,12 +455,22 @@ impl AnyEnvironment {
         result.push_str(markdown::code_block("yaml", &any_yaml).as_str());
 
         result.push_str(markdown::heading(2, "Workspace Environment").as_str());
-        let vars = self.get_vars();
+        let vars = self
+            .get_vars()
+            .context(format_context!("while getting vars"))?;
         let mut shell_code = String::new();
         for (key, value) in vars {
             shell_code.push_str(&format!("{key}={value}\n"));
         }
         result.push_str(markdown::code_block("shell", &shell_code).as_str());
+
+        let secrets = self
+            .get_secret_values()
+            .context(format_context!("Failed to get secrets"))?;
+
+        for secret in secrets {
+            result = result.replace(secret.as_ref(), "REDACTED");
+        }
 
         Ok(result)
     }

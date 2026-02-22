@@ -293,30 +293,35 @@ impl AddSoftLink {
         let destination = format!("{}/{}", workspace, self.destination);
         let source = self.source.clone();
 
-        let desination_path = std::path::Path::new(&destination);
-        if let Some(parent) = desination_path.parent() {
+        let destination_path = std::path::Path::new(&destination);
+        if let Some(parent) = destination_path.parent() {
             std::fs::create_dir_all(parent).context(format_context!(
                 "Failed to create parent directories for soft link {}",
                 destination
             ))?;
         }
 
-        if desination_path.exists() {
-            std::fs::remove_file(destination.clone()).context(format_context!(
+        if destination_path.is_symlink() {
+            symlink::remove_symlink_auto(destination_path).context(format_context!(
                 "Failed to remove existing symlink {}",
+                destination
+            ))?;
+        } else if destination_path.exists() {
+            std::fs::remove_file(destination_path).context(format_context!(
+                "Failed to remove existing file {}",
                 destination
             ))?;
         }
 
         let source_path = std::path::Path::new(&source);
         if source_path.is_dir() {
-            symlink::symlink_dir(source.clone(), destination.clone()).context(format_context!(
+            symlink::symlink_dir(source_path, destination_path).context(format_context!(
                 "Failed to create soft link dir from {} to {}",
                 source,
                 destination
             ))?;
         } else {
-            symlink::symlink_file(source.clone(), destination.clone()).context(format_context!(
+            symlink::symlink_file(source_path, destination_path).context(format_context!(
                 "Failed to create soft link file from {} to {}",
                 source,
                 destination

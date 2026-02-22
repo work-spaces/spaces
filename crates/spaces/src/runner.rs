@@ -245,7 +245,11 @@ pub fn run_shell_in_workspace(
     let shell_config = shell::Config::load(shell_config_path_option, path)
         .context(format_context!("while loading shell config"))?;
 
-    let run_environment = workspace_arc.read().get_env().get_vars();
+    let run_environment = workspace_arc
+        .read()
+        .get_env()
+        .get_vars()
+        .context(format_context!("while getting env vars"))?;
 
     const SHELL_DIR: &str = ".spaces/shell";
     std::fs::create_dir_all(SHELL_DIR).context(format_context!(
@@ -415,6 +419,7 @@ pub fn run_starlark_modules_in_workspace(
     .context(format_context!("while getting workspace"))?;
 
     let workspace_arc = workspace::WorkspaceArc::new(lock::StateLock::new(workspace));
+
     match run_workspace {
         RunWorkspace::Target(target, trailing_args) => {
             workspace_arc.write().trailing_args = trailing_args;

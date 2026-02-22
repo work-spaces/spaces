@@ -48,7 +48,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// * `message`: Abort message to show the user.
     ///
     fn abort(message: &str) -> anyhow::Result<NoneType> {
-        Err(format_error!("Checkout Aborting: {}", message))
+        if singleton::is_lsp_mode() {
+            Ok(NoneType)
+        } else {
+            Err(format_error!("Checkout Aborting: {}", message))
+        }
     }
 
     /// Adds a target to organize dependencies.
@@ -594,11 +598,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// Adds a file to the workspace.
     ///
     /// ```python
-    /// content = """
-    /// # README
-    ///
-    /// This is how to use this workspace.
-    /// """
+    /// content = "Hello. This is the content"
     ///
     /// checkout.add_asset(
     ///     rule = {"name": "README.md"},
@@ -726,6 +726,60 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let mut any_env = environment::AnyEnvironment::try_from(env.to_json_value()?)
             .context(format_context!("Failed to parse update_env arguments"))?;
+
+        any_env.populate_source_for_all(rules::get_latest_starlark_module());
+
+        let update_env = executor::env::UpdateEnv {
+            environment: any_env,
+        };
+
+        let rule_name = rule.name.clone();
+        rules::insert_task(task::Task::new(
+            rule,
+            task::Phase::Checkout,
+            executor::Task::UpdateEnv(update_env),
+        ))
+        .context(format_context!("Failed to insert task {rule_name}"))?;
+
+        Ok(NoneType)
+    }
+
+    /// Creates or updates the environment in the workspace during checkout.
+    ///
+    /// ```python
+    /// checkout.update_env(
+    ///     rule = {"name": "update_env"},
+    ///     env = {
+    ///         "paths": [],
+    ///         "system_paths": ["/usr/bin", "/bin"],
+    ///         "vars": {
+    ///             "PS1": '"(spaces) $PS1"',
+    ///         },
+    ///         "inherited_vars": ["HOME", "SHELL", "USER"],
+    ///         "optional_inherited_vars": ["TERM"],
+    ///         "secret_inherited_vars": ["SSH_AUTH_SOCK"],
+    ///     },
+    /// )
+    /// ```
+    ///
+    /// # Arguments
+    /// * `rule`: A `dict` rule definition containing `name` (`str`), `deps` (`list`), `platforms` (`list`), `type` (`str`), and `help` (`str`).
+    /// * `env`: A `dict` containing environment details. Variables are execution-phase dependent; they are available in subsequent modules during checkout and fully available during `spaces run`.
+    ///     * `vars` (`dict`): Environment variables to set.
+    ///     * `paths` (`list`): Paths to prepend to `PATH`.
+    ///     * `system_paths` (`list`): Paths appended to the end of `PATH`.
+    ///     * `inherited_vars` (`list`): Variables fixed from the calling environment at checkout.
+    ///     * `secret_inherited_vars` (`list`): Variables inherited on demand with masked log values.
+    fn add_env_vars(
+        #[starlark(require = named)] rule: starlark::values::Value,
+        #[starlark(require = named)] any_env: starlark::values::Value,
+    ) -> anyhow::Result<NoneType> {
+        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+            .context(format_context!("bad options for update env rule"))?;
+
+        let mut any_env: environment::AnyEnvironment =
+            serde_json::from_value(any_env.to_json_value()?)
+                .context(format_context!("Failed to parse update_asset arguments"))?;
 
         any_env.populate_source_for_all(rules::get_latest_starlark_module());
 

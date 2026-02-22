@@ -14,7 +14,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// ```python
     /// if workspace.is_reproducible():
-    ///     print("Workspace is reproducible")
+    ///     # ...
     /// ```
     ///
     /// # Returns
@@ -75,7 +75,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// ```python
     /// if workspace.is_env_var_set("DEBUG_MODE"):
-    ///     print("Debug mode is enabled")
+    ///     # ...
     /// ```
     ///
     /// # Arguments
@@ -94,6 +94,30 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(env.is_env_var_set(var_name))
     }
 
+    /// Returns true if the workspace environment variable is set.
+    ///
+    /// ```python
+    /// if workspace.is_env_var_set_to("DEBUG_MODE", "ON"):
+    ///     # ...
+    /// ```
+    ///
+    /// # Arguments
+    /// * `var_name`: The name of the environment variable to check.
+    /// * `var_value`: The expected value of the environment variable.
+    ///
+    /// # Returns
+    /// * `bool`: True if the variable exists and is equal to the expected value, False otherwise.
+    fn is_env_var_set_to(var_name: &str, var_value: &str) -> anyhow::Result<bool> {
+        if var_name == "PATH" {
+            return Ok(true);
+        }
+        let workspace_arc = singleton::get_workspace()
+            .context(format_error!("Internal error: no active workspace found"))?;
+        let workspace = workspace_arc.read();
+        let env = workspace.get_env();
+        Ok(env.is_env_var_set_to(var_name, var_value))
+    }
+
     /// Returns the value of a workspace environment variable.
     ///
     /// ```python
@@ -110,7 +134,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();
 
-        let env_vars = workspace.get_env().get_vars();
+        let env_vars = workspace
+            .get_env()
+            .get_vars()
+            .context(format_context!("while workspace.get_env_var({var_name}"))?;
 
         if let Some(value) = env_vars.get(var_name) {
             Ok(value.clone().to_string())
@@ -247,7 +274,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///     "required": {"Revision": "a1b2c3d4e5f6"}
     /// }
     /// if workspace.is_path_to_member_available(member = member_req):
-    ///     print("Member is available in the workspace.")
+    ///     # ...
     /// ```
     ///
     /// # Arguments

@@ -32,7 +32,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Arguments
     /// * `message`: Abort message to show the user.
     fn abort(message: &str) -> anyhow::Result<NoneType> {
-        Err(format_error!("Run Aborting: {}", message))
+        if singleton::is_lsp_mode() {
+            Ok(NoneType)
+        } else {
+            Err(format_error!("Run Aborting: {}", message))
+        }
     }
 
     /// Adds a target that depends on other targets.
