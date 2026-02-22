@@ -441,13 +441,24 @@ impl AnyEnvironment {
     fn get_secrets(&self) -> anyhow::Result<HashMap<Arc<str>, Arc<str>>> {
         let mut secret_map = HashMap::new();
         for any in self.vars.iter() {
-            if let Value::Inherit(inherit_value) = &any.value {
-                if let (Some(EnvBool::Yes), Some(value)) = (
-                    inherit_value.is_secret,
-                    inherit_value.get_value(any.name.as_ref()).ok().flatten(),
-                ) {
-                    secret_map.insert(any.name.clone(), value.clone());
+            match &any.value {
+                Value::Inherit(inherit_value) => {
+                    if let (Some(EnvBool::Yes), Some(value)) = (
+                        inherit_value.is_secret,
+                        inherit_value.get_value(any.name.as_ref()).ok().flatten(),
+                    ) {
+                        secret_map.insert(any.name.clone(), value.clone());
+                    }
                 }
+                Value::Script(script_value) => {
+                    if let (Some(EnvBool::Yes), Some(value)) = (
+                        script_value.is_secret,
+                        script_value.get_value(any.name.as_ref()).ok().flatten(),
+                    ) {
+                        secret_map.insert(any.name.clone(), value.clone());
+                    }
+                }
+                _ => (),
             }
         }
         Ok(secret_map)
