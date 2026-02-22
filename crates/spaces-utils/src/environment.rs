@@ -13,7 +13,7 @@ may affect rule reproducibility. These values will be part of the rule digest un
 Values passed to the command line using `--env=<NAME>=<VALUE>` will override the values in the checkout rules."#;
 
 const LIST_VARIABLES_DESCRIPTION: &str = r#"`Prepend` and `Append` variables enable assigning multiple values to the same
-environment varible such as `PATH`."#;
+environment variable such as `PATH`."#;
 
 const INHERIT_VARIABLES_DESCRIPTION: &str = r#"`Inherit` variables are inherited from the calling environment.
 
