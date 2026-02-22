@@ -31,10 +31,10 @@ and importing developer preferences (such as a preference for a shell or IDE).
 const SCRIPT_VARIABLES_DESCRIPTION: &str = r#"`Script` variables are acquired by executing a small shell script. The stdout of the script is
 assigned to the variable during checkout. The script is executed in the workspace directory using the same environment `spaces` is executed in.
 
-`Script` variables include the following option:
+`Script` variables include the following options:
 
 - default_value: Optional default value that is assigned if the script fails
-- shell: Optional shell to use. Default is `/bin/sh
+- shell: Optional shell to use. Default is `/bin/sh`
 - env: Map of environment variables to set in the script's environment. No other variables will be available.
 - is_required: If enabled, spaces will fail during evaluation if the variable is not provided by the caller's environment.
 - is_secret: If enabled, the value will be redacted in the logs."#;
