@@ -779,7 +779,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let mut any_env: environment::AnyEnvironment =
             serde_json::from_value(any_env.to_json_value()?)
-                .context(format_context!("Failed to parse update_asset arguments"))?;
+                .context(format_context!("Failed to parse add_env_vars arguments"))?;
 
         any_env.populate_source_for_all(rules::get_latest_starlark_module());
 
