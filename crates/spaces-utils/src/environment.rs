@@ -21,12 +21,23 @@ The values of `Inherit` variables are not considered part of the workspace diges
 the reproducibility of the rules. The best use cases are for getting authorization secrets into the workspace
 and importing developer preferences (such as a preference for a shell or IDE).
 
-`Inherit` variables include the following option:
+`Inherit` variables include the following options:
 
 - default_value: Optional default value that is assigned if the value cannot be inherited
 - is_required: If enabled, spaces will fail during evaluation if the variable is not provided by the caller's environment.
 - is_secret: If enabled, the value will be redacted in the logs.
 - is_save: If enabled, the variable will be inherited during checkout and the value saved."#;
+
+const SCRIPT_VARIABLES_DESCRIPTION: &str = r#"`Script` variables are acquired by executing a small shell script. The stdout of the script is
+assigned to the variable during checkout. The script is executed in the workspace directory using the same environment `spaces` is executed in.
+
+`Script` variables include the following option:
+
+- default_value: Optional default value that is assigned if the script fails
+- shell: Optional shell to use. Default is `/bin/sh
+- env: Map of environment variables to set in the script's environment. No other variables will be available.
+- is_required: If enabled, spaces will fail during evaluation if the variable is not provided by the caller's environment.
+- is_secret: If enabled, the value will be redacted in the logs."#;
 
 const ASSIGN_FROM_COMMAND_LINE_DESCRIPTION: &str = r#"`AssignFromArg` variables are assigned by using the `--env=NAME=VALUE` option
 during checkout and run time.
@@ -121,6 +132,101 @@ impl InheritValue {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
+pub struct ScriptValue {
+    /// The script to evaluate to get the value of the variable.
+    pub script: Arc<str>,
+    /// Environment variables to pass to script evaluation (no other variables will be passed)
+    pub env: HashMap<Arc<str>, Arc<str>>,
+    /// The value of the script variable populated using the script
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<Arc<str>>,
+    /// The shell to use to evaluate the script. The default is /bin/sh
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shell: Option<Arc<str>>,
+    /// Default value to use if the variable cannot be inherited
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assign_as_default: Option<Arc<str>>,
+    /// if true, an error will occur if the variable is not available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_required: Option<EnvBool>,
+    /// if true, redact the value in the logs
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_secret: Option<EnvBool>,
+}
+
+impl ScriptValue {
+    fn get_value(&self, name: &str) -> anyhow::Result<Option<Arc<str>>> {
+        if let Some(value) = self.value.clone() {
+            return Ok(Some(value));
+        }
+
+        let command = self.shell.clone().unwrap_or_else(|| Arc::from("/bin/sh"));
+
+        let mut script_builder = std::process::Command::new(command.as_ref());
+        script_builder
+            .env_clear()
+            .arg("-c")
+            .arg(self.script.as_ref());
+
+        for (key, value) in self.env.iter() {
+            script_builder.env(key.as_ref(), value.as_ref());
+        }
+
+        let script_result = script_builder.output();
+
+        match script_result {
+            Ok(output) if output.status.success() => {
+                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if stdout.is_empty() {
+                    if let (Some(EnvBool::Yes), None) =
+                        (self.is_required, self.assign_as_default.clone())
+                    {
+                        Err(format_error!(
+                            "{name} script produced no output and is required",
+                        ))
+                    } else if let Some(default_value) = self.assign_as_default.clone() {
+                        Ok(Some(default_value))
+                    } else {
+                        Ok(None)
+                    }
+                } else {
+                    Ok(Some(stdout.into()))
+                }
+            }
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                if let (Some(EnvBool::Yes), None) =
+                    (self.is_required, self.assign_as_default.clone())
+                {
+                    Err(format_error!(
+                        "{name} script failed with status {} and is required: {stderr}",
+                        output.status,
+                    ))
+                } else if let Some(default_value) = self.assign_as_default.clone() {
+                    Ok(Some(default_value))
+                } else {
+                    Ok(None)
+                }
+            }
+            Err(e) => {
+                if let (Some(EnvBool::Yes), None) =
+                    (self.is_required, self.assign_as_default.clone())
+                {
+                    Err(format_error!(
+                        "{name} script failed to execute and is required: {e}",
+                    ))
+                } else if let Some(default_value) = self.assign_as_default.clone() {
+                    Ok(Some(default_value))
+                } else {
+                    Ok(None)
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub enum Value {
     #[default]
     None,
@@ -135,6 +241,9 @@ pub enum Value {
     /// Inherit from the calling environment at checkout
     /// Must not affect reproducibility.
     Inherit(InheritValue),
+    /// Execute a script in the calling environment.
+    /// Must not affect reproducibility.
+    Script(ScriptValue),
     /// Inherit at both checkout/run time, if available, and redact
     /// Must not affect reproducibility.
     AssignFromArg(Arc<str>),
@@ -373,6 +482,15 @@ impl AnyEnvironment {
                         result.insert(name, value.clone());
                     }
                 }
+                Value::Script(script_value) => {
+                    let env_value = script_value
+                        .get_value(&name)
+                        .context(format_context!("while getting value for env {name}"))?;
+
+                    if let Some(value) = env_value {
+                        result.insert(name, value.clone());
+                    }
+                }
                 Value::Prepend(AppendPrependValue { value, separator }) => {
                     if let Some(entry) = result.get_mut(&name) {
                         let prepended = format!("{value}{separator}{entry}");
@@ -444,6 +562,15 @@ impl AnyEnvironment {
         let any_yaml = self
             .to_yaml(|any| matches!(any.value, Value::Inherit(_)))
             .context(format_context!("failed to create yaml for list value"))?;
+        result.push_str(markdown::code_block("yaml", &any_yaml).as_str());
+
+        result.push('\n');
+        result.push_str(markdown::heading(2, "Script Variables").as_str());
+        result.push_str(markdown::paragraph(SCRIPT_VARIABLES_DESCRIPTION).as_str());
+
+        let any_yaml = self
+            .to_yaml(|any| matches!(any.value, Value::Script(_)))
+            .context(format_context!("failed to create yaml for script value"))?;
         result.push_str(markdown::code_block("yaml", &any_yaml).as_str());
 
         result.push('\n');
