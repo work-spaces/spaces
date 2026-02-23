@@ -229,7 +229,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let cargo_bin: CargoBin = serde_json::from_value(cargo_bin.to_json_value()?)
             .context(format_context!("bad options for cargo_bin"))?;
 
-        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+        let mut rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for cargo_bin rule"))?;
 
         let workspace_arc =
@@ -267,32 +267,50 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             timeout: None,
         };
 
-        let rule_name = rule.name.clone();
+        let original_rule_name = rule.name.clone();
+        let cargo_bin_rule_name: Arc<str> = format!("{original_rule_name}_cargo_bin").into();
+        let mut cargo_bin_rule = rule.clone();
+        cargo_bin_rule.name = cargo_bin_rule_name.clone();
         rules::insert_task(task::Task::new(
-            rule,
+            cargo_bin_rule,
             task::Phase::Checkout,
             executor::Task::Exec(exec),
         ))
-        .context(format_context!("Failed to insert task {rule_name}"))?;
+        .context(format_context!(
+            "Failed to insert task {cargo_bin_rule_name}"
+        ))?;
 
+        let mut deps = Vec::new();
         for bin in cargo_bin.bins {
             let mut bin_rule = hard_link_rule.clone();
-            bin_rule.name = format!("{}/{}", hard_link_rule.name, bin).into();
+            let bin_rule_name: Arc<str> = format!("{original_rule_name}_hard_link_{bin}").into();
+            bin_rule.name = bin_rule_name.clone();
+            bin_rule.deps = Some(vec![cargo_bin_rule_name.clone()]);
+            deps.push(bin_rule.name.clone());
 
             // cargo install uses the root/bin install directory
             let output_file = format!("{output_directory}/bin/{bin}");
 
-            let rule_name = hard_link_rule.name.clone();
             rules::insert_task(task::Task::new(
                 bin_rule,
-                task::Phase::PostCheckout,
+                task::Phase::Checkout,
                 executor::Task::AddHardLink(asset::AddHardLink {
                     source: output_file,
                     destination: format!("sysroot/bin/{bin}"),
                 }),
             ))
-            .context(format_context!("Failed to insert task {rule_name}"))?;
+            .context(format_context!("Failed to insert task {bin_rule_name}"))?;
         }
+
+        // add original rule name as a target with hardlink deps
+        let rule_name = rule.name.clone();
+        rule.deps = Some(deps);
+        rules::insert_task(task::Task::new(
+            rule,
+            task::Phase::Checkout,
+            executor::Task::Target,
+        ))
+        .context(format_context!("Failed to insert final target {rule_name}",))?;
 
         Ok(NoneType)
     }
@@ -683,7 +701,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let rule_name = rule.name.clone();
         rules::insert_task(task::Task::new(
             rule,
-            task::Phase::PostCheckout,
+            task::Phase::Checkout,
             executor::Task::UpdateAsset(update_asset),
         ))
         .context(format_context!("Failed to insert task {rule_name}"))?;

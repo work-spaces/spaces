@@ -570,8 +570,6 @@ fn execute_tasks(
 
             rules::debug_sorted_tasks(printer, task::Phase::Checkout)
                 .context(format_context!("Failed to debug sorted tasks"))?;
-            rules::debug_sorted_tasks(printer, task::Phase::PostCheckout)
-                .context(format_context!("Failed to debug sorted tasks"))?;
             rules::debug_sorted_tasks(printer, task::Phase::Run)
                 .context(format_context!("Failed to debug sorted tasks"))?;
 
@@ -629,12 +627,6 @@ fn execute_tasks(
                     );
                 }
             }
-
-            rules::debug_sorted_tasks(printer, task::Phase::PostCheckout)
-                .context(format_context!("Failed to debug sorted tasks"))?;
-
-            rules::execute(printer, workspace.clone(), task::Phase::PostCheckout)
-                .context(format_context!("failed to execute post checkout phase"))?;
 
             let read_workspace = workspace.read();
             read_workspace

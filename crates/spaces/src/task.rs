@@ -7,7 +7,6 @@ use utils::rule;
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, ValueEnum, strum::Display)]
 pub enum Phase {
     Checkout,
-    PostCheckout,
     Run,
     Inspect,
     Complete,

@@ -57,6 +57,9 @@ impl UpdateAsset {
         use json_value_merge::Merge;
 
         let mut logger = logger::Logger::new_progress(&mut progress, name.into());
+
+        // the workspace write lock needs to be held for the duration of the update
+        // to prevent concurrent updates to the same asset
         let mut workspace_write_lock = workspace.write();
         let _ = workspace_write_lock
             .settings
