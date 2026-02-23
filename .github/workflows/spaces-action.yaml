@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - uses: work-spaces/spaces-checkout-run@eea6f750b11d102cd9ba613b78034d8d47a076bf
+      - uses: work-spaces/spaces-checkout-run@2b551e5712c82630d92927ea9b2b4b3ea4c56eca
         with:
-          checkout: --url=https://github.com/work-spaces/spaces --rev=${{ github.head_sha }}
+          checkout: --url=https://github.com/work-spaces/spaces --rev=${{ github.sha }}
           run: //spaces:check
