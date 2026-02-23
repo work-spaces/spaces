@@ -15,7 +15,7 @@ checkout.add_repo(
     rule = {"name": "@star/sdk"},
     repo = {
         "url": "https://github.com/work-spaces/sdk",
-        "rev": "v0.3.24",
+        "rev": "003468f12970da0fbb1e6e41ddbadb31815d27b9",
         "checkout": "Revision",
         "clone": "Default",
     },
