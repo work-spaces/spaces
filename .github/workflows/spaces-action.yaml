@@ -13,5 +13,5 @@ jobs:
     steps:
       - uses: work-spaces/spaces-checkout-run@2b551e5712c82630d92927ea9b2b4b3ea4c56eca
         with:
-          checkout: --url=https://github.com/work-spaces/spaces --rev=${{ github.sha }}
+          checkout: --url=https://github.com/work-spaces/spaces --rev=${{ github.head_ref }}
           run: //spaces:check
