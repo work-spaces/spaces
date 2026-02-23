@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - uses: work-spaces/spaces-checkout-run@2b551e5712c82630d92927ea9b2b4b3ea4c56eca
+      - uses: work-spaces/spaces-checkout-run@v0.1.0
         with:
           checkout: --url=https://github.com/work-spaces/spaces --rev=${{ github.head_ref }}
           run: //spaces:check_rust_clippy
