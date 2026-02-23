@@ -127,7 +127,7 @@ jobs:
           gh release upload ${{ github.ref_name }} \
             artifacts/spaces-macos-${{ matrix.arch }}-${{ github.ref_name }}.zip --clobber
 
-  build-matrix-linux-aarch64:
+  build-linux-aarch64:
     name: Build and Upload Linux aarch64
     needs: build-ubuntu
     runs-on: ubuntu-22.04-arm
