@@ -1,0 +1,17 @@
+name: Spaces Action
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: work-spaces/spaces-checkout-run@aea3a079518630299bfc788036c14d86b0f7c3ef
+        with:
+          checkout: --url=https://github.com/work-spaces/spaces --rev=${{ github.ref }}
+          run: //spaces:check
