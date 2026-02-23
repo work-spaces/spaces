@@ -7,7 +7,6 @@ load(
     "//@star/sdk/star/run.star",
     "run_add_exec",
     "run_add_exec_test",
-    "run_add_target",
 )
 load("//@star/sdk/star/shell.star", "shell")
 load(
@@ -101,4 +100,27 @@ shell(
     "install_dev_lsp",
     script = "cargo install --features=lsp-debug --force --path=spaces/crates/spaces --profile=dev --root={}".format(root),
     visibility = visibility_private(),
+)
+
+run_add_exec(
+    "check_starlark",
+    command = "buildifier",
+    args = ["-lint=warn", "-mode=check", "spaces.star"],
+    visibility = visibility_private(),
+    working_directory = ".",
+)
+
+run_add_exec(
+    "check_rust_fmt",
+    command = "cargo",
+    args = ["fmt", "--check"],
+    visibility = visibility_private(),
+)
+
+run_add_exec(
+    "check_rust_clippy",
+    command = "cargo",
+    args = ["clippy"],
+    visibility = visibility_private(),
+    deps = [":check_rust_fmt", ":check_starlark"],
 )
