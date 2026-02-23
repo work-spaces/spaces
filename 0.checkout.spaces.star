@@ -25,7 +25,7 @@ checkout.add_repo(
     rule = {"name": "@star/packages"},
     repo = {
         "url": "https://github.com/work-spaces/packages",
-        "rev": "v0.2.38",
+        "rev": "a020adf035c6ef2533e649a14182e7b2cba44fea",
         "checkout": "Revision",
         "clone": "Default",
     },
