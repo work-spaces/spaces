@@ -280,7 +280,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             "Failed to insert task {cargo_bin_rule_name}"
         ))?;
 
-        let mut deps = Vec::new();
+        let mut deps = vec![cargo_bin_rule_name.clone()];
         for bin in cargo_bin.bins {
             let mut bin_rule = hard_link_rule.clone();
             let bin_rule_name: Arc<str> = format!("{original_rule_name}_hard_link_{bin}").into();
