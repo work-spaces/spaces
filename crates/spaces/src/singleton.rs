@@ -1,5 +1,6 @@
 use crate::{task, workspace};
-use anyhow_source_location::format_error;
+use anyhow::Context;
+use anyhow_source_location::{format_context, format_error};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use utils::lock;
@@ -26,6 +27,14 @@ struct State {
 }
 
 static STATE: state::InitCell<lock::StateLock<State>> = state::InitCell::new();
+
+pub fn get_spaces_version() -> anyhow::Result<semver::Version> {
+    let current_version = env!("CARGO_PKG_VERSION");
+    let version = current_version
+        .parse::<semver::Version>()
+        .context(format_context!("Internal error: bad version for spaces"))?;
+    Ok(version)
+}
 
 fn get_state() -> &'static lock::StateLock<State> {
     if let Some(state) = STATE.try_get() {

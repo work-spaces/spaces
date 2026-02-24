@@ -14,8 +14,8 @@ pub enum IsCreateLockFile {
     Yes,
 }
 impl From<IsCreateLockFile> for bool {
-    fn from(is_create_lock_file: IsCreateLockFile) -> bool {
-        match is_create_lock_file {
+    fn from(value: IsCreateLockFile) -> bool {
+        match value {
             IsCreateLockFile::No => false,
             IsCreateLockFile::Yes => true,
         }
@@ -492,7 +492,6 @@ pub fn run_starlark_modules_in_workspace(
     .context(format_context!("while getting workspace"))?;
 
     let workspace_arc = workspace::WorkspaceArc::new(lock::StateLock::new(workspace));
-
     run_starlark_modules_with_workspace(
         printer,
         workspace_arc,
