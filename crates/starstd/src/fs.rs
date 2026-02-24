@@ -2,8 +2,8 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use starlark::environment::GlobalsBuilder;
 use starlark::eval::Evaluator;
-use starlark::values::none::NoneType;
 use starlark::values::Value;
+use starlark::values::none::NoneType;
 
 // This defines the function that is visible to Starlark
 #[starlark_module]

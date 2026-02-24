@@ -3,8 +3,8 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use starlark::environment::GlobalsBuilder;
 use starlark::eval::Evaluator;
-use starlark::values::none::NoneType;
 use starlark::values::Value;
+use starlark::values::none::NoneType;
 use std::collections::HashMap;
 use utils::{environment, ws};
 

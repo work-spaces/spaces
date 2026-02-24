@@ -1,7 +1,7 @@
 use starlark::environment::GlobalsBuilder;
 use starlark::eval::Evaluator;
-use starlark::values::none::NoneType;
 use starlark::values::Value;
+use starlark::values::none::NoneType;
 use std::collections::HashMap;
 use std::sync::RwLock;
 
