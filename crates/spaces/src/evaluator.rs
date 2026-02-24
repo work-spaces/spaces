@@ -43,7 +43,6 @@ enum IsSaveBin {
 pub fn get_dialect() -> Dialect {
     Dialect {
         enable_top_level_stmt: true,
-        enable_f_strings: true,
         ..Default::default()
     }
 }
