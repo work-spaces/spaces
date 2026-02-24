@@ -226,6 +226,7 @@ pub struct JsonSettings {
     pub scanned_modules: HashSet<Arc<str>>,
     pub order: Vec<Arc<str>>,
     pub is_scanned: Option<bool>,
+    pub minimum_version: Option<Arc<str>>,
     #[serde(default = "HashMap::new")]
     pub members: HashMap<Arc<str>, Vec<Member>>,
     #[serde(default = "HashMap::new")]
@@ -252,6 +253,7 @@ impl JsonSettings {
             scanned_modules: HashSet::new(),
             members: HashMap::new(),
             assets: HashMap::new(),
+            minimum_version: None,
             dev_branches: Vec::new(),
             bin_settings: Default::default(),
         }

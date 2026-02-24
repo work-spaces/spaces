@@ -205,6 +205,11 @@ pub fn save_env_file_at(dir_path: &std::path::Path, env_md: &str, env: &str) -> 
     workspace_file_content.push('\n');
     workspace_file_content.push_str("WORKSPACE_ENV = ");
     workspace_file_content.push_str(env);
+    workspace_file_content.push_str(
+        r#"
+info.set_minimum_version("0.15.27")
+        "#,
+    );
     workspace_file_content.push_str("\n\nworkspace.set_env(env = WORKSPACE_ENV) \n");
     let workspace_file_path = dir_path.join(ENV_FILE_NAME);
     std::fs::write(workspace_file_path, workspace_file_content)
@@ -233,6 +238,7 @@ pub struct Workspace {
     pub stardoc: stardoc::StarDoc,         // used to keep track of rule documentation
     pub settings: ws::Settings,
     pub is_any_digest_updated: bool,
+    pub minimum_version: semver::Version,
     pub store: store::Store,
 }
 
@@ -244,6 +250,12 @@ impl Workspace {
                 elapsed_time: elapsed_time.as_secs_f64(),
             },
         );
+    }
+
+    pub fn update_minimum_version(&mut self, version: &semver::Version) {
+        if *version > self.minimum_version {
+            self.minimum_version = version.clone();
+        }
     }
 
     pub fn is_dev_branch(&self, rule_name: &str) -> bool {
@@ -317,7 +329,7 @@ impl Workspace {
         false
     }
 
-    fn find_workspace_root(current_working_directory: &str) -> anyhow::Result<Arc<str>> {
+    pub fn find_workspace_root(current_working_directory: &str) -> anyhow::Result<Arc<str>> {
         let mut current_directory = current_working_directory.to_owned();
         loop {
             let workspace_path = format!("{current_directory}/{ENV_FILE_NAME}");
@@ -446,6 +458,33 @@ impl Workspace {
 
         let mut is_run_or_inspect = true;
         let (mut settings, is_json_available) = ws::Settings::load();
+
+        if let Some(required_version) = settings.json.minimum_version.as_ref() {
+            logger(&mut progress)
+                .info(format!("Minimum Required version: {required_version}",).as_str());
+            let current_semver = singleton::get_spaces_version()
+                .context(format_context!("While checking minimum version"))?;
+
+            let required_semver =
+                required_version
+                    .parse::<semver::Version>()
+                    .context(format_context!(
+                "Required version in .spaces/settings.spaces.json is invalid {required_version}"
+            ))?;
+
+            if required_semver > current_semver {
+                let exec_path = std::env::current_exe()
+                    .context(format_context!("Failed to get current executable path"))?;
+
+                return Err(format_error!(
+                    r#"
+  - This workspaces requires spaces version {required_version}.
+  - Spaces is executing version `{current_semver}` from `{}`.
+  - Use `spaces version fetch --tag=v{required_version}` to update."#,
+                    exec_path.display()
+                ));
+            }
+        }
 
         if is_checkout_phase == IsCheckoutPhase::Yes {
             settings.json.scanned_modules = HashSet::default();
@@ -662,6 +701,7 @@ impl Workspace {
             is_dirty,
             is_env_set: false,
             is_bin_dirty: is_dirty,
+            minimum_version: semver::Version::new(0, 0, 0),
             updated_assets: HashSet::new(),
             rule_metrics: HashMap::new(),
             stardoc: stardoc::StarDoc::default(),

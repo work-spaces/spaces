@@ -290,17 +290,21 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Arguments
     /// * `version`: The minimum version string (e.g., "1.5.0") required.
     fn set_minimum_version(version: &str) -> anyhow::Result<NoneType> {
-        let current_version = env!("CARGO_PKG_VERSION");
+        let current_version = singleton::get_spaces_version()
+            .context(format_context!("While checking minimum version"))?;
         let version = version
             .parse::<semver::Version>()
             .context(format_context!("bad version format"))?;
-        if version
-            > current_version
-                .parse::<semver::Version>()
-                .context(format_context!(
-                    "Internal Error: Failed to parse current version {current_version}"
-                ))?
+
+        let workspace_arc =
+            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+
         {
+            let mut workspace_write = workspace_arc.write();
+            workspace_write.update_minimum_version(&version);
+        }
+
+        if version > current_version {
             return Err(anyhow::anyhow!(
                 "Minimum required `spaces` version is `{version}`. `spaces` version is `{current_version}`"
             ));

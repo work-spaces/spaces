@@ -628,6 +628,12 @@ fn execute_tasks(
                 }
             }
 
+            {
+                let mut workspace_write = workspace.write();
+                let minimum_version = workspace_write.minimum_version.to_string();
+                workspace_write.settings.json.minimum_version = Some(minimum_version.into());
+            }
+
             let read_workspace = workspace.read();
             read_workspace
                 .save_env_file()
