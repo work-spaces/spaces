@@ -63,11 +63,7 @@ pub enum EnvBool {
 
 impl From<bool> for EnvBool {
     fn from(value: bool) -> Self {
-        if value {
-            EnvBool::Yes
-        } else {
-            EnvBool::No
-        }
+        if value { EnvBool::Yes } else { EnvBool::No }
     }
 }
 

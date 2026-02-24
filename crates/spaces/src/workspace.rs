@@ -465,12 +465,11 @@ impl Workspace {
             let current_semver = singleton::get_spaces_version()
                 .context(format_context!("While checking minimum version"))?;
 
-            let required_semver =
-                required_version
-                    .parse::<semver::Version>()
-                    .context(format_context!(
-                "Required version in .spaces/settings.spaces.json is invalid {required_version}"
-            ))?;
+            let required_semver = required_version.parse::<semver::Version>().context(
+                format_context!(
+                    "Required version in .spaces/settings.spaces.json is invalid {required_version}"
+                ),
+            )?;
 
             if required_semver > current_semver {
                 let exec_path = std::env::current_exe()

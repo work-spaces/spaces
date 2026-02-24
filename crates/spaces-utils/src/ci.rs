@@ -6,11 +6,7 @@ pub enum IsCi {
 
 impl From<bool> for IsCi {
     fn from(value: bool) -> Self {
-        if value {
-            IsCi::Yes
-        } else {
-            IsCi::No
-        }
+        if value { IsCi::Yes } else { IsCi::No }
     }
 }
 
