@@ -40,7 +40,7 @@ SHORTCUTS = {
 
 starship_add_bash("starship0", shortcuts = SHORTCUTS)
 
-spaces_isolate_workspace("spaces0", "v0.15.26", system_paths = ["/usr/bin", "/bin"])
+spaces_isolate_workspace("spaces0", "v0.15.27", system_paths = ["/usr/bin", "/bin"])
 spaces_add_star_formatter("star_formatter", configure_zed = True, deps = ["spaces0"])
 
 rust_add(
