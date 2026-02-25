@@ -1,4 +1,4 @@
-use crate::{singleton, workspace};
+use crate::{label, singleton, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -338,19 +338,18 @@ impl Git {
                 store_repository.full_path
             ))?;
 
-        if let git::Checkout::Revision(rev) = &self.checkout {
-            if store_repository.is_branch(progress, rev) {
-                logger(progress, self.url.clone()).debug(
-                    format!("{repo_path} is on a branch, doing a hard reset to origin/{rev}")
-                        .as_str(),
-                );
-                store_repository
-                    .reset_hard_origin_branch(progress, rev)
-                    .context(format_context!(
-                        "Failed to git reset --hard origin/{rev} for {}",
-                        store_repository.full_path
-                    ))?;
-            }
+        if let git::Checkout::Revision(rev) = &self.checkout
+            && store_repository.is_branch(progress, rev)
+        {
+            logger(progress, self.url.clone()).debug(
+                format!("{repo_path} is on a branch, doing a hard reset to origin/{rev}").as_str(),
+            );
+            store_repository
+                .reset_hard_origin_branch(progress, rev)
+                .context(format_context!(
+                    "Failed to git reset --hard origin/{rev} for {}",
+                    store_repository.full_path
+                ))?;
         }
 
         let git_lock_file_filter = Box::new(|path: &std::path::Path| {
@@ -505,6 +504,18 @@ impl Git {
             }
         };
 
+        let is_use_lock = if is_new_branch == IsNewBranch::No {
+            workspace.read().settings.is_use_locks()
+        } else {
+            false
+        };
+
+        let is_create_lock_file = workspace.read().is_create_lock_file;
+
+        logger(progress, self.url.clone())
+            .debug(format!("Is Create lock file: {is_create_lock_file}").as_str());
+        logger(progress, self.url.clone()).debug(format!("Is use lock: {is_use_lock}").as_str());
+
         if workspace.read().is_create_lock_file {
             logger(progress, self.url.clone()).debug("creating lock file");
             if let Some(commit_hash) =
@@ -521,30 +532,45 @@ impl Git {
                 // strip the trailing newline
                 workspace.write().add_git_commit_lock(name, rev);
             }
-        } else if let Some(commit_hash) = workspace.read().locks.get(name) {
-            logger(progress, self.url.clone())
-                .info(format!("applying {commit_hash} from lock file at {name}").as_str());
-
-            let options = printer::ExecuteOptions {
-                working_directory: Some(working_directory.clone()),
-                arguments: vec!["checkout".into(), "--detach".into(), commit_hash.clone()],
-                ..Default::default()
+        } else if is_use_lock {
+            let repo_name = label::get_rule_name_from_label(name);
+            let commit_hash_lock = {
+                let workspace_read = workspace.read();
+                workspace_read
+                    .locks
+                    .get(name)
+                    .or(workspace_read.locks.get(repo_name))
+                    .cloned()
             };
 
-            if let Some(member) = member.as_mut() {
-                member.rev = commit_hash.clone();
-                member.version = Self::rev_to_version(Some(commit_hash.clone()));
-            }
-
             logger(progress, self.url.clone())
-                .debug(format!("{}: git {options:?}", self.spaces_key).as_str());
+                .debug(format!("Is lock for {name}: {commit_hash_lock:?}").as_str());
 
-            git::execute_git_command(progress, &self.url, options).context(format_context!(
-                "Failed to checkout commit hash from {}",
-                self.spaces_key
-            ))?;
+            if let Some(commit_hash) = commit_hash_lock {
+                logger(progress, self.url.clone())
+                    .info(format!("applying {commit_hash} from lock file at {name}").as_str());
 
-            is_locked = true;
+                let options = printer::ExecuteOptions {
+                    working_directory: Some(working_directory.clone()),
+                    arguments: vec!["checkout".into(), "--detach".into(), commit_hash.clone()],
+                    ..Default::default()
+                };
+
+                if let Some(member) = member.as_mut() {
+                    member.rev = commit_hash.clone();
+                    member.version = Self::rev_to_version(Some(commit_hash.clone()));
+                }
+
+                logger(progress, self.url.clone())
+                    .debug(format!("{}: git {options:?}", self.spaces_key).as_str());
+
+                git::execute_git_command(progress, &self.url, options).context(format_context!(
+                    "Failed to checkout commit hash from {}",
+                    self.spaces_key
+                ))?;
+
+                is_locked = true;
+            }
         }
 
         if is_new_branch == IsNewBranch::Yes && !singleton::is_sync() {
@@ -581,8 +607,6 @@ impl Git {
                     .as_str(),
                 );
                 workspace.write().set_is_reproducible(false);
-
-                // try to pull the latest version from the branch
             }
         }
 

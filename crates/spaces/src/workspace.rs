@@ -243,6 +243,12 @@ pub struct Workspace {
 }
 
 impl Workspace {
+    pub fn update_locks(&mut self, locks: &HashMap<Arc<str>, Arc<str>>) {
+        for (key, value) in locks.iter() {
+            self.locks.insert(key.clone(), value.clone());
+        }
+    }
+
     pub fn update_rule_metrics(&mut self, rule_name: &str, elapsed_time: std::time::Duration) {
         self.rule_metrics.insert(
             rule_name.into(),
@@ -483,6 +489,10 @@ impl Workspace {
                     exec_path.display()
                 ));
             }
+        }
+
+        if singleton::get_is_use_locks() {
+            settings.json.is_use_locks = Some(true);
         }
 
         if is_checkout_phase == IsCheckoutPhase::Yes {

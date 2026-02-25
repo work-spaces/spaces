@@ -534,14 +534,13 @@ pub fn run_lsp(printer: &mut printer::Printer) -> anyhow::Result<()> {
         let entry = entry.context(format_context!("Failed to walk directory"))?;
         if entry.file_type().is_file() {
             let path = entry.path();
-            if let Some(ext) = path.extension() {
-                if ext == "star"
-                    && !path
-                        .components()
-                        .contains(&std::path::Component::Normal("script".as_ref()))
-                {
-                    modules.push(path.to_path_buf());
-                }
+            if let Some(ext) = path.extension()
+                && ext == "star"
+                && !path
+                    .components()
+                    .contains(&std::path::Component::Normal("script".as_ref()))
+            {
+                modules.push(path.to_path_buf());
             }
         }
     }

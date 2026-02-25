@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use utils::{ci, git, logger, workflows};
 
-fn co_logger(printer: &mut printer::Printer) -> logger::Logger {
+fn co_logger(printer: &mut printer::Printer) -> logger::Logger<'_> {
     logger::Logger::new_printer(printer, "co".into())
 }
 

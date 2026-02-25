@@ -22,7 +22,7 @@ impl<ModuleState: std::fmt::Debug> StateLock<ModuleState> {
         }
     }
 
-    pub fn read(&self) -> RwLockReadGuard<ModuleState> {
+    pub fn read(&self) -> RwLockReadGuard<'_, ModuleState> {
         self.lock.read().unwrap_or_else(|_| {
             panic!(
                 "Internal error: failed to get read lock for {:?}",
@@ -31,7 +31,7 @@ impl<ModuleState: std::fmt::Debug> StateLock<ModuleState> {
         })
     }
 
-    pub fn write(&self) -> RwLockWriteGuard<ModuleState> {
+    pub fn write(&self) -> RwLockWriteGuard<'_, ModuleState> {
         self.lock.write().unwrap_or_else(|_| {
             panic!(
                 "Internal error: failed to get write lock for {:?}",

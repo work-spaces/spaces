@@ -13,6 +13,7 @@ struct State {
     is_logging_disabled: bool,
     is_rescan: bool,
     is_lsp: bool,
+    is_use_locks: bool,
     is_skip_deps: bool,
     max_queue_count: i64,
     error_chain: Vec<String>,
@@ -48,6 +49,7 @@ fn get_state() -> &'static lock::StateLock<State> {
         is_rescan: false,
         is_lsp: false,
         is_skip_deps: false,
+        is_use_locks: false,
         max_queue_count: 8,
         active_workspace: None,
         error_chain: Vec::new(),
@@ -210,6 +212,16 @@ pub fn set_inspect_globs(inspect_globs: HashSet<Arc<str>>) {
 pub fn get_inspect_globs() -> HashSet<Arc<str>> {
     let state = get_state().read();
     state.inspect_globs.clone()
+}
+
+pub fn get_is_use_locks() -> bool {
+    let state = get_state().read();
+    state.is_use_locks
+}
+
+pub fn set_use_locks() {
+    let mut state = get_state().write();
+    state.is_use_locks = true;
 }
 
 pub fn get_is_rescan() -> bool {

@@ -99,14 +99,14 @@ impl Exec {
         let command_line_target = workspace.read().target.clone();
 
         let mut log_level = self.log_level;
-        if let Some(target) = command_line_target {
-            if target.as_ref() == name {
-                let trailing_args = workspace.read().trailing_args.clone();
-                let is_trailing_args_empty = trailing_args.is_empty();
-                arguments.extend(trailing_args);
-                if log_level.is_none() && !is_trailing_args_empty {
-                    log_level = Some(printer::Level::Passthrough);
-                }
+        if let Some(target) = command_line_target
+            && target.as_ref() == name
+        {
+            let trailing_args = workspace.read().trailing_args.clone();
+            let is_trailing_args_empty = trailing_args.is_empty();
+            arguments.extend(trailing_args);
+            if log_level.is_none() && !is_trailing_args_empty {
+                log_level = Some(printer::Level::Passthrough);
             }
         }
 

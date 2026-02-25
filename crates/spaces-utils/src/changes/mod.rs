@@ -22,7 +22,7 @@ pub struct ChangeDetail {
     pub detail_type: ChangeDetailType,
 }
 
-fn changes_logger(progress: &mut printer::MultiProgressBar) -> logger::Logger {
+fn changes_logger(progress: &mut printer::MultiProgressBar) -> logger::Logger<'_> {
     logger::Logger::new_progress(progress, "changes".into())
 }
 
@@ -68,16 +68,15 @@ impl Changes {
     ) -> bool {
         let sane_path = Self::sanitize_path(&path);
         let mut logger = logger::Logger::new_progress(progress, "Changes".into());
-        if let Some(previous_entry) = self.entries.insert(sane_path.into(), change_detail.clone()) {
-            if let (ChangeDetailType::File(previous_hash), ChangeDetailType::File(new_hash))
+        if let Some(previous_entry) = self.entries.insert(sane_path.into(), change_detail.clone())
+            && let (ChangeDetailType::File(previous_hash), ChangeDetailType::File(new_hash))
             | (ChangeDetailType::Symlink(previous_hash), ChangeDetailType::Symlink(new_hash)) =
                 (&previous_entry.detail_type, &change_detail.detail_type)
-            {
-                if previous_hash != new_hash {
-                    logger.debug(format!("{path} hash changed").as_str());
+        {
+            if previous_hash != new_hash {
+                logger.debug(format!("{path} hash changed").as_str());
 
-                    return true;
-                }
+                return true;
             }
         } else {
             logger.debug(format!("{path} added hash").as_str());
@@ -230,12 +229,12 @@ impl Changes {
         let mut hasher = blake3::Hasher::new();
         hasher.update(seed.as_bytes());
         for input in inputs.iter() {
-            if let Some(change_detail) = self.entries.get(*input) {
-                if let ChangeDetailType::File(hash) = &change_detail.detail_type {
-                    changes_logger(progress).trace(format!("Hashing {input}:{hash}").as_str());
-                    count += 1;
-                    hasher.update(hash.as_bytes());
-                }
+            if let Some(change_detail) = self.entries.get(*input)
+                && let ChangeDetailType::File(hash) = &change_detail.detail_type
+            {
+                changes_logger(progress).trace(format!("Hashing {input}:{hash}").as_str());
+                count += 1;
+                hasher.update(hash.as_bytes());
             }
         }
 
@@ -248,12 +247,12 @@ impl Changes {
 }
 
 fn input_includes_no_asterisk(input: &str) -> Option<std::path::PathBuf> {
-    if input.find('*').is_none() {
-        if let Some(input) = input.strip_prefix('+') {
-            let path = std::path::Path::new(input);
-            if path.exists() && path.is_file() {
-                return Some(path.to_path_buf());
-            }
+    if input.find('*').is_none()
+        && let Some(input) = input.strip_prefix('+')
+    {
+        let path = std::path::Path::new(input);
+        if path.exists() && path.is_file() {
+            return Some(path.to_path_buf());
         }
     }
     None
@@ -287,11 +286,11 @@ fn filter_update(
         return false;
     }
 
-    if let Some(entries) = entries {
-        if let Some(change_detail) = entries.get(file_path.as_ref()) {
-            let modified_time = get_modified_time(entry.metadata());
-            return is_modified(modified_time, change_detail.modified);
-        }
+    if let Some(entries) = entries
+        && let Some(change_detail) = entries.get(file_path.as_ref())
+    {
+        let modified_time = get_modified_time(entry.metadata());
+        return is_modified(modified_time, change_detail.modified);
     }
 
     true

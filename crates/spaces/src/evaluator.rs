@@ -134,34 +134,34 @@ pub fn evaluate_ast(
             eval.eval_module(ast, &globals)?;
         }
 
-        if let Some(workspace) = workspace {
-            if singleton::get_inspect_stardoc_path().is_some() {
-                let mut workspace = workspace.write();
-                let doc_items: Vec<(Arc<str>, _)> = module
-                    .names()
-                    .filter_map(|function_name| {
-                        let value = module.get(&function_name).unwrap();
-                        // The signature is the full path to the function with the file path
-                        // filter out values where the signature doesn't start with the module
-                        // that is being processed. These are loaded from another module
-                        // and don't belong in the docs for this module
-                        let signature_starts_with_name = value
-                            .parameters_spec()
-                            .map(|spec| spec.signature())
-                            .map(|signature| signature.starts_with(name.as_ref()))
-                            .unwrap_or(false);
-                        if signature_starts_with_name {
-                            Some((function_name.as_str().into(), value.documentation()))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-                let relative_name = name
-                    .strip_prefix(format!("{}/", workspace.get_absolute_path()).as_str())
-                    .unwrap_or(name.as_ref());
-                workspace.stardoc.insert(relative_name.into(), doc_items);
-            }
+        if let Some(workspace) = workspace
+            && singleton::get_inspect_stardoc_path().is_some()
+        {
+            let mut workspace = workspace.write();
+            let doc_items: Vec<(Arc<str>, _)> = module
+                .names()
+                .filter_map(|function_name| {
+                    let value = module.get(&function_name).unwrap();
+                    // The signature is the full path to the function with the file path
+                    // filter out values where the signature doesn't start with the module
+                    // that is being processed. These are loaded from another module
+                    // and don't belong in the docs for this module
+                    let signature_starts_with_name = value
+                        .parameters_spec()
+                        .map(|spec| spec.signature())
+                        .map(|signature| signature.starts_with(name.as_ref()))
+                        .unwrap_or(false);
+                    if signature_starts_with_name {
+                        Some((function_name.as_str().into(), value.documentation()))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            let relative_name = name
+                .strip_prefix(format!("{}/", workspace.get_absolute_path()).as_str())
+                .unwrap_or(name.as_ref());
+            workspace.stardoc.insert(relative_name.into(), doc_items);
         }
 
         let frozen_module = module.freeze()?;
@@ -187,7 +187,7 @@ pub fn evaluate_module(
     Ok(module)
 }
 
-fn star_logger(printer: &mut printer::Printer) -> logger::Logger {
+fn star_logger(printer: &mut printer::Printer) -> logger::Logger<'_> {
     logger::Logger::new_printer(printer, "starlark".into())
 }
 
