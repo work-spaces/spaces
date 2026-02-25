@@ -446,7 +446,6 @@ fn run_starlark_modules_with_workspace(
             }
 
             workspace.write().is_create_lock_file = is_create_lock_file.into();
-            workspace.write().digest = workspace::calculate_digest(&scripts);
 
             evaluator::run_starlark_modules(
                 printer,

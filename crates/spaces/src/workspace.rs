@@ -111,11 +111,16 @@ impl RuleMetricsFile {
 }
 
 pub fn get_short_digest(digest: &str) -> Arc<str> {
-    digest[0..8].into()
+    if digest.len() < 8 {
+        digest.into()
+    } else {
+        digest[0..8].into()
+    }
 }
 
-pub fn calculate_digest(modules: &[(Arc<str>, Arc<str>)]) -> Arc<str> {
+pub fn calculate_digest(env_str: &str, modules: &[(Arc<str>, Arc<str>)]) -> Arc<str> {
     let mut hasher = blake3::Hasher::new();
+    hasher.update(env_str.as_bytes());
     for (_, content) in modules {
         hasher.update(content.as_bytes());
     }
@@ -215,7 +220,6 @@ pub struct Workspace {
     pub relative_invoked_path: Arc<str>,    // workspace relative path where spaces was invoked
     pub log_directory: Arc<str>,            // always @logs/timestamp
     pub is_create_lock_file: bool,          // set at startup
-    pub digest: Arc<str>,                   // set at startup
     pub locks: HashMap<Arc<str>, Arc<str>>, // set during eval
     pub is_env_set: bool,
     pub env: environment::AnyEnvironment, // set during eval
@@ -530,7 +534,6 @@ impl Workspace {
         for (name, _) in modules.iter() {
             logger(&mut progress).debug(format!("Digesting {name}").as_str());
         }
-        let workspace_digest = calculate_digest(&modules);
 
         let log_directory: Arc<str> = format!(
             "{}/logs_{}",
@@ -694,7 +697,6 @@ impl Workspace {
             absolute_path,
             log_directory,
             is_create_lock_file: false,
-            digest: workspace_digest,
             locks: HashMap::new(),
             env,
             is_dirty,
@@ -791,7 +793,7 @@ impl Workspace {
         .context(format_context!("Failed to save workspace env file"))?;
 
         if self.is_reproducible() {
-            self.settings.json.digest = Some(calculate_digest(modules));
+            self.settings.json.digest = Some(calculate_digest(&env_str, modules));
         } else {
             self.settings.json.digest = None;
         }
@@ -851,7 +853,8 @@ impl Workspace {
     }
 
     pub fn get_short_digest(&self) -> Arc<str> {
-        get_short_digest(self.digest.as_ref())
+        let digest = self.settings.json.digest.clone().unwrap_or_default();
+        get_short_digest(&digest)
     }
 
     pub fn get_store_path(&self) -> Arc<str> {

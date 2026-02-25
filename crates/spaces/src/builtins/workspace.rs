@@ -53,7 +53,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let workspace_arc =
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();
-        Ok(workspace.digest.clone().to_string())
+        let digest = workspace.settings.json.digest.clone();
+        Ok(digest.map(|e| e.to_string()).unwrap_or_default())
     }
 
     /// Returns the short digest of the workspace.

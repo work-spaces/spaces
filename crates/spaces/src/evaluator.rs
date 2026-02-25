@@ -533,7 +533,13 @@ fn execute_tasks(
             let is_reproducible = workspace.read().is_reproducible();
             let repro_message = format!(
                 "Is Workspace reproducible: {is_reproducible} -> {}",
-                workspace.read().digest
+                workspace
+                    .read()
+                    .settings
+                    .json
+                    .digest
+                    .clone()
+                    .unwrap_or_default()
             );
             if is_reproducible {
                 star_logger(printer).message(repro_message.as_str());
