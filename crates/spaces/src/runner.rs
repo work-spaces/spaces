@@ -75,19 +75,22 @@ fn evaluate_environment(
     workspace_arc: workspace::WorkspaceArc,
 ) -> anyhow::Result<()> {
     let workspace_modules = workspace_arc.read().modules.clone();
-    let modules = workspace_modules.iter().filter_map(|(name, module)| {
-        if name.as_ref() == workspace::ENV_FILE_NAME {
-            Some((name.clone(), module.clone()))
-        } else {
-            None
-        }
-    });
+    let modules: Vec<_> = workspace_modules
+        .iter()
+        .filter_map(|(name, module)| {
+            if name.as_ref() == workspace::ENV_FILE_NAME {
+                Some((name.clone(), module.clone()))
+            } else {
+                None
+            }
+        })
+        .collect();
 
     // evaluate the modules to bring in env.spaces.star
     evaluator::evaluate_starlark_modules(
         printer,
         workspace_arc.clone(),
-        modules.collect(),
+        modules.as_slice(),
         task::Phase::Inspect,
     )
     .context(format_context!("while evaluating starlark env module"))?;
