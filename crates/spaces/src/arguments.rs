@@ -215,8 +215,12 @@ fn execute_command(
             create_lock_file,
             force_install_tools,
             keep_workspace_on_failure,
+            locked,
         } => {
             singleton::set_execution_phase(task::Phase::Checkout);
+            if locked {
+                singleton::set_use_locks();
+            }
 
             let is_ci = singleton::get_is_ci().into();
             let group = ci::GithubLogGroup::new_group(
@@ -252,7 +256,11 @@ fn execute_command(
             rev,
             env,
             new_branch,
+            locked,
         } => {
+            if locked {
+                singleton::set_use_locks();
+            }
             let checkout_map =
                 co::Checkout::load().context(format_context!("Failed to load co file"))?;
 
@@ -699,7 +707,8 @@ This can be used if the repository defines all of its own dependencies."#)]
         #[arg(
             long,
             help = r#"Create a lock file for the workspace.
-  This file can be passed on the next checkout as a script to re-create the exact workspace."#
+  This file can be passed on the next checkout as a script to re-create the exact workspace.
+  This argument is deprecated and will be removed in a future release."#
         )]
         create_lock_file: bool,
         /// Force install the tools spaces needs to run.
@@ -708,6 +717,9 @@ This can be used if the repository defines all of its own dependencies."#)]
         /// Do not delete the workspace directory if checkout fails.
         #[arg(long)]
         keep_workspace_on_failure: bool,
+        /// The workspaces lock rev's will override the rule rev for repos
+        #[arg(long)]
+        locked: bool,
     },
     #[command(about = r#"
 The shortform version of `checkout` and `checkout-repo`. The details of the command are
@@ -756,6 +768,9 @@ create-lock-file = false # optionally create a lock file
         /// Additional new-branch values to augment co.spaces.toml
         #[arg(long)]
         new_branch: Vec<Arc<str>>,
+        /// The workspaces lock rev's will override the rule rev for repos
+        #[arg(long)]
+        locked: bool,
     },
     /// Runs checkout rules within an existing workspace
     Sync {},

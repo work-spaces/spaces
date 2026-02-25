@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 const VERSION_FILE_NAME: &str = "spaces.version.json";
 
-pub fn logger(printer: &mut printer::Printer) -> logger::Logger {
+pub fn logger(printer: &mut printer::Printer) -> logger::Logger<'_> {
     logger::Logger::new_printer(printer, "version".into())
 }
 
@@ -339,14 +339,13 @@ impl Manager {
                     let command =
                         format!("cp -lf {} {}", binary_path.display(), exec_path.display());
                     logger(printer).info(format!("Install with:\n\n{command}\n",).as_str());
-                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                        if clipboard
+                    if let Ok(mut clipboard) = arboard::Clipboard::new()
+                        && clipboard
                             .set_text(command)
                             .context(format_context!("Failed to copy command to clipboard"))
                             .is_ok()
-                        {
-                            logger(printer).info("Command above was copied to the clipboard");
-                        }
+                    {
+                        logger(printer).info("Command above was copied to the clipboard");
                     }
                 } else {
                     logger(printer).error(

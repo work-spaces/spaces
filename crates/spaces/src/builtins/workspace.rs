@@ -200,7 +200,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .context(format_error!("Internal Error: No active workspace found"))?;
         let mut workspace = workspace_arc.write();
 
-        workspace.locks = locks;
+        workspace.update_locks(&locks);
 
         Ok(NoneType)
     }

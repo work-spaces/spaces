@@ -716,23 +716,21 @@ pub fn check_downloaded_archive(path_to_archive: &std::path::Path) -> anyhow::Re
     let mut collected_entries: Vec<_> = entries.collect();
     let mut count = collected_entries.len();
 
-    if !is_compressed {
-        if let Some(Ok(first_entry)) = collected_entries.first() {
-            if count != 1 {
-                return Err(format_error!(
-                    "Expected 1 entries in archive, found {count}",
-                ));
-            }
-            let path_to_dir = path_to_archive.join(first_entry.path());
-            delete_ds_store(path_to_dir.as_path())?;
-            let entries = std::fs::read_dir(path_to_dir.as_path()).context(format_context!(
-                "Failed to read directory contents {}",
-                path_to_dir.display()
-            ))?;
-
-            collected_entries = entries.collect();
-            count = collected_entries.len();
+    if !is_compressed && let Some(Ok(first_entry)) = collected_entries.first() {
+        if count != 1 {
+            return Err(format_error!(
+                "Expected 1 entries in archive, found {count}",
+            ));
         }
+        let path_to_dir = path_to_archive.join(first_entry.path());
+        delete_ds_store(path_to_dir.as_path())?;
+        let entries = std::fs::read_dir(path_to_dir.as_path()).context(format_context!(
+            "Failed to read directory contents {}",
+            path_to_dir.display()
+        ))?;
+
+        collected_entries = entries.collect();
+        count = collected_entries.len();
     }
 
     if count != 3 {
@@ -747,17 +745,17 @@ pub fn check_downloaded_archive(path_to_archive: &std::path::Path) -> anyhow::Re
 
     for entry in collected_entries.into_iter().filter_map(|e| e.ok()) {
         let entry_name = entry.file_name().display().to_string();
-        if let Some((current_hash, _suffix)) = entry_name.split_once(".") {
-            if is_compressed {
-                if hash.is_none() {
-                    hash = Some(current_hash.to_owned());
-                } else if let Some(hash) = hash.as_ref() {
-                    if current_hash != hash {
-                        return Err(format_error!(
-                            "Hash mismatch: expected {hash}, found {current_hash}"
-                        ));
-                    }
-                }
+        if let Some((current_hash, _suffix)) = entry_name.split_once(".")
+            && is_compressed
+        {
+            if hash.is_none() {
+                hash = Some(current_hash.to_owned());
+            } else if let Some(hash) = hash.as_ref()
+                && current_hash != hash
+            {
+                return Err(format_error!(
+                    "Hash mismatch: expected {hash}, found {current_hash}"
+                ));
             }
         }
 

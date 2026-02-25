@@ -95,18 +95,17 @@ impl OrasArchive {
             let mut sha256_option: Option<Arc<str>> = None;
             let mut filename_option: Option<Arc<str>> = None;
 
-            if let Some(digest) = value.pointer(&self.manifest_digest_path) {
-                if let Some(digest) = digest.as_str() {
-                    if let Some(sha256) = digest.strip_prefix("sha256:") {
-                        sha256_option = Some(sha256.into());
-                    }
-                }
+            if let Some(digest) = value.pointer(&self.manifest_digest_path)
+                && let Some(digest) = digest.as_str()
+                && let Some(sha256) = digest.strip_prefix("sha256:")
+            {
+                sha256_option = Some(sha256.into());
             }
 
-            if let Some(filename) = value.pointer(&self.manifest_artifact_path) {
-                if let Some(filename) = filename.as_str() {
-                    filename_option = Some(filename.into());
-                }
+            if let Some(filename) = value.pointer(&self.manifest_artifact_path)
+                && let Some(filename) = filename.as_str()
+            {
+                filename_option = Some(filename.into());
             }
 
             if let (Some(sha256), Some(filename)) = (sha256_option, filename_option) {

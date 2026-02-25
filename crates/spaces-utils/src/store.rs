@@ -10,7 +10,7 @@ const MANIFEST_FILE_NAME: &str = "store.spaces.json";
 pub const SPACES_STORE: &str = ".spaces/store";
 pub const SPACES_STORE_RCACHE: &str = "rcache";
 
-pub fn logger(printer: &mut printer::Printer) -> logger::Logger {
+pub fn logger(printer: &mut printer::Printer) -> logger::Logger<'_> {
     logger::Logger::new_printer(printer, "store".into())
 }
 
@@ -223,40 +223,36 @@ impl Store {
 
         for entry in entries {
             let entry_path = entry.path();
-            if let Ok(relative_path) = entry_path.strip_prefix(&path_to_store) {
-                if !self
+            if let Ok(relative_path) = entry_path.strip_prefix(&path_to_store)
+                && !self
                     .entries
                     .keys()
                     .map(|e| std::path::Path::new(e.as_ref()))
                     .any(|e| e == relative_path)
-                {
-                    let display = relative_path.display();
-                    if is_dry_run {
-                        logger(printer).info(
-                            format!("Unlisted Entry (not removing, dry run): {display}",).as_str(),
-                        );
-                    } else {
-                        logger(printer)
-                            .info(format!("Unlisted Entry (removing): {display}").as_str());
+            {
+                let display = relative_path.display();
+                if is_dry_run {
+                    logger(printer).info(
+                        format!("Unlisted Entry (not removing, dry run): {display}",).as_str(),
+                    );
+                } else {
+                    logger(printer).info(format!("Unlisted Entry (removing): {display}").as_str());
 
-                        if entry_path.starts_with(&path_to_store) {
-                            match std::fs::remove_dir_all(entry_path) {
-                                Ok(()) => {}
-                                Err(e) => {
-                                    logger(printer).error(
-                                        format!(
-                                            "Failed to remove {display}: {e} - remove manually"
-                                        )
+                    if entry_path.starts_with(&path_to_store) {
+                        match std::fs::remove_dir_all(entry_path) {
+                            Ok(()) => {}
+                            Err(e) => {
+                                logger(printer).error(
+                                    format!("Failed to remove {display}: {e} - remove manually")
                                         .as_str(),
-                                    );
-                                }
+                                );
                             }
-                        } else {
-                            logger(printer).error(
-                                format!("Internal Error: can't remove {display} - not in store")
-                                    .as_str(),
-                            );
                         }
+                    } else {
+                        logger(printer).error(
+                            format!("Internal Error: can't remove {display} - not in store")
+                                .as_str(),
+                        );
                     }
                 }
             }

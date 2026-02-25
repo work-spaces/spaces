@@ -167,12 +167,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             workspace.get_absolute_path()
         };
 
-        if let Some(clone_type) = repo.clone.as_ref() {
-            if *clone_type == git::Clone::Worktree && repo.sparse_checkout.is_some() {
-                return Err(format_error!(
-                    "Sparse checkout is not supported with Worktree clone"
-                ));
-            }
+        if let Some(clone_type) = repo.clone.as_ref()
+            && *clone_type == git::Clone::Worktree
+            && repo.sparse_checkout.is_some()
+        {
+            return Err(format_error!(
+                "Sparse checkout is not supported with Worktree clone"
+            ));
         }
 
         let checkout = repo.get_checkout();

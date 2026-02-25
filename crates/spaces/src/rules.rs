@@ -20,15 +20,15 @@ pub enum NeedsGraph {
     Yes(task::Phase),
 }
 
-fn rules_printer_logger(printer: &mut printer::Printer) -> logger::Logger {
+fn rules_printer_logger(printer: &mut printer::Printer) -> logger::Logger<'_> {
     logger::Logger::new_printer(printer, "rules".into())
 }
 
-fn _rules_progress_logger(progress: &mut printer::MultiProgressBar) -> logger::Logger {
+fn _rules_progress_logger(progress: &mut printer::MultiProgressBar) -> logger::Logger<'_> {
     logger::Logger::new_progress(progress, "rules".into())
 }
 
-fn task_logger(progress: &mut printer::MultiProgressBar, name: Arc<str>) -> logger::Logger {
+fn task_logger(progress: &mut printer::MultiProgressBar, name: Arc<str>) -> logger::Logger<'_> {
     logger::Logger::new_progress(progress, name)
 }
 
@@ -123,10 +123,9 @@ pub fn execute_task(
         if let (Some(platforms), Some(current_platform)) = (
             task.rule.platforms.as_ref(),
             platform::Platform::get_platform(),
-        ) {
-            if !platforms.contains(&current_platform) {
-                skip_execute_message = Some("Skipping: platform not enabled".into());
-            }
+        ) && !platforms.contains(&current_platform)
+        {
+            skip_execute_message = Some("Skipping: platform not enabled".into());
         }
 
         task_logger(&mut progress, name.clone()).debug(
@@ -242,10 +241,10 @@ pub fn execute_task(
             .write()
             .update_rule_metrics(&rule_name, elapsed_time);
 
-        if task_result.is_ok() {
-            if let Some(digest) = updated_digest {
-                workspace.write().update_rule_digest(&rule_name, digest);
-            }
+        if task_result.is_ok()
+            && let Some(digest) = updated_digest
+        {
+            workspace.write().update_rule_digest(&rule_name, digest);
         }
 
         {
@@ -513,13 +512,13 @@ impl State {
             }
         }
 
-        if let Some(workspace) = workspace {
-            if phase != task::Phase::Checkout {
-                let mut workspace_write = workspace.write();
-                rules_printer_logger(printer).debug("cloning graph to workspace bin settings");
-                workspace_write.settings.bin.graph = self.graph.clone();
-                workspace_write.is_bin_dirty = true;
-            }
+        if let Some(workspace) = workspace
+            && phase != task::Phase::Checkout
+        {
+            let mut workspace_write = workspace.write();
+            rules_printer_logger(printer).debug("cloning graph to workspace bin settings");
+            workspace_write.settings.bin.graph = self.graph.clone();
+            workspace_write.is_bin_dirty = true;
         }
 
         Ok(())
@@ -711,10 +710,10 @@ impl State {
                         .unwrap_or("<Not Provided>".to_string());
 
                     let mut task_name = task.rule.name.as_ref();
-                    if let Some(strip_prefix) = strip_prefix.as_ref() {
-                        if let Some(stripped) = task_name.strip_prefix(strip_prefix.as_ref()) {
-                            task_name = stripped.strip_prefix("/").unwrap_or(stripped);
-                        }
+                    if let Some(strip_prefix) = strip_prefix.as_ref()
+                        && let Some(stripped) = task_name.strip_prefix(strip_prefix.as_ref())
+                    {
+                        task_name = stripped.strip_prefix("/").unwrap_or(stripped);
                     }
 
                     let inputs = if printer.verbosity.level <= printer::Level::Message {
@@ -1115,10 +1114,10 @@ pub fn debug_sorted_tasks(
     let state = get_state().read();
     for node_index in state.sorted.iter() {
         let task_name = state.graph.get_task(*node_index);
-        if let Some(task) = state.tasks.read().get(task_name) {
-            if task.phase == phase {
-                rules_printer_logger(printer).debug(format!("Queued task {task_name}").as_str());
-            }
+        if let Some(task) = state.tasks.read().get(task_name)
+            && task.phase == phase
+        {
+            rules_printer_logger(printer).debug(format!("Queued task {task_name}").as_str());
         }
     }
     Ok(())

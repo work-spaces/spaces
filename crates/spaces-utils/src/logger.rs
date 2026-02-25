@@ -33,14 +33,14 @@ pub fn get_deferred_warnings() -> Vec<Arc<str>> {
 }
 
 impl Logger<'_> {
-    pub fn new_printer(printer: &mut printer::Printer, label: Arc<str>) -> Logger {
+    pub fn new_printer(printer: &mut printer::Printer, label: Arc<str>) -> Logger<'_> {
         Logger {
             printer: Printer::Printer(printer),
             label,
         }
     }
 
-    pub fn new_progress(progress: &mut printer::MultiProgressBar, label: Arc<str>) -> Logger {
+    pub fn new_progress(progress: &mut printer::MultiProgressBar, label: Arc<str>) -> Logger<'_> {
         Logger {
             printer: Printer::Progress(progress),
             label,

@@ -47,7 +47,6 @@ pub fn get_spaces_tools_path_as_path(store_path: &std::path::Path) -> Arc<std::p
 pub fn get_spaces_tools_path_to_sysroot_bin(store_path: &std::path::Path) -> Arc<std::path::Path> {
     get_spaces_tools_path_as_path(store_path)
         .join("sysroot")
-        .join("bin")
         .into()
 }
 
@@ -226,6 +225,7 @@ pub struct JsonSettings {
     pub scanned_modules: HashSet<Arc<str>>,
     pub order: Vec<Arc<str>>,
     pub is_scanned: Option<bool>,
+    pub is_use_locks: Option<bool>,
     pub minimum_version: Option<Arc<str>>,
     #[serde(default = "HashMap::new")]
     pub members: HashMap<Arc<str>, Vec<Member>>,
@@ -250,6 +250,7 @@ impl JsonSettings {
             order: Vec::new(),
             spaces_version: env!("CARGO_PKG_VERSION").into(),
             is_scanned: None,
+            is_use_locks: None,
             scanned_modules: HashSet::new(),
             members: HashMap::new(),
             assets: HashMap::new(),
@@ -448,6 +449,10 @@ impl Settings {
             .save(CHECKOUT_FILE_NAME)
             .context(format_context!("Checkout settings: {CHECKOUT_FILE_NAME}"))?;
         Ok(())
+    }
+
+    pub fn is_use_locks(&self) -> bool {
+        self.json.is_use_locks.unwrap_or(false)
     }
 
     pub fn clear_inputs(&mut self) -> anyhow::Result<()> {

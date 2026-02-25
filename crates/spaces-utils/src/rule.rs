@@ -112,11 +112,10 @@ impl Rule {
             for rule_name in section.rules.iter() {
                 if let Some((rule, details)) =
                     rule_map.get(format!("{}:{rule_name}", section.name).as_str())
+                    && (!show_has_help || rule.help.is_some())
                 {
-                    if !show_has_help || rule.help.is_some() {
-                        md.heading(4, rule_name)?;
-                        rule.print_markdown(md, details.to_owned(), is_run_rules)?;
-                    }
+                    md.heading(4, rule_name)?;
+                    rule.print_markdown(md, details.to_owned(), is_run_rules)?;
                 }
             }
         }
@@ -155,17 +154,17 @@ impl Rule {
             md.printer.newline()?;
         }
 
-        if let Some(deps) = self.deps.as_ref() {
-            if !deps.is_empty() {
-                md.bold("Dependencies")?;
-                md.printer.newline()?;
-                md.printer.newline()?;
-                for dep in deps {
-                    // get the rule using the dep as the name
-                    md.list_item(0, dep)?;
-                }
-                md.printer.newline()?;
+        if let Some(deps) = self.deps.as_ref()
+            && !deps.is_empty()
+        {
+            md.bold("Dependencies")?;
+            md.printer.newline()?;
+            md.printer.newline()?;
+            for dep in deps {
+                // get the rule using the dep as the name
+                md.list_item(0, dep)?;
             }
+            md.printer.newline()?;
         }
 
         Ok(())
