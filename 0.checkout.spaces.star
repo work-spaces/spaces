@@ -5,7 +5,6 @@ Load the spaces starlark SDK and packages repositories.
 workspace.set_locks(locks = {
     "printer": "8d1c6ca54931eead8f89b9120c4d57d37173b624",
     "archiver": "v0.3.0",
-    "spaces": "v0.15.27",
     "@star/sdk": "v0.3.25",
     "@star/packages": "v0.2.40",
 })
