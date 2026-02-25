@@ -89,13 +89,13 @@ pub struct InheritValue {
     /// Default value to use if the variable cannot be inherited
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assign_as_default: Option<Arc<str>>,
-    /// if true, an error will occur if the variable is not available.
+    /// if Yes, an error will occur if the variable is not available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_required: Option<EnvBool>,
-    /// if true, redact the value in the logs
+    /// if Yes, redact the value in the logs
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_secret: Option<EnvBool>,
-    /// if true, save the variable value at checkout
+    /// if Yes, save the variable value at checkout. If No, the value cannot impact reproducibility.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_save_at_checkout: Option<EnvBool>,
 }
@@ -142,12 +142,15 @@ pub struct ScriptValue {
     /// Default value to use if the variable cannot be inherited
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assign_as_default: Option<Arc<str>>,
-    /// if true, an error will occur if the variable is not available.
+    /// if Yes, an error will occur if the variable is not available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_required: Option<EnvBool>,
-    /// if true, redact the value in the logs
+    /// if Yes, redact the value in the logs
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_secret: Option<EnvBool>,
+    /// if Yes, save the variable value at checkout. If No, the value cannot impact reproducibility.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_save_at_checkout: Option<EnvBool>,
 }
 
 impl ScriptValue {
@@ -435,7 +438,10 @@ impl AnyEnvironment {
                 let env_value = script_value
                     .get_value(&any.name)
                     .context(format_context!("When getting script value"))?;
-                script_value.value = env_value;
+
+                if let Some(EnvBool::Yes) = script_value.is_save_at_checkout {
+                    script_value.value = env_value;
+                }
             }
         }
         Ok(())

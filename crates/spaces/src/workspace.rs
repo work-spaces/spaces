@@ -18,7 +18,6 @@ pub const SPACES_STDIN_NAME: &str = "stdin.star";
 const SPACES_SYSROOT_NAME: &str = "sysroot";
 
 pub const SPACES_ENV_IS_WORKSPACE_REPRODUCIBLE: &str = "SPACES_IS_WORKSPACE_REPRODUCIBLE";
-pub const _SPACES_ENV_WORKSPACE_DIGEST: &str = "SPACES_WORKSPACE_DIGEST";
 pub const WORKSPACE_FILE_HEADER: &str = r#"
 """
 Spaces Workspace file
@@ -117,18 +116,9 @@ pub fn get_short_digest(digest: &str) -> Arc<str> {
 
 pub fn calculate_digest(modules: &[(Arc<str>, Arc<str>)]) -> Arc<str> {
     let mut hasher = blake3::Hasher::new();
-
-    // workspace hash is content of the input modules
-    // AND the arguments passed on the command line.
-    // This is calculated at checkout.
-
-    let args_env_as_json_string =
-        serde_json::to_string(&singleton::get_args_env()).unwrap_or_default();
-    hasher.update(args_env_as_json_string.as_bytes());
     for (_, content) in modules {
         hasher.update(content.as_bytes());
     }
-
     hasher.finalize().to_string().into()
 }
 
@@ -785,7 +775,7 @@ impl Workspace {
         self.env.clone()
     }
 
-    pub fn save_env_file(&self) -> anyhow::Result<()> {
+    pub fn save_env_file(&mut self, modules: &[(Arc<str>, Arc<str>)]) -> anyhow::Result<()> {
         let env_markdown = self
             .env
             .to_markdown()
@@ -799,6 +789,13 @@ impl Workspace {
             &env_str,
         )
         .context(format_context!("Failed to save workspace env file"))?;
+
+        if self.is_reproducible() {
+            self.settings.json.digest = Some(calculate_digest(modules));
+        } else {
+            self.settings.json.digest = None;
+        }
+
         Ok(())
     }
 

@@ -221,6 +221,7 @@ pub struct JsonSettings {
     pub store_path: Arc<str>,
     #[serde(default = "get_unknown_version")]
     pub spaces_version: Arc<str>,
+    pub digest: Option<Arc<str>>,
     #[serde(default)]
     pub scanned_modules: HashSet<Arc<str>>,
     pub order: Vec<Arc<str>>,
@@ -251,6 +252,7 @@ impl JsonSettings {
             spaces_version: env!("CARGO_PKG_VERSION").into(),
             is_scanned: None,
             is_use_locks: None,
+            digest: None,
             scanned_modules: HashSet::new(),
             members: HashMap::new(),
             assets: HashMap::new(),

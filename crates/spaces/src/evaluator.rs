@@ -347,7 +347,7 @@ fn show_eval_progress(
 pub fn evaluate_starlark_modules(
     printer: &mut printer::Printer,
     workspace: workspace::WorkspaceArc,
-    modules: Vec<(Arc<str>, Arc<str>)>,
+    modules: &[(Arc<str>, Arc<str>)],
     phase: task::Phase,
 ) -> anyhow::Result<()> {
     star_logger(printer).message("--Run Starlark Modules--");
@@ -367,7 +367,7 @@ pub fn evaluate_starlark_modules(
     }
 
     let mut module_queue = std::collections::VecDeque::new();
-    module_queue.extend(modules);
+    module_queue.extend(modules.iter().cloned());
 
     star_logger(printer).trace(format!("Input module queue:{module_queue:?}").as_str());
 
@@ -494,6 +494,7 @@ fn execute_tasks(
     phase: task::Phase,
     target: Option<Arc<str>>,
     run_target: Option<Arc<str>>,
+    modules: &[(Arc<str>, Arc<str>)],
 ) -> anyhow::Result<IsSaveBin> {
     let glob_warnings = singleton::get_glob_warnings();
     for warning in glob_warnings {
@@ -633,11 +634,12 @@ fn execute_tasks(
                 workspace_write.settings.json.minimum_version = Some(minimum_version.into());
             }
 
-            let read_workspace = workspace.read();
-            read_workspace
-                .save_env_file()
+            workspace
+                .write()
+                .save_env_file(modules)
                 .context(format_context!("Failed to save env file"))?;
 
+            let read_workspace = workspace.read();
             star_logger(printer).debug("saving JSON workspace settings");
             read_workspace
                 .settings
@@ -725,7 +727,7 @@ pub fn run_starlark_modules(
             } else {
                 star_logger(printer).message("always evaluate during checkout/sync");
             }
-            evaluate_starlark_modules(printer, workspace.clone(), modules, phase)
+            evaluate_starlark_modules(printer, workspace.clone(), &modules, phase)
                 .context(format_context!("evaluating modules"))?;
 
             star_logger(printer).message("Inserting //:setup, //:all, //:test, //:clean rules");
@@ -762,8 +764,15 @@ pub fn run_starlark_modules(
     printer.secrets = secrets;
 
     let is_save_bin = if is_execute_tasks == IsExecuteTasks::Yes {
-        execute_tasks(printer, workspace.clone(), phase, target, run_target)
-            .context(format_context!("executing tasks"))?
+        execute_tasks(
+            printer,
+            workspace.clone(),
+            phase,
+            target,
+            run_target,
+            modules.as_slice(),
+        )
+        .context(format_context!("executing tasks"))?
     } else {
         is_save_bin
     };
