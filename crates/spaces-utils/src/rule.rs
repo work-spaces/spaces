@@ -1,4 +1,6 @@
-use crate::platform;
+use crate::changes::glob;
+use crate::{changes, platform};
+use anyhow_source_location::format_error;
 use printer::markdown;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -34,6 +36,58 @@ pub enum Visibility {
     Private,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AnyInputsOutputs {
+    Includes(HashSet<Arc<str>>),
+    Excludes(HashSet<Arc<str>>),
+    IncludesEnv(HashSet<Arc<str>>),
+    ExcludesEnv(HashSet<Arc<str>>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum InputsOutputs {
+    Globs(HashSet<Arc<str>>),
+    Any(Vec<AnyInputsOutputs>),
+}
+
+impl InputsOutputs {
+    pub fn get_globs(&self) -> changes::glob::Globs {
+        match self {
+            InputsOutputs::Globs(hash_set) => glob::Globs::new_with_annotated_set(hash_set),
+            InputsOutputs::Any(any_list) => {
+                let mut globs = changes::glob::Globs::default();
+                for entry in any_list {
+                    match entry {
+                        AnyInputsOutputs::Includes(hash_set) => {
+                            globs.includes.extend(hash_set.iter().cloned())
+                        }
+                        AnyInputsOutputs::Excludes(hash_set) => {
+                            globs.excludes.extend(hash_set.iter().cloned())
+                        }
+                        // env vars are not globs
+                        _ => (),
+                    }
+                }
+                globs
+            }
+        }
+    }
+
+    pub fn validate(&self) -> anyhow::Result<()> {
+        if let InputsOutputs::Globs(globs) = self {
+            for glob in globs {
+                if !glob.starts_with('+') && !glob.starts_with('-') {
+                    return Err(format_error!(
+                        "Invalid glob: {glob:?}. Must begin with '+' (includes) or '-' (excludes)"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 /// A rule desribes what a task should do.
 /// It specifies named depedencies that must be executed
 /// before the task can run.
@@ -47,9 +101,9 @@ pub struct Rule {
     /// help text displayed to the user when running inspect - use markdown format
     pub help: Option<Arc<str>>,
     /// list of globs that must have a change to re-run the rule
-    pub inputs: Option<HashSet<Arc<str>>>,
+    pub inputs: Option<InputsOutputs>,
     /// No used
-    pub outputs: Option<HashSet<Arc<str>>>,
+    pub outputs: Option<InputsOutputs>,
     /// list of platforms that the rule will run on. default is to run on all platforms
     pub platforms: Option<Vec<platform::Platform>>,
     /// The type for the rule in the run phase

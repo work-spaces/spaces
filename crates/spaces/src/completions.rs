@@ -49,7 +49,7 @@ pub fn generate_workspace_completions(
         }
     }
 
-    // Step 6: Add top-level args if needed
+    // Step 6: Add top-level args if neededsss
     for arg in command.get_arguments() {
         new_command = new_command.arg(arg.clone());
     }

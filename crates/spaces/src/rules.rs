@@ -1,3 +1,4 @@
+use crate::label::IsAnnotated;
 use crate::workspace::WorkspaceArc;
 use crate::{executor, label, singleton, task, workspace};
 use anyhow::Context;
@@ -5,8 +6,9 @@ use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use utils::changes::glob;
 use utils::rule::Visibility;
-use utils::{changes, environment, graph, lock, logger, platform, rule};
+use utils::{environment, graph, lock, logger, platform, rule};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum HasHelp {
@@ -184,7 +186,7 @@ pub fn execute_task(
                 None
             } else {
                 task_logger(&mut progress, name.clone())
-                    .debug(format!("update workspace changes {} inputs", inputs.len()).as_str());
+                    .debug("update workspace changes with inputs");
 
                 workspace
                     .write()
@@ -315,6 +317,28 @@ impl State {
         label::sanitize_working_directory(rule_name, self.latest_starlark_module.clone())
     }
 
+    fn sanitize_glob_hash_set(
+        hash_set: &mut HashSet<Arc<str>>,
+        is_annotated: IsAnnotated,
+        rule_label: Arc<str>,
+        latest_starlark_module: Option<Arc<str>>,
+    ) -> anyhow::Result<()> {
+        *hash_set = hash_set
+            .drain()
+            .map(|item| {
+                label::sanitize_glob_value(
+                    item.as_ref(),
+                    is_annotated,
+                    rule_label.as_ref(),
+                    latest_starlark_module.clone(),
+                )
+                .context(format_context!("Failed to sanitize inputs: {item}"))
+            })
+            .collect::<anyhow::Result<HashSet<Arc<str>>>>()?;
+
+        Ok(())
+    }
+
     pub fn insert_task(&self, mut task_to_insert: task::Task) -> anyhow::Result<()> {
         // update the rule name to have the starlark module name
 
@@ -354,18 +378,42 @@ impl State {
         task_to_insert.rule.name = rule_label.clone();
         task_to_insert.signal = task::SignalArc::new(rule_label.clone());
 
-        if let Some(inputs) = task_to_insert.rule.inputs.clone() {
-            let mut new_inputs = HashSet::new();
-            for input in inputs.iter() {
-                let value = label::sanitize_glob_value(
-                    input.as_ref(),
-                    rule_label.as_ref(),
-                    self.latest_starlark_module.clone(),
-                )
-                .context(format_context!("Failed to sanitize inputs: {}", input))?;
-                new_inputs.insert(value);
+        if let Some(mut inputs) = task_to_insert.rule.inputs.clone() {
+            match &mut inputs {
+                rule::InputsOutputs::Globs(globs) => {
+                    Self::sanitize_glob_hash_set(
+                        globs,
+                        label::IsAnnotated::Yes,
+                        rule_label.clone(),
+                        self.latest_starlark_module.clone(),
+                    )?;
+                }
+                rule::InputsOutputs::Any(list) => {
+                    for item in list.iter_mut() {
+                        match item {
+                            rule::AnyInputsOutputs::Includes(set) => {
+                                Self::sanitize_glob_hash_set(
+                                    set,
+                                    label::IsAnnotated::No,
+                                    rule_label.clone(),
+                                    self.latest_starlark_module.clone(),
+                                )?;
+                            }
+                            rule::AnyInputsOutputs::Excludes(set) => {
+                                Self::sanitize_glob_hash_set(
+                                    set,
+                                    label::IsAnnotated::No,
+                                    rule_label.clone(),
+                                    self.latest_starlark_module.clone(),
+                                )?;
+                            }
+                            // envs don't need sanitization
+                            _ => (),
+                        }
+                    }
+                }
             }
-            task_to_insert.rule.inputs = Some(new_inputs);
+            task_to_insert.rule.inputs = Some(inputs);
         }
 
         // update deps that refer to rules in the same starlark module
@@ -678,12 +726,10 @@ impl State {
         let mut task_info_list: HashMap<Arc<str>, _> = std::collections::HashMap::new();
         for node_index in self.sorted.iter() {
             let task_name = self.graph.get_task(*node_index);
+            let globs = glob::Globs::new_with_includes(filter);
 
             if !filter.is_empty()
-                && !changes::glob::match_globs(
-                    filter,
-                    task_name.strip_prefix("//").unwrap_or(task_name),
-                )
+                && !globs.is_match(task_name.strip_prefix("//").unwrap_or(task_name))
             {
                 logger::Logger::new_printer(printer, "glob".into())
                     .debug(format!("Filtering {task_name} with {filter:?}").as_str());

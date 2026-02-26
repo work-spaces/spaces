@@ -2,14 +2,56 @@ use anyhow_source_location::format_error;
 use std::collections::HashSet;
 use std::sync::Arc;
 
+#[derive(Debug, Clone, Default)]
 pub struct Globs {
-    pub includes: Vec<Arc<str>>,
-    pub excludes: Vec<Arc<str>>,
+    pub includes: HashSet<Arc<str>>,
+    pub excludes: HashSet<Arc<str>>,
 }
 
-pub enum Inputs {
-    List(Vec<Arc<str>>),
-    Globs(Globs),
+impl Globs {
+    pub fn new_with_includes(includes: &HashSet<Arc<str>>) -> Self {
+        Self {
+            includes: includes.clone(),
+            excludes: HashSet::new(),
+        }
+    }
+
+    pub fn new_with_annotated_set(annotated_set: &HashSet<Arc<str>>) -> Self {
+        let includes = annotated_set
+            .iter()
+            .filter_map(|g| g.strip_prefix('+').map(|e| e.into()))
+            .collect();
+        let excludes = annotated_set
+            .iter()
+            .filter_map(|g| g.strip_prefix('-').map(|e| e.into()))
+            .collect();
+        Self { includes, excludes }
+    }
+
+    pub fn merge(&mut self, other: &Self) {
+        self.includes.extend(other.includes.clone());
+        self.excludes.extend(other.excludes.clone());
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.includes.is_empty() && self.excludes.is_empty()
+    }
+
+    pub fn is_match(&self, input: &str) -> bool {
+        let input = input.strip_prefix("./").unwrap_or(input);
+        for include in self.includes.iter() {
+            let include_pattern = include.strip_prefix('+').unwrap_or(include.as_ref());
+            if glob_match::glob_match(include_pattern, input) {
+                for exclude_pattern in self.excludes.iter() {
+                    if glob_match::glob_match(exclude_pattern, input) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+        }
+        false
+    }
 }
 
 pub fn is_glob_include(glob: &str) -> Option<Arc<str>> {
@@ -25,27 +67,6 @@ pub fn is_glob_include(glob: &str) -> Option<Arc<str>> {
         result.push('.');
     }
     Some(result.into())
-}
-
-pub fn match_globs(globs: &HashSet<Arc<str>>, input: &str) -> bool {
-    let includes = globs.iter().filter(|g| g.starts_with('+'));
-    let excludes = globs.iter().filter(|g| g.starts_with('-'));
-
-    let input = input.strip_prefix("./").unwrap_or(input);
-    for include in includes {
-        let include_pattern = include.strip_prefix('+').unwrap_or(include.as_ref());
-        if glob_match::glob_match(include_pattern, input) {
-            for exclude in excludes {
-                let exclude_pattern = exclude.strip_prefix('-').unwrap_or(exclude.as_ref());
-                if glob_match::glob_match(exclude_pattern, input) {
-                    return false;
-                }
-            }
-            return true;
-        }
-    }
-
-    false
 }
 
 pub fn validate(globs: &HashSet<Arc<str>>) -> anyhow::Result<()> {
@@ -95,85 +116,94 @@ mod tests {
             "//test/capsules/test1:install_bin",
         ];
 
-        let globs = vec!["+//**/*:*bin".into()].into_iter().collect();
-        assert_eq!(match_globs(&globs, INPUT_LIST[0]), true);
-        assert_eq!(match_globs(&globs, INPUT_LIST[1]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[2]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[3]), true);
-        assert_eq!(match_globs(&globs, INPUT_LIST[4]), true);
-        assert_eq!(match_globs(&globs, INPUT_LIST[5]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[7]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[8]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[9]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[10]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[11]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[12]), true);
+        let globs =
+            Globs::new_with_annotated_set(&vec!["+//**/*:*bin".into()].into_iter().collect());
+        assert_eq!(globs.is_match(INPUT_LIST[0]), true);
+        assert_eq!(globs.is_match(INPUT_LIST[1]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[2]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[3]), true);
+        assert_eq!(globs.is_match(INPUT_LIST[4]), true);
+        assert_eq!(globs.is_match(INPUT_LIST[5]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[7]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[8]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[9]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[10]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[11]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[12]), true);
 
-        let globs = vec!["+//**/*:*bin".into(), "-//**/*:*ftp.gnu.org*".into()]
+        let globs = Globs::new_with_annotated_set(
+            &vec!["+//**/*:*bin".into(), "-//**/*:*ftp.gnu.org*".into()]
+                .into_iter()
+                .collect(),
+        );
+        assert_eq!(globs.is_match(INPUT_LIST[0]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[1]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[2]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[3]), true);
+        assert_eq!(globs.is_match(INPUT_LIST[4]), true);
+        assert_eq!(globs.is_match(INPUT_LIST[5]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[6]), true);
+        assert_eq!(globs.is_match(INPUT_LIST[7]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[8]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[9]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[10]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[11]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[12]), true);
+        let globs = Globs::new_with_annotated_set(
+            &vec!["+//**/**".into(), "-//capsules:*".into()]
+                .into_iter()
+                .collect(),
+        );
+        assert_eq!(globs.is_match(INPUT_LIST[0]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[1]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[2]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[3]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[4]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[5]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[6]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[7]), true);
+        assert_eq!(globs.is_match(INPUT_LIST[8]), true);
+        assert_eq!(globs.is_match(INPUT_LIST[9]), true);
+        assert_eq!(globs.is_match(INPUT_LIST[10]), true);
+        assert_eq!(globs.is_match(INPUT_LIST[11]), true);
+        assert_eq!(globs.is_match(INPUT_LIST[12]), true);
+        let globs = Globs::new_with_annotated_set(
+            &vec!["+//**/capsules/**:*".into()].into_iter().collect(),
+        );
+        assert_eq!(globs.is_match(INPUT_LIST[0]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[1]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[2]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[3]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[4]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[5]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[6]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[7]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[8]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[9]), true);
+        assert_eq!(globs.is_match(INPUT_LIST[10]), true);
+        assert_eq!(globs.is_match(INPUT_LIST[11]), true);
+        assert_eq!(globs.is_match(INPUT_LIST[12]), true);
+        let globs = Globs::new_with_annotated_set(
+            &vec![
+                "+//*/capsules/**:*".into(),
+                "-//*/capsules/**:*install*".into(),
+            ]
             .into_iter()
-            .collect();
-        assert_eq!(match_globs(&globs, INPUT_LIST[0]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[1]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[2]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[3]), true);
-        assert_eq!(match_globs(&globs, INPUT_LIST[4]), true);
-        assert_eq!(match_globs(&globs, INPUT_LIST[5]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[6]), true);
-        assert_eq!(match_globs(&globs, INPUT_LIST[7]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[8]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[9]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[10]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[11]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[12]), true);
-        let globs = vec!["+//**/**".into(), "-//capsules:*".into()]
-            .into_iter()
-            .collect();
-        assert_eq!(match_globs(&globs, INPUT_LIST[0]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[1]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[2]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[3]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[4]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[5]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[6]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[7]), true);
-        assert_eq!(match_globs(&globs, INPUT_LIST[8]), true);
-        assert_eq!(match_globs(&globs, INPUT_LIST[9]), true);
-        assert_eq!(match_globs(&globs, INPUT_LIST[10]), true);
-        assert_eq!(match_globs(&globs, INPUT_LIST[11]), true);
-        assert_eq!(match_globs(&globs, INPUT_LIST[12]), true);
-        let globs = vec!["+//**/capsules/**:*".into()].into_iter().collect();
-        assert_eq!(match_globs(&globs, INPUT_LIST[0]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[1]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[2]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[3]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[4]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[5]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[6]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[7]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[8]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[9]), true);
-        assert_eq!(match_globs(&globs, INPUT_LIST[10]), true);
-        assert_eq!(match_globs(&globs, INPUT_LIST[11]), true);
-        assert_eq!(match_globs(&globs, INPUT_LIST[12]), true);
-        let globs = vec![
-            "+//*/capsules/**:*".into(),
-            "-//*/capsules/**:*install*".into(),
-        ]
-        .into_iter()
-        .collect();
-        assert_eq!(match_globs(&globs, INPUT_LIST[0]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[1]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[2]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[3]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[4]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[5]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[6]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[7]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[8]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[9]), true);
-        assert_eq!(match_globs(&globs, INPUT_LIST[10]), true);
-        assert_eq!(match_globs(&globs, INPUT_LIST[11]), false);
-        assert_eq!(match_globs(&globs, INPUT_LIST[12]), false);
+            .collect(),
+        );
+        assert_eq!(globs.is_match(INPUT_LIST[0]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[1]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[2]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[3]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[4]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[5]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[6]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[7]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[8]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[9]), true);
+        assert_eq!(globs.is_match(INPUT_LIST[10]), true);
+        assert_eq!(globs.is_match(INPUT_LIST[11]), false);
+        assert_eq!(globs.is_match(INPUT_LIST[12]), false);
     }
 
     #[test]
@@ -186,13 +216,15 @@ mod tests {
 
     #[test]
     fn test_match_globs() {
-        let globs = vec!["+foo".into(), "-foo".into(), "+bar".into()]
-            .into_iter()
-            .collect();
+        let globs = Globs::new_with_annotated_set(
+            &vec!["+foo".into(), "-foo".into(), "+bar".into()]
+                .into_iter()
+                .collect(),
+        );
 
-        assert_eq!(match_globs(&globs, "foo"), false);
-        assert_eq!(match_globs(&globs, "bar"), true);
-        assert_eq!(match_globs(&globs, "baz"), false);
+        assert_eq!(globs.is_match("foo"), false);
+        assert_eq!(globs.is_match("bar"), true);
+        assert_eq!(globs.is_match("baz"), false);
     }
 
     #[test]

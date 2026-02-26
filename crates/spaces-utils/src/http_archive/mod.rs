@@ -1,4 +1,4 @@
-use crate::{changes, lock, logger, ws};
+use crate::{changes::glob, lock, logger, ws};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -298,10 +298,12 @@ impl HttpArchive {
             .load_files_json()
             .context(format_context!("failed to load json files manifest"))?;
         for file in all_files.iter() {
-            let mut is_match = true;
+            let mut collect_globs = glob::Globs::default();
             if let Some(globs) = self.archive.globs.as_ref() {
-                is_match = changes::glob::match_globs(globs, file);
+                collect_globs.merge(&glob::Globs::new_with_annotated_set(globs));
             }
+
+            let is_match = collect_globs.is_empty() || collect_globs.is_match(file);
 
             if is_match {
                 files.push(file);

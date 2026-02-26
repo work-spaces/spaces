@@ -2,7 +2,7 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use starlark::{environment::GlobalsBuilder, values::none::NoneType};
 use std::collections::HashSet;
-use utils::{inputs, rule};
+use utils::rule;
 
 use crate::{executor, rules, singleton, task};
 
@@ -100,8 +100,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for exec rule"))?;
 
-        inputs::validate_input_globs(&rule.inputs)
-            .context(format_context!("invalid inputs globs with {}", rule.name))?;
+        if let Some(inputs) = rule.inputs.as_ref() {
+            inputs
+                .validate()
+                .context(format_context!("invalid inputs globs with {}", rule.name))?;
+        }
 
         add_rule_to_all(&rule)
             .context(format_context!("Internal Error: Failed to add rule to all"))?;
@@ -149,8 +152,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for kill rule"))?;
 
-        inputs::validate_input_globs(&rule.inputs)
-            .context(format_context!("invalid inputs globs with {}", rule.name))?;
+        if let Some(inputs) = rule.inputs.as_ref() {
+            inputs
+                .validate()
+                .context(format_context!("invalid inputs globs with {}", rule.name))?;
+        }
 
         add_rule_to_all(&rule)
             .context(format_context!("Internal Error: Failed to add rule to all"))?;
@@ -220,7 +226,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         create_archive.input = input;
 
         inputs.insert(format!("+//{}/**", create_archive.input).into());
-        rule.inputs = Some(inputs);
+        rule.inputs = Some(rule::InputsOutputs::Globs(inputs));
 
         let mut outputs = HashSet::new();
         outputs.insert(
@@ -231,7 +237,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             )
             .into(),
         );
-        rule.outputs = Some(outputs);
+        rule.outputs = Some(rule::InputsOutputs::Globs(outputs));
 
         let archive = executor::archive::Archive { create_archive };
 
