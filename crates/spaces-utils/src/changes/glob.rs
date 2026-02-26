@@ -34,7 +34,7 @@ impl Globs {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.includes.is_empty() && self.excludes.is_empty()
+        self.includes.is_empty()
     }
 
     pub fn is_match(&self, input: &str) -> bool {
