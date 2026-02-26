@@ -330,44 +330,86 @@ mod tests {
     fn test_sanitize_glob_value() {
         // "+//" prefix is replaced with "+"
         assert_eq!(
-            sanitize_annotated_glob_value("+//some/path/*.rs", "rule", Some("module.star".into()))
-                .unwrap()
-                .as_ref(),
+            sanitize_glob_value(
+                "+//some/path/*.rs",
+                IsAnnotated::Yes,
+                "rule",
+                Some("module.star".into())
+            )
+            .unwrap()
+            .as_ref(),
             "+some/path/*.rs"
+        );
+
+        assert_eq!(
+            sanitize_glob_value(
+                "//some/path/*.rs",
+                IsAnnotated::No,
+                "rule",
+                Some("module.star".into())
+            )
+            .unwrap()
+            .as_ref(),
+            "some/path/*.rs"
         );
 
         // "-//" prefix is replaced with "-"
         assert_eq!(
-            sanitize_annotated_glob_value("-//some/path/*.rs", "rule", Some("module.star".into()))
-                .unwrap()
-                .as_ref(),
+            sanitize_glob_value(
+                "-//some/path/*.rs",
+                IsAnnotated::Yes,
+                "rule",
+                Some("module.star".into())
+            )
+            .unwrap()
+            .as_ref(),
             "-some/path/*.rs"
         );
 
         // "+//**" triggers a performance warning but still succeeds
         assert_eq!(
-            sanitize_annotated_glob_value("+//**/*.rs", "rule", Some("module.star".into()))
-                .unwrap()
-                .as_ref(),
+            sanitize_glob_value(
+                "+//**/*.rs",
+                IsAnnotated::Yes,
+                "rule",
+                Some("module.star".into())
+            )
+            .unwrap()
+            .as_ref(),
             "+**/*.rs"
         );
 
         // Invalid prefixes → error
         assert!(
-            sanitize_annotated_glob_value("some/path/*.rs", "rule", Some("module.star".into()))
-                .is_err()
+            sanitize_glob_value(
+                "some/path/*.rs",
+                IsAnnotated::Yes,
+                "rule",
+                Some("module.star".into())
+            )
+            .is_err()
         );
         assert!(
-            sanitize_annotated_glob_value("+/some/path", "rule", Some("module.star".into()))
-                .is_err()
+            sanitize_glob_value(
+                "+/some/path",
+                IsAnnotated::Yes,
+                "rule",
+                Some("module.star".into())
+            )
+            .is_err()
         );
         assert!(
-            sanitize_annotated_glob_value("-/some/path", "rule", Some("module.star".into()))
-                .is_err()
+            sanitize_glob_value(
+                "-/some/path",
+                IsAnnotated::Yes,
+                "rule",
+                Some("module.star".into())
+            )
+            .is_err()
         );
 
         // None module → error message contains "unknown"
-        let err_msg = sanitize_annotated_glob_value("bad_value", "rule", None)
+        let err_msg = sanitize_glob_value("bad_value", IsAnnotated::Yes, "rule", None)
             .unwrap_err()
             .to_string();
         assert!(err_msg.contains("unknown"));
