@@ -94,9 +94,9 @@ impl Task {
             return;
         }
 
-        if let Some(inputs) = &self.rule.inputs {
+        if let Some(rule::InputsOutputs::Globs(inputs)) = &self.rule.inputs {
             for input in inputs {
-                if let Some(other_outputs) = &other_task.rule.outputs
+                if let Some(rule::InputsOutputs::Globs(other_outputs)) = &other_task.rule.outputs
                     && other_outputs.contains(input)
                 {
                     if let Some(deps) = self.rule.deps.as_mut() {

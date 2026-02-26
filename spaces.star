@@ -20,25 +20,28 @@ load(
     "workspace_is_env_var_set",
 )
 
+ANNOTATED_INPUTS = [
+    "+//spaces/Cargo.toml",
+    "+//spaces/Cargo.workspace.toml",
+    "+//spaces/**/*.rs",
+    "-//spaces/target/**",
+    "+//printer/**/*.rs",
+    "+//archiver/**/*.rs",
+]
+
 run_add_exec(
     "check",
     command = "cargo",
     args = ["check"],
     help = "Run cargo check on workspace",
+    inputs = ANNOTATED_INPUTS,
     visibility = visibility_private(),
 )
 
 run_add_exec(
     "build",
     command = "cargo",
-    inputs = [
-        "+//spaces/Cargo.toml",
-        "+//spaces/Cargo.workspace.toml",
-        "+//spaces/**/*.rs",
-        "-//spaces/target/**",
-        "+//printer/**/*.rs",
-        "+//archiver/**/*.rs",
-    ],
+    inputs = ANNOTATED_INPUTS,
     args = ["build"],
     visibility = visibility_private(),
     help = "Run cargo build on workspace",
@@ -49,6 +52,7 @@ run_add_exec(
     command = "cargo",
     args = ["clippy"],
     log_level = "Passthrough",
+    inputs = ANNOTATED_INPUTS,
     help = "Run cargo clippy on workspace",
     visibility = visibility_private(),
 )
@@ -74,6 +78,7 @@ run_add_exec_test(
         "RUST_BACKTRACE": "1",
         "RUST_LOG": "trace",
     },
+    inputs = ANNOTATED_INPUTS,
     visibility = visibility_rules(["//:test"]),
 )
 

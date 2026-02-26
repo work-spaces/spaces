@@ -264,7 +264,6 @@ mod tests {
         let expected_hash = blake3::hash(content).to_string();
 
         // First save
-        println!("Save artifact: {artifact:?} -> {expected_hash}");
         assert!(artifact.exists());
         let hash1 = save_artifact_to_cache(&cache_path, &artifact).unwrap();
         assert_eq!(hash1.as_ref(), expected_hash.as_str());

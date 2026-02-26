@@ -4,7 +4,7 @@ use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use utils::{age, environment, lock, logger, store, ws};
+use utils::{age, environment, lock, logger, rule, store, ws};
 
 pub const WORKFLOW_TOML_NAME: &str = "workflows.spaces.toml";
 pub const SHELL_TOML_NAME: &str = "shell.spaces.toml";
@@ -824,7 +824,7 @@ impl Workspace {
     pub fn update_changes(
         &mut self,
         progress: &mut printer::MultiProgressBar,
-        inputs: &HashSet<Arc<str>>,
+        inputs: &rule::InputsOutputs,
     ) -> anyhow::Result<()> {
         self.is_bin_dirty = true;
         self.settings
@@ -839,12 +839,13 @@ impl Workspace {
     pub fn inspect_inputs(
         &self,
         progress: &mut printer::MultiProgressBar,
-        inputs: &HashSet<Arc<str>>,
+        inputs: &rule::InputsOutputs,
     ) -> anyhow::Result<Vec<String>> {
+        let globs = inputs.get_globs();
         self.settings
             .bin
             .changes
-            .inspect_inputs(progress, inputs)
+            .inspect_inputs(progress, &globs)
             .context(format_context!("Failed to inspect workspace inputs"))
     }
 
@@ -880,13 +881,14 @@ impl Workspace {
         progress: &mut printer::MultiProgressBar,
         rule_name: &str,
         seed: &str,
-        inputs: &HashSet<Arc<str>>,
+        inputs: &rule::InputsOutputs,
     ) -> anyhow::Result<Option<Arc<str>>> {
+        let globs = inputs.get_globs();
         let digest = self
             .settings
             .bin
             .changes
-            .get_digest(progress, seed, inputs)
+            .get_digest(progress, seed, &globs)
             .context(format_context!("Failed to get digest for rule {rule_name}"))?;
 
         let is_changed_result = self

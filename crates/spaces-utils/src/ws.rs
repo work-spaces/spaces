@@ -10,7 +10,7 @@ pub const SPACES_LOGS_NAME: &str = ".spaces/logs";
 pub const METRICS_FILE_NAME: &str = ".spaces/metrics.spaces.json";
 pub const SETTINGS_FILE_NAME: &str = ".spaces/settings.spaces.json";
 const CHECKOUT_FILE_NAME: &str = ".spaces/checkout.spaces.json";
-const BIN_SETTINGS_FILE_NAME: &str = "build/workspace.settings.3.spaces";
+const BIN_SETTINGS_FILE_NAME: &str = "build/workspace.settings.4.spaces";
 pub const SPACES_WORKSPACE_ENV_VAR: &str = "SPACES_WORKSPACE";
 const SPACES_HOME_ENV_VAR: &str = "SPACES_HOME";
 

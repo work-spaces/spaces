@@ -70,27 +70,56 @@ pub fn sanitize_rule(rule_name: Arc<str>, starlark_module: Option<Arc<str>>) -> 
     }
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum IsAnnotated {
+    No,
+    Yes,
+}
+
 pub fn sanitize_glob_value(
     value: &str,
+    is_annotated: IsAnnotated,
     rule_name: &str,
     starlark_module: Option<Arc<str>>,
 ) -> anyhow::Result<Arc<str>> {
     let module = starlark_module.unwrap_or("unknown".into());
-    if value.starts_with("+//**") {
-        singleton::push_glob_warning(
+    if is_annotated == IsAnnotated::Yes {
+        if value.starts_with("+//**") {
+            singleton::push_glob_warning(
+                format!(
+                    "{module}:{rule_name} inputs -> {value} globbing the workspace root is bad for performance"
+                )
+                .into()
+            );
+        }
+
+        if value.starts_with("+//") || value.starts_with("-//") {
+            return Ok(value.replace("+//", "+").replace("-//", "-").into());
+        }
+
+        return Err(format_error!(
+            "{}:{} inputs -> {} must begin with +// or -// and be a workspace root path",
+            module,
+            rule_name,
+            value
+        ));
+    } else {
+        if value.starts_with("//**") {
+            singleton::push_glob_warning(
             format!(
                 "{module}:{rule_name} inputs -> {value} globbing the workspace root is bad for performance"
             )
             .into()
         );
-    }
+        }
 
-    if value.starts_with("+//") || value.starts_with("-//") {
-        return Ok(value.replace("+//", "+").replace("-//", "-").into());
+        if value.starts_with("//") {
+            return Ok(value.replace("//", "").into());
+        }
     }
 
     Err(format_error!(
-        "{}:{} inputs -> {} must begin with +// or -// and be a workspace root path",
+        "{}:{} inputs Includes/Excludes -> {} must begin with // and be a workspace root path",
         module,
         rule_name,
         value
@@ -301,7 +330,7 @@ mod tests {
     fn test_sanitize_glob_value() {
         // "+//" prefix is replaced with "+"
         assert_eq!(
-            sanitize_glob_value("+//some/path/*.rs", "rule", Some("module.star".into()))
+            sanitize_annotated_glob_value("+//some/path/*.rs", "rule", Some("module.star".into()))
                 .unwrap()
                 .as_ref(),
             "+some/path/*.rs"
@@ -309,7 +338,7 @@ mod tests {
 
         // "-//" prefix is replaced with "-"
         assert_eq!(
-            sanitize_glob_value("-//some/path/*.rs", "rule", Some("module.star".into()))
+            sanitize_annotated_glob_value("-//some/path/*.rs", "rule", Some("module.star".into()))
                 .unwrap()
                 .as_ref(),
             "-some/path/*.rs"
@@ -317,19 +346,28 @@ mod tests {
 
         // "+//**" triggers a performance warning but still succeeds
         assert_eq!(
-            sanitize_glob_value("+//**/*.rs", "rule", Some("module.star".into()))
+            sanitize_annotated_glob_value("+//**/*.rs", "rule", Some("module.star".into()))
                 .unwrap()
                 .as_ref(),
             "+**/*.rs"
         );
 
         // Invalid prefixes → error
-        assert!(sanitize_glob_value("some/path/*.rs", "rule", Some("module.star".into())).is_err());
-        assert!(sanitize_glob_value("+/some/path", "rule", Some("module.star".into())).is_err());
-        assert!(sanitize_glob_value("-/some/path", "rule", Some("module.star".into())).is_err());
+        assert!(
+            sanitize_annotated_glob_value("some/path/*.rs", "rule", Some("module.star".into()))
+                .is_err()
+        );
+        assert!(
+            sanitize_annotated_glob_value("+/some/path", "rule", Some("module.star".into()))
+                .is_err()
+        );
+        assert!(
+            sanitize_annotated_glob_value("-/some/path", "rule", Some("module.star".into()))
+                .is_err()
+        );
 
         // None module → error message contains "unknown"
-        let err_msg = sanitize_glob_value("bad_value", "rule", None)
+        let err_msg = sanitize_annotated_glob_value("bad_value", "rule", None)
             .unwrap_err()
             .to_string();
         assert!(err_msg.contains("unknown"));

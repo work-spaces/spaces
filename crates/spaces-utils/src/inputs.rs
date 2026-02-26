@@ -1,21 +1,6 @@
-use anyhow_source_location::format_error;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::sync::Arc;
-
-pub fn validate_input_globs(globs: &Option<HashSet<Arc<str>>>) -> anyhow::Result<()> {
-    if let Some(globs) = globs.as_ref() {
-        for glob in globs {
-            if !glob.starts_with('+') && !glob.starts_with('-') {
-                return Err(format_error!(
-                    "Invalid glob: {glob:?}. Must begin with '+' (includes) or '-' (excludes)"
-                ));
-            }
-        }
-    }
-    Ok(())
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Inputs {
