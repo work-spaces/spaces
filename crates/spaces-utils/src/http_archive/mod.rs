@@ -297,12 +297,13 @@ impl HttpArchive {
         let all_files = self
             .load_files_json()
             .context(format_context!("failed to load json files manifest"))?;
-        for file in all_files.iter() {
-            let mut collect_globs = glob::Globs::default();
-            if let Some(globs) = self.archive.globs.as_ref() {
-                collect_globs.merge(&glob::Globs::new_with_annotated_set(globs));
-            }
 
+        let mut collect_globs = glob::Globs::default();
+        if let Some(globs) = self.archive.globs.as_ref() {
+            collect_globs.merge(&glob::Globs::new_with_annotated_set(globs));
+        }
+
+        for file in all_files.iter() {
             let is_match = collect_globs.is_empty() || collect_globs.is_match(file);
 
             if is_match {
