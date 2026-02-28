@@ -802,6 +802,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         any_env.populate_source_for_all(rules::get_latest_starlark_module());
 
+        {
+            let workspace_arc =
+                singleton::get_workspace().context(format_error!("No active workspace found"))?;
+            let workspace = workspace_arc.read();
+            workspace.insert_automatic_var_placeholders(&mut any_env);
+        }
+
         let update_env = executor::env::UpdateEnv {
             environment: any_env,
         };

@@ -427,7 +427,7 @@ pub fn evaluate_starlark_modules(
             {
                 let mut workspace_write = workspace.write();
                 workspace_write
-                    .env
+                    .get_env_mut()
                     .repopulate_inherited_vars()
                     .context(format_context!("While populating required inherited vars"))?;
             }
@@ -525,7 +525,10 @@ fn execute_tasks(
             {
                 // apply args_env to workspace
                 let args_env = singleton::get_args_env();
-                workspace.write().env.insert_assign_from_args(&args_env);
+                workspace
+                    .write()
+                    .get_env_mut()
+                    .insert_assign_from_args(&args_env);
             }
 
             star_logger(printer).message("--Run Phase--");
@@ -763,7 +766,6 @@ pub fn run_starlark_modules(
     let secrets = {
         let read_workspace = workspace.read();
         read_workspace
-            .env
             .get_secret_values()
             .context(format_context!("while getting secrets for checkout phase"))?
     };

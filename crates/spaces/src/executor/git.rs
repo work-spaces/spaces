@@ -590,7 +590,7 @@ impl Git {
                 self.spaces_key
             ))?;
 
-            workspace.write().set_is_reproducible(false);
+            workspace.write().set_is_not_reproducible();
         }
 
         // after possibly checking out the lock commit, check for reproducibility
@@ -606,7 +606,7 @@ impl Git {
                     )
                     .as_str(),
                 );
-                workspace.write().set_is_reproducible(false);
+                workspace.write().set_is_not_reproducible();
             }
         }
 

@@ -5,54 +5,30 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-const ASSIGN_VARIABLES_DESCRIPTION: &str = r#"`Assign` variables are assigned a value in the checkout rules. These values
-may affect rule reproducibility. These values will be part of the rule digest unless filtered out.
+const ASSIGN_VARIABLES_DESCRIPTION: &str = r#"Values set in checkout rules. Part of the rule digest unless filtered. Overridden by `--env=NAME=VALUE`."#;
 
-`Assign` variables may allow overriding rule values with values inherited from the environment by enabled `is_try_inherit`.
+const AUTOMATIC_VARIABLES_DESCRIPTION: &str = r#"Workspace-specific values assigned by spaces during checkout (e.g. workspace path, digest). Other variables referencing these values use placeholders that are resolved at run time. This keeps rule digests stable across workspaces and enables cross-workspace rule caching."#;
 
-Values passed to the command line using `--env=<NAME>=<VALUE>` will override the values in the checkout rules."#;
+const LIST_VARIABLES_DESCRIPTION: &str = r#"`Prepend` and `Append` variables assign multiple values to the same variable (e.g. `PATH`)."#;
 
-const LIST_VARIABLES_DESCRIPTION: &str = r#"`Prepend` and `Append` variables enable assigning multiple values to the same
-environment variable such as `PATH`."#;
+const INHERIT_VARIABLES_DESCRIPTION: &str = r#"Values inherited from the calling environment. Not part of the workspace digest and must not affect reproducibility. Use for secrets and developer preferences.
 
-const INHERIT_VARIABLES_DESCRIPTION: &str = r#"`Inherit` variables are inherited from the calling environment.
+- `default_value`: Fallback if the variable is not in the calling environment.
+- `is_required`: Fail if the variable is missing.
+- `is_secret`: Redact the value in logs.
+- `is_save`: Persist the inherited value at checkout."#;
 
-The values of `Inherit` variables are not considered part of the workspace digest. They must not be used to impact
-the reproducibility of the rules. The best use cases are for getting authorization secrets into the workspace
-and importing developer preferences (such as a preference for a shell or IDE).
+const SCRIPT_VARIABLES_DESCRIPTION: &str = r#"Values produced by running a shell script at checkout. The script runs with a clean environment.
 
-`Inherit` variables include the following options:
+- `default_value`: Fallback if the script fails.
+- `shell`: Shell to use (default `/bin/sh`).
+- `env`: Environment variables passed to the script.
+- `is_required`: Fail if the script produces no output.
+- `is_secret`: Redact the value in logs."#;
 
-- default_value: Optional default value that is assigned if the value cannot be inherited
-- is_required: If enabled, spaces will fail during evaluation if the variable is not provided by the caller's environment.
-- is_secret: If enabled, the value will be redacted in the logs.
-- is_save: If enabled, the variable will be inherited during checkout and the value saved."#;
+const ASSIGN_FROM_COMMAND_LINE_DESCRIPTION: &str = r#"Values set via `--env=NAME=VALUE`.
 
-const SCRIPT_VARIABLES_DESCRIPTION: &str = r#"`Script` variables are acquired by executing a small shell script. The stdout of the script is
-assigned to the variable during checkout. The script is executed in the current working directory with a clean environment.
-
-`Script` variables include the following options:
-
-- default_value: Optional default value that is assigned if the script fails
-- shell: Optional shell to use. Default is `/bin/sh`
-- env: Map of environment variables to set in the script's environment. No other variables will be available.
-- is_required: If enabled, spaces will fail during evaluation if the variable is not provided by the caller's environment.
-- is_secret: If enabled, the value will be redacted in the logs."#;
-
-const ASSIGN_FROM_COMMAND_LINE_DESCRIPTION: &str = r#"`AssignFromArg` variables are assigned by using the `--env=NAME=VALUE` option
-during checkout and run time.
-
-For values passed to checkout:
-
-- The variables and values becomes part of the workspace digest.
-- The variable is stored persistently in the workspace env.
-
-For values passed to run:
-
-- The variables do NOT become part of the workspace digest.
-- All starlark modules are re-evaluated and the dependency graph recomputed.
-
-ENV values assigned from command line arguments will overwrite any workspace values."#;
+At checkout: included in the workspace digest and persisted. At run: NOT included in the digest; triggers re-evaluation of all modules. Always overrides existing workspace values."#;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 pub enum EnvBool {
@@ -246,6 +222,32 @@ pub enum Value {
     /// Inherit at both checkout/run time, if available, and redact
     /// Must not affect reproducibility.
     AssignFromArg(Arc<str>),
+    /// Automatic variables are assigned by spaces on-demand.
+    /// They have no user-supplied value; the value is populated
+    /// automatically during workspace operations.
+    Automatic,
+}
+
+const AUTOMATIC_PLACEHOLDER_PREFIX: &str = "$AUTO";
+
+impl Value {
+    pub fn get_automatic_placeholder(name: &str) -> String {
+        format!("{AUTOMATIC_PLACEHOLDER_PREFIX}{{{name}}}")
+    }
+
+    pub fn replace_with_automatic_placeholders(
+        value: &str,
+        auto_vars: &HashMap<&str, Arc<str>>,
+    ) -> String {
+        let mut result = value.to_string();
+        for (auto_name, auto_value) in auto_vars.iter() {
+            if !auto_value.is_empty() {
+                let placeholder = Self::get_automatic_placeholder(auto_name);
+                result = result.replace(auto_value.as_ref(), &placeholder);
+            }
+        }
+        result
+    }
 }
 
 /// Represents an update to an environment.
@@ -334,6 +336,15 @@ impl Any {
             ..Default::default()
         }
     }
+
+    pub fn new_automatic(name: Arc<str>, help: Option<Arc<str>>) -> Self {
+        Self {
+            name,
+            value: Value::Automatic,
+            source: Some("automatically assigned by spaces".into()),
+            help,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -394,9 +405,35 @@ impl AnyEnvironment {
             self.insert_or_update(Any {
                 name: name.clone(),
                 value: Value::AssignFromArg(value.clone()),
-                source: Some("<command line argument>".into()),
+                help: Some("Inserting by user from the command line".into()),
                 ..Default::default()
             });
+        }
+    }
+
+    pub fn replace_values_with_automatic_placeholders(
+        &mut self,
+        auto_vars: &HashMap<&str, Arc<str>>,
+    ) {
+        for any in self.vars.iter_mut() {
+            match &mut any.value {
+                Value::Assign(assign_value) => {
+                    assign_value.value =
+                        Value::replace_with_automatic_placeholders(&assign_value.value, auto_vars)
+                            .into();
+                }
+                Value::Append(append_prepend) | Value::Prepend(append_prepend) => {
+                    append_prepend.value = Value::replace_with_automatic_placeholders(
+                        &append_prepend.value,
+                        auto_vars,
+                    )
+                    .into();
+                }
+                Value::AssignFromArg(value) => {
+                    *value = Value::replace_with_automatic_placeholders(value, auto_vars).into();
+                }
+                Value::None | Value::Automatic | Value::Inherit(_) | Value::Script(_) => {}
+            }
         }
     }
 
@@ -493,6 +530,9 @@ impl AnyEnvironment {
                 Value::Assign(assign_value) => {
                     result.insert(name, assign_value.value.clone());
                 }
+                Value::Automatic => {
+                    result.insert(name.clone(), Value::get_automatic_placeholder(&name).into());
+                }
                 Value::Inherit(inherit_value) => {
                     let env_value = inherit_value
                         .get_value(&name)
@@ -553,7 +593,7 @@ impl AnyEnvironment {
         Ok(any_yaml)
     }
 
-    pub fn to_markdown(&self) -> anyhow::Result<String> {
+    pub fn to_markdown(&self, auto_vars: &HashMap<&str, Arc<str>>) -> anyhow::Result<String> {
         let mut result = String::new();
         result.push_str(markdown::heading(1, "Environment Variables").as_str());
         result.push_str(markdown::heading(2, "Assign Variables").as_str());
@@ -601,6 +641,25 @@ impl AnyEnvironment {
             .to_yaml(|any| matches!(any.value, Value::AssignFromArg(_)))
             .context(format_context!("failed to create yaml for list value"))?;
         result.push_str(markdown::code_block("yaml", &any_yaml).as_str());
+
+        result.push('\n');
+        result.push_str(markdown::heading(2, "Automatic Variables").as_str());
+        result.push_str(markdown::paragraph(AUTOMATIC_VARIABLES_DESCRIPTION).as_str());
+
+        let any_yaml = self
+            .to_yaml(|any| matches!(any.value, Value::Automatic))
+            .context(format_context!("failed to create yaml for automatic value"))?;
+        result.push_str(markdown::code_block("yaml", &any_yaml).as_str());
+
+        if !auto_vars.is_empty() {
+            result.push('\n');
+            result.push_str(markdown::heading(2, "Automatic Variable Values").as_str());
+            let mut shell_code = String::new();
+            for (key, value) in auto_vars.iter() {
+                shell_code.push_str(&format!("{key}={value}\n"));
+            }
+            result.push_str(markdown::code_block("shell", &shell_code).as_str());
+        }
 
         result.push_str(markdown::heading(2, "Workspace Environment").as_str());
         let vars = self

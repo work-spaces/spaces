@@ -265,8 +265,7 @@ pub fn run_shell_in_workspace(
 
     let run_environment = workspace_arc
         .read()
-        .get_env()
-        .get_vars()
+        .get_env_vars()
         .context(format_context!("while getting env vars"))?;
 
     const SHELL_DIR: &str = ".spaces/shell";

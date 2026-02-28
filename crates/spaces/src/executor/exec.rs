@@ -69,10 +69,9 @@ impl Exec {
         name: &str,
     ) -> anyhow::Result<()> {
         let mut arguments = self.args.clone().unwrap_or_default();
-        let workspace_env = workspace.read().get_env();
-
-        let mut exec_env_vars = workspace_env
-            .get_vars()
+        let mut exec_env_vars = workspace
+            .read()
+            .get_env_vars()
             .context(format_context!("while getting env vars"))?;
 
         let absolute_path_to_workspace = workspace.read().get_absolute_path();
@@ -119,7 +118,6 @@ impl Exec {
         };
 
         logger(progress, name).debug(format!("log file: {log_file_path:?}",).as_str());
-        logger(progress, name).debug(format!("Workspace ENV: {workspace_env:?}",).as_str());
         logger(progress, name).debug(format!("Env: {environment:?}",).as_str());
 
         let options = printer::ExecuteOptions {

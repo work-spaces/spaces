@@ -91,8 +91,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let workspace_arc = singleton::get_workspace()
             .context(format_error!("Internal error: no active workspace found"))?;
         let workspace = workspace_arc.read();
-        let env = workspace.get_env();
-        Ok(env.is_env_var_set(var_name))
+        Ok(workspace.is_env_var_set(var_name))
     }
 
     /// Returns true if the workspace environment variable is set.
@@ -112,8 +111,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let workspace_arc = singleton::get_workspace()
             .context(format_error!("Internal error: no active workspace found"))?;
         let workspace = workspace_arc.read();
-        let env = workspace.get_env();
-        Ok(env.is_env_var_set_to(var_name, var_value))
+        Ok(workspace.is_env_var_set_to(var_name, var_value))
     }
 
     /// Returns the value of a workspace environment variable.
@@ -133,8 +131,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let workspace = workspace_arc.read();
 
         let env_vars = workspace
-            .get_env()
-            .get_vars()
+            .get_env_vars()
             .context(format_context!("while workspace.get_env_var({var_name})"))?;
 
         if let Some(value) = env_vars.get(var_name) {
