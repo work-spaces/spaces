@@ -286,7 +286,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             let mut bin_rule = hard_link_rule.clone();
             let bin_rule_name: Arc<str> = format!("{original_rule_name}_hard_link_{bin}").into();
             bin_rule.name = bin_rule_name.clone();
-            bin_rule.deps = Some(vec![cargo_bin_rule_name.clone()]);
+            bin_rule.deps = Some(rule::Deps::Rules(vec![cargo_bin_rule_name.clone()]));
             deps.push(bin_rule.name.clone());
 
             // cargo install uses the root/bin install directory
@@ -305,7 +305,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         // add original rule name as a target with hardlink deps
         let rule_name = rule.name.clone();
-        rule.deps = Some(deps);
+        rule.deps = Some(rule::Deps::Rules(deps));
         rules::insert_task(task::Task::new(
             rule,
             task::Phase::Checkout,

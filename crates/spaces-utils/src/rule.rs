@@ -51,6 +51,99 @@ pub enum InputsOutputs {
     Any(Vec<AnyInputsOutputs>),
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Globs {
+    Includes(HashSet<Arc<str>>),
+    Excludes(HashSet<Arc<str>>),
+}
+
+impl Globs {
+    pub fn to_changes_globs(items: &[Globs]) -> changes::glob::Globs {
+        let mut globs = changes::glob::Globs::default();
+        for item in items {
+            match item {
+                Globs::Includes(set) => globs.includes.extend(set.iter().cloned()),
+                Globs::Excludes(set) => globs.excludes.extend(set.iter().cloned()),
+            }
+        }
+        globs
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Deps {
+    Rules(Vec<Arc<str>>),
+    Globs(Vec<Globs>),
+}
+
+impl Deps {
+    /// Returns a reference to the rules list if this is the `Rules` variant, or `None`.
+    pub fn rules(&self) -> Option<&Vec<Arc<str>>> {
+        match self {
+            Deps::Rules(rules) => Some(rules),
+            Deps::Globs(_) => None,
+        }
+    }
+
+    /// Returns a mutable reference to the rules list if this is the `Rules` variant, or `None`.
+    pub fn rules_mut(&mut self) -> Option<&mut Vec<Arc<str>>> {
+        match self {
+            Deps::Rules(rules) => Some(rules),
+            Deps::Globs(_) => None,
+        }
+    }
+
+    /// Returns true if this is the `Rules` variant and the list is empty,
+    /// or if this is the `AnyFiles` variant and the list is empty.
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Deps::Rules(rules) => rules.is_empty(),
+            Deps::Globs(any) => any.is_empty(),
+        }
+    }
+
+    /// Ensures this is a `Rules` variant, converting from a default if needed,
+    /// and pushes a rule name onto it.
+    pub fn push_rule(&mut self, rule: Arc<str>) {
+        match self {
+            Deps::Rules(rules) => rules.push(rule),
+            Deps::Globs(_) => {
+                // AnyFiles variant cannot hold rule names; this is a no-op
+            }
+        }
+    }
+
+    /// Returns true if this is the `Rules` variant and contains the given rule name.
+    pub fn contains_rule(&self, rule: &Arc<str>) -> bool {
+        match self {
+            Deps::Rules(rules) => rules.contains(rule),
+            Deps::Globs(_) => false,
+        }
+    }
+
+    /// Returns the file globs for the `AnyFiles` variant.
+    pub fn get_globs(&self) -> changes::glob::Globs {
+        match self {
+            Deps::Rules(_) => changes::glob::Globs::default(),
+            Deps::Globs(any_list) => {
+                let mut globs = changes::glob::Globs::default();
+                for entry in any_list {
+                    match entry {
+                        Globs::Includes(hash_set) => {
+                            globs.includes.extend(hash_set.iter().cloned())
+                        }
+                        Globs::Excludes(hash_set) => {
+                            globs.excludes.extend(hash_set.iter().cloned())
+                        }
+                    }
+                }
+                globs
+            }
+        }
+    }
+}
+
 impl InputsOutputs {
     pub fn get_globs(&self) -> changes::glob::Globs {
         match self {
@@ -96,8 +189,8 @@ impl InputsOutputs {
 pub struct Rule {
     /// workspace unique name of the rule
     pub name: Arc<str>,
-    /// list of rule dependencies by name
-    pub deps: Option<Vec<Arc<str>>>,
+    /// list of rule dependencies by name, or file-based deps with includes/excludes
+    pub deps: Option<Deps>,
     /// help text displayed to the user when running inspect - use markdown format
     pub help: Option<Arc<str>>,
     /// list of globs that must have a change to re-run the rule
@@ -214,9 +307,29 @@ impl Rule {
             md.bold("Dependencies")?;
             md.printer.newline()?;
             md.printer.newline()?;
-            for dep in deps {
-                // get the rule using the dep as the name
-                md.list_item(0, dep)?;
+            match deps {
+                Deps::Rules(rules) => {
+                    for dep in rules {
+                        // get the rule using the dep as the name
+                        md.list_item(0, dep)?;
+                    }
+                }
+                Deps::Globs(any_deps) => {
+                    for entry in any_deps {
+                        match entry {
+                            Globs::Includes(set) => {
+                                for item in set {
+                                    md.list_item(0, &format!("+{item}"))?;
+                                }
+                            }
+                            Globs::Excludes(set) => {
+                                for item in set {
+                                    md.list_item(0, &format!("-{item}"))?;
+                                }
+                            }
+                        }
+                    }
+                }
             }
             md.printer.newline()?;
         }

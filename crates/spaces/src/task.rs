@@ -89,7 +89,7 @@ impl Task {
 
     pub fn _update_implicit_dependency(&mut self, other_task: &Task) {
         if let Some(deps) = &self.rule.deps
-            && deps.contains(&other_task.rule.name)
+            && deps.contains_rule(&other_task.rule.name)
         {
             return;
         }
@@ -100,9 +100,10 @@ impl Task {
                     && other_outputs.contains(input)
                 {
                     if let Some(deps) = self.rule.deps.as_mut() {
-                        deps.push(other_task.rule.name.clone());
+                        deps.push_rule(other_task.rule.name.clone());
                     } else {
-                        self.rule.deps = Some(vec![other_task.rule.name.clone()]);
+                        self.rule.deps =
+                            Some(rule::Deps::Rules(vec![other_task.rule.name.clone()]));
                     }
                     return;
                 }

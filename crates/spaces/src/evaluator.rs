@@ -233,7 +233,7 @@ fn insert_setup_and_all_rules(
         outputs: None,
         type_: Some(rule::RuleType::Run),
         platforms: None,
-        deps: Some(deps),
+        deps: Some(rule::Deps::Rules(deps)),
         visibility: Some(rule::Visibility::Public),
     };
 
