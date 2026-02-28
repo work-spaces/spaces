@@ -195,7 +195,7 @@ pub fn save_env_file_at(dir_path: &std::path::Path, env_md: &str, env: &str) -> 
     workspace_file_content.push_str(env);
     workspace_file_content.push_str(
         r#"
-info.set_minimum_version("0.15.27")
+info.set_minimum_version("0.15.28")
         "#,
     );
     workspace_file_content.push_str("\n\nworkspace.set_env(env = WORKSPACE_ENV) \n");

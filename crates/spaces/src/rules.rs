@@ -39,8 +39,10 @@ fn get_task_signal_deps(task: &task::Task) -> anyhow::Result<Vec<task::SignalArc
     let tasks = state.tasks.read();
 
     let mut result = Vec::new();
-    if let Some(deps) = task.rule.deps.as_ref() {
-        for dep in deps {
+    if let Some(deps) = task.rule.deps.as_ref()
+        && let Some(rules) = deps.rules()
+    {
+        for dep in rules {
             // # tasks * # deps + hashmap access is EXPENSIVE
             // this causes a substantial delay when starting spaces
             let dep_task = tasks.get(dep).ok_or(format_error!(
@@ -417,8 +419,10 @@ impl State {
         }
 
         // update deps that refer to rules in the same starlark module
-        if let Some(deps) = task_to_insert.rule.deps.as_mut() {
-            for dep in deps.iter_mut() {
+        if let Some(deps) = task_to_insert.rule.deps.as_mut()
+            && let Some(rules) = deps.rules_mut()
+        {
+            for dep in rules.iter_mut() {
                 if label::is_rule_sanitized(dep) {
                     continue;
                 }
@@ -450,9 +454,11 @@ impl State {
     fn check_task_deps_visibility(&self, task: &task::Task) -> anyhow::Result<()> {
         let tasks = self.tasks.read();
 
-        if let Some(deps) = task.rule.deps.as_ref() {
+        if let Some(deps) = task.rule.deps.as_ref()
+            && let Some(rules) = deps.rules()
+        {
             let task_path = label::get_path_from_label(task.rule.name.as_ref());
-            for dep in deps.iter() {
+            for dep in rules.iter() {
                 if let Some(dep_task) = tasks.get(dep) {
                     match dep_task.rule.visibility.as_ref() {
                         None | Some(rule::Visibility::Public) => {
@@ -546,8 +552,10 @@ impl State {
                 }
 
                 // connect the dependencies
-                if let Some(deps) = task.rule.deps.as_ref() {
-                    for dep in deps {
+                if let Some(deps) = task.rule.deps.as_ref()
+                    && let Some(rules) = deps.rules()
+                {
+                    for dep in rules {
                         self.graph.add_dependency(&task.rule.name, dep).context(
                             format_context!(
                                 "Failed to add dependency {dep} to task {}: {}",
@@ -683,7 +691,12 @@ impl State {
             if let Some(task) = task {
                 let mut task_hasher = blake3::Hasher::new();
                 task_hasher.update(task.calculate_digest().as_bytes());
-                let mut deps = task.rule.deps.clone().unwrap_or_default();
+                let mut deps = task
+                    .rule
+                    .deps
+                    .clone()
+                    .and_then(|d| d.rules().cloned())
+                    .unwrap_or_default();
                 deps.sort();
                 for dep in deps {
                     if let Some(dep_task) = tasks.get(&dep) {
@@ -1092,36 +1105,38 @@ pub fn add_setup_dep_to_run_rules() -> anyhow::Result<()> {
         if task.rule.type_ != Some(rule::RuleType::Setup) && task.phase == task::Phase::Run {
             task.rule
                 .deps
-                .get_or_insert_with(Vec::new)
-                .push(rule::SETUP_RULE_NAME.into());
+                .get_or_insert_with(|| rule::Deps::Rules(Vec::new()))
+                .push_rule(rule::SETUP_RULE_NAME.into());
         }
     }
     Ok(())
 }
 
-fn get_rules_by_type(rule_type: rule::RuleType) -> Vec<Arc<str>> {
+fn get_rules_by_type(rule_type: rule::RuleType) -> rule::Deps {
     let state = get_state().read();
     let tasks = state.tasks.read();
-    tasks
-        .values()
-        .filter(|task| task.rule.type_ == Some(rule_type))
-        .map(|task| task.rule.name.clone())
-        .collect()
+    rule::Deps::Rules(
+        tasks
+            .values()
+            .filter(|task| task.rule.type_ == Some(rule_type))
+            .map(|task| task.rule.name.clone())
+            .collect(),
+    )
 }
 
-pub fn get_setup_rules() -> Vec<Arc<str>> {
+pub fn get_setup_rules() -> rule::Deps {
     get_rules_by_type(rule::RuleType::Setup)
 }
 
-pub fn get_test_rules() -> Vec<Arc<str>> {
+pub fn get_test_rules() -> rule::Deps {
     get_rules_by_type(rule::RuleType::Test)
 }
 
-pub fn get_pre_commit_rules() -> Vec<Arc<str>> {
+pub fn get_pre_commit_rules() -> rule::Deps {
     get_rules_by_type(rule::RuleType::PreCommit)
 }
 
-pub fn get_clean_rules() -> Vec<Arc<str>> {
+pub fn get_clean_rules() -> rule::Deps {
     get_rules_by_type(rule::RuleType::Clean)
 }
 
