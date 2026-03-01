@@ -187,7 +187,11 @@ pub fn execute_task(
             if skip_execute_message.is_some() {
                 None
             } else {
-                let dep_globs = task.rule.deps.as_ref().unwrap().collect_globs();
+                let dep_globs = if let Some(deps) = task.rule.deps.as_ref() {
+                    deps.collect_globs()
+                } else {
+                    Vec::new()
+                };
 
                 task_logger(&mut progress, name.clone())
                     .debug("update workspace changes with deps globs");
