@@ -43,6 +43,7 @@ run_add_exec(
     command = "cargo",
     inputs = ANNOTATED_INPUTS,
     args = ["build"],
+    deps = [":check"],
     visibility = visibility_private(),
     help = "Run cargo build on workspace",
 )

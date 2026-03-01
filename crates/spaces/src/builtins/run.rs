@@ -101,9 +101,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .context(format_context!("bad options for exec rule"))?;
 
         if let Some(inputs) = rule.inputs.as_ref() {
-            inputs
-                .validate()
-                .context(format_context!("invalid inputs globs with {}", rule.name))?;
+            for glob in inputs {
+                if !glob.starts_with('+') && !glob.starts_with('-') {
+                    return Err(format_error!(
+                        "Invalid glob: {glob:?}. Must begin with '+' (includes) or '-' (excludes) in {}",
+                        rule.name
+                    ));
+                }
+            }
         }
 
         add_rule_to_all(&rule)
@@ -153,9 +158,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .context(format_context!("bad options for kill rule"))?;
 
         if let Some(inputs) = rule.inputs.as_ref() {
-            inputs
-                .validate()
-                .context(format_context!("invalid inputs globs with {}", rule.name))?;
+            for glob in inputs {
+                if !glob.starts_with('+') && !glob.starts_with('-') {
+                    return Err(format_error!(
+                        "Invalid glob: {glob:?}. Must begin with '+' (includes) or '-' (excludes) in {}",
+                        rule.name
+                    ));
+                }
+            }
         }
 
         add_rule_to_all(&rule)
@@ -216,7 +226,6 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 .context(format_context!("bad options for archive"))?;
 
         let rule_name = rule.name.clone();
-        let mut inputs = HashSet::new();
 
         let input = create_archive
             .input
@@ -225,8 +234,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .to_owned();
         create_archive.input = input;
 
-        inputs.insert(format!("+//{}/**", create_archive.input).into());
-        rule.inputs = Some(rule::InputsOutputs::Globs(inputs));
+        // Add archive input globs to deps without clobbering existing deps
+        let mut includes = HashSet::new();
+        includes.insert(format!("//{}/**", create_archive.input).into());
+        rule::Deps::push_any_dep(
+            &mut rule.deps,
+            rule::AnyDep::Glob(rule::Globs::Includes(includes)),
+        );
 
         let mut outputs = HashSet::new();
         outputs.insert(
@@ -237,7 +251,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             )
             .into(),
         );
-        rule.outputs = Some(rule::InputsOutputs::Globs(outputs));
+        rule.outputs = Some(outputs);
 
         let archive = executor::archive::Archive { create_archive };
 

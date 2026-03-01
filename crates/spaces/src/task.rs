@@ -94,18 +94,24 @@ impl Task {
             return;
         }
 
-        if let Some(rule::InputsOutputs::Globs(inputs)) = &self.rule.inputs {
-            for input in inputs {
-                if let Some(rule::InputsOutputs::Globs(other_outputs)) = &other_task.rule.outputs
-                    && other_outputs.contains(input)
-                {
-                    if let Some(deps) = self.rule.deps.as_mut() {
-                        deps.push_rule(other_task.rule.name.clone());
-                    } else {
-                        self.rule.deps =
-                            Some(rule::Deps::Rules(vec![other_task.rule.name.clone()]));
+        if let Some(deps) = &self.rule.deps
+            && deps.has_globs()
+        {
+            let self_globs = rule::Globs::to_changes_globs(&deps.collect_globs());
+            if let Some(other_deps) = &other_task.rule.deps
+                && other_deps.has_globs()
+            {
+                let other_globs = rule::Globs::to_changes_globs(&other_deps.collect_globs());
+                for input in self_globs.includes.iter() {
+                    if other_globs.includes.contains(input) {
+                        if let Some(deps) = self.rule.deps.as_mut() {
+                            deps.push_rule(other_task.rule.name.clone());
+                        } else {
+                            self.rule.deps =
+                                Some(rule::Deps::Rules(vec![other_task.rule.name.clone()]));
+                        }
+                        return;
                     }
-                    return;
                 }
             }
         }
