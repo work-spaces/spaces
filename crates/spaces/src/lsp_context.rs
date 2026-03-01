@@ -386,7 +386,7 @@ impl LspContext for SpacesContext {
                 if literal.starts_with(':') {
                     eprintln!("Match leading : -> {current_file:?}");
                     match current_file {
-                        LspUrl::File(path) => Some(path.to_string_lossy().into()),
+                        LspUrl::File(path) => Some(path.to_string_lossy().to_string()),
                         _ => None,
                     }
                 } else {
