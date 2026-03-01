@@ -328,14 +328,14 @@ impl State {
         label::sanitize_working_directory(rule_name, self.latest_starlark_module.clone())
     }
 
-    fn sanitize_glob_hash_set(
-        hash_set: &mut HashSet<Arc<str>>,
+    fn sanitize_glob_vec(
+        vec: &mut Vec<Arc<str>>,
         is_annotated: IsAnnotated,
         rule_label: Arc<str>,
         latest_starlark_module: Option<Arc<str>>,
     ) -> anyhow::Result<()> {
-        *hash_set = hash_set
-            .drain()
+        *vec = vec
+            .drain(..)
             .map(|item| {
                 label::sanitize_glob_value(
                     item.as_ref(),
@@ -345,7 +345,7 @@ impl State {
                 )
                 .context(format_context!("Failed to sanitize deps glob: {item}"))
             })
-            .collect::<anyhow::Result<HashSet<Arc<str>>>>()?;
+            .collect::<anyhow::Result<Vec<Arc<str>>>>()?;
 
         Ok(())
     }
@@ -415,9 +415,9 @@ impl State {
                                     );
                                 }
                             }
-                            rule::AnyDep::Glob(glob) => match glob {
+                            rule::AnyDep::Globs(glob) => match glob {
                                 rule::Globs::Includes(set) => {
-                                    Self::sanitize_glob_hash_set(
+                                    Self::sanitize_glob_vec(
                                         set,
                                         label::IsAnnotated::No,
                                         rule_label.clone(),
@@ -425,7 +425,7 @@ impl State {
                                     )?;
                                 }
                                 rule::Globs::Excludes(set) => {
-                                    Self::sanitize_glob_hash_set(
+                                    Self::sanitize_glob_vec(
                                         set,
                                         label::IsAnnotated::No,
                                         rule_label.clone(),
@@ -433,6 +433,14 @@ impl State {
                                     )?;
                                 }
                             },
+                            rule::AnyDep::Target(target) => {
+                                if !label::is_rule_sanitized(&target.rule) {
+                                    target.rule = label::sanitize_rule(
+                                        target.rule.clone(),
+                                        self.latest_starlark_module.clone(),
+                                    );
+                                }
+                            }
                         }
                     }
                 }
