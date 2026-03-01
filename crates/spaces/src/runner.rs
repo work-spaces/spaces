@@ -1,8 +1,8 @@
-use crate::{completions, evaluator, executor, label, rules, task, workspace};
+use crate::{completions, evaluator, executor, rules, task, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use std::sync::Arc;
-use utils::{ci, git, lock, logger, shell, store, version, ws};
+use utils::{ci, git, labels, lock, logger, shell, store, version, ws};
 
 use crate::{lsp_context, singleton};
 use itertools::Itertools;
@@ -161,7 +161,7 @@ pub fn foreach_repo(
                 // get the dev-branches from the workspace settings
                 for dev_branch_rule in dev_branch_rules.iter() {
                     let location_in_workspace =
-                        label::get_rule_name_from_label(dev_branch_rule.as_ref());
+                        labels::get_rule_name_from_label(dev_branch_rule.as_ref());
                     if location_in_workspace == member.path.as_ref() {
                         repos.push(member.clone());
                         // skip the rest of the loop

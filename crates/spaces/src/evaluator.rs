@@ -205,6 +205,7 @@ fn insert_setup_and_all_rules(
         help: Some("Builtin rule to run setup rules first".into()),
         inputs: None,
         outputs: None,
+        targets: None,
         type_: Some(rule::RuleType::Run),
         platforms: None,
         deps: Some(rules::get_setup_rules()),
@@ -218,22 +219,23 @@ fn insert_setup_and_all_rules(
     ))
     .context(format_context!("Failed to insert task `setup`"))?;
 
-    let mut deps: Vec<Arc<str>> = Vec::new();
+    let mut deps: Vec<rule::AnyDep> = Vec::new();
     let all_deps = workspace.read().settings.bin.run_all.clone();
     for all_target in all_deps {
-        deps.push(all_target.clone());
+        deps.push(rule::AnyDep::Rule(all_target.clone()));
     }
 
-    deps.push(rule::SETUP_RULE_NAME.into());
+    deps.push(rule::AnyDep::Rule(rule::SETUP_RULE_NAME.into()));
 
     let rule = rule::Rule {
         name: rule::ALL_RULE_NAME.into(),
         help: Some("Builtin rule to run default targets and dependencies".into()),
         inputs: None,
         outputs: None,
+        targets: None,
         type_: Some(rule::RuleType::Run),
         platforms: None,
-        deps: Some(rule::Deps::Rules(deps)),
+        deps: Some(rule::Deps::Any(deps)),
         visibility: Some(rule::Visibility::Public),
     };
 
@@ -249,6 +251,7 @@ fn insert_setup_and_all_rules(
         help: Some("Builtin rule to run tests".into()),
         inputs: None,
         outputs: None,
+        targets: None,
         type_: Some(rule::RuleType::Test),
         platforms: None,
         deps: Some(rules::get_test_rules()),
@@ -267,6 +270,7 @@ fn insert_setup_and_all_rules(
         help: Some("Builtin rule to run pre-commit checks".into()),
         inputs: None,
         outputs: None,
+        targets: None,
         type_: Some(rule::RuleType::PreCommit),
         platforms: None,
         deps: Some(rules::get_pre_commit_rules()),
@@ -285,6 +289,7 @@ fn insert_setup_and_all_rules(
         help: Some("Builtin rule to cleanup the workspace".into()),
         inputs: None,
         outputs: None,
+        targets: None,
         type_: Some(rule::RuleType::Clean),
         platforms: None,
         deps: Some(rules::get_clean_rules()),
@@ -496,11 +501,6 @@ fn execute_tasks(
     run_target: Option<Arc<str>>,
     modules: &[(Arc<str>, Arc<str>)],
 ) -> anyhow::Result<IsSaveBin> {
-    let glob_warnings = singleton::get_glob_warnings();
-    for warning in glob_warnings {
-        star_logger(printer).warning(warning.as_ref());
-    }
-
     if phase == task::Phase::Checkout || singleton::get_is_rescan() || workspace.read().is_dirty {
         star_logger(printer).debug("saving JSON workspace settings");
         workspace

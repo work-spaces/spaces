@@ -896,13 +896,14 @@ impl Workspace {
     pub fn update_changes(
         &mut self,
         progress: &mut printer::MultiProgressBar,
-        inputs: &rule::InputsOutputs,
+        rule_globs: &[rule::Globs],
     ) -> anyhow::Result<()> {
         self.is_bin_dirty = true;
+        let changes_globs = rule::Globs::to_changes_globs(rule_globs);
         self.settings
             .bin
             .changes
-            .update_from_inputs(progress, inputs)
+            .update_from_globs(progress, &changes_globs)
             .context(format_context!("Failed to update workspace changes"))?;
 
         Ok(())
@@ -911,13 +912,13 @@ impl Workspace {
     pub fn inspect_inputs(
         &self,
         progress: &mut printer::MultiProgressBar,
-        inputs: &rule::InputsOutputs,
+        globs: &[rule::Globs],
     ) -> anyhow::Result<Vec<String>> {
-        let globs = inputs.get_globs();
+        let changes_globs = rule::Globs::to_changes_globs(globs);
         self.settings
             .bin
             .changes
-            .inspect_inputs(progress, &globs)
+            .inspect_inputs(progress, &changes_globs)
             .context(format_context!("Failed to inspect workspace inputs"))
     }
 
@@ -953,14 +954,14 @@ impl Workspace {
         progress: &mut printer::MultiProgressBar,
         rule_name: &str,
         seed: &str,
-        inputs: &rule::InputsOutputs,
+        globs: &[rule::Globs],
     ) -> anyhow::Result<Option<Arc<str>>> {
-        let globs = inputs.get_globs();
+        let changes_globs = rule::Globs::to_changes_globs(globs);
         let digest = self
             .settings
             .bin
             .changes
-            .get_digest(progress, seed, &globs)
+            .get_digest(progress, seed, &changes_globs)
             .context(format_context!("Failed to get digest for rule {rule_name}"))?;
 
         let is_changed_result = self
