@@ -1121,10 +1121,10 @@ pub fn add_setup_dep_to_run_rules() -> anyhow::Result<()> {
     let mut tasks = state.tasks.write();
     for task in tasks.values_mut() {
         if task.rule.type_ != Some(rule::RuleType::Setup) && task.phase == task::Phase::Run {
-            task.rule
-                .deps
-                .get_or_insert_with(|| rule::Deps::Rules(Vec::new()))
-                .push_rule(rule::SETUP_RULE_NAME.into());
+            rule::Deps::push_any_dep(
+                &mut task.rule.deps,
+                rule::AnyDep::Rule(rule::SETUP_RULE_NAME.into()),
+            );
         }
     }
     Ok(())

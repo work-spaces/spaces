@@ -218,13 +218,13 @@ fn insert_setup_and_all_rules(
     ))
     .context(format_context!("Failed to insert task `setup`"))?;
 
-    let mut deps: Vec<Arc<str>> = Vec::new();
+    let mut deps: Vec<rule::AnyDep> = Vec::new();
     let all_deps = workspace.read().settings.bin.run_all.clone();
     for all_target in all_deps {
-        deps.push(all_target.clone());
+        deps.push(rule::AnyDep::Rule(all_target.clone()));
     }
 
-    deps.push(rule::SETUP_RULE_NAME.into());
+    deps.push(rule::AnyDep::Rule(rule::SETUP_RULE_NAME.into()));
 
     let rule = rule::Rule {
         name: rule::ALL_RULE_NAME.into(),
@@ -233,7 +233,7 @@ fn insert_setup_and_all_rules(
         outputs: None,
         type_: Some(rule::RuleType::Run),
         platforms: None,
-        deps: Some(rule::Deps::Rules(deps)),
+        deps: Some(rule::Deps::Any(deps)),
         visibility: Some(rule::Visibility::Public),
     };
 

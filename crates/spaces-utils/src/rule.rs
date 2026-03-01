@@ -275,10 +275,10 @@ struct Section {
 impl Rule {
     pub fn sanitize(&mut self) {
         // Convert Deps::Rules to Deps::Any with individual AnyDep::Rule entries
-        if let Some(Deps::Rules(rules)) = self.deps.take()
-            && !rules.is_empty()
-        {
-            self.deps = Some(Deps::Any(rules.into_iter().map(AnyDep::Rule).collect()));
+        if let Some(Deps::Rules(rules)) = self.deps.take() {
+            if !rules.is_empty() {
+                self.deps = Some(Deps::Any(rules.into_iter().map(AnyDep::Rule).collect()));
+            }
         }
 
         // Pull any glob values from inputs into deps as Deps::Any with AnyDep::Glob
