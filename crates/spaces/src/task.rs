@@ -86,28 +86,4 @@ impl Task {
         digest.update(seed.as_bytes());
         digest.finalize()
     }
-
-    pub fn _update_implicit_dependency(&mut self, other_task: &Task) {
-        if let Some(deps) = &self.rule.deps
-            && deps.contains_rule(&other_task.rule.name)
-        {
-            return;
-        }
-
-        if let Some(rule::InputsOutputs::Globs(inputs)) = &self.rule.inputs {
-            for input in inputs {
-                if let Some(rule::InputsOutputs::Globs(other_outputs)) = &other_task.rule.outputs
-                    && other_outputs.contains(input)
-                {
-                    if let Some(deps) = self.rule.deps.as_mut() {
-                        deps.push_rule(other_task.rule.name.clone());
-                    } else {
-                        self.rule.deps =
-                            Some(rule::Deps::Rules(vec![other_task.rule.name.clone()]));
-                    }
-                    return;
-                }
-            }
-        }
-    }
 }

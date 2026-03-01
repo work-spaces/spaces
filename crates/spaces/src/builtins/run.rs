@@ -1,8 +1,8 @@
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use starlark::{environment::GlobalsBuilder, values::none::NoneType};
-use std::collections::HashSet;
-use utils::rule;
+
+use utils::{rule, targets};
 
 use crate::{executor, rules, singleton, task};
 
@@ -101,9 +101,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .context(format_context!("bad options for exec rule"))?;
 
         if let Some(inputs) = rule.inputs.as_ref() {
-            inputs
-                .validate()
-                .context(format_context!("invalid inputs globs with {}", rule.name))?;
+            for glob in inputs {
+                if !glob.starts_with('+') && !glob.starts_with('-') {
+                    return Err(format_error!(
+                        "Invalid glob: {glob:?}. Must begin with '+' (includes) or '-' (excludes) in {}",
+                        rule.name
+                    ));
+                }
+            }
         }
 
         add_rule_to_all(&rule)
@@ -153,9 +158,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .context(format_context!("bad options for kill rule"))?;
 
         if let Some(inputs) = rule.inputs.as_ref() {
-            inputs
-                .validate()
-                .context(format_context!("invalid inputs globs with {}", rule.name))?;
+            for glob in inputs {
+                if !glob.starts_with('+') && !glob.starts_with('-') {
+                    return Err(format_error!(
+                        "Invalid glob: {glob:?}. Must begin with '+' (includes) or '-' (excludes) in {}",
+                        rule.name
+                    ));
+                }
+            }
         }
 
         add_rule_to_all(&rule)
@@ -205,7 +215,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             ));
         }
 
-        if rule.outputs.is_some() {
+        if rule.targets.is_some() {
             return Err(anyhow::anyhow!(
                 "outputs are populated automatically by add_archive"
             ));
@@ -216,7 +226,6 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 .context(format_context!("bad options for archive"))?;
 
         let rule_name = rule.name.clone();
-        let mut inputs = HashSet::new();
 
         let input = create_archive
             .input
@@ -225,19 +234,25 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .to_owned();
         create_archive.input = input;
 
-        inputs.insert(format!("+//{}/**", create_archive.input).into());
-        rule.inputs = Some(rule::InputsOutputs::Globs(inputs));
+        // Add archive input globs to deps without clobbering existing deps
+        let includes = vec![format!("//{}/**", create_archive.input).into()];
+        rule::Deps::push_any_dep(
+            &mut rule.deps,
+            rule::AnyDep::Globs(rule::Globs::Includes(includes)),
+        );
 
-        let mut outputs = HashSet::new();
-        outputs.insert(
+        let target_file = vec![
             format!(
                 "build/{}/{}",
                 rules::get_sanitized_rule_name(rule_name.clone()),
                 create_archive.get_output_file()
             )
             .into(),
-        );
-        rule.outputs = Some(rule::InputsOutputs::Globs(outputs));
+        ];
+        rule.push_target(targets::Target::new_with_files(
+            "archive".into(),
+            target_file,
+        ));
 
         let archive = executor::archive::Archive { create_archive };
 

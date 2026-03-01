@@ -1,10 +1,10 @@
-use crate::changes::glob;
-use crate::{changes, platform};
-use anyhow_source_location::format_error;
+use crate::{deps, platform, targets};
 use printer::markdown;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+
+pub use deps::{AnyDep, Deps, Globs};
 
 pub const SETUP_RULE_NAME: &str = "//:setup";
 pub const TEST_RULE_NAME: &str = "//:test";
@@ -36,151 +36,6 @@ pub enum Visibility {
     Private,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum AnyInputsOutputs {
-    Includes(HashSet<Arc<str>>),
-    Excludes(HashSet<Arc<str>>),
-    IncludesEnv(HashSet<Arc<str>>),
-    ExcludesEnv(HashSet<Arc<str>>),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum InputsOutputs {
-    Globs(HashSet<Arc<str>>),
-    Any(Vec<AnyInputsOutputs>),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Globs {
-    Includes(HashSet<Arc<str>>),
-    Excludes(HashSet<Arc<str>>),
-}
-
-impl Globs {
-    pub fn to_changes_globs(items: &[Globs]) -> changes::glob::Globs {
-        let mut globs = changes::glob::Globs::default();
-        for item in items {
-            match item {
-                Globs::Includes(set) => globs.includes.extend(set.iter().cloned()),
-                Globs::Excludes(set) => globs.excludes.extend(set.iter().cloned()),
-            }
-        }
-        globs
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum Deps {
-    Rules(Vec<Arc<str>>),
-    Globs(Vec<Globs>),
-}
-
-impl Deps {
-    /// Returns a reference to the rules list if this is the `Rules` variant, or `None`.
-    pub fn rules(&self) -> Option<&Vec<Arc<str>>> {
-        match self {
-            Deps::Rules(rules) => Some(rules),
-            Deps::Globs(_) => None,
-        }
-    }
-
-    /// Returns a mutable reference to the rules list if this is the `Rules` variant, or `None`.
-    pub fn rules_mut(&mut self) -> Option<&mut Vec<Arc<str>>> {
-        match self {
-            Deps::Rules(rules) => Some(rules),
-            Deps::Globs(_) => None,
-        }
-    }
-
-    /// Returns true if this is the `Rules` variant and the list is empty,
-    /// or if this is the `AnyFiles` variant and the list is empty.
-    pub fn is_empty(&self) -> bool {
-        match self {
-            Deps::Rules(rules) => rules.is_empty(),
-            Deps::Globs(any) => any.is_empty(),
-        }
-    }
-
-    /// Ensures this is a `Rules` variant, converting from a default if needed,
-    /// and pushes a rule name onto it.
-    pub fn push_rule(&mut self, rule: Arc<str>) {
-        match self {
-            Deps::Rules(rules) => rules.push(rule),
-            Deps::Globs(_) => {
-                // AnyFiles variant cannot hold rule names; this is a no-op
-            }
-        }
-    }
-
-    /// Returns true if this is the `Rules` variant and contains the given rule name.
-    pub fn contains_rule(&self, rule: &Arc<str>) -> bool {
-        match self {
-            Deps::Rules(rules) => rules.contains(rule),
-            Deps::Globs(_) => false,
-        }
-    }
-
-    /// Returns the file globs for the `AnyFiles` variant.
-    pub fn get_globs(&self) -> changes::glob::Globs {
-        match self {
-            Deps::Rules(_) => changes::glob::Globs::default(),
-            Deps::Globs(any_list) => {
-                let mut globs = changes::glob::Globs::default();
-                for entry in any_list {
-                    match entry {
-                        Globs::Includes(hash_set) => {
-                            globs.includes.extend(hash_set.iter().cloned())
-                        }
-                        Globs::Excludes(hash_set) => {
-                            globs.excludes.extend(hash_set.iter().cloned())
-                        }
-                    }
-                }
-                globs
-            }
-        }
-    }
-}
-
-impl InputsOutputs {
-    pub fn get_globs(&self) -> changes::glob::Globs {
-        match self {
-            InputsOutputs::Globs(hash_set) => glob::Globs::new_with_annotated_set(hash_set),
-            InputsOutputs::Any(any_list) => {
-                let mut globs = changes::glob::Globs::default();
-                for entry in any_list {
-                    match entry {
-                        AnyInputsOutputs::Includes(hash_set) => {
-                            globs.includes.extend(hash_set.iter().cloned())
-                        }
-                        AnyInputsOutputs::Excludes(hash_set) => {
-                            globs.excludes.extend(hash_set.iter().cloned())
-                        }
-                        // env vars are not globs
-                        _ => (),
-                    }
-                }
-                globs
-            }
-        }
-    }
-
-    pub fn validate(&self) -> anyhow::Result<()> {
-        if let InputsOutputs::Globs(globs) = self {
-            for glob in globs {
-                if !glob.starts_with('+') && !glob.starts_with('-') {
-                    return Err(format_error!(
-                        "Invalid glob: {glob:?}. Must begin with '+' (includes) or '-' (excludes)"
-                    ));
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
 /// A rule desribes what a task should do.
 /// It specifies named depedencies that must be executed
 /// before the task can run.
@@ -193,10 +48,12 @@ pub struct Rule {
     pub deps: Option<Deps>,
     /// help text displayed to the user when running inspect - use markdown format
     pub help: Option<Arc<str>>,
-    /// list of globs that must have a change to re-run the rule
-    pub inputs: Option<InputsOutputs>,
-    /// No used
-    pub outputs: Option<InputsOutputs>,
+    /// list of globs that must have a change to re-run the rule (deprecated: use deps with Globs)
+    pub inputs: Option<HashSet<Arc<str>>>,
+    /// Not used - use targets
+    pub outputs: Option<HashSet<Arc<str>>>,
+    /// The targets that the rule creates
+    pub targets: Option<Vec<targets::Target>>,
     /// list of platforms that the rule will run on. default is to run on all platforms
     pub platforms: Option<Vec<platform::Platform>>,
     /// The type for the rule in the run phase
@@ -214,6 +71,42 @@ struct Section {
 }
 
 impl Rule {
+    pub fn sanitize(&mut self) {
+        // Convert Deps::Rules to Deps::Any with individual AnyDep::Rule entries
+        if let Some(Deps::Rules(rules)) = self.deps.take() {
+            if !rules.is_empty() {
+                self.deps = Some(Deps::Any(rules.into_iter().map(AnyDep::Rule).collect()));
+            }
+        }
+
+        // Pull any glob values from inputs into deps as Deps::Any with AnyDep::Glob
+        if let Some(hash_set) = self.inputs.take() {
+            let mut includes = Vec::new();
+            let mut excludes = Vec::new();
+
+            // Annotated set: +prefix means include, -prefix means exclude
+            for item in hash_set {
+                if let Some(stripped) = item.strip_prefix('+') {
+                    includes.push(Arc::from(stripped));
+                } else if let Some(stripped) = item.strip_prefix('-') {
+                    excludes.push(Arc::from(stripped));
+                }
+            }
+
+            if !includes.is_empty() || !excludes.is_empty() {
+                let mut globs = Vec::new();
+                if !includes.is_empty() {
+                    globs.push(AnyDep::Globs(Globs::Includes(includes)));
+                }
+                if !excludes.is_empty() {
+                    globs.push(AnyDep::Globs(Globs::Excludes(excludes)));
+                }
+
+                Deps::push_any_deps(&mut self.deps, globs);
+            }
+        }
+    }
+
     fn get_hash_map(rules: &[(&Rule, Option<String>)]) -> RuleMap {
         let mut map = HashMap::new();
         for (rule, details) in rules {
@@ -242,6 +135,10 @@ impl Rule {
             section.rules.sort();
         }
         sections
+    }
+
+    pub fn push_target(&mut self, target: targets::Target) {
+        self.targets.get_or_insert_with(Vec::new).push(target);
     }
 
     pub fn print_markdown_section(
@@ -314,18 +211,26 @@ impl Rule {
                         md.list_item(0, dep)?;
                     }
                 }
-                Deps::Globs(any_deps) => {
+                Deps::Any(any_deps) => {
                     for entry in any_deps {
                         match entry {
-                            Globs::Includes(set) => {
-                                for item in set {
-                                    md.list_item(0, &format!("+{item}"))?;
-                                }
+                            AnyDep::Rule(rule) => {
+                                md.list_item(0, rule)?;
                             }
-                            Globs::Excludes(set) => {
-                                for item in set {
-                                    md.list_item(0, &format!("-{item}"))?;
+                            AnyDep::Globs(glob) => match glob {
+                                Globs::Includes(set) => {
+                                    for item in set {
+                                        md.list_item(0, &format!("+{item}"))?;
+                                    }
                                 }
+                                Globs::Excludes(set) => {
+                                    for item in set {
+                                        md.list_item(0, &format!("-{item}"))?;
+                                    }
+                                }
+                            },
+                            AnyDep::Target(target) => {
+                                md.list_item(0, &format!("{}:{}", target.rule, target.target))?;
                             }
                         }
                     }

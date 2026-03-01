@@ -39,10 +39,9 @@ fn get_task_signal_deps(task: &task::Task) -> anyhow::Result<Vec<task::SignalArc
     let tasks = state.tasks.read();
 
     let mut result = Vec::new();
-    if let Some(deps) = task.rule.deps.as_ref()
-        && let Some(rules) = deps.rules()
-    {
-        for dep in rules {
+    if let Some(deps) = task.rule.deps.as_ref() {
+        let all_rules = deps.collect_all_rules();
+        for dep in all_rules.iter() {
             // # tasks * # deps + hashmap access is EXPENSIVE
             // this causes a substantial delay when starting spaces
             let dep_task = tasks.get(dep).ok_or(format_error!(
@@ -183,16 +182,23 @@ pub fn execute_task(
 
         let rule_name = name.clone();
 
-        let updated_digest = if let Some(inputs) = &task.rule.inputs {
+        let has_dep_globs = task.rule.deps.as_ref().is_some_and(|d| d.has_globs());
+        let updated_digest = if has_dep_globs {
             if skip_execute_message.is_some() {
                 None
             } else {
+                let dep_globs = if let Some(deps) = task.rule.deps.as_ref() {
+                    deps.collect_globs()
+                } else {
+                    Vec::new()
+                };
+
                 task_logger(&mut progress, name.clone())
-                    .debug("update workspace changes with inputs");
+                    .debug("update workspace changes with deps globs");
 
                 workspace
                     .write()
-                    .update_changes(&mut progress, inputs)
+                    .update_changes(&mut progress, &dep_globs)
                     .context(format_context!("Failed to update workspace changes"))?;
 
                 task_logger(&mut progress, name.clone()).debug("check for new digest");
@@ -201,11 +207,18 @@ pub fn execute_task(
                     .context(format_context!("Failed to serialize"))?;
                 let digest = workspace
                     .read()
-                    .is_rule_inputs_changed(&mut progress, &rule_name, seed.as_str(), inputs)
-                    .context(format_context!("Failed to check inputs for {rule_name}"))?;
+                    .is_rule_inputs_changed(
+                        &mut progress,
+                        &rule_name,
+                        seed.as_str(),
+                        &dep_globs[..],
+                    )
+                    .context(format_context!(
+                        "Failed to check deps globs for {rule_name}"
+                    ))?;
                 if digest.is_none() {
                     // the digest has not changed - not need to execute
-                    skip_execute_message = Some("skipping: same inputs".into());
+                    skip_execute_message = Some("skipping: same deps globs".into());
                 }
                 task_logger(&mut progress, name.clone())
                     .debug(format!("New digest for {rule_name}={digest:?}").as_str());
@@ -319,14 +332,14 @@ impl State {
         label::sanitize_working_directory(rule_name, self.latest_starlark_module.clone())
     }
 
-    fn sanitize_glob_hash_set(
-        hash_set: &mut HashSet<Arc<str>>,
+    fn sanitize_glob_vec(
+        vec: &mut Vec<Arc<str>>,
         is_annotated: IsAnnotated,
         rule_label: Arc<str>,
         latest_starlark_module: Option<Arc<str>>,
     ) -> anyhow::Result<()> {
-        *hash_set = hash_set
-            .drain()
+        *vec = vec
+            .drain(..)
             .map(|item| {
                 label::sanitize_glob_value(
                     item.as_ref(),
@@ -334,9 +347,9 @@ impl State {
                     rule_label.as_ref(),
                     latest_starlark_module.clone(),
                 )
-                .context(format_context!("Failed to sanitize inputs: {item}"))
+                .context(format_context!("Failed to sanitize deps glob: {item}"))
             })
-            .collect::<anyhow::Result<HashSet<Arc<str>>>>()?;
+            .collect::<anyhow::Result<Vec<Arc<str>>>>()?;
 
         Ok(())
     }
@@ -380,54 +393,61 @@ impl State {
         task_to_insert.rule.name = rule_label.clone();
         task_to_insert.signal = task::SignalArc::new(rule_label.clone());
 
-        if let Some(mut inputs) = task_to_insert.rule.inputs.clone() {
-            match &mut inputs {
-                rule::InputsOutputs::Globs(globs) => {
-                    Self::sanitize_glob_hash_set(
-                        globs,
-                        label::IsAnnotated::Yes,
-                        rule_label.clone(),
-                        self.latest_starlark_module.clone(),
-                    )?;
+        // Migrate any inputs into deps as Deps::Any with AnyDep::Glob
+        task_to_insert.rule.sanitize();
+
+        // update deps: sanitize rule names and glob hash sets
+        if let Some(deps) = task_to_insert.rule.deps.as_mut() {
+            match deps {
+                rule::Deps::Rules(rules) => {
+                    for dep in rules.iter_mut() {
+                        if label::is_rule_sanitized(dep) {
+                            continue;
+                        }
+                        *dep =
+                            label::sanitize_rule(dep.clone(), self.latest_starlark_module.clone());
+                    }
                 }
-                rule::InputsOutputs::Any(list) => {
-                    for item in list.iter_mut() {
-                        match item {
-                            rule::AnyInputsOutputs::Includes(set) => {
-                                Self::sanitize_glob_hash_set(
-                                    set,
-                                    label::IsAnnotated::No,
-                                    rule_label.clone(),
-                                    self.latest_starlark_module.clone(),
-                                )?;
+                rule::Deps::Any(any_list) => {
+                    for any_entry in any_list.iter_mut() {
+                        match any_entry {
+                            rule::AnyDep::Rule(dep) => {
+                                if !label::is_rule_sanitized(dep) {
+                                    *dep = label::sanitize_rule(
+                                        dep.clone(),
+                                        self.latest_starlark_module.clone(),
+                                    );
+                                }
                             }
-                            rule::AnyInputsOutputs::Excludes(set) => {
-                                Self::sanitize_glob_hash_set(
-                                    set,
-                                    label::IsAnnotated::No,
-                                    rule_label.clone(),
-                                    self.latest_starlark_module.clone(),
-                                )?;
+                            rule::AnyDep::Globs(glob) => match glob {
+                                rule::Globs::Includes(set) => {
+                                    Self::sanitize_glob_vec(
+                                        set,
+                                        label::IsAnnotated::No,
+                                        rule_label.clone(),
+                                        self.latest_starlark_module.clone(),
+                                    )?;
+                                }
+                                rule::Globs::Excludes(set) => {
+                                    Self::sanitize_glob_vec(
+                                        set,
+                                        label::IsAnnotated::No,
+                                        rule_label.clone(),
+                                        self.latest_starlark_module.clone(),
+                                    )?;
+                                }
+                            },
+                            rule::AnyDep::Target(target) => {
+                                if !label::is_rule_sanitized(&target.rule) {
+                                    target.rule = label::sanitize_rule(
+                                        target.rule.clone(),
+                                        self.latest_starlark_module.clone(),
+                                    );
+                                }
                             }
-                            // envs don't need sanitization
-                            _ => (),
                         }
                     }
                 }
-            }
-            task_to_insert.rule.inputs = Some(inputs);
-        }
-
-        // update deps that refer to rules in the same starlark module
-        if let Some(deps) = task_to_insert.rule.deps.as_mut()
-            && let Some(rules) = deps.rules_mut()
-        {
-            for dep in rules.iter_mut() {
-                if label::is_rule_sanitized(dep) {
-                    continue;
-                }
-                // sanitize the rule by prepending the current module location
-                *dep = label::sanitize_rule(dep.clone(), self.latest_starlark_module.clone());
             }
         }
 
@@ -454,11 +474,10 @@ impl State {
     fn check_task_deps_visibility(&self, task: &task::Task) -> anyhow::Result<()> {
         let tasks = self.tasks.read();
 
-        if let Some(deps) = task.rule.deps.as_ref()
-            && let Some(rules) = deps.rules()
-        {
+        if let Some(deps) = task.rule.deps.as_ref() {
+            let all_rules = deps.collect_all_rules();
             let task_path = label::get_path_from_label(task.rule.name.as_ref());
-            for dep in rules.iter() {
+            for dep in all_rules.iter() {
                 if let Some(dep_task) = tasks.get(dep) {
                     match dep_task.rule.visibility.as_ref() {
                         None | Some(rule::Visibility::Public) => {
@@ -495,7 +514,7 @@ impl State {
                     }
                 }
             }
-        }
+        };
 
         Ok(())
     }
@@ -552,10 +571,9 @@ impl State {
                 }
 
                 // connect the dependencies
-                if let Some(deps) = task.rule.deps.as_ref()
-                    && let Some(rules) = deps.rules()
-                {
-                    for dep in rules {
+                if let Some(deps) = task.rule.deps.as_ref() {
+                    let all_rules = deps.collect_all_rules();
+                    for dep in all_rules.iter() {
                         self.graph.add_dependency(&task.rule.name, dep).context(
                             format_context!(
                                 "Failed to add dependency {dep} to task {}: {}",
@@ -694,8 +712,8 @@ impl State {
                 let mut deps = task
                     .rule
                     .deps
-                    .clone()
-                    .and_then(|d| d.rules().cloned())
+                    .as_ref()
+                    .map(|d| d.collect_all_rules())
                     .unwrap_or_default();
                 deps.sort();
                 for dep in deps {
@@ -733,7 +751,7 @@ impl State {
             source: String,
             help: String,
             #[serde(skip_serializing_if = "Option::is_none")]
-            inputs: Option<Vec<String>>,
+            deps: Option<Vec<Arc<str>>>,
         }
 
         let mut task_info_list: HashMap<Arc<str>, _> = std::collections::HashMap::new();
@@ -775,17 +793,36 @@ impl State {
                         task_name = stripped.strip_prefix("/").unwrap_or(stripped);
                     }
 
-                    let inputs = if printer.verbosity.level <= printer::Level::Message {
-                        if let Some(inputs) = &task.rule.inputs {
-                            let mut progress = printer::MultiProgress::new(printer);
-                            let mut progress_bar =
-                                progress.add_progress("inspecting inputs", None, Some("Complete"));
-                            Some(
-                                workspace
+                    let deps = if printer.verbosity.level <= printer::Level::Message {
+                        if let Some(task_deps) = &task.rule.deps {
+                            let mut dep_strings: Vec<Arc<str>> = Vec::new();
+
+                            // Collect rule names
+                            for rule_name in task_deps.collect_all_rules() {
+                                dep_strings.push(rule_name.clone());
+                            }
+
+                            // Collect expanded glob file paths
+                            if task_deps.has_globs() {
+                                let globs = task_deps.collect_globs();
+                                let mut progress = printer::MultiProgress::new(printer);
+                                let mut progress_bar = progress.add_progress(
+                                    "inspecting deps globs",
+                                    None,
+                                    Some("Complete"),
+                                );
+                                let files = workspace
                                     .read()
-                                    .inspect_inputs(&mut progress_bar, inputs)
-                                    .context(format_context!("Failed to inspect inputs"))?,
-                            )
+                                    .inspect_inputs(&mut progress_bar, &globs)
+                                    .context(format_context!("Failed to inspect deps globs"))?;
+                                dep_strings.extend(files.into_iter().map(|e| e.into()));
+                            }
+
+                            if dep_strings.is_empty() {
+                                None
+                            } else {
+                                Some(dep_strings)
+                            }
                         } else {
                             None
                         }
@@ -794,14 +831,7 @@ impl State {
                     };
 
                     let source = label::get_source_from_label(task_name);
-                    task_info_list.insert(
-                        task_name.into(),
-                        TaskInfo {
-                            help,
-                            source,
-                            inputs,
-                        },
-                    );
+                    task_info_list.insert(task_name.into(), TaskInfo { help, source, deps });
                 }
             }
         }
@@ -1103,10 +1133,10 @@ pub fn add_setup_dep_to_run_rules() -> anyhow::Result<()> {
     let mut tasks = state.tasks.write();
     for task in tasks.values_mut() {
         if task.rule.type_ != Some(rule::RuleType::Setup) && task.phase == task::Phase::Run {
-            task.rule
-                .deps
-                .get_or_insert_with(|| rule::Deps::Rules(Vec::new()))
-                .push_rule(rule::SETUP_RULE_NAME.into());
+            rule::Deps::push_any_dep(
+                &mut task.rule.deps,
+                rule::AnyDep::Rule(rule::SETUP_RULE_NAME.into()),
+            );
         }
     }
     Ok(())
@@ -1115,11 +1145,11 @@ pub fn add_setup_dep_to_run_rules() -> anyhow::Result<()> {
 fn get_rules_by_type(rule_type: rule::RuleType) -> rule::Deps {
     let state = get_state().read();
     let tasks = state.tasks.read();
-    rule::Deps::Rules(
+    rule::Deps::Any(
         tasks
             .values()
             .filter(|task| task.rule.type_ == Some(rule_type))
-            .map(|task| task.rule.name.clone())
+            .map(|task| rule::AnyDep::Rule(task.rule.name.clone()))
             .collect(),
     )
 }

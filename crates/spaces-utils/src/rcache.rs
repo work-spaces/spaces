@@ -204,7 +204,7 @@ impl RuleDigestCacheEntry {
 pub fn execute<Exec>(
     cache_path: &std::path::Path,
     rule_digest: Arc<str>,
-    outputs: Vec<Arc<std::path::Path>>,
+    target_paths: Vec<Arc<std::path::Path>>,
     exec: Exec,
 ) -> anyhow::Result<()>
 where
@@ -220,7 +220,7 @@ where
     } else {
         exec().with_context(|| format_context!("Task failed to execute in rule cacher"))?;
 
-        RuleDigestCacheEntry::create_cache_entry(cache_path, &rule_digest, outputs.as_slice())
+        RuleDigestCacheEntry::create_cache_entry(cache_path, &rule_digest, target_paths.as_slice())
             .context(format_context!("Failed to create cache entry"))?;
     }
 

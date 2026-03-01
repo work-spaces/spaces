@@ -1,4 +1,4 @@
-use crate::{logger, rule};
+use crate::logger;
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -143,20 +143,19 @@ impl Changes {
     }
 
     /// Processes all the files that are specified in the input globs
-    pub fn update_from_inputs(
+    pub fn update_from_globs(
         &mut self,
         progress: &mut printer::MultiProgressBar,
-        inputs: &rule::InputsOutputs,
+        globs: &glob::Globs,
     ) -> anyhow::Result<()> {
-        let inputs = inputs.get_globs();
-        for input in inputs.includes.iter() {
+        for input in globs.includes.iter() {
             changes_logger(progress).trace(format!("Update changes for {input}").as_str());
 
             let mut count = 0usize;
             let input_path = get_glob_path(input.clone());
             changes_logger(progress).trace(format!("include input path `{input_path}`").as_str());
 
-            let walk_dir = self.walk_glob_dir(progress, input_path, CheckIsModified::Yes, &inputs);
+            let walk_dir = self.walk_glob_dir(progress, input_path, CheckIsModified::Yes, globs);
 
             changes_logger(progress).trace(format!("walked {} entries", walk_dir.len()).as_str());
 
