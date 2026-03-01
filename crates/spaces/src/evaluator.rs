@@ -501,11 +501,6 @@ fn execute_tasks(
     run_target: Option<Arc<str>>,
     modules: &[(Arc<str>, Arc<str>)],
 ) -> anyhow::Result<IsSaveBin> {
-    let glob_warnings = singleton::get_glob_warnings();
-    for warning in glob_warnings {
-        star_logger(printer).warning(warning.as_ref());
-    }
-
     if phase == task::Phase::Checkout || singleton::get_is_rescan() || workspace.read().is_dirty {
         star_logger(printer).debug("saving JSON workspace settings");
         workspace

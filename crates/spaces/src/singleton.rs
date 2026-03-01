@@ -23,7 +23,6 @@ struct State {
     has_help: bool,
     inspect_markdown_path: Option<Arc<str>>,
     inspect_stardoc_path: Option<Arc<str>>,
-    glob_warnings: Vec<Arc<str>>,
     execution_phase: task::Phase,
 }
 
@@ -59,7 +58,6 @@ fn get_state() -> &'static lock::StateLock<State> {
         inspect_markdown_path: None,
         inspect_stardoc_path: None,
         args_env: HashMap::new(),
-        glob_warnings: Vec::new(),
         execution_phase: task::Phase::Complete,
     }));
 
@@ -87,16 +85,6 @@ pub fn show_error_chain() {
         let show_error = error.to_string().replace('\n', "\n    ");
         eprintln!("  [{offset}]: {show_error}");
     }
-}
-
-pub fn push_glob_warning(warning: Arc<str>) {
-    let mut state = get_state().write();
-    state.glob_warnings.push(warning);
-}
-
-pub fn get_glob_warnings() -> Vec<Arc<str>> {
-    let state = get_state().read();
-    state.glob_warnings.clone()
 }
 
 pub fn get_has_help() -> bool {

@@ -91,23 +91,21 @@ pub fn sanitize_glob_value(
             return Ok(value.replace("+//", "+").replace("-//", "-").into());
         }
 
-        return Err(format_error!(
+        Err(format_error!(
             "{}:{} inputs -> {} must begin with +// or -// and be a workspace root path",
             module,
             rule_name,
             value
-        ));
+        ))
+    } else if value.starts_with("//") {
+        Ok(value.replace("//", "").into())
     } else {
-        if value.starts_with("//") {
-            Ok(value.replace("//", "").into())
-        } else {
-            let rule_path = get_source_from_label(rule_name);
-            // remove everything following the last slash
-            let (path_in_workspace, _some_spaces_star) = rule_path
-                .rsplit_once('/')
-                .ok_or(format_error!("Internal Error: malformat label {rule_name}"))?;
-            Ok(format!("{path_in_workspace}/{value}").into())
-        }
+        let rule_path = get_source_from_label(rule_name);
+        // remove everything following the last slash
+        let (path_in_workspace, _some_spaces_star) = rule_path
+            .rsplit_once('/')
+            .ok_or(format_error!("Internal Error: malformat label {rule_name}"))?;
+        Ok(format!("{path_in_workspace}/{value}").into())
     }
 }
 

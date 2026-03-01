@@ -1,4 +1,5 @@
 use crate::{deps, platform, targets};
+use anyhow_source_location::format_error;
 use printer::markdown;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -71,12 +72,12 @@ struct Section {
 }
 
 impl Rule {
-    pub fn sanitize(&mut self) {
+    pub fn sanitize(&mut self) -> anyhow::Result<()> {
         // Convert Deps::Rules to Deps::Any with individual AnyDep::Rule entries
-        if let Some(Deps::Rules(rules)) = self.deps.take() {
-            if !rules.is_empty() {
-                self.deps = Some(Deps::Any(rules.into_iter().map(AnyDep::Rule).collect()));
-            }
+        if let Some(Deps::Rules(rules)) = self.deps.take()
+            && !rules.is_empty()
+        {
+            self.deps = Some(Deps::Any(rules.into_iter().map(AnyDep::Rule).collect()));
         }
 
         // Pull any glob values from inputs into deps as Deps::Any with AnyDep::Glob
@@ -90,6 +91,10 @@ impl Rule {
                     includes.push(Arc::from(stripped));
                 } else if let Some(stripped) = item.strip_prefix('-') {
                     excludes.push(Arc::from(stripped));
+                } else {
+                    return Err(format_error!(
+                        "inputs entry must start with + or - for {item}"
+                    ));
                 }
             }
 
@@ -105,6 +110,8 @@ impl Rule {
                 Deps::push_any_deps(&mut self.deps, globs);
             }
         }
+
+        Ok(())
     }
 
     fn get_hash_map(rules: &[(&Rule, Option<String>)]) -> RuleMap {
