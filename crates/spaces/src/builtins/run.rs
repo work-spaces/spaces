@@ -238,7 +238,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let includes = vec![format!("//{}/**", create_archive.input).into()];
         rule::Deps::push_any_dep(
             &mut rule.deps,
-            rule::AnyDep::Globs(rule::Globs::Includes(includes)),
+            rule::AnyDep::Glob(rule::Globs::Includes(includes)),
         );
 
         let target_file = vec![

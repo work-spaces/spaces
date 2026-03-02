@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use utils::changes::glob;
 use utils::rule::Visibility;
-use utils::{environment, graph, labels, lock, logger, platform, rule};
+use utils::{environment, graph, labels, lock, logger, platform, rcache, rule, ws};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum HasHelp {
@@ -247,9 +247,31 @@ pub fn execute_task(
             }
             Ok(executor::TaskResult::new())
         } else {
-            task.executor
-                .execute(progress, workspace.clone(), &rule_name)
-                .context(format_context!("Failed to exec {}", name))
+            let store_path = ws::get_checkout_store_path_as_path();
+            let cache_path = ws::get_rcache_path(&store_path);
+            if task.rule.has_targets() {
+                // if the rule defines targets, the rule is run through
+                // the rule cache engine
+                let task_result_option = rcache::execute(
+                    cache_path.as_ref(),
+                    task.digest.clone(),
+                    || {
+                        task.executor
+                            .execute(progress, workspace.clone(), &rule_name)
+                            .context(format_context!("Failed to exec {}", name))
+                    },
+                    || task.rule.get_target_paths(),
+                );
+                match task_result_option {
+                    Some(Ok(result)) => Ok(result),
+                    Some(Err(err)) => Err(err),
+                    None => Ok(executor::TaskResult::new()),
+                }
+            } else {
+                task.executor
+                    .execute(progress, workspace.clone(), &rule_name)
+                    .context(format_context!("Failed to exec {}", name))
+            }
         };
 
         let elapsed_time = start_time.elapsed();

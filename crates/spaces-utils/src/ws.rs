@@ -36,8 +36,8 @@ pub fn get_spaces_tools_path(store_path: &str) -> Arc<str> {
     format!("{store_path}/spaces_tools").into()
 }
 
-pub fn get_rcache_path(store_path: &str) -> Arc<str> {
-    format!("{store_path}/{}", store::SPACES_STORE_RCACHE).into()
+pub fn get_rcache_path(store_path: &std::path::Path) -> Arc<std::path::Path> {
+    store_path.join(store::SPACES_STORE_RCACHE).into()
 }
 
 pub fn get_spaces_tools_path_as_path(store_path: &std::path::Path) -> Arc<std::path::Path> {

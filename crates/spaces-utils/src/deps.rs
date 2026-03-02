@@ -21,6 +21,11 @@ impl Globs {
         }
         globs
     }
+
+    pub fn get_glob_matches(&self) -> Vec<Arc<std::path::Path>> {
+        let changes_globs = Self::to_changes_globs(std::slice::from_ref(self));
+        changes_globs.collect_matches()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,7 +37,7 @@ pub struct RuleTarget {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AnyDep {
     Rule(Arc<str>),
-    Globs(Globs),
+    Glob(Globs),
     Target(RuleTarget),
 }
 
@@ -54,7 +59,7 @@ impl AnyDep {
                     );
                 }
             }
-            AnyDep::Globs(glob) => match glob {
+            AnyDep::Glob(glob) => match glob {
                 Globs::Includes(set) => {
                     Self::sanitize_glob_vec(
                         set,
@@ -171,7 +176,7 @@ impl Deps {
     pub fn push_any_deps(deps: &mut Option<Deps>, new_deps: Vec<AnyDep>) {
         match deps.take() {
             Some(Deps::Rules(rules)) => {
-                let mut any: Vec<AnyDep> = rules.into_iter().map(AnyDep::Rule).collect();
+                let mut any: Vec<_> = rules.into_iter().map(AnyDep::Rule).collect();
                 any.extend(new_deps);
                 *deps = Some(Deps::Any(any));
             }
@@ -189,7 +194,7 @@ impl Deps {
     pub fn has_globs(&self) -> bool {
         match self {
             Deps::Rules(_) => false,
-            Deps::Any(list) => list.iter().any(|entry| matches!(entry, AnyDep::Globs(_))),
+            Deps::Any(list) => list.iter().any(|entry| matches!(entry, AnyDep::Glob(_))),
         }
     }
 
@@ -200,7 +205,7 @@ impl Deps {
             Deps::Any(any_list) => any_list
                 .iter()
                 .filter_map(|entry| match entry {
-                    AnyDep::Globs(glob) => Some(glob.clone()),
+                    AnyDep::Glob(glob) => Some(glob.clone()),
                     _ => None,
                 })
                 .collect(),
@@ -355,7 +360,7 @@ mod tests {
     fn test_collect_all_rules_from_any_variant() {
         let deps = Deps::Any(vec![
             AnyDep::Rule("//a:rule".into()),
-            AnyDep::Globs(Globs::Includes(vec!["src/**".into()])),
+            AnyDep::Glob(Globs::Includes(vec!["src/**".into()])),
             AnyDep::Target(RuleTarget {
                 rule: "//b:build".into(),
                 target: "output.tar".into(),
@@ -380,7 +385,7 @@ mod tests {
 
     #[test]
     fn test_collect_all_rules_globs_only() {
-        let deps = Deps::Any(vec![AnyDep::Globs(Globs::Includes(vec!["src/**".into()]))]);
+        let deps = Deps::Any(vec![AnyDep::Glob(Globs::Includes(vec!["src/**".into()]))]);
         assert!(deps.collect_all_rules().is_empty());
     }
 
@@ -413,7 +418,7 @@ mod tests {
         ]));
         Deps::push_any_dep(
             &mut deps,
-            AnyDep::Globs(Globs::Includes(vec!["src/**".into()])),
+            AnyDep::Glob(Globs::Includes(vec!["src/**".into()])),
         );
         let deps = deps.unwrap();
         match &deps {
@@ -429,7 +434,7 @@ mod tests {
                     _ => panic!("expected Rule"),
                 }
                 // third is the new Globs
-                assert!(matches!(&list[2], AnyDep::Globs(Globs::Includes(_))));
+                assert!(matches!(&list[2], AnyDep::Glob(Globs::Includes(_))));
             }
             _ => panic!("expected Any variant"),
         }
@@ -535,7 +540,7 @@ mod tests {
     fn test_has_globs_any_with_globs() {
         let deps = Deps::Any(vec![
             AnyDep::Rule("//a:rule".into()),
-            AnyDep::Globs(Globs::Includes(vec!["src/**".into()])),
+            AnyDep::Glob(Globs::Includes(vec!["src/**".into()])),
         ]);
         assert!(deps.has_globs());
     }
@@ -566,8 +571,8 @@ mod tests {
     fn test_collect_globs_any_with_globs() {
         let deps = Deps::Any(vec![
             AnyDep::Rule("//a:rule".into()),
-            AnyDep::Globs(Globs::Includes(vec!["src/**".into()])),
-            AnyDep::Globs(Globs::Excludes(vec!["*.tmp".into()])),
+            AnyDep::Glob(Globs::Includes(vec!["src/**".into()])),
+            AnyDep::Glob(Globs::Excludes(vec!["*.tmp".into()])),
         ]);
         let globs = deps.collect_globs();
         assert_eq!(globs.len(), 2);
@@ -656,7 +661,7 @@ mod tests {
 
     #[test]
     fn test_sanitize_globs_includes() {
-        let mut dep = AnyDep::Globs(Globs::Includes(vec!["//src/**".into()]));
+        let mut dep = AnyDep::Glob(Globs::Includes(vec!["//src/**".into()]));
         dep.sanitize(
             "//pkg:label".into(),
             Some("pkg/spaces.star".into()),
@@ -664,7 +669,7 @@ mod tests {
         )
         .unwrap();
         match &dep {
-            AnyDep::Globs(Globs::Includes(v)) => {
+            AnyDep::Glob(Globs::Includes(v)) => {
                 assert_eq!(v.len(), 1);
                 // IsAnnotated::No + starts with "//" → stripped to "src/**"
                 assert_eq!(v[0].as_ref(), "src/**");
@@ -675,7 +680,7 @@ mod tests {
 
     #[test]
     fn test_sanitize_globs_excludes() {
-        let mut dep = AnyDep::Globs(Globs::Excludes(vec!["//build/**".into()]));
+        let mut dep = AnyDep::Glob(Globs::Excludes(vec!["//build/**".into()]));
         dep.sanitize(
             "//pkg:label".into(),
             Some("pkg/spaces.star".into()),
@@ -683,7 +688,7 @@ mod tests {
         )
         .unwrap();
         match &dep {
-            AnyDep::Globs(Globs::Excludes(v)) => {
+            AnyDep::Glob(Globs::Excludes(v)) => {
                 assert_eq!(v.len(), 1);
                 assert_eq!(v[0].as_ref(), "build/**");
             }
@@ -717,7 +722,7 @@ mod tests {
     fn test_deps_sanitize_any_variant_mixed() {
         let mut deps = Deps::Any(vec![
             AnyDep::Rule("my_rule".into()),
-            AnyDep::Globs(Globs::Includes(vec!["//src/**".into()])),
+            AnyDep::Glob(Globs::Includes(vec!["//src/**".into()])),
             AnyDep::Target(RuleTarget {
                 rule: "build".into(),
                 target: "out".into(),
@@ -736,7 +741,7 @@ mod tests {
                     _ => panic!("expected Rule"),
                 }
                 match &list[1] {
-                    AnyDep::Globs(Globs::Includes(v)) => assert_eq!(v[0].as_ref(), "src/**"),
+                    AnyDep::Glob(Globs::Includes(v)) => assert_eq!(v[0].as_ref(), "src/**"),
                     _ => panic!("expected Globs::Includes"),
                 }
                 match &list[2] {

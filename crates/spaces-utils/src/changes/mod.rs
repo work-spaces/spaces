@@ -123,7 +123,7 @@ impl Changes {
             if let Some(path) = input_includes_no_asterisk(input.as_ref()) {
                 set.insert(path.display().to_string());
             } else {
-                let input_path = get_glob_path(input.clone());
+                let input_path = glob::get_glob_path(input.clone());
                 changes_logger(progress)
                     .trace(format!("inspect include input path `{input_path}`").as_str());
                 let walk_dir =
@@ -152,7 +152,7 @@ impl Changes {
             changes_logger(progress).trace(format!("Update changes for {input}").as_str());
 
             let mut count = 0usize;
-            let input_path = get_glob_path(input.clone());
+            let input_path = glob::get_glob_path(input.clone());
             changes_logger(progress).trace(format!("include input path `{input_path}`").as_str());
 
             let walk_dir = self.walk_glob_dir(progress, input_path, CheckIsModified::Yes, globs);
@@ -341,21 +341,5 @@ fn process_entry(
                 ))
             }
         }
-    }
-}
-
-// This is used to limit globbing to a subset of the workspace
-fn get_glob_path(input: Arc<str>) -> Arc<str> {
-    if let Some(asterisk_position) = input.find('*') {
-        let mut path = input.to_string();
-        path.truncate(asterisk_position);
-        if path.is_empty() {
-            ".".into()
-        } else {
-            path.into()
-        }
-    } else {
-        // no asterisk found, return input as-is
-        input.clone()
     }
 }

@@ -74,10 +74,11 @@ struct Section {
 impl Rule {
     pub fn sanitize(&mut self) -> anyhow::Result<()> {
         // Convert Deps::Rules to Deps::Any with individual AnyDep::Rule entries
-        if let Some(Deps::Rules(rules)) = self.deps.take()
-            && !rules.is_empty()
-        {
-            self.deps = Some(Deps::Any(rules.into_iter().map(AnyDep::Rule).collect()));
+        //
+        if let Some(Deps::Rules(rules)) = self.deps.as_mut() {
+            self.deps = Some(Deps::Any(
+                rules.iter_mut().map(|e| AnyDep::Rule(e.clone())).collect(),
+            ));
         }
 
         // Pull any glob values from inputs into deps as Deps::Any with AnyDep::Glob
@@ -101,10 +102,10 @@ impl Rule {
             if !includes.is_empty() || !excludes.is_empty() {
                 let mut globs = Vec::new();
                 if !includes.is_empty() {
-                    globs.push(AnyDep::Globs(Globs::Includes(includes)));
+                    globs.push(AnyDep::Glob(Globs::Includes(includes)));
                 }
                 if !excludes.is_empty() {
-                    globs.push(AnyDep::Globs(Globs::Excludes(excludes)));
+                    globs.push(AnyDep::Glob(Globs::Excludes(excludes)));
                 }
 
                 Deps::push_any_deps(&mut self.deps, globs);
@@ -112,6 +113,22 @@ impl Rule {
         }
 
         Ok(())
+    }
+
+    pub fn has_targets(&self) -> bool {
+        self.targets
+            .as_ref()
+            .is_some_and(|targets| !targets.is_empty())
+    }
+
+    pub fn get_target_paths(&self) -> Vec<Arc<std::path::Path>> {
+        let mut result = Vec::new();
+        if let Some(targets) = self.targets.as_ref() {
+            for target in targets.iter() {
+                result.extend(target.get_target_paths());
+            }
+        }
+        result
     }
 
     fn get_hash_map(rules: &[(&Rule, Option<String>)]) -> RuleMap {
@@ -224,7 +241,7 @@ impl Rule {
                             AnyDep::Rule(rule) => {
                                 md.list_item(0, rule)?;
                             }
-                            AnyDep::Globs(glob) => match glob {
+                            AnyDep::Glob(glob) => match glob {
                                 Globs::Includes(set) => {
                                     for item in set {
                                         md.list_item(0, &format!("+{item}"))?;
