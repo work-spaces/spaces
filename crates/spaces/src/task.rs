@@ -79,6 +79,11 @@ impl Task {
         }
     }
 
+    /// Returns all rule names from `Rules`, `Any(AnyDep::Rule)`, and `Any(AnyDep::Target)` variants.
+    pub fn collect_rule_deps(&self) -> Vec<Arc<str>> {
+        self.rule.collect_rule_deps()
+    }
+
     pub fn collects_glob_deps(&self, tasks: &HashMap<Arc<str>, Task>) -> Vec<deps::Globs> {
         let mut result = Vec::new();
         if let Some(deps) = self.rule.deps.as_ref()

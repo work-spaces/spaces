@@ -39,57 +39,55 @@ fn get_task_signal_deps(task: &task::Task) -> anyhow::Result<Vec<task::SignalArc
     let tasks = state.tasks.read();
 
     let mut result = Vec::new();
-    if let Some(deps) = task.rule.deps.as_ref() {
-        let all_rules = deps.collect_all_rules();
-        for dep in all_rules.iter() {
-            // # tasks * # deps + hashmap access is EXPENSIVE
-            // this causes a substantial delay when starting spaces
-            let dep_task = tasks.get(dep).ok_or(format_error!(
-                "Task Dependency {} not found for {}",
-                dep,
-                task.rule.name
-            ))?;
+    let rule_deps = task.collect_rule_deps();
+    for dep in rule_deps.iter() {
+        // # tasks * # deps + hashmap access is EXPENSIVE
+        // this causes a substantial delay when starting spaces
+        let dep_task = tasks.get(dep).ok_or(format_error!(
+            "Task Dependency {} not found for {}",
+            dep,
+            task.rule.name
+        ))?;
 
-            if dep_task.phase == task::Phase::Complete || task::Phase::Cancelled == dep_task.phase {
-                continue;
-            }
-
-            match task.phase {
-                task::Phase::Run => {
-                    if dep_task.phase != task::Phase::Run {
-                        return Err(format_error!(
-                            "Run task {} cannot depend on non-run task {} -> {}",
-                            task.rule.name,
-                            dep_task.rule.name,
-                            dep_task.phase
-                        ));
-                    }
-                    if task.rule.type_ == Some(rule::RuleType::Setup)
-                        && dep_task.rule.type_ != Some(rule::RuleType::Setup)
-                    {
-                        return Err(format_error!(
-                            "Setup task {} cannot depend on non-setup task {} -> {}",
-                            task.rule.name,
-                            dep_task.rule.name,
-                            dep_task.phase
-                        ));
-                    }
-                }
-                task::Phase::Checkout => {
-                    if dep_task.phase != task::Phase::Checkout {
-                        return Err(format_error!(
-                            "Checkout task {} cannot depend on non-checkout task {} -> {}",
-                            task.rule.name,
-                            dep_task.rule.name,
-                            dep_task.phase
-                        ));
-                    }
-                }
-                _ => {}
-            }
-
-            result.push(dep_task.signal.clone());
+        if dep_task.phase == task::Phase::Complete || task::Phase::Cancelled == dep_task.phase {
+            continue;
         }
+
+        match task.phase {
+            task::Phase::Run => {
+                if dep_task.phase != task::Phase::Run {
+                    return Err(format_error!(
+                        "Run task {} cannot depend on non-run task {} -> {}",
+                        task.rule.name,
+                        dep_task.rule.name,
+                        dep_task.phase
+                    ));
+                }
+                if task.rule.type_ == Some(rule::RuleType::Setup)
+                    && dep_task.rule.type_ != Some(rule::RuleType::Setup)
+                {
+                    return Err(format_error!(
+                        "Setup task {} cannot depend on non-setup task {} -> {}",
+                        task.rule.name,
+                        dep_task.rule.name,
+                        dep_task.phase
+                    ));
+                }
+            }
+            task::Phase::Checkout => {
+                if dep_task.phase != task::Phase::Checkout {
+                    return Err(format_error!(
+                        "Checkout task {} cannot depend on non-checkout task {} -> {}",
+                        task.rule.name,
+                        dep_task.rule.name,
+                        dep_task.phase
+                    ));
+                }
+            }
+            _ => {}
+        }
+
+        result.push(dep_task.signal.clone());
     }
     Ok(result)
 }
@@ -243,7 +241,9 @@ pub fn execute_rule(
         } else {
             let store_path = ws::get_checkout_store_path_as_path();
             let cache_path = ws::get_rcache_path(&store_path);
-            if task.rule.has_targets() {
+            if task.rule.has_targets()
+                && let Some(targets) = task.rule.targets.as_ref()
+            {
                 // if the rule defines targets, the rule is run through
                 // the rule cache engine
 
@@ -257,6 +257,7 @@ pub fn execute_rule(
                 let task_result_option = rcache::execute(
                     cache_path.as_ref(),
                     effective_digest,
+                    targets.as_slice(),
                     || {
                         task.executor
                             .execute(progress, workspace.clone(), &rule_name)
@@ -423,48 +424,46 @@ impl State {
     fn check_task_deps_visibility(&self, task: &task::Task) -> anyhow::Result<()> {
         let tasks = self.tasks.read();
 
-        if let Some(deps) = task.rule.deps.as_ref() {
-            let all_rules = deps.collect_all_rules();
-            let task_path = labels::get_path_label_from_rule_label(task.rule.name.as_ref());
-            for dep in all_rules.iter() {
-                if let Some(dep_task) = tasks.get(dep) {
-                    match dep_task.rule.visibility.as_ref() {
-                        None | Some(rule::Visibility::Public) => {
-                            // Do nothing if the dependency is public
-                        }
-                        Some(rule::Visibility::Rules(list)) => {
-                            // are task and dep in the same repository
-                            let mut is_match = false;
-                            for prefix in list.iter() {
-                                if task.rule.name.starts_with(prefix.as_ref()) {
-                                    is_match = true;
-                                    break;
-                                }
-                            }
-                            if !is_match {
-                                return Err(format_error!(
-                                    "Dependency {} (rules) is NOT visible to {}.",
-                                    dep_task.rule.name,
-                                    task.rule.name
-                                ));
+        let rule_deps = task.collect_rule_deps();
+        let task_path = labels::get_path_label_from_rule_label(task.rule.name.as_ref());
+        for dep in rule_deps.iter() {
+            if let Some(dep_task) = tasks.get(dep) {
+                match dep_task.rule.visibility.as_ref() {
+                    None | Some(rule::Visibility::Public) => {
+                        // Do nothing if the dependency is public
+                    }
+                    Some(rule::Visibility::Rules(list)) => {
+                        // are task and dep in the same repository
+                        let mut is_match = false;
+                        for prefix in list.iter() {
+                            if task.rule.name.starts_with(prefix.as_ref()) {
+                                is_match = true;
+                                break;
                             }
                         }
-                        Some(rule::Visibility::Private) => {
-                            // are task and dep in the same module
-                            if labels::get_path_label_from_rule_label(dep_task.rule.name.as_ref())
-                                != task_path
-                            {
-                                return Err(format_error!(
-                                    "Dependency {} (private) is NOT visible to {}.",
-                                    dep_task.rule.name,
-                                    task.rule.name
-                                ));
-                            }
+                        if !is_match {
+                            return Err(format_error!(
+                                "Dependency {} (rules) is NOT visible to {}.",
+                                dep_task.rule.name,
+                                task.rule.name
+                            ));
+                        }
+                    }
+                    Some(rule::Visibility::Private) => {
+                        // are task and dep in the same module
+                        if labels::get_path_label_from_rule_label(dep_task.rule.name.as_ref())
+                            != task_path
+                        {
+                            return Err(format_error!(
+                                "Dependency {} (private) is NOT visible to {}.",
+                                dep_task.rule.name,
+                                task.rule.name
+                            ));
                         }
                     }
                 }
             }
-        };
+        }
 
         Ok(())
     }
@@ -521,17 +520,15 @@ impl State {
                 }
 
                 // connect the dependencies
-                if let Some(deps) = task.rule.deps.as_ref() {
-                    let all_rules = deps.collect_all_rules();
-                    for dep in all_rules.iter() {
-                        self.graph.add_dependency(&task.rule.name, dep).context(
-                            format_context!(
-                                "Failed to add dependency {dep} to task {}: {}",
-                                task.rule.name,
-                                self.graph.get_target_not_found(dep.clone())
-                            ),
-                        )?;
-                    }
+                let all_rules = task.collect_rule_deps();
+                for rule_dep in all_rules.iter() {
+                    self.graph
+                        .add_dependency(&task.rule.name, rule_dep)
+                        .context(format_context!(
+                            "Failed to add dependency {rule_dep} to task {}: {}",
+                            task.rule.name,
+                            self.graph.get_target_not_found(rule_dep.clone())
+                        ))?;
                 }
             }
         }
@@ -793,7 +790,7 @@ impl State {
                         }
 
                         // Collect rule names
-                        for rule_name in task.rule.collect_rules() {
+                        for rule_name in task.collect_rule_deps() {
                             dep_strings.push(rule_name);
                         }
 

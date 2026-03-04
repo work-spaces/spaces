@@ -3,7 +3,6 @@ Spaces starlark checkout/run script to make changes to spaces, printer, and arch
 With VSCode/Zed integration
 """
 
-load("//@star/sdk/star/deps.star", "deps")
 load(
     "//@star/sdk/star/run.star",
     "run_add_exec",
@@ -95,22 +94,6 @@ shell(
     "install_dev",
     script = "cargo install --force --path=spaces/crates/spaces --profile=dev --root={}".format(root),
     visibility = visibility_private(),
-)
-
-run_add_exec(
-    "use_cache",
-    command = "bash",
-    args = ["-c", "sleep 4; rm -f build/cache.txt && cat input.txt > build/cache.txt"],
-    deps = deps(files = ["//input.txt"]),
-    target_files = ["//build/cache.txt"],
-)
-
-run_add_exec(
-    "use_cache_output",
-    command = "bash",
-    args = ["-c", "sleep 3; rm -f build/cache2.txt && cat build/cache.txt > build/cache2.txt"],
-    deps = deps(rules = [":use_cache"]),
-    target_files = ["//build/cache2.txt"],
 )
 
 shell(

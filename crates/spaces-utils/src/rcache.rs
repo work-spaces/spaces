@@ -1,6 +1,6 @@
 /// Rule cache
 /// Cache the outputs of the rule based on the input digest
-use crate::age;
+use crate::{age, targets};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
@@ -58,14 +58,14 @@ fn save_artifact_to_cache(
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct CachedOutput {
+pub struct CachedTarget {
     // where does the artifact exist in the cache
     path_in_cache: Arc<str>,
     // where should the artifact be restored in the workspace
     path_in_workspace: Arc<str>,
 }
 
-impl CachedOutput {
+impl CachedTarget {
     fn new_from_workspace_path(
         cache_path: &std::path::Path,
         path_in_workspace: &std::path::Path,
@@ -73,7 +73,7 @@ impl CachedOutput {
         let path_in_cache = save_artifact_to_cache(cache_path, path_in_workspace)
             .with_context(|| format_context!("Failed to save artifact to cache"))?;
         let path_in_workspace = path_in_workspace.to_string_lossy().into();
-        Ok(CachedOutput {
+        Ok(CachedTarget {
             path_in_cache,
             path_in_workspace,
         })
@@ -111,7 +111,7 @@ impl CachedOutput {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RuleDigestCacheEntry {
     last_used: age::LastUsed,
-    outputs: Vec<CachedOutput>,
+    outputs: Vec<CachedTarget>,
 }
 
 impl RuleDigestCacheEntry {
@@ -170,7 +170,7 @@ impl RuleDigestCacheEntry {
         let mut outputs = Vec::new();
         for path_in_workspace in workspace_outputs {
             outputs.push(
-                CachedOutput::new_from_workspace_path(cache_path, path_in_workspace)
+                CachedTarget::new_from_workspace_path(cache_path, path_in_workspace)
                     .with_context(|| format_context!("Failed to create cached output"))?,
             );
         }
@@ -199,6 +199,15 @@ impl RuleDigestCacheEntry {
     }
 }
 
+fn remove_targets(targets: &[targets::Target]) -> anyhow::Result<()> {
+    for target in targets {
+        target
+            .remove()
+            .with_context(|| format_context!("Failed to remove target"))?;
+    }
+    Ok(())
+}
+
 /// Checks to see if the input digest exists in the cache.
 ///
 /// if the input digest exists in the cache, populate the workspace outputs with
@@ -209,6 +218,7 @@ impl RuleDigestCacheEntry {
 pub fn execute<Exec, ExecSuccess, GetTargetPaths>(
     cache_path: &std::path::Path,
     rule_digest: Arc<str>,
+    targets: &[targets::Target],
     exec: Exec,
     get_target_paths: GetTargetPaths,
 ) -> Option<anyhow::Result<ExecSuccess>>
@@ -216,6 +226,13 @@ where
     Exec: FnOnce() -> anyhow::Result<ExecSuccess>,
     GetTargetPaths: FnOnce() -> Vec<Arc<std::path::Path>>,
 {
+    let remove_result =
+        remove_targets(targets).with_context(|| format_context!("while removing targets"));
+
+    if let Err(e) = remove_result {
+        return Some(Err(e));
+    }
+
     let new_from_cache_result = RuleDigestCacheEntry::new_from_cache(cache_path, &rule_digest)
         .with_context(|| format_context!("Failed to check for cache entry for {rule_digest}"));
 

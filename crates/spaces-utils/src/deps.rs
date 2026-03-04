@@ -135,20 +135,6 @@ impl Deps {
         }
     }
 
-    /// Returns all rule names from `Rules`, `Any(AnyDep::Rule)`, and `Any(AnyDep::Target)` variants.
-    pub fn collect_all_rules(&self) -> Vec<Arc<str>> {
-        match self {
-            Deps::Rules(rules) => rules.clone(),
-            Deps::Any(list) => list
-                .iter()
-                .filter_map(|entry| match entry {
-                    AnyDep::Rule(rule) => Some(rule.clone()),
-                    AnyDep::Glob(_) => None,
-                })
-                .collect(),
-        }
-    }
-
     /// Inserts an `AnyDep` entry into deps without clobbering existing entries.
     /// Converts `Deps::Rules` to `Deps::Any` if needed to accommodate the new entry.
     pub fn push_any_dep(deps: &mut Option<Deps>, dep: AnyDep) {
@@ -204,6 +190,20 @@ impl Deps {
                 .filter_map(|entry| match entry {
                     AnyDep::Glob(glob) => Some(glob.clone()),
                     _ => None,
+                })
+                .collect(),
+        }
+    }
+
+    /// Returns all rule names from `Rules`, `Any(AnyDep::Rule)`, and `Any(AnyDep::Target)` variants.
+    pub fn collect_rules(&self) -> Vec<Arc<str>> {
+        match self {
+            Deps::Rules(rules) => rules.clone(),
+            Deps::Any(list) => list
+                .iter()
+                .filter_map(|entry| match entry {
+                    AnyDep::Rule(rule) => Some(rule.clone()),
+                    AnyDep::Glob(_) => None,
                 })
                 .collect(),
         }
@@ -348,7 +348,7 @@ mod tests {
     #[test]
     fn test_collect_all_rules_from_rules_variant() {
         let deps = Deps::Rules(vec!["//a:one".into(), "//b:two".into()]);
-        let rules = deps.collect_all_rules();
+        let rules = deps.collect_rules();
         assert_eq!(rules.len(), 2);
         assert_eq!(rules[0].as_ref(), "//a:one");
         assert_eq!(rules[1].as_ref(), "//b:two");
@@ -361,7 +361,7 @@ mod tests {
             AnyDep::Glob(Globs::Includes(vec!["src/**".into()])),
             AnyDep::Rule("//c:test".into()),
         ]);
-        let rules = deps.collect_all_rules();
+        let rules = deps.collect_rules();
         assert_eq!(rules.len(), 2);
         assert_eq!(rules[0].as_ref(), "//a:rule");
         assert_eq!(rules[1].as_ref(), "//c:test");
@@ -370,16 +370,16 @@ mod tests {
     #[test]
     fn test_collect_all_rules_empty() {
         let deps = Deps::Any(vec![]);
-        assert!(deps.collect_all_rules().is_empty());
+        assert!(deps.collect_rules().is_empty());
 
         let deps = Deps::Rules(vec![]);
-        assert!(deps.collect_all_rules().is_empty());
+        assert!(deps.collect_rules().is_empty());
     }
 
     #[test]
     fn test_collect_all_rules_globs_only() {
         let deps = Deps::Any(vec![AnyDep::Glob(Globs::Includes(vec!["src/**".into()]))]);
-        assert!(deps.collect_all_rules().is_empty());
+        assert!(deps.collect_rules().is_empty());
     }
 
     // -------------------------------------------------------

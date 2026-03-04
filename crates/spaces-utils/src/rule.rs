@@ -150,14 +150,25 @@ impl Rule {
             .is_some_and(|targets| !targets.is_empty())
     }
 
-    pub fn collect_rules(&self) -> Vec<Arc<str>> {
+    /// Returns all rule names from `Rules`, `Any(AnyDep::Rule)`, and `Any(AnyDep::Target)` variants.
+    pub fn collect_rule_deps(&self) -> Vec<Arc<str>> {
+        let mut result = Vec::new();
         if let Some(deps) = self.deps.as_ref() {
-            deps.collect_all_rules()
-        } else {
-            Vec::new()
+            result.extend(deps.collect_rules());
         }
+        result
     }
 
+    /// Returns all rule names from `Rules`, `Any(AnyDep::Rule)`, and `Any(AnyDep::Target)` variants.
+    pub fn collect_glob_deps(&self) -> Vec<deps::Globs> {
+        let mut result = Vec::new();
+        if let Some(deps) = self.deps.as_ref() {
+            result.extend(deps.collect_globs());
+        }
+        result
+    }
+
+    /// Collects the targets for this rule as globs
     pub fn collect_target_globs(&self) -> Vec<deps::Globs> {
         if let Some(targets) = self.targets.as_ref() {
             let mut result = Vec::new();
@@ -170,6 +181,8 @@ impl Rule {
         }
     }
 
+    /// Collects the target files and walks the target directories
+    /// to get all the target paths included
     pub fn get_target_paths(&self) -> Vec<Arc<std::path::Path>> {
         let mut result = Vec::new();
         if let Some(targets) = self.targets.as_ref() {
