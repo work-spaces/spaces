@@ -15,8 +15,22 @@ impl Globs {
         let mut globs = changes::glob::Globs::default();
         for item in items {
             match item {
-                Globs::Includes(set) => globs.includes.extend(set.iter().cloned()),
-                Globs::Excludes(set) => globs.excludes.extend(set.iter().cloned()),
+                Globs::Includes(vec) => {
+                    globs
+                        .includes
+                        .extend(vec.iter().map(|e| match e.strip_prefix("//") {
+                            Some(stripped) => Arc::from(stripped),
+                            None => e.clone(),
+                        }))
+                }
+                Globs::Excludes(vec) => {
+                    globs
+                        .excludes
+                        .extend(vec.iter().map(|e| match e.strip_prefix("//") {
+                            Some(stripped) => Arc::from(stripped),
+                            None => e.clone(),
+                        }))
+                }
             }
         }
         globs
@@ -29,16 +43,9 @@ impl Globs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RuleTarget {
-    pub rule: Arc<str>,
-    pub target: Arc<str>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AnyDep {
     Rule(Arc<str>),
     Glob(Globs),
-    Target(RuleTarget),
 }
 
 impl AnyDep {
@@ -77,15 +84,6 @@ impl AnyDep {
                     )?;
                 }
             },
-            AnyDep::Target(target) => {
-                if !labels::is_rule_sanitized(&target.rule) {
-                    target.rule = labels::sanitize_rule(
-                        target.rule.clone(),
-                        starlark_module.clone(),
-                        spaces_module_suffix,
-                    );
-                }
-            }
         }
         Ok(())
     }
@@ -145,8 +143,7 @@ impl Deps {
                 .iter()
                 .filter_map(|entry| match entry {
                     AnyDep::Rule(rule) => Some(rule.clone()),
-                    AnyDep::Target(target) => Some(target.rule.clone()),
-                    _ => None,
+                    AnyDep::Glob(_) => None,
                 })
                 .collect(),
         }
@@ -245,6 +242,7 @@ impl Deps {
                 }
             }
         }
+
         Ok(())
     }
 }
@@ -361,17 +359,12 @@ mod tests {
         let deps = Deps::Any(vec![
             AnyDep::Rule("//a:rule".into()),
             AnyDep::Glob(Globs::Includes(vec!["src/**".into()])),
-            AnyDep::Target(RuleTarget {
-                rule: "//b:build".into(),
-                target: "output.tar".into(),
-            }),
             AnyDep::Rule("//c:test".into()),
         ]);
         let rules = deps.collect_all_rules();
-        assert_eq!(rules.len(), 3);
+        assert_eq!(rules.len(), 2);
         assert_eq!(rules[0].as_ref(), "//a:rule");
-        assert_eq!(rules[1].as_ref(), "//b:build");
-        assert_eq!(rules[2].as_ref(), "//c:test");
+        assert_eq!(rules[1].as_ref(), "//c:test");
     }
 
     #[test]
@@ -526,13 +519,7 @@ mod tests {
 
     #[test]
     fn test_has_globs_any_without_globs() {
-        let deps = Deps::Any(vec![
-            AnyDep::Rule("//a:rule".into()),
-            AnyDep::Target(RuleTarget {
-                rule: "//b:build".into(),
-                target: "out".into(),
-            }),
-        ]);
+        let deps = Deps::Any(vec![AnyDep::Rule("//a:rule".into())]);
         assert!(!deps.has_globs());
     }
 
@@ -621,45 +608,6 @@ mod tests {
     }
 
     #[test]
-    fn test_sanitize_target_unsanitized() {
-        let mut dep = AnyDep::Target(RuleTarget {
-            rule: "build_rule".into(),
-            target: "output.tar".into(),
-        });
-        dep.sanitize(
-            "//pkg:label".into(),
-            Some("pkg/spaces.star".into()),
-            "spaces.star",
-        )
-        .unwrap();
-        match &dep {
-            AnyDep::Target(t) => {
-                assert_eq!(t.rule.as_ref(), "//pkg:build_rule");
-                assert_eq!(t.target.as_ref(), "output.tar");
-            }
-            _ => panic!("expected Target"),
-        }
-    }
-
-    #[test]
-    fn test_sanitize_target_already_sanitized() {
-        let mut dep = AnyDep::Target(RuleTarget {
-            rule: "//already:done".into(),
-            target: "out".into(),
-        });
-        dep.sanitize(
-            "//pkg:label".into(),
-            Some("pkg/spaces.star".into()),
-            "spaces.star",
-        )
-        .unwrap();
-        match &dep {
-            AnyDep::Target(t) => assert_eq!(t.rule.as_ref(), "//already:done"),
-            _ => panic!("expected Target"),
-        }
-    }
-
-    #[test]
     fn test_sanitize_globs_includes() {
         let mut dep = AnyDep::Glob(Globs::Includes(vec!["//src/**".into()]));
         dep.sanitize(
@@ -723,10 +671,6 @@ mod tests {
         let mut deps = Deps::Any(vec![
             AnyDep::Rule("my_rule".into()),
             AnyDep::Glob(Globs::Includes(vec!["//src/**".into()])),
-            AnyDep::Target(RuleTarget {
-                rule: "build".into(),
-                target: "out".into(),
-            }),
         ]);
         deps.sanitize(
             "//pkg:label".into(),
@@ -743,10 +687,6 @@ mod tests {
                 match &list[1] {
                     AnyDep::Glob(Globs::Includes(v)) => assert_eq!(v[0].as_ref(), "src/**"),
                     _ => panic!("expected Globs::Includes"),
-                }
-                match &list[2] {
-                    AnyDep::Target(t) => assert_eq!(t.rule.as_ref(), "//pkg:build"),
-                    _ => panic!("expected Target"),
                 }
             }
             _ => panic!("expected Any variant"),
@@ -805,17 +745,5 @@ mod tests {
             AnyDep::Rule(r) => assert_eq!(r.as_ref(), "//pkg:rule"),
             _ => panic!("expected Rule"),
         }
-    }
-
-    #[test]
-    fn test_rule_target_serde_roundtrip() {
-        let target = RuleTarget {
-            rule: "//pkg:build".into(),
-            target: "output.tar".into(),
-        };
-        let json = serde_json::to_string(&target).unwrap();
-        let deserialized: RuleTarget = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized.rule.as_ref(), "//pkg:build");
-        assert_eq!(deserialized.target.as_ref(), "output.tar");
     }
 }

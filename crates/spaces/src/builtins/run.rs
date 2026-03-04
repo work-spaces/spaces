@@ -241,18 +241,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             rule::AnyDep::Glob(rule::Globs::Includes(includes)),
         );
 
-        let target_file = vec![
-            format!(
-                "build/{}/{}",
-                rules::get_sanitized_rule_name(rule_name.clone()),
-                create_archive.get_output_file()
-            )
-            .into(),
-        ];
-        rule.push_target(targets::Target::new_with_files(
-            "archive".into(),
-            target_file,
-        ));
+        let target_path = format!(
+            "build/{}/{}",
+            rules::get_sanitized_rule_name(rule_name.clone()),
+            create_archive.get_output_file()
+        )
+        .into();
+        rule.push_target(targets::Target::Directory(target_path));
 
         let archive = executor::archive::Archive { create_archive };
 

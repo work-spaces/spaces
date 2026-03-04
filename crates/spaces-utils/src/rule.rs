@@ -1,4 +1,4 @@
-use crate::{deps, platform, targets};
+use crate::{deps, labels, platform, targets};
 use anyhow_source_location::format_error;
 use printer::markdown;
 use serde::{Deserialize, Serialize};
@@ -53,7 +53,7 @@ pub struct Rule {
     pub inputs: Option<HashSet<Arc<str>>>,
     /// Not used - use targets
     pub outputs: Option<HashSet<Arc<str>>>,
-    /// The targets that the rule creates
+    /// The targets can be files or directories - directory will use entire directory contents
     pub targets: Option<Vec<targets::Target>>,
     /// list of platforms that the rule will run on. default is to run on all platforms
     pub platforms: Option<Vec<platform::Platform>>,
@@ -72,9 +72,13 @@ struct Section {
 }
 
 impl Rule {
-    pub fn sanitize(&mut self) -> anyhow::Result<()> {
+    pub fn sanitize(
+        &mut self,
+        rule_label: Arc<str>,
+        latest_starlark_module: Option<Arc<str>>,
+        spaces_module_suffix: &str,
+    ) -> anyhow::Result<()> {
         // Convert Deps::Rules to Deps::Any with individual AnyDep::Rule entries
-        //
         if let Some(Deps::Rules(rules)) = self.deps.as_mut() {
             self.deps = Some(Deps::Any(
                 rules.iter_mut().map(|e| AnyDep::Rule(e.clone())).collect(),
@@ -112,6 +116,31 @@ impl Rule {
             }
         }
 
+        // update deps: sanitize rule names and glob vectors
+        if let Some(deps) = self.deps.as_mut() {
+            deps.sanitize(
+                rule_label.clone(),
+                latest_starlark_module.clone(),
+                spaces_module_suffix,
+            )?;
+        }
+
+        if let Some(targets) = self.targets.as_mut() {
+            for target in targets.iter_mut() {
+                target.sanitize(latest_starlark_module.clone());
+            }
+        }
+
+        if let Some(Visibility::Rules(list)) = self.visibility.as_mut() {
+            for vis_rule in list.iter_mut() {
+                *vis_rule = labels::sanitize_rule(
+                    vis_rule.clone(),
+                    latest_starlark_module.clone(),
+                    spaces_module_suffix,
+                );
+            }
+        }
+
         Ok(())
     }
 
@@ -119,6 +148,26 @@ impl Rule {
         self.targets
             .as_ref()
             .is_some_and(|targets| !targets.is_empty())
+    }
+
+    pub fn collect_rules(&self) -> Vec<Arc<str>> {
+        if let Some(deps) = self.deps.as_ref() {
+            deps.collect_all_rules()
+        } else {
+            Vec::new()
+        }
+    }
+
+    pub fn collect_target_globs(&self) -> Vec<deps::Globs> {
+        if let Some(targets) = self.targets.as_ref() {
+            let mut result = Vec::new();
+            for target in targets {
+                result.push(target.get_target_glob());
+            }
+            result
+        } else {
+            Vec::new()
+        }
     }
 
     pub fn get_target_paths(&self) -> Vec<Arc<std::path::Path>> {
@@ -253,9 +302,6 @@ impl Rule {
                                     }
                                 }
                             },
-                            AnyDep::Target(target) => {
-                                md.list_item(0, &format!("{}:{}", target.rule, target.target))?;
-                            }
                         }
                     }
                 }

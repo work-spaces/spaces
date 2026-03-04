@@ -10,7 +10,6 @@ load(
     "run_add_exec_test",
 )
 load("//@star/sdk/star/shell.star", "shell")
-load("//@star/sdk/star/targets.star", "targets_from_files")
 load(
     "//@star/sdk/star/visibility.star",
     "visibility_private",
@@ -101,11 +100,17 @@ shell(
 run_add_exec(
     "use_cache",
     command = "bash",
-    args = ["-c", "sleep 5; echo 'Using cache2' >> build/cache.txt"],
-    deps = deps(files = ["input.txt"]),
-    targets = [
-        targets_from_files("cache", ["build/cache.txt"]),
-    ],
+    args = ["-c", "sleep 4; rm -f build/cache.txt && cat input.txt > build/cache.txt"],
+    deps = deps(files = ["//input.txt"]),
+    target_files = ["//build/cache.txt"],
+)
+
+run_add_exec(
+    "use_cache_output",
+    command = "bash",
+    args = ["-c", "sleep 3; rm -f build/cache2.txt && cat build/cache.txt > build/cache2.txt"],
+    deps = deps(rules = [":use_cache"]),
+    target_files = ["//build/cache2.txt"],
 )
 
 shell(
