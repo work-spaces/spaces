@@ -1,6 +1,6 @@
 /// Rule cache
 /// Cache the outputs of the rule based on the input digest
-use crate::age;
+use crate::{age, targets};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
@@ -8,6 +8,10 @@ use std::sync::Arc;
 
 const ARTIFACT_CACHE_DIR: &str = "artifacts";
 const RULE_DIGEST_CACHE_DIR: &str = "rule_digests";
+
+fn get_artifact_cache_path(cache_path: &std::path::Path, artifact: &str) -> std::path::PathBuf {
+    cache_path.join(ARTIFACT_CACHE_DIR).join(artifact)
+}
 
 fn save_artifact_to_cache(
     cache_path: &std::path::Path,
@@ -23,7 +27,7 @@ fn save_artifact_to_cache(
 
     let artifact_hash = blake3::hash(&contents).to_string();
     //path in cache is the hash of the artifact contents
-    let path_in_cache = cache_path.join(ARTIFACT_CACHE_DIR).join(&artifact_hash);
+    let path_in_cache = get_artifact_cache_path(cache_path, &artifact_hash);
 
     // skip caching if the artifact is already in the cache
     if !path_in_cache.exists() {
@@ -54,14 +58,14 @@ fn save_artifact_to_cache(
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct CachedOutput {
+pub struct CachedTarget {
     // where does the artifact exist in the cache
     path_in_cache: Arc<str>,
     // where should the artifact be restored in the workspace
     path_in_workspace: Arc<str>,
 }
 
-impl CachedOutput {
+impl CachedTarget {
     fn new_from_workspace_path(
         cache_path: &std::path::Path,
         path_in_workspace: &std::path::Path,
@@ -69,15 +73,14 @@ impl CachedOutput {
         let path_in_cache = save_artifact_to_cache(cache_path, path_in_workspace)
             .with_context(|| format_context!("Failed to save artifact to cache"))?;
         let path_in_workspace = path_in_workspace.to_string_lossy().into();
-        Ok(CachedOutput {
+        Ok(CachedTarget {
             path_in_cache,
             path_in_workspace,
         })
     }
 
-    fn restore_to_workspace(&self) -> anyhow::Result<()> {
+    fn restore_to_workspace(&self, path_to_cache: &std::path::Path) -> anyhow::Result<()> {
         // hard link to the workspace
-        let path_in_cache = std::path::Path::new(self.path_in_cache.as_ref());
         let path_in_workspace = std::path::Path::new(self.path_in_workspace.as_ref());
         if let Some(parent) = path_in_workspace.parent() {
             std::fs::create_dir_all(parent).context(format_context!(
@@ -93,10 +96,12 @@ impl CachedOutput {
             ))?;
         }
 
-        std::fs::hard_link(path_in_cache, path_in_workspace).with_context(|| {
+        let path_in_cache = get_artifact_cache_path(path_to_cache, &self.path_in_cache);
+        std::fs::hard_link(&path_in_cache, path_in_workspace).with_context(|| {
             format_context!(
-                "Failed to restore artifact to workspace at {}",
-                path_in_workspace.display()
+                "Failed to restore artifact to workspace at {} from {}",
+                path_in_workspace.display(),
+                path_in_cache.display()
             )
         })?;
         Ok(())
@@ -106,7 +111,7 @@ impl CachedOutput {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RuleDigestCacheEntry {
     last_used: age::LastUsed,
-    outputs: Vec<CachedOutput>,
+    outputs: Vec<CachedTarget>,
 }
 
 impl RuleDigestCacheEntry {
@@ -148,10 +153,10 @@ impl RuleDigestCacheEntry {
         }
     }
 
-    fn restore_to_workspace(&self) -> anyhow::Result<()> {
+    fn restore_to_workspace(&self, path_to_cache: &std::path::Path) -> anyhow::Result<()> {
         for output in &self.outputs {
             output
-                .restore_to_workspace()
+                .restore_to_workspace(path_to_cache)
                 .with_context(|| format_context!("Failed to restore cached output"))?;
         }
         Ok(())
@@ -165,7 +170,7 @@ impl RuleDigestCacheEntry {
         let mut outputs = Vec::new();
         for path_in_workspace in workspace_outputs {
             outputs.push(
-                CachedOutput::new_from_workspace_path(cache_path, path_in_workspace)
+                CachedTarget::new_from_workspace_path(cache_path, path_in_workspace)
                     .with_context(|| format_context!("Failed to create cached output"))?,
             );
         }
@@ -194,6 +199,15 @@ impl RuleDigestCacheEntry {
     }
 }
 
+fn remove_targets(targets: &[targets::Target]) -> anyhow::Result<()> {
+    for target in targets {
+        target
+            .remove()
+            .with_context(|| format_context!("Failed to remove target"))?;
+    }
+    Ok(())
+}
+
 /// Checks to see if the input digest exists in the cache.
 ///
 /// if the input digest exists in the cache, populate the workspace outputs with
@@ -201,30 +215,60 @@ impl RuleDigestCacheEntry {
 ///
 /// if the input digest does not exist, the task is executed and the outputs are cached
 /// if the task runs successfully.
-pub fn execute<Exec>(
+pub fn execute<Exec, ExecSuccess, GetTargetPaths>(
     cache_path: &std::path::Path,
     rule_digest: Arc<str>,
-    target_paths: Vec<Arc<std::path::Path>>,
+    targets: &[targets::Target],
     exec: Exec,
-) -> anyhow::Result<()>
+    get_target_paths: GetTargetPaths,
+) -> Option<anyhow::Result<ExecSuccess>>
 where
-    Exec: FnOnce() -> anyhow::Result<()>,
+    Exec: FnOnce() -> anyhow::Result<ExecSuccess>,
+    GetTargetPaths: FnOnce() -> Vec<Arc<std::path::Path>>,
 {
-    if let Some(entry) = RuleDigestCacheEntry::new_from_cache(cache_path, &rule_digest)
-        .context(format_context!("Failed to check for cache entry"))?
-    {
-        // cache entry exists
-        entry
-            .restore_to_workspace()
-            .with_context(|| format_context!("Failed to restore cached output to workspace"))?;
-    } else {
-        exec().with_context(|| format_context!("Task failed to execute in rule cacher"))?;
+    let remove_result =
+        remove_targets(targets).with_context(|| format_context!("while removing targets"));
 
-        RuleDigestCacheEntry::create_cache_entry(cache_path, &rule_digest, target_paths.as_slice())
-            .context(format_context!("Failed to create cache entry"))?;
+    if let Err(e) = remove_result {
+        return Some(Err(e));
     }
 
-    Ok(())
+    let new_from_cache_result = RuleDigestCacheEntry::new_from_cache(cache_path, &rule_digest)
+        .with_context(|| format_context!("Failed to check for cache entry for {rule_digest}"));
+
+    match new_from_cache_result {
+        Err(e) => Some(Err(e)),
+        Ok(Some(entry)) => {
+            // cache entry exists
+            let result = entry
+                .restore_to_workspace(cache_path)
+                .with_context(|| format_context!("Failed to restore cached output to workspace"));
+            if let Err(e) = result {
+                return Some(Err(e));
+            }
+
+            // no result and no error, item restored from cache
+            None
+        }
+        Ok(None) => {
+            let exec_result = exec();
+
+            if exec_result.is_ok() {
+                let result = RuleDigestCacheEntry::create_cache_entry(
+                    cache_path,
+                    &rule_digest,
+                    get_target_paths().as_slice(),
+                )
+                .with_context(|| format_context!("Failed to create cache entry for {rule_digest}"));
+
+                if let Err(e) = result {
+                    return Some(Err(e));
+                }
+            }
+
+            Some(exec_result)
+        }
+    }
 }
 
 #[cfg(test)]

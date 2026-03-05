@@ -1,8 +1,9 @@
 use crate::executor;
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex};
-use utils::rule;
+use utils::{deps, rule};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, ValueEnum, strum::Display)]
 pub enum Phase {
@@ -76,6 +77,30 @@ impl Task {
             rule,
             digest: "".into(),
         }
+    }
+
+    /// Returns all rule names from `Rules`, `Any(AnyDep::Rule)`, and `Any(AnyDep::Target)` variants.
+    pub fn collect_rule_deps(&self) -> Vec<Arc<str>> {
+        self.rule.collect_rule_deps()
+    }
+
+    pub fn collects_glob_deps(&self, tasks: &HashMap<Arc<str>, Task>) -> Vec<deps::Globs> {
+        let mut result = Vec::new();
+        if let Some(deps) = self.rule.deps.as_ref()
+            && let deps::Deps::Any(any_list) = deps
+        {
+            for any in any_list.iter() {
+                if let deps::AnyDep::Rule(rule_name) = any
+                    && let Some(task) = tasks.get(rule_name.as_ref())
+                {
+                    let globs = task.rule.collect_target_globs();
+                    result.extend(globs);
+                } else if let deps::AnyDep::Glob(glob) = any {
+                    result.push(glob.clone());
+                }
+            }
+        }
+        result
     }
 
     pub fn calculate_digest(&self) -> blake3::Hash {

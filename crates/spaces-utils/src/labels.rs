@@ -20,9 +20,14 @@ pub fn get_rule_name_from_label(label: &str) -> &str {
     rule_name
 }
 
-pub fn get_path_from_label(label: &str) -> &str {
+pub fn get_path_label_from_rule_label(label: &str) -> &str {
     let (path, _rule_name) = label.split_once(":").unwrap_or(("", label));
     path
+}
+
+pub fn get_path_from_path_label(label: &str) -> Arc<std::path::Path> {
+    let path_str = label.strip_prefix("//").unwrap_or(label);
+    std::path::Path::new(path_str).into()
 }
 
 pub fn sanitize_rule_for_display(rule_name: Arc<str>) -> Arc<str> {
@@ -73,6 +78,21 @@ pub fn sanitize_rule(
     }
 }
 
+pub fn sanitize_path(path_label: Arc<str>, starlark_module: Option<Arc<str>>) -> Arc<str> {
+    if path_label.starts_with("//") {
+        path_label
+    } else if let Some(latest_module) = starlark_module {
+        let path_label = path_label.strip_prefix(':').unwrap_or(path_label.as_ref());
+        if let Some(parent) = std::path::Path::new(latest_module.as_ref()).parent() {
+            format!("//{}/{path_label}", parent.display()).into()
+        } else {
+            format!("//{path_label}").into()
+        }
+    } else {
+        path_label
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 pub enum IsAnnotated {
     No,
@@ -98,14 +118,14 @@ pub fn sanitize_glob_value(
             value
         ))
     } else if value.starts_with("//") {
-        Ok(value.replace("//", "").into())
+        Ok(value.into())
     } else {
         let rule_path = get_source_from_label(rule_name);
         // remove everything following the last slash
         let (path_in_workspace, _some_spaces_star) = rule_path
             .rsplit_once('/')
             .ok_or(format_error!("Internal Error: malformat label {rule_name}"))?;
-        Ok(format!("{path_in_workspace}/{value}").into())
+        Ok(format!("//{path_in_workspace}/{value}").into())
     }
 }
 
@@ -167,14 +187,17 @@ mod tests {
     #[test]
     fn test_get_path_from_label() {
         assert_eq!(
-            get_path_from_label("//path/to/pkg:my_rule"),
+            get_path_label_from_rule_label("//path/to/pkg:my_rule"),
             "//path/to/pkg"
         );
         // these are malformed but allowed by this function
-        assert_eq!(get_path_from_label("my_rule"), "");
-        assert_eq!(get_path_from_label(""), "");
-        assert_eq!(get_path_from_label(":"), "");
-        assert_eq!(get_path_from_label("//path:nested:rule"), "//path");
+        assert_eq!(get_path_label_from_rule_label("my_rule"), "");
+        assert_eq!(get_path_label_from_rule_label(""), "");
+        assert_eq!(get_path_label_from_rule_label(":"), "");
+        assert_eq!(
+            get_path_label_from_rule_label("//path:nested:rule"),
+            "//path"
+        );
     }
 
     #[test]

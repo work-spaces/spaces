@@ -949,7 +949,7 @@ impl Workspace {
         format!("{}/{rule_name}.log", self.log_directory).into()
     }
 
-    pub fn is_rule_inputs_changed(
+    pub fn is_rule_deps_changed(
         &self,
         progress: &mut printer::MultiProgressBar,
         rule_name: &str,

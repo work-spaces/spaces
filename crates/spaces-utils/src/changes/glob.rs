@@ -52,6 +52,48 @@ impl Globs {
         }
         false
     }
+
+    fn walk_glob_dir(&self, glob_include_path: Arc<str>) -> Vec<walkdir::DirEntry> {
+        walkdir::WalkDir::new(glob_include_path.as_ref())
+            .into_iter()
+            .filter_map(|entry| entry.ok())
+            .collect()
+    }
+
+    pub fn collect_matches(&self) -> Vec<Arc<std::path::Path>> {
+        let mut set = HashSet::new();
+        for input in self.includes.iter() {
+            let glob_include_path = get_glob_path(input.clone());
+            let walk_dir = self.walk_glob_dir(glob_include_path);
+            for entry in walk_dir.into_iter() {
+                if entry.file_type().is_dir() {
+                    continue;
+                }
+                set.insert(entry.into_path());
+            }
+        }
+
+        let mut result = Vec::new();
+        result.extend(set.into_iter().map(|e| e.into()));
+        result.sort();
+        result
+    }
+}
+
+// This is used to limit globbing to a subset of the workspace
+pub fn get_glob_path(input: Arc<str>) -> Arc<str> {
+    if let Some(asterisk_position) = input.find('*') {
+        let mut path = input.to_string();
+        path.truncate(asterisk_position);
+        if path.is_empty() {
+            ".".into()
+        } else {
+            path.into()
+        }
+    } else {
+        // no asterisk found, return input as-is
+        input.clone()
+    }
 }
 
 pub fn is_glob_include(glob: &str) -> Option<Arc<str>> {

@@ -2,12 +2,13 @@ use crate::workspace::WorkspaceArc;
 use crate::{executor, singleton, task, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
+
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use utils::changes::glob;
-use utils::rule::Visibility;
-use utils::{environment, graph, labels, lock, logger, platform, rule};
+use utils::{changes::glob, targets};
+
+use utils::{environment, graph, labels, lock, logger, platform, rcache, rule, ws};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum HasHelp {
@@ -38,62 +39,60 @@ fn get_task_signal_deps(task: &task::Task) -> anyhow::Result<Vec<task::SignalArc
     let tasks = state.tasks.read();
 
     let mut result = Vec::new();
-    if let Some(deps) = task.rule.deps.as_ref() {
-        let all_rules = deps.collect_all_rules();
-        for dep in all_rules.iter() {
-            // # tasks * # deps + hashmap access is EXPENSIVE
-            // this causes a substantial delay when starting spaces
-            let dep_task = tasks.get(dep).ok_or(format_error!(
-                "Task Dependency {} not found for {}",
-                dep,
-                task.rule.name
-            ))?;
+    let rule_deps = task.collect_rule_deps();
+    for dep in rule_deps.iter() {
+        // # tasks * # deps + hashmap access is EXPENSIVE
+        // this causes a substantial delay when starting spaces
+        let dep_task = tasks.get(dep).ok_or(format_error!(
+            "Task Dependency {} not found for {}",
+            dep,
+            task.rule.name
+        ))?;
 
-            if dep_task.phase == task::Phase::Complete || task::Phase::Cancelled == dep_task.phase {
-                continue;
-            }
-
-            match task.phase {
-                task::Phase::Run => {
-                    if dep_task.phase != task::Phase::Run {
-                        return Err(format_error!(
-                            "Run task {} cannot depend on non-run task {} -> {}",
-                            task.rule.name,
-                            dep_task.rule.name,
-                            dep_task.phase
-                        ));
-                    }
-                    if task.rule.type_ == Some(rule::RuleType::Setup)
-                        && dep_task.rule.type_ != Some(rule::RuleType::Setup)
-                    {
-                        return Err(format_error!(
-                            "Setup task {} cannot depend on non-setup task {} -> {}",
-                            task.rule.name,
-                            dep_task.rule.name,
-                            dep_task.phase
-                        ));
-                    }
-                }
-                task::Phase::Checkout => {
-                    if dep_task.phase != task::Phase::Checkout {
-                        return Err(format_error!(
-                            "Checkout task {} cannot depend on non-checkout task {} -> {}",
-                            task.rule.name,
-                            dep_task.rule.name,
-                            dep_task.phase
-                        ));
-                    }
-                }
-                _ => {}
-            }
-
-            result.push(dep_task.signal.clone());
+        if dep_task.phase == task::Phase::Complete || task::Phase::Cancelled == dep_task.phase {
+            continue;
         }
+
+        match task.phase {
+            task::Phase::Run => {
+                if dep_task.phase != task::Phase::Run {
+                    return Err(format_error!(
+                        "Run task {} cannot depend on non-run task {} -> {}",
+                        task.rule.name,
+                        dep_task.rule.name,
+                        dep_task.phase
+                    ));
+                }
+                if task.rule.type_ == Some(rule::RuleType::Setup)
+                    && dep_task.rule.type_ != Some(rule::RuleType::Setup)
+                {
+                    return Err(format_error!(
+                        "Setup task {} cannot depend on non-setup task {} -> {}",
+                        task.rule.name,
+                        dep_task.rule.name,
+                        dep_task.phase
+                    ));
+                }
+            }
+            task::Phase::Checkout => {
+                if dep_task.phase != task::Phase::Checkout {
+                    return Err(format_error!(
+                        "Checkout task {} cannot depend on non-checkout task {} -> {}",
+                        task.rule.name,
+                        dep_task.rule.name,
+                        dep_task.phase
+                    ));
+                }
+            }
+            _ => {}
+        }
+
+        result.push(dep_task.signal.clone());
     }
     Ok(result)
 }
 
-pub fn execute_task(
+pub fn execute_rule(
     mut progress: printer::MultiProgressBar,
     workspace: workspace::WorkspaceArc,
     task: &task::Task,
@@ -181,48 +180,41 @@ pub fn execute_task(
 
         let rule_name = name.clone();
 
-        let has_dep_globs = task.rule.deps.as_ref().is_some_and(|d| d.has_globs());
-        let updated_digest = if has_dep_globs {
-            if skip_execute_message.is_some() {
-                None
-            } else {
-                let dep_globs = if let Some(deps) = task.rule.deps.as_ref() {
-                    deps.collect_globs()
-                } else {
-                    Vec::new()
-                };
+        let dep_globs = {
+            let state = get_state().read();
+            let tasks = state.tasks.read();
+            task.collects_glob_deps(&tasks)
+        };
 
-                task_logger(&mut progress, name.clone())
-                    .debug("update workspace changes with deps globs");
+        let updated_digest = if !dep_globs.is_empty() && skip_execute_message.is_none() {
+            task_logger(&mut progress, name.clone())
+                .debug(format!("update workspace changes with deps globs {dep_globs:?}").as_str());
 
-                workspace
-                    .write()
-                    .update_changes(&mut progress, &dep_globs)
-                    .context(format_context!("Failed to update workspace changes"))?;
+            workspace
+                .write()
+                .update_changes(&mut progress, &dep_globs)
+                .context(format_context!("Failed to update workspace changes"))?;
 
-                task_logger(&mut progress, name.clone()).debug("check for new digest");
+            task_logger(&mut progress, name.clone()).debug("check for new digest");
 
-                let seed = serde_json::to_string(&task.executor)
-                    .context(format_context!("Failed to serialize"))?;
-                let digest = workspace
-                    .read()
-                    .is_rule_inputs_changed(
-                        &mut progress,
-                        &rule_name,
-                        seed.as_str(),
-                        &dep_globs[..],
-                    )
-                    .context(format_context!(
-                        "Failed to check deps globs for {rule_name}"
-                    ))?;
-                if digest.is_none() {
-                    // the digest has not changed - not need to execute
-                    skip_execute_message = Some("skipping: same deps globs".into());
-                }
-                task_logger(&mut progress, name.clone())
-                    .debug(format!("New digest for {rule_name}={digest:?}").as_str());
-                digest
+            let digest = workspace
+                .read()
+                .is_rule_deps_changed(
+                    &mut progress,
+                    &rule_name,
+                    task.digest.as_ref(),
+                    &dep_globs[..],
+                )
+                .context(format_context!(
+                    "Failed to check deps globs for {rule_name}"
+                ))?;
+            if digest.is_none() {
+                // the digest has not changed - not need to execute
+                skip_execute_message = Some("skipping: same deps globs".into());
             }
+            task_logger(&mut progress, name.clone())
+                .debug(format!("New digest for {rule_name}={digest:?}").as_str());
+            digest
         } else {
             None
         };
@@ -247,9 +239,42 @@ pub fn execute_task(
             }
             Ok(executor::TaskResult::new())
         } else {
-            task.executor
-                .execute(progress, workspace.clone(), &rule_name)
-                .context(format_context!("Failed to exec {}", name))
+            let store_path = ws::get_checkout_store_path_as_path();
+            let cache_path = ws::get_rcache_path(&store_path);
+            if task.rule.has_targets()
+                && let Some(targets) = task.rule.targets.as_ref()
+            {
+                // if the rule defines targets, the rule is run through
+                // the rule cache engine
+
+                let effective_digest = updated_digest
+                    .clone()
+                    .unwrap_or_else(|| task.digest.clone());
+
+                task_logger(&mut progress, name.clone())
+                    .debug(format!("rcache digest {effective_digest}").as_str());
+
+                let task_result_option = rcache::execute(
+                    cache_path.as_ref(),
+                    effective_digest,
+                    targets.as_slice(),
+                    || {
+                        task.executor
+                            .execute(progress, workspace.clone(), &rule_name)
+                            .context(format_context!("Failed to exec {}", name))
+                    },
+                    || task.rule.get_target_paths(),
+                );
+                match task_result_option {
+                    Some(Ok(result)) => Ok(result),
+                    Some(Err(err)) => Err(err),
+                    None => Ok(executor::TaskResult::new()),
+                }
+            } else {
+                task.executor
+                    .execute(progress, workspace.clone(), &rule_name)
+                    .context(format_context!("Failed to exec {}", name))
+            }
         };
 
         let elapsed_time = start_time.elapsed();
@@ -375,33 +400,16 @@ impl State {
         task_to_insert.rule.name = rule_label.clone();
         task_to_insert.signal = task::SignalArc::new(rule_label.clone());
 
-        // Migrate any inputs into deps as Deps::Any with AnyDep::Glob
         task_to_insert
             .rule
-            .sanitize()
-            .context(format_context!("while sanitizing rule {rule_label}"))?;
-
-        // update deps: sanitize rule names and glob vectors
-        if let Some(deps) = task_to_insert.rule.deps.as_mut() {
-            deps.sanitize(
+            .sanitize(
                 rule_label.clone(),
                 self.latest_starlark_module.clone(),
                 workspace::SPACES_MODULE_NAME,
-            )?;
-        }
-
-        if let Some(Visibility::Rules(list)) = task_to_insert.rule.visibility.as_mut() {
-            for vis_rule in list.iter_mut() {
-                *vis_rule = labels::sanitize_rule(
-                    vis_rule.clone(),
-                    self.latest_starlark_module.clone(),
-                    workspace::SPACES_MODULE_NAME,
-                );
-            }
-        }
+            )
+            .context(format_context!("while sanitizing rule {rule_label}"))?;
 
         let mut tasks = self.tasks.write();
-
         if let Some(task) = tasks.get(&rule_label) {
             return Err(format_error!(
                 "Rule already exists {rule_label} with {task:?}"
@@ -416,47 +424,46 @@ impl State {
     fn check_task_deps_visibility(&self, task: &task::Task) -> anyhow::Result<()> {
         let tasks = self.tasks.read();
 
-        if let Some(deps) = task.rule.deps.as_ref() {
-            let all_rules = deps.collect_all_rules();
-            let task_path = labels::get_path_from_label(task.rule.name.as_ref());
-            for dep in all_rules.iter() {
-                if let Some(dep_task) = tasks.get(dep) {
-                    match dep_task.rule.visibility.as_ref() {
-                        None | Some(rule::Visibility::Public) => {
-                            // Do nothing if the dependency is public
-                        }
-                        Some(rule::Visibility::Rules(list)) => {
-                            // are task and dep in the same repository
-                            let mut is_match = false;
-                            for prefix in list.iter() {
-                                if task.rule.name.starts_with(prefix.as_ref()) {
-                                    is_match = true;
-                                    break;
-                                }
-                            }
-                            if !is_match {
-                                return Err(format_error!(
-                                    "Dependency {} (rules) is NOT visible to {}.",
-                                    dep_task.rule.name,
-                                    task.rule.name
-                                ));
+        let rule_deps = task.collect_rule_deps();
+        let task_path = labels::get_path_label_from_rule_label(task.rule.name.as_ref());
+        for dep in rule_deps.iter() {
+            if let Some(dep_task) = tasks.get(dep) {
+                match dep_task.rule.visibility.as_ref() {
+                    None | Some(rule::Visibility::Public) => {
+                        // Do nothing if the dependency is public
+                    }
+                    Some(rule::Visibility::Rules(list)) => {
+                        // are task and dep in the same repository
+                        let mut is_match = false;
+                        for prefix in list.iter() {
+                            if task.rule.name.starts_with(prefix.as_ref()) {
+                                is_match = true;
+                                break;
                             }
                         }
-                        Some(rule::Visibility::Private) => {
-                            // are task and dep in the same module
-                            if labels::get_path_from_label(dep_task.rule.name.as_ref()) != task_path
-                            {
-                                return Err(format_error!(
-                                    "Dependency {} (private) is NOT visible to {}.",
-                                    dep_task.rule.name,
-                                    task.rule.name
-                                ));
-                            }
+                        if !is_match {
+                            return Err(format_error!(
+                                "Dependency {} (rules) is NOT visible to {}.",
+                                dep_task.rule.name,
+                                task.rule.name
+                            ));
+                        }
+                    }
+                    Some(rule::Visibility::Private) => {
+                        // are task and dep in the same module
+                        if labels::get_path_label_from_rule_label(dep_task.rule.name.as_ref())
+                            != task_path
+                        {
+                            return Err(format_error!(
+                                "Dependency {} (private) is NOT visible to {}.",
+                                dep_task.rule.name,
+                                task.rule.name
+                            ));
                         }
                     }
                 }
             }
-        };
+        }
 
         Ok(())
     }
@@ -513,17 +520,15 @@ impl State {
                 }
 
                 // connect the dependencies
-                if let Some(deps) = task.rule.deps.as_ref() {
-                    let all_rules = deps.collect_all_rules();
-                    for dep in all_rules.iter() {
-                        self.graph.add_dependency(&task.rule.name, dep).context(
-                            format_context!(
-                                "Failed to add dependency {dep} to task {}: {}",
-                                task.rule.name,
-                                self.graph.get_target_not_found(dep.clone())
-                            ),
-                        )?;
-                    }
+                let all_rules = task.collect_rule_deps();
+                for rule_dep in all_rules.iter() {
+                    self.graph
+                        .add_dependency(&task.rule.name, rule_dep)
+                        .context(format_context!(
+                            "Failed to add dependency {rule_dep} to task {}: {}",
+                            task.rule.name,
+                            self.graph.get_target_not_found(rule_dep.clone())
+                        ))?;
                 }
             }
         }
@@ -622,6 +627,55 @@ impl State {
         Ok(())
     }
 
+    fn validate_one_rule_per_target(&self) -> anyhow::Result<()> {
+        let tasks = self.tasks.read();
+
+        // Map each target path to the rule that owns it.
+        let mut file_map: HashMap<Arc<str>, Arc<str>> = HashMap::new();
+        let mut dir_map: HashMap<Arc<str>, Arc<str>> = HashMap::new();
+
+        for (rule_name, task) in tasks.iter() {
+            for target in task.rule.targets.iter().flatten() {
+                match target {
+                    targets::Target::File(file) => {
+                        if let Some(existing_rule) =
+                            file_map.insert(file.clone(), rule_name.clone())
+                        {
+                            return Err(format_error!(
+                                "Target `{file}` is claimed by both rule `{existing_rule}` and rule `{rule_name}`",
+                            ));
+                        };
+                    }
+                    targets::Target::Directory(file) => {
+                        if let Some(existing_rule) = dir_map.insert(file.clone(), rule_name.clone())
+                        {
+                            return Err(format_error!(
+                                "Target `{file}` is claimed by both rule `{existing_rule}` and rule `{rule_name}`",
+                            ));
+                        };
+                    }
+                }
+            }
+        }
+
+        for (file_path_label, file_rule) in file_map.iter() {
+            for (dir_path_label, dir_rule) in dir_map.iter() {
+                let dir_prefix = if dir_path_label.ends_with('/') {
+                    dir_path_label.to_string()
+                } else {
+                    format!("{dir_path_label}/")
+                };
+                if file_path_label.starts_with(dir_prefix.as_str()) {
+                    return Err(format_error!(
+                        "Target `{file_path_label}` from {file_rule} is contained in target {dir_path_label} from {dir_rule}",
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn update_tasks_digests(
         &self,
         printer: &mut printer::Printer,
@@ -644,32 +698,21 @@ impl State {
             )
             .as_str(),
         );
-        let mut tasks = self.tasks.write();
-        for node in topo_sorted.iter() {
-            let task_name = self.graph.get_task(*node);
-            let task = tasks.get(task_name).cloned();
-            if let Some(task) = task {
-                let mut task_hasher = blake3::Hasher::new();
-                task_hasher.update(task.calculate_digest().as_bytes());
-                let mut deps = task
-                    .rule
-                    .deps
-                    .as_ref()
-                    .map(|d| d.collect_all_rules())
-                    .unwrap_or_default();
-                deps.sort();
-                for dep in deps {
-                    if let Some(dep_task) = tasks.get(&dep) {
-                        task_hasher.update(dep_task.digest.as_bytes());
-                    }
-                }
+        {
+            let mut tasks = self.tasks.write();
+            for node in topo_sorted.iter() {
+                let task_name = self.graph.get_task(*node);
                 if let Some(task_mut) = tasks.get_mut(task_name) {
-                    task_mut.digest = task_hasher.finalize().to_string().into();
+                    let digest = task_mut.calculate_digest();
+                    task_mut.digest = digest.to_string().into();
                 }
             }
         }
 
-        let serde_tasks = tasks.clone();
+        self.validate_one_rule_per_target()
+            .context(format_context!("While checking for one rule per target"))?;
+
+        let serde_tasks = self.tasks.read().clone();
         workspace.write().settings.bin.tasks_json = serde_json::to_string(&serde_tasks)
             .map_err(|e| format_error!("Failed to encode {e}"))?
             .into();
@@ -694,6 +737,8 @@ impl State {
             help: String,
             #[serde(skip_serializing_if = "Option::is_none")]
             deps: Option<Vec<Arc<str>>>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            targets: Option<Vec<Arc<str>>>,
         }
 
         let mut task_info_list: HashMap<Arc<str>, _> = std::collections::HashMap::new();
@@ -735,45 +780,55 @@ impl State {
                         task_name = stripped.strip_prefix("/").unwrap_or(stripped);
                     }
 
-                    let deps = if printer.verbosity.level <= printer::Level::Message {
-                        if let Some(task_deps) = &task.rule.deps {
-                            let mut dep_strings: Vec<Arc<str>> = Vec::new();
+                    let (deps, targets) = if printer.verbosity.level <= printer::Level::Message {
+                        let mut dep_strings: Vec<Arc<str>> = Vec::new();
+                        let mut target_strings: Vec<Arc<str>> = Vec::new();
 
-                            // Collect rule names
-                            for rule_name in task_deps.collect_all_rules() {
-                                dep_strings.push(rule_name);
+                        if let Some(targets) = task.rule.targets.as_ref() {
+                            for target in targets {
+                                let target_str = match target {
+                                    targets::Target::File(file_name) => file_name,
+                                    targets::Target::Directory(dir_name) => dir_name,
+                                };
+                                target_strings.push(target_str.clone());
                             }
-
-                            // Collect expanded glob file paths
-                            if task_deps.has_globs() {
-                                let globs = task_deps.collect_globs();
-                                let mut progress = printer::MultiProgress::new(printer);
-                                let mut progress_bar = progress.add_progress(
-                                    "inspecting deps globs",
-                                    None,
-                                    Some("Complete"),
-                                );
-                                let files = workspace
-                                    .read()
-                                    .inspect_inputs(&mut progress_bar, &globs)
-                                    .context(format_context!("Failed to inspect deps globs"))?;
-                                dep_strings.extend(files.into_iter().map(|e| e.into()));
-                            }
-
-                            if dep_strings.is_empty() {
-                                None
-                            } else {
-                                Some(dep_strings)
-                            }
-                        } else {
-                            None
                         }
+
+                        // Collect rule names
+                        for rule_name in task.collect_rule_deps() {
+                            dep_strings.push(rule_name);
+                        }
+
+                        // Collect expanded glob file paths
+                        let globs = {
+                            let state = get_state().read();
+                            let tasks = state.tasks.read();
+                            task.collects_glob_deps(&tasks)
+                        };
+                        let mut progress = printer::MultiProgress::new(printer);
+                        let mut progress_bar =
+                            progress.add_progress("inspecting deps globs", None, Some("Complete"));
+                        let files = workspace
+                            .read()
+                            .inspect_inputs(&mut progress_bar, &globs)
+                            .context(format_context!("Failed to inspect deps globs"))?;
+                        dep_strings.extend(files.into_iter().map(|e| format!("//{e}").into()));
+
+                        (Some(dep_strings), Some(target_strings))
                     } else {
-                        None
+                        (None, None)
                     };
 
                     let source = labels::get_source_from_label(task_name);
-                    task_info_list.insert(task_name.into(), TaskInfo { help, source, deps });
+                    task_info_list.insert(
+                        task_name.into(),
+                        TaskInfo {
+                            help,
+                            source,
+                            deps,
+                            targets,
+                        },
+                    );
                 }
             }
         }
@@ -883,7 +938,7 @@ impl State {
                 task_logger(&mut progress_bar, task_name.into())
                     .debug(format!("Staging task {}", task.rule.name).as_str());
 
-                handle_list.push(execute_task(progress_bar, workspace.clone(), &task));
+                handle_list.push(execute_rule(progress_bar, workspace.clone(), &task));
 
                 loop {
                     let mut number_running = 0;

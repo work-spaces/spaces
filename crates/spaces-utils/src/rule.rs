@@ -1,4 +1,4 @@
-use crate::{deps, platform, targets};
+use crate::{deps, labels, platform, targets};
 use anyhow_source_location::format_error;
 use printer::markdown;
 use serde::{Deserialize, Serialize};
@@ -53,7 +53,7 @@ pub struct Rule {
     pub inputs: Option<HashSet<Arc<str>>>,
     /// Not used - use targets
     pub outputs: Option<HashSet<Arc<str>>>,
-    /// The targets that the rule creates
+    /// The targets can be files or directories - directory will use entire directory contents
     pub targets: Option<Vec<targets::Target>>,
     /// list of platforms that the rule will run on. default is to run on all platforms
     pub platforms: Option<Vec<platform::Platform>>,
@@ -72,12 +72,17 @@ struct Section {
 }
 
 impl Rule {
-    pub fn sanitize(&mut self) -> anyhow::Result<()> {
+    pub fn sanitize(
+        &mut self,
+        rule_label: Arc<str>,
+        latest_starlark_module: Option<Arc<str>>,
+        spaces_module_suffix: &str,
+    ) -> anyhow::Result<()> {
         // Convert Deps::Rules to Deps::Any with individual AnyDep::Rule entries
-        if let Some(Deps::Rules(rules)) = self.deps.take()
-            && !rules.is_empty()
-        {
-            self.deps = Some(Deps::Any(rules.into_iter().map(AnyDep::Rule).collect()));
+        if let Some(Deps::Rules(rules)) = self.deps.as_mut() {
+            self.deps = Some(Deps::Any(
+                rules.iter_mut().map(|e| AnyDep::Rule(e.clone())).collect(),
+            ));
         }
 
         // Pull any glob values from inputs into deps as Deps::Any with AnyDep::Glob
@@ -101,17 +106,91 @@ impl Rule {
             if !includes.is_empty() || !excludes.is_empty() {
                 let mut globs = Vec::new();
                 if !includes.is_empty() {
-                    globs.push(AnyDep::Globs(Globs::Includes(includes)));
+                    globs.push(AnyDep::Glob(Globs::Includes(includes)));
                 }
                 if !excludes.is_empty() {
-                    globs.push(AnyDep::Globs(Globs::Excludes(excludes)));
+                    globs.push(AnyDep::Glob(Globs::Excludes(excludes)));
                 }
 
                 Deps::push_any_deps(&mut self.deps, globs);
             }
         }
 
+        // update deps: sanitize rule names and glob vectors
+        if let Some(deps) = self.deps.as_mut() {
+            deps.sanitize(
+                rule_label.clone(),
+                latest_starlark_module.clone(),
+                spaces_module_suffix,
+            )?;
+        }
+
+        if let Some(targets) = self.targets.as_mut() {
+            for target in targets.iter_mut() {
+                target.sanitize(latest_starlark_module.clone());
+            }
+        }
+
+        if let Some(Visibility::Rules(list)) = self.visibility.as_mut() {
+            for vis_rule in list.iter_mut() {
+                *vis_rule = labels::sanitize_rule(
+                    vis_rule.clone(),
+                    latest_starlark_module.clone(),
+                    spaces_module_suffix,
+                );
+            }
+        }
+
         Ok(())
+    }
+
+    pub fn has_targets(&self) -> bool {
+        self.targets
+            .as_ref()
+            .is_some_and(|targets| !targets.is_empty())
+    }
+
+    /// Returns all rule names from the rule's deps, including `Rules`, `Any(AnyDep::Rule)`, and `Any(AnyDep::Target)` variants.
+    pub fn collect_rule_deps(&self) -> Vec<Arc<str>> {
+        let mut result = Vec::new();
+        if let Some(deps) = self.deps.as_ref() {
+            result.extend(deps.collect_rules());
+        }
+        result
+    }
+
+    /// Returns all `Globs` entries collected from `AnyDep::Glob` within the rule's deps.
+    pub fn collect_glob_deps(&self) -> Vec<deps::Globs> {
+        let mut result = Vec::new();
+        if let Some(deps) = self.deps.as_ref() {
+            result.extend(deps.collect_globs());
+        }
+        result
+    }
+
+    /// Collects the targets for this rule as globs
+    pub fn collect_target_globs(&self) -> Vec<deps::Globs> {
+        if let Some(targets) = self.targets.as_ref() {
+            let mut result = Vec::new();
+            for target in targets {
+                result.push(target.get_target_glob());
+            }
+            result
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Collects the target files and walks the target directories
+    /// to get all the target paths included
+    pub fn get_target_paths(&self) -> Vec<Arc<std::path::Path>> {
+        let mut result = Vec::new();
+        if let Some(targets) = self.targets.as_ref() {
+            for target in targets.iter() {
+                result.extend(target.get_target_paths());
+            }
+        }
+        result
     }
 
     fn get_hash_map(rules: &[(&Rule, Option<String>)]) -> RuleMap {
@@ -224,7 +303,7 @@ impl Rule {
                             AnyDep::Rule(rule) => {
                                 md.list_item(0, rule)?;
                             }
-                            AnyDep::Globs(glob) => match glob {
+                            AnyDep::Glob(glob) => match glob {
                                 Globs::Includes(set) => {
                                     for item in set {
                                         md.list_item(0, &format!("+{item}"))?;
@@ -236,9 +315,6 @@ impl Rule {
                                     }
                                 }
                             },
-                            AnyDep::Target(target) => {
-                                md.list_item(0, &format!("{}:{}", target.rule, target.target))?;
-                            }
                         }
                     }
                 }
