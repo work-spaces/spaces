@@ -99,7 +99,7 @@ run_add_exec(
     "rustup_update",
     command = "rustup",
     args = ["update"],
-    deps = deps(files = ["rust-toolchain.toml"]),
+    deps = ["+//spaces/rust-toolchain.toml"]),
     help = "Update the Rust toolchain via rustup",
     visibility = visibility_private(),
 )
