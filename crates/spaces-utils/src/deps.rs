@@ -195,7 +195,7 @@ impl Deps {
         }
     }
 
-    /// Returns all rule names from `Rules`, `Any(AnyDep::Rule)`, and `Any(AnyDep::Target)` variants.
+    /// Returns all rule names from `Rules`, and `Any(AnyDep::Rule)` variants.
     pub fn collect_rules(&self) -> Vec<Arc<str>> {
         match self {
             Deps::Rules(rules) => rules.clone(),
@@ -211,7 +211,7 @@ impl Deps {
 
     /// Sanitizes rule names and glob vectors within the deps.
     /// For `Rules` variant, sanitizes each rule name.
-    /// For `Any` variant, sanitizes rule names in `AnyDep::Rule` and `AnyDep::Target`,
+    /// For `Any` variant, sanitizes rule names in `AnyDep::Rule`,
     /// and sanitizes glob patterns in `AnyDep::Globs`.
     pub fn sanitize(
         &mut self,

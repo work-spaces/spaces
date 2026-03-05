@@ -150,7 +150,7 @@ impl Rule {
             .is_some_and(|targets| !targets.is_empty())
     }
 
-    /// Returns all rule names from `Rules`, `Any(AnyDep::Rule)`, and `Any(AnyDep::Target)` variants.
+    /// Returns all rule names from the rule's deps, including `Rules`, `Any(AnyDep::Rule)`, and `Any(AnyDep::Target)` variants.
     pub fn collect_rule_deps(&self) -> Vec<Arc<str>> {
         let mut result = Vec::new();
         if let Some(deps) = self.deps.as_ref() {
@@ -159,7 +159,7 @@ impl Rule {
         result
     }
 
-    /// Returns all rule names from `Rules`, `Any(AnyDep::Rule)`, and `Any(AnyDep::Target)` variants.
+    /// Returns all `Globs` entries collected from `AnyDep::Glob` within the rule's deps.
     pub fn collect_glob_deps(&self) -> Vec<deps::Globs> {
         let mut result = Vec::new();
         if let Some(deps) = self.deps.as_ref() {

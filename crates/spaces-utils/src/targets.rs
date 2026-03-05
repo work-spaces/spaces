@@ -26,14 +26,14 @@ impl Target {
     pub fn remove(&self) -> anyhow::Result<()> {
         match self {
             Target::File(file_path) => {
-                let path = std::path::Path::new(file_path.as_ref());
+                let path = labels::get_path_from_path_label(file_path.as_ref());
                 if path.exists() {
                     std::fs::remove_file(path)
                         .context(format_context!("Failed to remove target {file_path}"))?;
                 }
             }
             Target::Directory(dir_path) => {
-                let path = std::path::Path::new(dir_path.as_ref());
+                let path = labels::get_path_from_path_label(dir_path.as_ref());
                 if path.is_dir() {
                     for entry in std::fs::read_dir(path)
                         .context(format_context!("Failed to read directory {dir_path}"))?

@@ -660,7 +660,12 @@ impl State {
 
         for (file_path_label, file_rule) in file_map.iter() {
             for (dir_path_label, dir_rule) in dir_map.iter() {
-                if file_path_label.starts_with(dir_path_label.as_ref()) {
+                let dir_prefix = if dir_path_label.ends_with('/') {
+                    dir_path_label.to_string()
+                } else {
+                    format!("{dir_path_label}/")
+                };
+                if file_path_label.starts_with(dir_prefix.as_str()) {
                     return Err(format_error!(
                         "Target `{file_path_label}` from {file_rule} is contained in target {dir_path_label} from {dir_rule}",
                     ));
