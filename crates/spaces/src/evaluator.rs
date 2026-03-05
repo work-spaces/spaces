@@ -606,14 +606,16 @@ fn execute_tasks(
                     .context(format_context!("Failed to export tasks as markdown"))?;
             } else {
                 //only show checkout if log level is message or higher
+                let fuzzy_query = singleton::get_fuzzy_query();
+                let fuzzy_query_ref = fuzzy_query.as_deref();
                 if printer.verbosity.level <= printer::Level::Message {
                     rules::show_tasks(
                         printer,
                         workspace.clone(),
                         task::Phase::Checkout,
-                        target.clone(),
                         &globs,
                         strip_prefix.clone(),
+                        fuzzy_query_ref,
                     )
                     .context(format_context!("Failed to show tasks"))?;
                 }
@@ -621,9 +623,9 @@ fn execute_tasks(
                     printer,
                     workspace.clone(),
                     task::Phase::Run,
-                    target.clone(),
                     &globs,
                     strip_prefix,
+                    fuzzy_query_ref,
                 )
                 .context(format_context!("Failed to show tasks"))?;
             }

@@ -725,9 +725,9 @@ impl State {
         printer: &mut printer::Printer,
         workspace: WorkspaceArc,
         phase: task::Phase,
-        _target: Option<Arc<str>>,
         filter: &HashSet<Arc<str>>,
         strip_prefix: Option<Arc<str>>,
+        fuzzy_query: Option<&str>,
     ) -> anyhow::Result<()> {
         let tasks = self.tasks.read();
 
@@ -741,7 +741,21 @@ impl State {
             targets: Option<Vec<Arc<str>>>,
         }
 
+        // When fuzzy matching, collect (score, task_name) pairs so we can
+        // keep only the top matches.
+        struct ScoredTask {
+            score: isize,
+            name: Arc<str>,
+            info: TaskInfo,
+        }
+        let mut scored_tasks: Vec<ScoredTask> = Vec::new();
+
         let mut task_info_list: HashMap<Arc<str>, _> = std::collections::HashMap::new();
+
+        // Fuzzy matching is only used when a fuzzy query is provided
+        // and filter/globs are not active.
+        let use_fuzzy = fuzzy_query.is_some() && filter.is_empty();
+
         for node_index in self.sorted.iter() {
             let task_name = self.graph.get_task(*node_index);
             let globs = glob::Globs::new_with_includes(filter);
@@ -820,20 +834,53 @@ impl State {
                     };
 
                     let source = labels::get_source_from_label(task_name);
-                    task_info_list.insert(
-                        task_name.into(),
-                        TaskInfo {
-                            help,
-                            source,
-                            deps,
-                            targets,
-                        },
-                    );
+
+                    if use_fuzzy {
+                        // Score the task name against the fuzzy query
+                        let query = fuzzy_query.unwrap_or_default();
+                        if let Some(match_result) = sublime_fuzzy::best_match(query, task_name) {
+                            scored_tasks.push(ScoredTask {
+                                score: match_result.score(),
+                                name: task_name.into(),
+                                info: TaskInfo {
+                                    help,
+                                    source,
+                                    deps,
+                                    targets,
+                                },
+                            });
+                        }
+                    } else {
+                        task_info_list.insert(
+                            task_name.into(),
+                            TaskInfo {
+                                help,
+                                source,
+                                deps,
+                                targets,
+                            },
+                        );
+                    }
                 }
             }
         }
 
-        printer.info(phase.to_string().as_str(), &task_info_list)?;
+        if use_fuzzy {
+            // Sort by score descending so the best matches come first
+            scored_tasks.sort_by(|a, b| b.score.cmp(&a.score));
+
+            // Only show the top matching targets (top 10)
+            let top_count = 10.min(scored_tasks.len());
+            for scored in scored_tasks.into_iter().take(top_count) {
+                task_info_list.insert(scored.name, scored.info);
+            }
+        }
+
+        if task_info_list.is_empty() {
+            printer.error("No Results", &"No matching rules available")?;
+        } else {
+            printer.info(phase.to_string().as_str(), &task_info_list)?;
+        }
 
         Ok(())
     }
@@ -1057,12 +1104,12 @@ pub fn show_tasks(
     printer: &mut printer::Printer,
     workspace: WorkspaceArc,
     phase: task::Phase,
-    target: Option<Arc<str>>,
     filter: &HashSet<Arc<str>>,
     strip_prefix: Option<Arc<str>>,
+    fuzzy_query: Option<&str>,
 ) -> anyhow::Result<()> {
     let state = get_state().read();
-    state.show_tasks(printer, workspace, phase, target, filter, strip_prefix)
+    state.show_tasks(printer, workspace, phase, filter, strip_prefix, fuzzy_query)
 }
 
 pub fn get_run_targets(has_help: HasHelp) -> anyhow::Result<Vec<Arc<str>>> {

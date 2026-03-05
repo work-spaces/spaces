@@ -43,6 +43,7 @@ chrono = "0.4"
 blake3 = "1"
 fs2 = "0.4"
 
+sublime_fuzzy = "0.7"
 which = "7"
 json_value_merge = "2"
 regex = "1"

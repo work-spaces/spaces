@@ -23,6 +23,7 @@ struct State {
     has_help: bool,
     inspect_markdown_path: Option<Arc<str>>,
     inspect_stardoc_path: Option<Arc<str>>,
+    fuzzy_query: Option<Arc<str>>,
     execution_phase: task::Phase,
 }
 
@@ -57,6 +58,7 @@ fn get_state() -> &'static lock::StateLock<State> {
         new_branches: Vec::new(),
         inspect_markdown_path: None,
         inspect_stardoc_path: None,
+        fuzzy_query: None,
         args_env: HashMap::new(),
         execution_phase: task::Phase::Complete,
     }));
@@ -200,6 +202,16 @@ pub fn set_inspect_globs(inspect_globs: HashSet<Arc<str>>) {
 pub fn get_inspect_globs() -> HashSet<Arc<str>> {
     let state = get_state().read();
     state.inspect_globs.clone()
+}
+
+pub fn set_fuzzy_query(fuzzy_query: Arc<str>) {
+    let mut state = get_state().write();
+    state.fuzzy_query = Some(fuzzy_query);
+}
+
+pub fn get_fuzzy_query() -> Option<Arc<str>> {
+    let state = get_state().read();
+    state.fuzzy_query.clone()
 }
 
 pub fn get_is_use_locks() -> bool {
