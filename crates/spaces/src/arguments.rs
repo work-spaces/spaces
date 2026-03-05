@@ -471,6 +471,7 @@ fn execute_command(
             has_help,
             markdown,
             stardoc,
+            fuzzy,
         } => {
             singleton::set_execution_phase(task::Phase::Inspect);
 
@@ -504,6 +505,9 @@ fn execute_command(
             singleton::set_inspect_globs(filter_globs);
             singleton::set_has_help(has_help);
             singleton::set_inspect_markdown_path(markdown);
+            if let Some(fuzzy_query) = fuzzy {
+                singleton::set_fuzzy_query(fuzzy_query);
+            }
             if stardoc.is_some() {
                 singleton::set_rescan(true);
             }
@@ -818,6 +822,9 @@ create-lock-file = false # optionally create a lock file
         /// Write the starlark documentation to the specified path
         #[arg(long)]
         stardoc: Option<Arc<str>>,
+        /// Use fuzzy matching when searching for targets (e.g. `--fuzzy="my query"`)
+        #[arg(long)]
+        fuzzy: Option<Arc<str>>,
     },
     /// Generates shell completions for the spaces command.
     Completions {
