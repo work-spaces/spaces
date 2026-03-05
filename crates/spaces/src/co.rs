@@ -52,7 +52,13 @@ pub fn checkout_repo(
     keep_workspace_on_failure: bool,
 ) -> anyhow::Result<()> {
     set_workspace_env(env).context(format_context!("While checking out repo"))?;
-    let clone = clone.unwrap_or(git::Clone::Default);
+
+    // use a shallow clone by default if running in CI
+    let clone = if singleton::get_is_ci() {
+        clone.unwrap_or(git::Clone::Shallow)
+    } else {
+        clone.unwrap_or(git::Clone::Default)
+    };
 
     // get the repo name from the url
     let repo_name = if let Some(rule_name) = rule_name {
