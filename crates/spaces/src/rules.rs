@@ -749,12 +749,7 @@ impl State {
             info: TaskInfo,
         }
         let mut scored_tasks: Vec<ScoredTask> = Vec::new();
-
         let mut task_info_list: HashMap<Arc<str>, _> = std::collections::HashMap::new();
-
-        // Fuzzy matching is only used when a fuzzy query is provided
-        // and filter/globs are not active.
-        let use_fuzzy = fuzzy_query.is_some() && filter.is_empty();
 
         for node_index in self.sorted.iter() {
             let task_name = self.graph.get_task(*node_index);
@@ -835,9 +830,8 @@ impl State {
 
                     let source = labels::get_source_from_label(task_name);
 
-                    if use_fuzzy {
+                    if let Some(query) = fuzzy_query {
                         // Score the task name against the fuzzy query
-                        let query = fuzzy_query.unwrap_or_default();
                         if let Some(match_result) = sublime_fuzzy::best_match(query, task_name) {
                             scored_tasks.push(ScoredTask {
                                 score: match_result.score(),
@@ -865,7 +859,7 @@ impl State {
             }
         }
 
-        if use_fuzzy {
+        if fuzzy_query.is_some() {
             // Sort by score descending so the best matches come first
             scored_tasks.sort_by(|a, b| b.score.cmp(&a.score));
 

@@ -108,6 +108,7 @@ shell(
     script = "cargo install --force --path=spaces/crates/spaces --profile=dev --root={}".format(root),
     deps = [":rustup_update"],
     visibility = visibility_private(),
+    help = "Install dev build on local system",
 )
 
 shell(
