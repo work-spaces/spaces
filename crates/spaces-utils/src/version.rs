@@ -338,7 +338,12 @@ impl Manager {
                         .context(format_context!("Failed to get current executable path"))?;
                     let command =
                         format!("cp -lf {} {}", binary_path.display(), exec_path.display());
-                    logger(printer).info(format!("Install with:\n\n{command}\n",).as_str());
+                    logger(printer).info(
+                        format!(
+                            "You need to execute the following command to install the fetched tag:\n\n{command}\n",
+                        )
+                        .as_str(),
+                    );
                     if let Ok(mut clipboard) = arboard::Clipboard::new()
                         && clipboard
                             .set_text(command)
