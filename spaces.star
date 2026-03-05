@@ -3,7 +3,6 @@ Spaces starlark checkout/run script to make changes to spaces, printer, and arch
 With VSCode/Zed integration
 """
 
-load("//@star/sdk/star/deps.star", "deps")
 load(
     "//@star/sdk/star/run.star",
     "run_add_exec",
@@ -99,7 +98,7 @@ run_add_exec(
     "rustup_update",
     command = "rustup",
     args = ["update"],
-    deps = ["+//spaces/rust-toolchain.toml"]),
+    inputs = ["+//spaces/rust-toolchain.toml"],
     help = "Update the Rust toolchain via rustup",
     visibility = visibility_private(),
 )
