@@ -41,8 +41,16 @@ enum IsSaveBin {
 }
 
 pub fn get_dialect() -> Dialect {
+    let is_enforce_types =
+        std::env::var("SPACES_ENV_IS_ENFORCE_TYPES").unwrap_or("ON".to_string()) == "ON";
+    let enable_types = if is_enforce_types {
+        starlark_syntax::dialect::DialectTypes::Enable
+    } else {
+        starlark_syntax::dialect::DialectTypes::ParseOnly
+    };
     Dialect {
         enable_top_level_stmt: true,
+        enable_types,
         ..Default::default()
     }
 }
