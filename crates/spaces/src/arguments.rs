@@ -314,7 +314,7 @@ fn execute_command(
                 .checkout(effective_printer, name, keep_workspace_on_failure)
                 .context(format_context!("while checking out repo"))?;
         }
-        Commands::Sync { env } => {
+        Commands::Sync { env, dev_branch } => {
             singleton::set_execution_phase(task::Phase::Checkout);
 
             if shell::is_spaces_shell() {
@@ -324,6 +324,13 @@ fn execute_command(
             singleton::set_args_env(env).context(format_context!(
                 "while setting environment variables for sync"
             ))?;
+
+            // Add any dev branches specified by the command line
+            if !dev_branch.is_empty() {
+                let mut new_branches = singleton::get_new_branches();
+                new_branches.extend(dev_branch);
+                singleton::set_new_branches(new_branches);
+            }
 
             // Always need to evaluate when doing a sync
             singleton::set_rescan(true);
@@ -788,6 +795,12 @@ create-lock-file = false # optionally create a lock file
   Use `--env=VAR=VALUE`. Makes workspace not reproducible."#
         )]
         env: Vec<Arc<str>>,
+        #[arg(
+            long,
+            help = r#"Use --dev-branch=<rule> to add a repo to the dev-branch list.
+  Unlike --new-branch on checkout, this does not create a new git branch."#
+        )]
+        dev_branch: Vec<Arc<str>>,
     },
     #[command(about = r"Runs a spaces run rule.
   - `spaces run`: Run all non-optional rules with dependencies
