@@ -758,7 +758,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ) -> anyhow::Result<NoneType> {
         logger::push_deprecation_warning(
             rules::get_latest_starlark_module(),
-            "Support checkout.update_env() will be removed in v0.16. Use checkout.add_env_vars()",
+            "Support for checkout.update_env() will be removed in v0.16. Use checkout.add_env_vars()",
         );
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for update env rule"))?;
