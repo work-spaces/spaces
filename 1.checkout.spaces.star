@@ -20,7 +20,6 @@ load(
     "info_get_path_to_store",
     "info_is_ci",
 )
-load("//@star/sdk/star/shortcut.star", "shortcut")
 load(
     "//@star/sdk/star/ws.star",
     "workspace_get_absolute_path",
@@ -33,11 +32,11 @@ SPACES_CHECKOUT_PATH = workspace_get_path_to_checkout()
 
 if not info_is_ci():
     SHORTCUTS = {
-        "inspect": shortcut("spaces inspect", "Inspect the spaces configuration"),
-        "install_dev": shortcut("spaces run //spaces:install_dev", "Install development dependencies"),
-        "install_dev_lsp": shortcut("spaces run //spaces:install_dev_lsp", "Install development LSP dependencies"),
-        "install_release": shortcut("spaces run //spaces:install_release", "Install release dependencies"),
-        "clippy": shortcut("spaces run //spaces:clippy", "Run clippy"),
+        "inspect": "spaces inspect",
+        "install_dev": "spaces run //spaces:install_dev",
+        "install_dev_lsp": "spaces run //spaces:install_dev_lsp",
+        "install_release": "spaces run //spaces:install_release",
+        "clippy": "spaces run //spaces:clippy",
         "format": "spaces run //spaces:format",
     }
 
