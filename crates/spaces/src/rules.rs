@@ -353,6 +353,7 @@ impl State {
             rule_name,
             self.latest_starlark_module.clone(),
             workspace::SPACES_MODULE_NAME,
+            labels::IsDep::No,
         )
     }
 
@@ -383,6 +384,7 @@ impl State {
             task_to_insert.rule.name,
             self.latest_starlark_module.clone(),
             workspace::SPACES_MODULE_NAME,
+            labels::IsDep::No,
         );
 
         if let Some(ws_dest) = workspace_destination {

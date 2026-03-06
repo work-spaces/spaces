@@ -87,6 +87,7 @@ impl Git {
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
+        logger::push_deprecation_warning(None, "Support for worktrees will be removed in v0.16");
         logger(progress, self.url.clone()).message("execute worktree clone");
 
         let (relative_bare_store_path, name_dot_git) =

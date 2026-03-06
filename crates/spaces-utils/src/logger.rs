@@ -27,6 +27,18 @@ fn push_deferred_warning(warning: Arc<str>) {
     state.push(warning);
 }
 
+pub fn push_deprecation_warning<Message: std::fmt::Display>(
+    module: Option<Arc<str>>,
+    warning: Message,
+) {
+    if let Ok(warn_deprecation) = std::env::var("SPACES_ENV_WARN_DEPRECATED")
+        && warn_deprecation == "0.16"
+    {
+        let module = module.unwrap_or("unknown".into());
+        push_deferred_warning(format!("{module} => {warning}").into());
+    }
+}
+
 pub fn get_deferred_warnings() -> Vec<Arc<str>> {
     let state = get_deferred_warnings_state().read();
     state.clone()

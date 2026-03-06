@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use starlark::environment::GlobalsBuilder;
 use starlark::values::none::NoneType;
 use std::sync::Arc;
-use utils::{changes, environment, git, http_archive, platform, rule};
+use utils::{changes, environment, git, http_archive, logger, platform, rule};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
@@ -423,6 +423,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] asset: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
+        logger::push_deprecation_warning(
+            rules::get_latest_starlark_module(),
+            "Support checkout.add_which_asset() will be removed in v0.16. Use checkout.add_any_asset()",
+        );
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for which asset rule"))?;
 
@@ -461,6 +465,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] asset: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
+        logger::push_deprecation_warning(
+            rules::get_latest_starlark_module(),
+            "Support checkout.add_hard_link_asset() will be removed in v0.16. Use checkout.add_any_asset()",
+        );
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for which asset rule"))?;
 
@@ -501,6 +509,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] asset: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
+        logger::push_deprecation_warning(
+            rules::get_latest_starlark_module(),
+            "Support checkout.add_soft_link_asset() will be removed in v0.16. Use checkout.add_any_asset()",
+        );
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for which asset rule"))?;
 
@@ -635,6 +647,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] asset: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
+        logger::push_deprecation_warning(
+            rules::get_latest_starlark_module(),
+            "Support checkout.add_asset() will be removed in v0.16. Use checkout.add_any_asset()",
+        );
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for add asset rule"))?;
 
@@ -740,6 +756,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] env: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
+        logger::push_deprecation_warning(
+            rules::get_latest_starlark_module(),
+            "Support checkout.update_env() will be removed in v0.16. Use checkout.add_env_vars()",
+        );
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for update env rule"))?;
 
@@ -807,6 +827,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 singleton::get_workspace().context(format_error!("No active workspace found"))?;
             let workspace = workspace_arc.read();
             workspace.insert_automatic_var_placeholders(&mut any_env);
+            logger::push_deprecation_warning(
+                None,
+                "checkout.update_env() will be removed in v0.16",
+            );
         }
 
         let update_env = executor::env::UpdateEnv {

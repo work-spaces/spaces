@@ -48,7 +48,7 @@ spaces_add_star_formatter("star_formatter", configure_zed = True, deps = ["space
 rust_add(
     "rust_toolchain",
     version = "1.80",
-    deps = ["spaces0"],
+    deps = [":spaces0"],
 )
 
 coreutils_add_rs_tools("coreutils0", deps = ["rust_toolchain"])
