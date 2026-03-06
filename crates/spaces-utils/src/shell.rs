@@ -112,6 +112,75 @@ impl Config {
         }
     }
 
+    pub fn to_markdown(&self) -> String {
+        use printer::markdown;
+
+        let mut md = String::new();
+
+        md.push_str(&markdown::heading(1, "Spaces Shell"));
+        md.push_str(&markdown::paragraph(
+            &format!("Run {} from anywhere in the workspace to launch an interactive shell with the workspace environment. Get more info with {}",
+            markdown::code("spaces shell"),
+            markdown::code("spaces shell --help")
+        )));
+
+        md.push_str(&markdown::heading(2, "Configuration"));
+
+        md.push_str(&markdown::heading(3, "Shell Path"));
+        md.push_str(&markdown::code_block("", &self.path));
+        md.push('\n');
+
+        if !self.args.is_empty() {
+            md.push_str(&markdown::heading(3, "Shell Arguments"));
+            let items: Vec<Arc<str>> = self.args.iter().map(|a| markdown::code(a).into()).collect();
+            md.push_str(&markdown::list(items));
+        }
+
+        if let Some(startup) = &self.startup {
+            md.push_str(&markdown::heading(3, "Startup Script"));
+            md.push_str(&markdown::paragraph(&format!(
+                "File: {}",
+                markdown::code(&startup.name)
+            )));
+            if let Some(env_name) = &startup.env_name {
+                md.push_str(&markdown::paragraph(&format!(
+                    "Environment variable: {}",
+                    markdown::code(env_name)
+                )));
+            }
+            md.push_str(&markdown::code_block("sh", &startup.contents));
+            md.push('\n');
+        }
+
+        if let Some(shortcuts) = &self.shortcuts {
+            md.push_str(&markdown::heading(2, "Shortcuts"));
+            md.push_str(&markdown::paragraph(
+                "The following shortcuts are available as shell functions in the spaces shell.",
+            ));
+
+            let mut keys: Vec<&Arc<str>> = shortcuts.keys().collect();
+            keys.sort();
+
+            for key in keys {
+                let value = &shortcuts[key];
+                let command = value.command();
+
+                md.push_str(markdown::hline());
+                md.push_str(&markdown::heading(3, key));
+                md.push_str(&markdown::code_block("sh", key));
+
+                if let Some(help) = value.help() {
+                    md.push_str(&markdown::paragraph(help));
+                }
+
+                md.push_str(&markdown::code_block("sh", command));
+                md.push('\n');
+            }
+        }
+
+        md
+    }
+
     pub fn get_shell(&self) -> anyhow::Result<clap_complete::Shell> {
         let program_name = std::path::Path::new(self.path.as_ref())
             .file_name()

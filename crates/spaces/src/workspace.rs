@@ -8,6 +8,7 @@ use utils::{age, environment, lock, logger, rule, store, ws};
 
 pub const WORKFLOW_TOML_NAME: &str = "workflows.spaces.toml";
 pub const SHELL_TOML_NAME: &str = "shell.spaces.toml";
+pub const SHELL_MD_FILE_NAME: &str = "shell.spaces.md";
 pub const CHECKOUT_FILE_NAME: &str = "checkout.spaces.star";
 pub const ENV_FILE_NAME: &str = "env.spaces.star";
 pub const ENV_MD_FILE_NAME: &str = "env.spaces.md";
