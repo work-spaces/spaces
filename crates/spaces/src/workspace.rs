@@ -524,15 +524,21 @@ impl Workspace {
             logger(&mut progress).debug(format!("Digesting {name}").as_str());
         }
 
-        let log_directory: Arc<str> = format!(
-            "{}/logs_{}",
-            ws::SPACES_LOGS_NAME,
-            date.format("%Y%m%d-%H-%M-%S")
-        )
-        .into();
+        let log_folder_name = format!("logs_{}", date.format("%Y%m%d-%H-%M-%S"));
+        let log_directory: Arc<str> = format!("{}/{log_folder_name}", ws::SPACES_LOGS_NAME).into();
 
         std::fs::create_dir_all(log_directory.as_ref()).context(format_context!(
             "Failed to create log folder {log_directory}",
+        ))?;
+
+        // Create or update a "latest" symlink pointing to the new log directory
+        let latest_symlink = format!("{}/latest", ws::SPACES_LOGS_NAME);
+        let latest_path = std::path::Path::new(latest_symlink.as_str());
+        // Remove existing symlink if it exists (ignore errors if it doesn't)
+        let _ = symlink::remove_symlink_auto(latest_path);
+        symlink::symlink_dir(&log_folder_name, latest_path).context(format_context!(
+            "Failed to create latest symlink in {}",
+            ws::SPACES_LOGS_NAME
         ))?;
 
         // load the modules scanned from the workspace
