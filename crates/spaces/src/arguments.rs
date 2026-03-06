@@ -314,12 +314,16 @@ fn execute_command(
                 .checkout(effective_printer, name, keep_workspace_on_failure)
                 .context(format_context!("while checking out repo"))?;
         }
-        Commands::Sync {} => {
+        Commands::Sync { env } => {
             singleton::set_execution_phase(task::Phase::Checkout);
 
             if shell::is_spaces_shell() {
                 return Err(format_error!("Exit the spaces shell to run `spaces sync`"));
             }
+
+            singleton::set_args_env(env).context(format_context!(
+                "while setting environment variables for sync"
+            ))?;
 
             // Always need to evaluate when doing a sync
             singleton::set_rescan(true);
@@ -777,7 +781,14 @@ create-lock-file = false # optionally create a lock file
         locked: bool,
     },
     /// Runs checkout rules within an existing workspace
-    Sync {},
+    Sync {
+        #[arg(
+            long,
+            help = r#"Environment variables to add to the workspace.
+  Use `--env=VAR=VALUE`. Makes workspace not reproducible."#
+        )]
+        env: Vec<Arc<str>>,
+    },
     #[command(about = r"Runs a spaces run rule.
   - `spaces run`: Run all non-optional rules with dependencies
   - `spaces run my-target`: Run a single target plus dependencies
