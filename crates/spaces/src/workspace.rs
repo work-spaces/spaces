@@ -732,6 +732,8 @@ impl Workspace {
 
         if singleton::is_sync() {
             self.env.retain_vars_from_args();
+            let args_env = singleton::get_args_env();
+            self.env.insert_assign_from_args(&args_env);
         }
 
         let env_json = serde_json::to_string(&self.env)
