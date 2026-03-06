@@ -1,5 +1,12 @@
+use crate::logger;
 use anyhow_source_location::format_error;
 use std::sync::Arc;
+
+#[derive(Copy, Clone, PartialEq)]
+pub enum IsDep {
+    No,
+    Yes,
+}
 
 pub fn get_source_from_label(label: &str) -> String {
     let (source, _rule_name) = label.split_once(":").unwrap_or(("", label));
@@ -56,12 +63,18 @@ pub fn sanitize_rule(
     rule_name: Arc<str>,
     starlark_module: Option<Arc<str>>,
     spaces_module_suffix: &str,
+    is_dep: IsDep,
 ) -> Arc<str> {
     if is_rule_sanitized(rule_name.as_ref()) {
         return rule_name;
     }
 
-    if let Some(latest_module) = starlark_module {
+    if let Some(latest_module) = starlark_module.clone() {
+        if is_dep == IsDep::Yes && !rule_name.starts_with(':') {
+            logger::push_deprecation_warning(starlark_module, format!(
+                "deps `{rule_name}` will be treated as a rule label in v0.16. Use `//` for workspace root or `:` for current module"
+            ).as_str());
+        }
         let rule_name = rule_name.strip_prefix(':').unwrap_or(rule_name.as_ref());
         let slash_suffix = format!("/{}", spaces_module_suffix);
         let dot_suffix = format!(".{}", spaces_module_suffix);
@@ -81,7 +94,11 @@ pub fn sanitize_rule(
 pub fn sanitize_path(path_label: Arc<str>, starlark_module: Option<Arc<str>>) -> Arc<str> {
     if path_label.starts_with("//") {
         path_label
-    } else if let Some(latest_module) = starlark_module {
+    } else if let Some(latest_module) = starlark_module.clone() {
+        logger::push_deprecation_warning(starlark_module, format!(
+            "{path_label} will be treated as a path label in v0.16. Use // to reference the workspace root."
+        ).as_str());
+
         let path_label = path_label.strip_prefix(':').unwrap_or(path_label.as_ref());
         if let Some(parent) = std::path::Path::new(latest_module.as_ref()).parent() {
             format!("//{}/{path_label}", parent.display()).into()
@@ -118,7 +135,7 @@ pub fn sanitize_glob_value(
             value
         ))
     } else if value.starts_with("//") {
-        Ok(value.into())
+        Ok(value.strip_prefix("//").unwrap().into())
     } else {
         let rule_path = get_source_from_label(rule_name);
         // remove everything following the last slash
@@ -288,7 +305,8 @@ mod tests {
             &sanitize_rule(
                 sanitized.clone(),
                 Some("module/spaces.star".into()),
-                "spaces.star"
+                "spaces.star",
+                IsDep::No
             )
         ));
 
@@ -296,7 +314,7 @@ mod tests {
         let unsanitized: Arc<str> = "unsanitized_rule".into();
         assert!(Arc::ptr_eq(
             &unsanitized,
-            &sanitize_rule(unsanitized.clone(), None, "spaces.star")
+            &sanitize_rule(unsanitized.clone(), None, "spaces.star", IsDep::No)
         ));
 
         // Module with /spaces.star suffix → prefix extracted, colon separator
@@ -304,7 +322,8 @@ mod tests {
             sanitize_rule(
                 "my_rule".into(),
                 Some("path/to/pkg/spaces.star".into()),
-                "spaces.star"
+                "spaces.star",
+                IsDep::No
             )
             .as_ref(),
             "//path/to/pkg:my_rule"
@@ -315,7 +334,8 @@ mod tests {
             sanitize_rule(
                 "my_rule".into(),
                 Some("path/to/pkg.spaces.star".into()),
-                "spaces.star"
+                "spaces.star",
+                IsDep::No
             )
             .as_ref(),
             "//path/to/pkg:my_rule"
@@ -326,7 +346,8 @@ mod tests {
             sanitize_rule(
                 ":my_rule".into(),
                 Some("path/to/pkg/spaces.star".into()),
-                "spaces.star"
+                "spaces.star",
+                IsDep::No
             )
             .as_ref(),
             "//path/to/pkg:my_rule"
@@ -337,7 +358,8 @@ mod tests {
             sanitize_rule(
                 "nested:rule".into(),
                 Some("path/to/pkg/spaces.star".into()),
-                "spaces.star"
+                "spaces.star",
+                IsDep::No
             )
             .as_ref(),
             "//path/to/pkg/nested:rule"
@@ -348,7 +370,8 @@ mod tests {
             sanitize_rule(
                 "my_rule".into(),
                 Some("no_suffix_match.star".into()),
-                "spaces.star"
+                "spaces.star",
+                IsDep::No
             )
             .as_ref(),
             "//:my_rule"
@@ -356,7 +379,13 @@ mod tests {
 
         // Module that is just "spaces.star" → neither suffix matches, empty prefix
         assert_eq!(
-            sanitize_rule("my_rule".into(), Some("spaces.star".into()), "spaces.star").as_ref(),
+            sanitize_rule(
+                "my_rule".into(),
+                Some("spaces.star".into()),
+                "spaces.star",
+                IsDep::No
+            )
+            .as_ref(),
             "//:my_rule"
         );
     }

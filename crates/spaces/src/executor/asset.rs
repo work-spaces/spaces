@@ -2,7 +2,7 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use utils::{http_archive, logger, ws};
+use utils::{http_archive, labels, logger, ws};
 
 use crate::workspace;
 
@@ -207,6 +207,10 @@ impl AddHardLink {
         let destination = format!("{}/{}", workspace, self.destination);
         let source = self.source.clone();
 
+        // just need this for the deprecation warning
+        let _ = labels::sanitize_path(self.source.clone().into(), None);
+        let _ = labels::sanitize_path(self.destination.clone().into(), None);
+
         http_archive::HttpArchive::create_link(
             destination.clone(),
             source.clone(),
@@ -241,6 +245,9 @@ impl AddAsset {
         let mut logger = logger::Logger::new_progress(progress, name.into());
         let mut workspace_write_lock = workspace.write();
         workspace_write_lock.add_checkout_asset(self.destination.clone(), self.content.clone());
+
+        // just need this for the deprecation warning
+        let _ = labels::sanitize_path(self.destination.clone(), None);
 
         let previous_checkout = workspace_write_lock.settings.clone_existing_checkout();
         // does this already exist and has it been modified
@@ -295,6 +302,10 @@ impl AddSoftLink {
         let workspace = workspace_write_lock.get_absolute_path();
         let destination = format!("{}/{}", workspace, self.destination);
         let source = self.source.clone();
+
+        // just need this for the deprecation warning
+        let _ = labels::sanitize_path(source.clone().into(), None);
+        let _ = labels::sanitize_path(destination.clone().into(), None);
 
         let destination_path = std::path::Path::new(&destination);
         if let Some(parent) = destination_path.parent() {

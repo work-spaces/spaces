@@ -1,4 +1,4 @@
-use crate::{deps, labels, platform, targets};
+use crate::{deps, labels, logger, platform, targets};
 use anyhow_source_location::format_error;
 use printer::markdown;
 use serde::{Deserialize, Serialize};
@@ -85,8 +85,20 @@ impl Rule {
             ));
         }
 
+        if self.outputs.is_some() {
+            logger::push_deprecation_warning(
+                latest_starlark_module.clone(),
+                "`outputs` will be deprecated in v0.16. Use `targets` instead",
+            );
+        }
+
         // Pull any glob values from inputs into deps as Deps::Any with AnyDep::Glob
         if let Some(hash_set) = self.inputs.take() {
+            logger::push_deprecation_warning(
+                latest_starlark_module.clone(),
+                "`inputs` will be deprecated in v0.16. Use `deps` with files instead",
+            );
+
             let mut includes = Vec::new();
             let mut excludes = Vec::new();
 
@@ -137,6 +149,7 @@ impl Rule {
                     vis_rule.clone(),
                     latest_starlark_module.clone(),
                     spaces_module_suffix,
+                    labels::IsDep::Yes,
                 );
             }
         }
