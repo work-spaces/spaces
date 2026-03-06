@@ -343,6 +343,7 @@ pub struct State {
     pub graph: graph::Graph,
     pub sorted: Vec<petgraph::prelude::NodeIndex>,
     pub latest_starlark_module: Option<Arc<str>>,
+    pub default_module_visibility: rule::Visibility,
     pub all_modules: HashSet<Arc<str>>,
     pub log_status: lock::StateLock<Vec<LogStatus>>,
 }
@@ -401,6 +402,11 @@ impl State {
 
         task_to_insert.rule.name = rule_label.clone();
         task_to_insert.signal = task::SignalArc::new(rule_label.clone());
+
+        // Apply default visibility from workspace member when the rule has no explicit visibility
+        if task_to_insert.rule.visibility.is_none() {
+            task_to_insert.rule.visibility = Some(self.default_module_visibility.clone());
+        }
 
         task_to_insert
             .rule
@@ -1044,6 +1050,7 @@ fn get_state() -> &'static lock::StateLock<State> {
         graph: graph::Graph::default(),
         sorted: Vec::new(),
         latest_starlark_module: None,
+        default_module_visibility: rule::Visibility::Public,
         all_modules: HashSet::new(),
         log_status: lock::StateLock::new(Vec::new()),
     }));
@@ -1093,7 +1100,13 @@ pub fn get_latest_starlark_module() -> Option<Arc<str>> {
 pub fn set_latest_starlark_module(name: Arc<str>) {
     let mut state = get_state().write();
     state.latest_starlark_module = Some(name.clone());
+    state.default_module_visibility = rule::Visibility::Public;
     state.all_modules.insert(name);
+}
+
+pub fn set_latest_starlark_module_default_visibility(visibility: rule::Visibility) {
+    let mut state = get_state().write();
+    state.default_module_visibility = visibility;
 }
 
 pub fn show_tasks(
