@@ -48,11 +48,40 @@ pub struct Startup {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ShortcutEntry {
+    pub command: Arc<str>,
+    pub help: Arc<str>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ShortcutValue {
+    Simple(Arc<str>),
+    Detailed(ShortcutEntry),
+}
+
+impl ShortcutValue {
+    pub fn command(&self) -> &Arc<str> {
+        match self {
+            ShortcutValue::Simple(cmd) => cmd,
+            ShortcutValue::Detailed(entry) => &entry.command,
+        }
+    }
+
+    pub fn help(&self) -> Option<&Arc<str>> {
+        match self {
+            ShortcutValue::Simple(_) => None,
+            ShortcutValue::Detailed(entry) => Some(&entry.help),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
     pub path: Arc<str>,
     pub startup: Option<Startup>,
     pub args: Vec<Arc<str>>,
-    pub shortcuts: Option<HashMap<Arc<str>, Arc<str>>>,
+    pub shortcuts: Option<HashMap<Arc<str>, ShortcutValue>>,
 }
 
 impl Config {
@@ -83,6 +112,75 @@ impl Config {
         }
     }
 
+    pub fn to_markdown(&self) -> String {
+        use printer::markdown;
+
+        let mut md = String::new();
+
+        md.push_str(&markdown::heading(1, "Spaces Shell"));
+        md.push_str(&markdown::paragraph(
+            &format!("Run {} from anywhere in the workspace to launch an interactive shell with the workspace environment. Get more info with {}",
+            markdown::code("spaces shell"),
+            markdown::code("spaces shell --help")
+        )));
+
+        md.push_str(&markdown::heading(2, "Configuration"));
+
+        md.push_str(&markdown::heading(3, "Shell Path"));
+        md.push_str(&markdown::code_block("", &self.path));
+        md.push('\n');
+
+        if !self.args.is_empty() {
+            md.push_str(&markdown::heading(3, "Shell Arguments"));
+            let items: Vec<Arc<str>> = self.args.iter().map(|a| markdown::code(a).into()).collect();
+            md.push_str(&markdown::list(items));
+        }
+
+        if let Some(startup) = &self.startup {
+            md.push_str(&markdown::heading(3, "Startup Script"));
+            md.push_str(&markdown::paragraph(&format!(
+                "File: {}",
+                markdown::code(&startup.name)
+            )));
+            if let Some(env_name) = &startup.env_name {
+                md.push_str(&markdown::paragraph(&format!(
+                    "Environment variable: {}",
+                    markdown::code(env_name)
+                )));
+            }
+            md.push_str(&markdown::code_block("sh", &startup.contents));
+            md.push('\n');
+        }
+
+        if let Some(shortcuts) = &self.shortcuts {
+            md.push_str(&markdown::heading(2, "Shortcuts"));
+            md.push_str(&markdown::paragraph(
+                "The following shortcuts are available as shell functions in the spaces shell.",
+            ));
+
+            let mut keys: Vec<&Arc<str>> = shortcuts.keys().collect();
+            keys.sort();
+
+            for key in keys {
+                let value = &shortcuts[key];
+                let command = value.command();
+
+                md.push_str(markdown::hline());
+                md.push_str(&markdown::heading(3, key));
+                md.push_str(&markdown::code_block("sh", key));
+
+                if let Some(help) = value.help() {
+                    md.push_str(&markdown::paragraph(help));
+                }
+
+                md.push_str(&markdown::code_block("sh", command));
+                md.push('\n');
+            }
+        }
+
+        md
+    }
+
     pub fn get_shell(&self) -> anyhow::Result<clap_complete::Shell> {
         let program_name = std::path::Path::new(self.path.as_ref())
             .file_name()
@@ -102,7 +200,7 @@ impl Config {
 
 fn create_shortcuts(
     path: Arc<str>,
-    shortcuts: &HashMap<Arc<str>, Arc<str>>,
+    shortcuts: &HashMap<Arc<str>, ShortcutValue>,
 ) -> anyhow::Result<Vec<Arc<str>>> {
     let shell_type = ShellType::try_from(path.clone())
         .context(format_context!("while decoding shell type from {}", path))?;
@@ -110,9 +208,12 @@ fn create_shortcuts(
     let mut functions = Vec::new();
 
     for (key, value) in shortcuts {
+        let command = value.command();
         let function = match shell_type {
-            ShellType::Bash | ShellType::Zsh => format!("{key}() {{\n\t{value}\n}}"),
-            ShellType::Fish => format!("function {key}\n\t{value}\nend"),
+            ShellType::Bash | ShellType::Zsh => {
+                format!("{key}() {{\n\t{command}\n}}")
+            }
+            ShellType::Fish => format!("function {key}\n\t{command}\nend"),
         };
         functions.push(function.into());
     }

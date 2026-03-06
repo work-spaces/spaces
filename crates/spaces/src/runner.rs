@@ -245,6 +245,12 @@ pub fn run_shell_in_workspace(
     let shell_config = shell::Config::load(shell_config_path_option, path)
         .context(format_context!("while loading shell config"))?;
 
+    let shell_md = shell_config.to_markdown();
+    std::fs::write(workspace::SHELL_MD_FILE_NAME, shell_md).context(format_context!(
+        "while writing {}",
+        workspace::SHELL_MD_FILE_NAME
+    ))?;
+
     let completion_content = if let Some((command, has_help)) = completions_command {
         // rules are now available
         let clap_shell = shell_config
