@@ -48,11 +48,40 @@ pub struct Startup {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ShortcutEntry {
+    pub command: Arc<str>,
+    pub help: Arc<str>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ShortcutValue {
+    Simple(Arc<str>),
+    Detailed(ShortcutEntry),
+}
+
+impl ShortcutValue {
+    pub fn command(&self) -> &Arc<str> {
+        match self {
+            ShortcutValue::Simple(cmd) => cmd,
+            ShortcutValue::Detailed(entry) => &entry.command,
+        }
+    }
+
+    pub fn help(&self) -> Option<&Arc<str>> {
+        match self {
+            ShortcutValue::Simple(_) => None,
+            ShortcutValue::Detailed(entry) => Some(&entry.help),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
     pub path: Arc<str>,
     pub startup: Option<Startup>,
     pub args: Vec<Arc<str>>,
-    pub shortcuts: Option<HashMap<Arc<str>, Arc<str>>>,
+    pub shortcuts: Option<HashMap<Arc<str>, ShortcutValue>>,
 }
 
 impl Config {
@@ -102,7 +131,7 @@ impl Config {
 
 fn create_shortcuts(
     path: Arc<str>,
-    shortcuts: &HashMap<Arc<str>, Arc<str>>,
+    shortcuts: &HashMap<Arc<str>, ShortcutValue>,
 ) -> anyhow::Result<Vec<Arc<str>>> {
     let shell_type = ShellType::try_from(path.clone())
         .context(format_context!("while decoding shell type from {}", path))?;
@@ -110,9 +139,19 @@ fn create_shortcuts(
     let mut functions = Vec::new();
 
     for (key, value) in shortcuts {
+        let command = value.command();
+        let help_comment = match value.help() {
+            Some(help) => match shell_type {
+                ShellType::Bash | ShellType::Zsh => format!("\n\t# {help}"),
+                ShellType::Fish => format!("\n\t# {help}"),
+            },
+            None => String::new(),
+        };
         let function = match shell_type {
-            ShellType::Bash | ShellType::Zsh => format!("{key}() {{\n\t{value}\n}}"),
-            ShellType::Fish => format!("function {key}\n\t{value}\nend"),
+            ShellType::Bash | ShellType::Zsh => {
+                format!("{key}() {{{help_comment}\n\t{command}\n}}")
+            }
+            ShellType::Fish => format!("function {key}{help_comment}\n\t{command}\nend"),
         };
         functions.push(function.into());
     }
