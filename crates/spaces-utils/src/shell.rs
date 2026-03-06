@@ -209,18 +209,11 @@ fn create_shortcuts(
 
     for (key, value) in shortcuts {
         let command = value.command();
-        let help_comment = match value.help() {
-            Some(help) => match shell_type {
-                ShellType::Bash | ShellType::Zsh => format!("\n\t# {help}"),
-                ShellType::Fish => format!("\n\t# {help}"),
-            },
-            None => String::new(),
-        };
         let function = match shell_type {
             ShellType::Bash | ShellType::Zsh => {
-                format!("{key}() {{{help_comment}\n\t{command}\n}}")
+                format!("{key}() {{\n\t{command}\n}}")
             }
-            ShellType::Fish => format!("function {key}{help_comment}\n\t{command}\nend"),
+            ShellType::Fish => format!("function {key}\n\t{command}\nend"),
         };
         functions.push(function.into());
     }
