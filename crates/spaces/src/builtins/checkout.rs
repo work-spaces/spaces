@@ -467,7 +467,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ) -> anyhow::Result<NoneType> {
         logger::push_deprecation_warning(
             rules::get_latest_starlark_module(),
-            "Support checkout.add_hard_link_asset() will be removed in v0.16. Use checkout.add_any_asset()",
+            "Support for checkout.add_hard_link_asset() will be removed in v0.16. Use checkout.add_any_asset()",
         );
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for which asset rule"))?;
