@@ -6,7 +6,7 @@ use starlark::eval::Evaluator;
 use starlark::values::Value;
 use starlark::values::none::NoneType;
 use std::collections::HashMap;
-use utils::{environment, ws};
+use utils::{environment, rule, ws};
 
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
@@ -452,5 +452,16 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let alloc_value = heap.alloc(json_value);
 
         Ok(alloc_value)
+    }
+
+    /// Sets the default visibility to private for the current module.
+    ///
+    ///
+    /// ```python
+    /// workspace.set_default_module_visibility_private()
+    /// ```
+    fn set_default_module_visibility_private() -> anyhow::Result<NoneType> {
+        rules::set_latest_starlark_module_default_visibility(rule::Visibility::Private);
+        Ok(NoneType)
     }
 }
