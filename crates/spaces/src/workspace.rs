@@ -731,7 +731,7 @@ impl Workspace {
         Self::insert_automatic_vars(&mut self.env);
         self.is_env_set = true;
 
-        if singleton::is_sync() {
+        if singleton::get_is_sync() {
             self.env.retain_vars_from_args();
             let args_env = singleton::get_args_env();
             self.env.insert_assign_from_args(&args_env);

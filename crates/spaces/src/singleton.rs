@@ -10,6 +10,7 @@ struct State {
     active_workspace: Option<workspace::WorkspaceArc>,
     is_sync: bool,
     is_ci: bool,
+    is_checkout: bool,
     is_logging_disabled: bool,
     is_rescan: bool,
     is_lsp: bool,
@@ -44,6 +45,7 @@ fn get_state() -> &'static lock::StateLock<State> {
 
     STATE.set(lock::StateLock::new(State {
         is_ci: false,
+        is_checkout: false,
         is_logging_disabled: false,
         is_sync: false,
         is_rescan: false,
@@ -154,7 +156,7 @@ pub fn set_new_branches(new_branches: Vec<Arc<str>>) {
     state.new_branches = new_branches;
 }
 
-pub fn is_sync() -> bool {
+pub fn get_is_sync() -> bool {
     let state = get_state().read();
     state.is_sync
 }
@@ -257,6 +259,16 @@ pub fn get_is_ci() -> bool {
 pub fn set_ci(is_ci: bool) {
     let mut state = get_state().write();
     state.is_ci = is_ci;
+}
+
+pub fn get_is_checkout() -> bool {
+    let state = get_state().read();
+    state.is_checkout
+}
+
+pub fn set_is_checkout() {
+    let mut state = get_state().write();
+    state.is_checkout = true;
 }
 
 pub fn set_active_workspace(workspace: workspace::WorkspaceArc) {

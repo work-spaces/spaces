@@ -155,7 +155,7 @@ impl Git {
             .as_str(),
         );
 
-        if is_new_branch == IsNewBranch::Yes && singleton::is_sync() {
+        if is_new_branch == IsNewBranch::Yes && singleton::get_is_sync() {
             logger(progress, self.url.clone())
                 .warning("Skipping update for dev branch during sync operation.");
             return Ok(());
@@ -574,7 +574,7 @@ impl Git {
             }
         }
 
-        if is_new_branch == IsNewBranch::Yes && !singleton::is_sync() {
+        if is_new_branch == IsNewBranch::Yes && !singleton::get_is_sync() {
             logger(progress, self.url.clone()).message("creating new branch");
             let new_branch = workspace.read().get_new_branch_name();
             let options = printer::ExecuteOptions {

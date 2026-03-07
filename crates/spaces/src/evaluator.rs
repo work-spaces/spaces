@@ -674,6 +674,12 @@ fn execute_tasks(
             read_workspace
                 .finalize_store()
                 .context(format_context!("Failed to finalize store"))?;
+
+            star_logger(printer).debug("saving checkout store");
+            read_workspace
+                .settings
+                .save_checkout_store()
+                .context(format_context!("Failed to save checkout store"))?;
         }
         _ => {}
     }

@@ -464,4 +464,104 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         rules::set_latest_starlark_module_default_visibility(rule::Visibility::Private);
         Ok(NoneType)
     }
+
+    /// Loads a value previously stored with `checkout.store_value()`.
+    ///
+    /// Returns the stored value associated with the given key, or `None` if the key
+    /// does not exist. Values are namespaced by the member path in the workspace.
+    ///
+    /// Exactly one of `url` or `path` may be specified. If neither is given, all
+    /// members are searched and the first match is returned.
+    ///
+    /// ```python
+    /// # Load from a specific member URL
+    /// value = workspace.load_value("my_key", url = "https://github.com/example/repo")
+    ///
+    /// # Load from a specific path in the workspace
+    /// value = workspace.load_value("my_key", path = "spaces")
+    ///
+    /// # Search all members for the key, returning the first match
+    /// value = workspace.load_value("my_key")
+    /// ```
+    ///
+    /// # Arguments
+    /// * `key`: The string key used when calling `checkout.store_value()`.
+    /// * `url`: Optional member URL to load from.
+    /// * `path`: Optional workspace path to identify the member. The member with the longest
+    ///   matching path prefix is used.
+    ///
+    /// # Returns
+    /// * The stored JSON value (string, number, bool, list, dict), or `None` if the key is not found.
+    fn load_value<'v>(
+        key: &str,
+        #[starlark(require = named, default = NoneType)] url: Value,
+        #[starlark(require = named, default = NoneType)] path: Value,
+        eval: &mut Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<Value<'v>> {
+        if !url.is_none() && !path.is_none() {
+            return Err(format_error!(
+                "Cannot specify both `url` and `path` in workspace.load_value()"
+            ));
+        }
+
+        let workspace_arc =
+            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+        let workspace = workspace_arc.read();
+
+        let json_value = if !url.is_none() {
+            let url_str = url
+                .unpack_str()
+                .ok_or_else(|| format_error!("url must be a string, got {}", url.get_type()))?;
+            // Find the entry whose url matches, then look up the key
+            workspace
+                .settings
+                .checkout_store
+                .entries
+                .values()
+                .find(|entry| entry.url.as_ref() == url_str)
+                .and_then(|entry| entry.values.get(key))
+        } else if !path.is_none() {
+            let path_str = path
+                .unpack_str()
+                .ok_or_else(|| format_error!("path must be a string, got {}", path.get_type()))?;
+            // Find the member whose path best matches, then look up by that member's path
+            let member_path: std::sync::Arc<str> = workspace
+                .settings
+                .json
+                .get_member_from_module_path(path_str.into())
+                .map(|member| member.path.clone())
+                .unwrap_or_else(|| path_str.into());
+            workspace
+                .settings
+                .checkout_store
+                .entries
+                .get(&member_path)
+                .and_then(|entry| entry.values.get(key))
+        } else {
+            // Search all member entries for the key, error if more than one match
+            let mut matches: Vec<_> = workspace
+                .settings
+                .checkout_store
+                .entries
+                .iter()
+                .filter_map(|(member_path, entry)| entry.values.get(key).map(|v| (member_path, v)))
+                .collect();
+            if matches.len() > 1 {
+                let paths: Vec<_> = matches.iter().map(|(p, _)| p.as_ref()).collect();
+                return Err(format_error!(
+                    "Key '{key}' found in multiple members: {paths:?}. Use `url` or `path` to disambiguate."
+                ));
+            }
+            matches.pop().map(|(_, v)| v)
+        };
+
+        match json_value {
+            Some(json_value) => {
+                let heap = eval.heap();
+                let alloc_value = heap.alloc(json_value.clone());
+                Ok(alloc_value)
+            }
+            None => Ok(Value::new_none()),
+        }
+    }
 }
