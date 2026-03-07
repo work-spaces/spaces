@@ -308,6 +308,11 @@ fn execute_command(
                             repo.store
                                 .get_or_insert_default()
                                 .insert(key.into(), toml::Value::String(value.to_string()));
+                        } else {
+                            return Err(format_error!(
+                                "invalid store entry: {}. Use --store=<key>=<value>",
+                                entry
+                            ));
                         }
                     }
                     for entry in new_branch {
@@ -335,6 +340,11 @@ fn execute_command(
                                 .store
                                 .get_or_insert_default()
                                 .insert(key.into(), toml::Value::String(value.to_string()));
+                        } else {
+                            return Err(format_error!(
+                                "invalid store entry: {}. Use --store=<key>=<value>",
+                                entry
+                            ));
                         }
                     }
                 }

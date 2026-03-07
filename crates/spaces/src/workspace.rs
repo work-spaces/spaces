@@ -122,13 +122,12 @@ pub fn calculate_digest(
     for (_, content) in modules {
         hasher.update(content.as_bytes());
     }
-    // Include command-line store values in the digest so that
+    // Include command-line store values (path "//") in the digest so that
     // different --store arguments produce different workspace digests.
-    // We sort the entries by key for deterministic hashing.
-    let mut store_entries: Vec<_> = checkout_store.entries.iter().collect();
-    store_entries.sort_by_key(|(k, _)| (*k).clone());
-    for (path, entry) in store_entries {
-        hasher.update(path.as_bytes());
+    // Only the "//" entry is considered; other checkout store entries
+    // do not affect the digest.
+    if let Some(entry) = checkout_store.entries.get("//" as &str) {
+        hasher.update("//".as_bytes());
         hasher.update(entry.url.as_bytes());
         let mut value_entries: Vec<_> = entry.values.iter().collect();
         value_entries.sort_by_key(|(k, _)| (*k).clone());
