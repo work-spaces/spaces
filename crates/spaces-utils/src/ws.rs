@@ -48,6 +48,7 @@ pub fn get_spaces_tools_path_as_path(store_path: &std::path::Path) -> Arc<std::p
 pub fn get_spaces_tools_path_to_sysroot_bin(store_path: &std::path::Path) -> Arc<std::path::Path> {
     get_spaces_tools_path_as_path(store_path)
         .join("sysroot")
+        .join("bin")
         .into()
 }
 

@@ -465,16 +465,27 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(NoneType)
     }
 
-    /// Loads a value previously stored with `checkout.store_value()`.
+    /// Loads a value from the checkout store.
+    ///
+    /// Values can be set in three ways, listed from highest to lowest priority:
+    ///
+    /// 1. **Command line**: `--store=KEY=VALUE` (on `checkout`, `checkout-repo`, `co`, `sync`, or `run`).
+    ///    These are stored with path `//` and url `<command line>`, and always take
+    ///    precedence over all other sources regardless of the `url` or `path` argument.
+    /// 2. **`co.spaces.toml`**: The `store` table in a `[entry.Repo]` or `[entry.Workflow]` section.
+    ///    TOML values preserve their types (strings, integers, bools, arrays, tables).
+    /// 3. **`checkout.store_value()`**: Called from starlark scripts during checkout or sync.
     ///
     /// Returns the stored value associated with the given key, or `None` if the key
     /// does not exist. Values are namespaced by the member path in the workspace.
     ///
     /// Exactly one of `url` or `path` may be specified. If neither is given, all
-    /// members are searched and the first match is returned.
+    /// members are searched and the first match is returned. Note that command-line
+    /// values are checked first and returned immediately if the key matches,
+    /// before consulting `url` or `path`.
     ///
     /// ```python
-    /// # Load from a specific member URL
+    /// # Load from a specific member URL (command-line values still take priority)
     /// value = workspace.load_value("my_key", url = "https://github.com/example/repo")
     ///
     /// # Load from a specific path in the workspace
@@ -485,10 +496,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// ```
     ///
     /// # Arguments
-    /// * `key`: The string key used when calling `checkout.store_value()`.
-    /// * `url`: Optional member URL to load from.
+    /// * `key`: The string key to look up.
+    /// * `url`: Optional member URL to load from (ignored when a command-line value exists for the key).
     /// * `path`: Optional workspace path to identify the member. The member with the longest
-    ///   matching path prefix is used.
+    ///   matching path prefix is used (ignored when a command-line value exists for the key).
     ///
     /// # Returns
     /// * The stored JSON value (string, number, bool, list, dict), or `None` if the key is not found.
@@ -508,7 +519,17 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();
 
-        let json_value = if !url.is_none() {
+        // Command-line store values (path "//") always take priority
+        let command_line_value = workspace
+            .settings
+            .checkout_store
+            .entries
+            .get("//" as &str)
+            .and_then(|entry| entry.values.get(key));
+
+        let json_value = if command_line_value.is_some() {
+            command_line_value
+        } else if !url.is_none() {
             let url_str = url
                 .unpack_str()
                 .ok_or_else(|| format_error!("url must be a string, got {}", url.get_type()))?;

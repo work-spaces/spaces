@@ -112,11 +112,29 @@ pub fn get_short_digest(digest: &str) -> Arc<str> {
     }
 }
 
-pub fn calculate_digest(env_str: &str, modules: &[(Arc<str>, Arc<str>)]) -> Arc<str> {
+pub fn calculate_digest(
+    env_str: &str,
+    modules: &[(Arc<str>, Arc<str>)],
+    checkout_store: &ws::CheckoutStore,
+) -> Arc<str> {
     let mut hasher = blake3::Hasher::new();
     hasher.update(env_str.as_bytes());
     for (_, content) in modules {
         hasher.update(content.as_bytes());
+    }
+    // Include command-line store values (path "//") in the digest so that
+    // different --store arguments produce different workspace digests.
+    // Only the "//" entry is considered; other checkout store entries
+    // do not affect the digest.
+    if let Some(entry) = checkout_store.entries.get("//" as &str) {
+        hasher.update("//".as_bytes());
+        hasher.update(entry.url.as_bytes());
+        let mut value_entries: Vec<_> = entry.values.iter().collect();
+        value_entries.sort_by_key(|(k, _)| (*k).clone());
+        for (key, value) in value_entries {
+            hasher.update(key.as_bytes());
+            hasher.update(value.to_string().as_bytes());
+        }
     }
     hasher.finalize().to_string().into()
 }
@@ -688,6 +706,27 @@ impl Workspace {
             settings.bin.is_always_evaluate = true;
         }
 
+        // Apply command-line --store=KEY=VALUE args into checkout_store
+        // These are stored with path "//" and url "<command line>"
+        // and get priority over all other path or url values in load_value
+        let args_store = singleton::get_args_store();
+        if !args_store.is_empty() {
+            let entry = settings
+                .checkout_store
+                .entries
+                .entry("//".into())
+                .or_insert_with(|| ws::CheckoutStoreEntry {
+                    url: "<command line>".into(),
+                    values: HashMap::new(),
+                });
+            for (key, value) in args_store.iter() {
+                entry.values.insert(key.clone(), value.clone());
+            }
+            // store values may affect script behavior,
+            // so they need to rerun if any are passed on the command line
+            settings.bin.is_always_evaluate = true;
+        }
+
         Ok(Self {
             modules,
             absolute_path,
@@ -874,7 +913,11 @@ impl Workspace {
         .context(format_context!("Failed to save workspace env file"))?;
 
         if self.is_reproducible() {
-            self.settings.json.digest = Some(calculate_digest(&env_str, modules));
+            self.settings.json.digest = Some(calculate_digest(
+                &env_str,
+                modules,
+                &self.settings.checkout_store,
+            ));
         } else {
             self.settings.json.digest = None;
         }
