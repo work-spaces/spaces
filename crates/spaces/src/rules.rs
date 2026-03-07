@@ -1223,6 +1223,20 @@ pub fn get_clean_rules() -> rule::Deps {
     get_rules_by_type(rule::RuleType::Clean)
 }
 
+pub fn get_cloned_task(name: &str) -> anyhow::Result<task::Task> {
+    let state = get_state().read();
+    let sanitized_name = state.get_sanitized_rule_name(name.into());
+    let tasks = state.tasks.read();
+    if let Some(task) = tasks.get(&sanitized_name) {
+        Ok(task.clone())
+    } else {
+        Err(format_error!(
+            "Task {} not found for cloning",
+            sanitized_name
+        ))
+    }
+}
+
 pub fn is_git_rule(name: &str) -> bool {
     let state = get_state().read();
     let tasks = state.tasks.read();
