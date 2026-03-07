@@ -37,36 +37,70 @@ fn set_workspace_env(env: Vec<Arc<str>>) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
+fn set_workspace_store(store: Vec<Arc<str>>) -> anyhow::Result<()> {
+    for store_pair in store.iter() {
+        let parts = store_pair.split_once('=');
+        if parts.is_none() {
+            return Err(format_error!(
+                "Invalid store format: {store_pair}.\n Use `--store=KEY=VALUE`"
+            ));
+        }
+    }
+
+    singleton::set_args_store(store).context(format_context!(
+        "while setting store values for checkout rules"
+    ))?;
+
+    Ok(())
+}
+
+pub struct CheckoutRepoArgs {
+    pub rule_name: Option<Arc<str>>,
+    pub url: Arc<str>,
+    pub rev: Arc<str>,
+    pub clone: Option<git::Clone>,
+}
+
+pub struct CheckoutWorkflowArgs {
+    pub script: Vec<Arc<str>>,
+    pub workflow: Option<Arc<str>>,
+    pub wf: Option<Arc<str>>,
+}
+
+pub struct CheckoutArgs {
+    pub env: Vec<Arc<str>>,
+    pub store: Vec<Arc<str>>,
+    pub new_branch: Vec<Arc<str>>,
+    pub create_lock_file: bool,
+    pub force_install_tools: bool,
+    pub keep_workspace_on_failure: bool,
+}
+
 pub fn checkout_repo(
     printer: &mut printer::Printer,
     name: Arc<str>,
-    rule_name: Option<Arc<str>>,
-    url: Arc<str>,
-    rev: Arc<str>,
-    clone: Option<git::Clone>,
-    env: Vec<Arc<str>>,
-    new_branch: Vec<Arc<str>>,
-    create_lock_file: bool,
-    force_install_tools: bool,
-    keep_workspace_on_failure: bool,
+    repo_args: CheckoutRepoArgs,
+    args: CheckoutArgs,
 ) -> anyhow::Result<()> {
-    set_workspace_env(env).context(format_context!("While checking out repo"))?;
-    let clone = clone.unwrap_or(git::Clone::Default);
+    set_workspace_env(args.env).context(format_context!("While checking out repo"))?;
+    set_workspace_store(args.store).context(format_context!("While checking out repo"))?;
+    let clone = repo_args.clone.unwrap_or(git::Clone::Default);
 
     // get the repo name from the url
-    let repo_name = if let Some(rule_name) = rule_name {
+    let repo_name = if let Some(rule_name) = repo_args.rule_name {
         rule_name
     } else {
-        let repo_name = url
+        let repo_name = repo_args
+            .url
             .split('/')
             .next_back()
-            .context(format_context!("URL is mal-formed {url}"))?;
+            .context(format_context!("URL is mal-formed {}", repo_args.url))?;
 
         repo_name.strip_suffix(".git").unwrap_or(repo_name).into()
     };
 
-    // remove the .git extension
+    let url = &repo_args.url;
+    let rev = &repo_args.rev;
 
     let script: Arc<str> = format!(
         r#"
@@ -84,50 +118,44 @@ checkout.add_repo(
     )
     .into();
 
-    tools::install_tools(printer, force_install_tools)
+    tools::install_tools(printer, args.force_install_tools)
         .context(format_context!("while installing tools"))?;
 
-    co_logger(printer).debug(format!("Adding branches {new_branch:?}").as_str());
-    handle_new_branch(new_branch);
+    co_logger(printer).debug(format!("Adding branches {:?}", args.new_branch).as_str());
+    handle_new_branch(args.new_branch);
 
     runner::checkout(
         printer,
         name,
         vec![],
         Some(script),
-        create_lock_file.into(),
-        keep_workspace_on_failure,
+        args.create_lock_file.into(),
+        args.keep_workspace_on_failure,
     )
     .context(format_context!("during runner checkout"))?;
 
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn checkout_workflow(
     printer: &mut printer::Printer,
     name: Arc<str>,
-    env: Vec<Arc<str>>,
-    new_branch: Vec<Arc<str>>,
-    script: Vec<Arc<str>>,
-    workflow: Option<Arc<str>>,
-    wf: Option<Arc<str>>,
-    create_lock_file: bool,
-    force_install_tools: bool,
-    keep_workspace_on_failure: bool,
+    workflow_args: CheckoutWorkflowArgs,
+    args: CheckoutArgs,
 ) -> anyhow::Result<()> {
     singleton::set_execution_phase(task::Phase::Run);
 
     let mut script_inputs: Vec<Arc<str>> = vec![];
-    script_inputs.extend(script.clone());
+    script_inputs.extend(workflow_args.script.clone());
 
-    if wf.is_some() && workflow.is_some() {
+    if workflow_args.wf.is_some() && workflow_args.workflow.is_some() {
         return Err(format_error!("Cannot use both --workflow and --wf"));
     }
 
-    set_workspace_env(env).context(format_context!("While checking out workflow"))?;
+    set_workspace_env(args.env).context(format_context!("While checking out workflow"))?;
+    set_workspace_store(args.store).context(format_context!("While checking out workflow"))?;
 
-    if let Some(workflow) = workflow.or(wf) {
+    if let Some(workflow) = workflow_args.workflow.or(workflow_args.wf) {
         let parts: Vec<_> = workflow.split(':').collect();
         if parts.len() != 2 {
             return Err(format_error!(
@@ -175,7 +203,7 @@ pub fn checkout_workflow(
         }
     }
 
-    handle_new_branch(new_branch);
+    handle_new_branch(args.new_branch);
 
     for script_path in script_inputs.iter() {
         let script_as_path = std::path::Path::new(script_path.as_ref());
@@ -190,7 +218,7 @@ pub fn checkout_workflow(
         }
     }
 
-    tools::install_tools(printer, force_install_tools)
+    tools::install_tools(printer, args.force_install_tools)
         .context(format_context!("while installing tools"))?;
 
     runner::checkout(
@@ -198,8 +226,8 @@ pub fn checkout_workflow(
         name,
         script_inputs,
         None,
-        create_lock_file.into(),
-        keep_workspace_on_failure,
+        args.create_lock_file.into(),
+        args.keep_workspace_on_failure,
     )
     .context(format_context!("during runner checkout"))?;
 
@@ -212,6 +240,7 @@ pub struct CheckoutWorkflow {
     pub workflow: Option<Arc<str>>,
     pub script: Option<Vec<Arc<str>>>,
     pub env: Option<Vec<Arc<str>>>,
+    pub store: Option<Vec<Arc<str>>>,
     #[serde(alias = "new-branch")]
     pub new_branch: Option<Vec<Arc<str>>>,
     #[serde(alias = "create-lock-file")]
@@ -234,14 +263,19 @@ impl CheckoutWorkflow {
         let result = checkout_workflow(
             printer,
             name,
-            self.env.unwrap_or_default(),
-            self.new_branch.unwrap_or_default(),
-            self.script.unwrap_or_default(),
-            self.workflow,
-            None,
-            self.create_lock_file.unwrap_or_default(),
-            false,
-            keep_workspace_on_failure,
+            CheckoutWorkflowArgs {
+                script: self.script.unwrap_or_default(),
+                workflow: self.workflow,
+                wf: None,
+            },
+            CheckoutArgs {
+                env: self.env.unwrap_or_default(),
+                store: self.store.unwrap_or_default(),
+                new_branch: self.new_branch.unwrap_or_default(),
+                create_lock_file: self.create_lock_file.unwrap_or_default(),
+                force_install_tools: false,
+                keep_workspace_on_failure,
+            },
         );
         group.end_group(printer, is_ci)?;
         result.context(format_context!("in CheckoutWorkflow"))?;
@@ -260,6 +294,7 @@ pub struct CheckoutRepo {
     pub new_branch: Option<Vec<Arc<str>>>,
     pub clone: Option<git::Clone>,
     pub env: Option<Vec<Arc<str>>>,
+    pub store: Option<Vec<Arc<str>>>,
     #[serde(alias = "create-lock-file")]
     pub create_lock_file: Option<bool>,
 }
@@ -280,15 +315,20 @@ impl CheckoutRepo {
         let result = checkout_repo(
             printer,
             name,
-            self.rule_name,
-            self.url,
-            self.rev,
-            self.clone,
-            self.env.unwrap_or_default(),
-            self.new_branch.unwrap_or_default(),
-            self.create_lock_file.unwrap_or_default(),
-            false,
-            keep_workspace_on_failure,
+            CheckoutRepoArgs {
+                rule_name: self.rule_name,
+                url: self.url,
+                rev: self.rev,
+                clone: self.clone,
+            },
+            CheckoutArgs {
+                env: self.env.unwrap_or_default(),
+                store: self.store.unwrap_or_default(),
+                new_branch: self.new_branch.unwrap_or_default(),
+                create_lock_file: self.create_lock_file.unwrap_or_default(),
+                force_install_tools: false,
+                keep_workspace_on_failure,
+            },
         );
         group.end_group(printer, is_ci)?;
         result.context(format_context!("in CheckoutRepo"))?;

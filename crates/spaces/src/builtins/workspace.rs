@@ -508,7 +508,17 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();
 
-        let json_value = if !url.is_none() {
+        // Command-line store values (path "//") always take priority
+        let command_line_value = workspace
+            .settings
+            .checkout_store
+            .entries
+            .get("//" as &str)
+            .and_then(|entry| entry.values.get(key));
+
+        let json_value = if command_line_value.is_some() {
+            command_line_value
+        } else if !url.is_none() {
             let url_str = url
                 .unpack_str()
                 .ok_or_else(|| format_error!("url must be a string, got {}", url.get_type()))?;

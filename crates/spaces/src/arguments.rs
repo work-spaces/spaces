@@ -182,6 +182,7 @@ fn execute_command(
         Commands::Checkout {
             name,
             env,
+            store,
             new_branch,
             script,
             workflow,
@@ -194,14 +195,19 @@ fn execute_command(
             co::checkout_workflow(
                 effective_printer,
                 name,
-                env,
-                new_branch,
-                script,
-                workflow,
-                wf,
-                create_lock_file,
-                force_install_tools,
-                keep_workspace_on_failure,
+                co::CheckoutWorkflowArgs {
+                    script,
+                    workflow,
+                    wf,
+                },
+                co::CheckoutArgs {
+                    env,
+                    store,
+                    new_branch,
+                    create_lock_file,
+                    force_install_tools,
+                    keep_workspace_on_failure,
+                },
             )
             .context(format_context!("While checking out workflow"))?;
         }
@@ -212,6 +218,7 @@ fn execute_command(
             rev,
             clone,
             env,
+            store,
             new_branch,
             create_lock_file,
             force_install_tools,
@@ -234,15 +241,20 @@ fn execute_command(
             let result = co::checkout_repo(
                 effective_printer,
                 name,
-                rule_name,
-                url,
-                rev,
-                clone,
-                env,
-                new_branch,
-                create_lock_file,
-                force_install_tools,
-                keep_workspace_on_failure,
+                co::CheckoutRepoArgs {
+                    rule_name,
+                    url,
+                    rev,
+                    clone,
+                },
+                co::CheckoutArgs {
+                    env,
+                    store,
+                    new_branch,
+                    create_lock_file,
+                    force_install_tools,
+                    keep_workspace_on_failure,
+                },
             )
             .context(format_context!("while checking out repo"));
 
@@ -257,6 +269,7 @@ fn execute_command(
             url,
             rev,
             env,
+            store,
             new_branch,
             locked,
         } => {
@@ -290,6 +303,9 @@ fn execute_command(
                     for entry in env {
                         repo.env.get_or_insert_default().push(entry);
                     }
+                    for entry in store {
+                        repo.store.get_or_insert_default().push(entry);
+                    }
                     for entry in new_branch {
                         repo.new_branch.get_or_insert_default().push(entry);
                     }
@@ -309,6 +325,9 @@ fn execute_command(
                     for entry in env {
                         workflow.env.get_or_insert_default().push(entry);
                     }
+                    for entry in store {
+                        workflow.store.get_or_insert_default().push(entry);
+                    }
                 }
             }
 
@@ -317,7 +336,11 @@ fn execute_command(
                 .checkout(effective_printer, name, keep_workspace_on_failure)
                 .context(format_context!("while checking out repo"))?;
         }
-        Commands::Sync { env, dev_branch } => {
+        Commands::Sync {
+            env,
+            store,
+            dev_branch,
+        } => {
             singleton::set_execution_phase(task::Phase::Checkout);
 
             if shell::is_spaces_shell() {
@@ -327,6 +350,9 @@ fn execute_command(
             singleton::set_args_env(env).context(format_context!(
                 "while setting environment variables for sync"
             ))?;
+
+            singleton::set_args_store(store)
+                .context(format_context!("while setting store values for sync"))?;
 
             // Add any dev branches specified by the command line
             if !dev_branch.is_empty() {
@@ -648,6 +674,13 @@ Executes the checkout rules in the specified scripts or workflow files."#)]
         env: Vec<Arc<str>>,
         #[arg(
             long,
+            help = r#"Store values in the checkout store accessible via workspace.load_value().
+  Use `--store=KEY=VALUE`. Values are stored with path `//` and url `<command line>`.
+  Command line store values take priority over all other path or url values."#
+        )]
+        store: Vec<Arc<str>>,
+        #[arg(
+            long,
             help = r#"Use --new-branch=<rule> to have spaces create a new branch for the rule.
   Branch name will match the workspace name."#
         )]
@@ -724,6 +757,13 @@ This can be used if the repository defines all of its own dependencies."#)]
         env: Vec<Arc<str>>,
         #[arg(
             long,
+            help = r#"Store values in the checkout store accessible via workspace.load_value().
+  Use `--store=KEY=VALUE`. Values are stored with path `//` and url `<command line>`.
+  Command line store values take priority over all other path or url values."#
+        )]
+        store: Vec<Arc<str>>,
+        #[arg(
+            long,
             help = r#"Create a lock file for the workspace.
   This file can be passed on the next checkout as a script to re-create the exact workspace.
   This argument is deprecated and will be removed in a future release."#
@@ -783,6 +823,9 @@ create-lock-file = false # optionally create a lock file
         /// Additional env values to augment co.spaces.toml
         #[arg(long)]
         env: Vec<Arc<str>>,
+        /// Additional store values to augment co.spaces.toml. Use `--store=KEY=VALUE`.
+        #[arg(long)]
+        store: Vec<Arc<str>>,
         /// Additional new-branch values to augment co.spaces.toml
         #[arg(long)]
         new_branch: Vec<Arc<str>>,
@@ -798,6 +841,13 @@ create-lock-file = false # optionally create a lock file
   Use `--env=VAR=VALUE`. Makes workspace not reproducible."#
         )]
         env: Vec<Arc<str>>,
+        #[arg(
+            long,
+            help = r#"Store values accessible via workspace.load_value().
+  Use `--store=KEY=VALUE`. Values are stored with path `//` and url `<command line>`.
+  Command line store values take priority over all other path or url values."#
+        )]
+        store: Vec<Arc<str>>,
         #[arg(
             long,
             help = r#"Use --dev-branch=<rule> to add a repo to the dev-branch list.

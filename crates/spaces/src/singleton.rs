@@ -19,6 +19,7 @@ struct State {
     max_queue_count: i64,
     error_chain: Vec<String>,
     args_env: HashMap<Arc<str>, Arc<str>>,
+    args_store: HashMap<Arc<str>, Arc<str>>,
     new_branches: Vec<Arc<str>>,
     inspect_globs: HashSet<Arc<str>>,
     has_help: bool,
@@ -62,6 +63,7 @@ fn get_state() -> &'static lock::StateLock<State> {
         inspect_stardoc_path: None,
         fuzzy_query: None,
         args_env: HashMap::new(),
+        args_store: HashMap::new(),
         execution_phase: task::Phase::Complete,
     }));
 
@@ -140,6 +142,26 @@ pub fn set_args_env(args: Vec<Arc<str>>) -> anyhow::Result<()> {
         } else {
             return Err(format_error!(
                 "Bad env argument: `{env}` use `<key>=<value>`"
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub fn get_args_store() -> HashMap<Arc<str>, Arc<str>> {
+    let state = get_state().read();
+    state.args_store.clone()
+}
+
+pub fn set_args_store(args: Vec<Arc<str>>) -> anyhow::Result<()> {
+    let mut state = get_state().write();
+    for arg in args.iter() {
+        let parts = arg.split_once('=');
+        if let Some((key, value)) = parts {
+            state.args_store.insert(key.into(), value.into());
+        } else {
+            return Err(format_error!(
+                "Bad store argument: `{arg}` use `<key>=<value>`"
             ));
         }
     }
