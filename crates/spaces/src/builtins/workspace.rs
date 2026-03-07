@@ -470,9 +470,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// Returns the stored value associated with the given key, or `None` if the key
     /// does not exist. Values are namespaced by the member path in the workspace.
     ///
+    /// Exactly one of `url` or `path` may be specified. If neither is given, all
+    /// members are searched and the first match is returned.
+    ///
     /// ```python
     /// # Load from a specific member URL
     /// value = workspace.load_value("my_key", url = "https://github.com/example/repo")
+    ///
+    /// # Load from a specific path in the workspace
+    /// value = workspace.load_value("my_key", path = "spaces")
     ///
     /// # Search all members for the key, returning the first match
     /// value = workspace.load_value("my_key")
@@ -480,28 +486,29 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// # Arguments
     /// * `key`: The string key used when calling `checkout.store_value()`.
-    /// * `url`: Optional member URL to load from. If not specified, searches all members and returns the first match.
+    /// * `url`: Optional member URL to load from.
+    /// * `path`: Optional workspace path to identify the member. The member with the longest
+    ///   matching path prefix is used.
     ///
     /// # Returns
     /// * The stored JSON value (string, number, bool, list, dict), or `None` if the key is not found.
     fn load_value<'v>(
         key: &str,
-        #[starlark(default = NoneType)] url: Value,
+        #[starlark(require = named, default = NoneType)] url: Value,
+        #[starlark(require = named, default = NoneType)] path: Value,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<Value<'v>> {
+        if !url.is_none() && !path.is_none() {
+            return Err(format_error!(
+                "Cannot specify both `url` and `path` in workspace.load_value()"
+            ));
+        }
+
         let workspace_arc =
             singleton::get_workspace().context(format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();
 
-        let json_value = if url.is_none() {
-            // Search all member entries for the key, return the first match
-            workspace
-                .settings
-                .checkout_store
-                .entries
-                .values()
-                .find_map(|entry| entry.values.get(key))
-        } else {
+        let json_value = if !url.is_none() {
             let url_str = url
                 .unpack_str()
                 .ok_or_else(|| format_error!("url must be a string, got {}", url.get_type()))?;
@@ -513,6 +520,31 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 .values()
                 .find(|entry| entry.url.as_ref() == url_str)
                 .and_then(|entry| entry.values.get(key))
+        } else if !path.is_none() {
+            let path_str = path
+                .unpack_str()
+                .ok_or_else(|| format_error!("path must be a string, got {}", path.get_type()))?;
+            // Find the member whose path best matches, then look up by that member's path
+            let member_path: std::sync::Arc<str> = workspace
+                .settings
+                .json
+                .get_member_from_module_path(path_str.into())
+                .map(|member| member.path.clone())
+                .unwrap_or_else(|| path_str.into());
+            workspace
+                .settings
+                .checkout_store
+                .entries
+                .get(&member_path)
+                .and_then(|entry| entry.values.get(key))
+        } else {
+            // Search all member entries for the key, return the first match
+            workspace
+                .settings
+                .checkout_store
+                .entries
+                .values()
+                .find_map(|entry| entry.values.get(key))
         };
 
         match json_value {
