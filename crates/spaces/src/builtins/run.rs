@@ -39,9 +39,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         }
     }
 
-    /// Adds a target that depends on other targets.
+    /// Adds a rule that depends on other rules.
     ///
-    /// There is no specific action for the target, but this rule can be useful for organizing dependencies.
+    /// There is no specific action for the rule, but this rule can be useful for organizing dependencies.
+    ///
+    /// This function is not properly named. `target` is not used correctly in this context.
     ///
     /// ```python
     /// run.add_target(
@@ -54,7 +56,6 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// # Arguments
     /// * `rule`: Rule definition containing `name` (`str`), `deps` (`list`), `platforms` (`list`), `type` (`str`), and `help` (`str`).
-
     fn add_target(
         #[starlark(require = named)] rule: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
@@ -255,6 +256,102 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             rule,
             task::Phase::Run,
             executor::Task::CreateArchive(archive),
+        ))
+        .context(format_context!("Failed to insert task {rule_name}"))?;
+        Ok(NoneType)
+    }
+
+    /// Adds a rule that will execute based on the cloned from rule.
+    ///
+    /// The new rule is merged with the cloned rule: the new rule's fields take precedence,
+    /// and the exec/target is taken from the cloned rule.
+    ///
+    /// ```python
+    /// run.add_from_clone(
+    ///     rule = {
+    ///         "name": "my_new_rule",
+    ///         "deps": ["other_dep"],
+    ///     },
+    ///     clone_from = "existing_rule",
+    /// )
+    /// ```
+    ///
+    /// # Arguments
+    /// * `rule`: Rule definition containing `name` (`str`), `deps` (`list`), `platforms` (`list`), `type` (`str`), and `help` (`str`).
+    /// * `clone_from`: The name of an existing rule whose exec will be cloned.
+    fn add_from_clone(
+        #[starlark(require = named)] rule: starlark::values::Value,
+        #[starlark(require = named)] clone_from: &str,
+    ) -> anyhow::Result<NoneType> {
+        let mut rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+            .context(format_context!("bad options for add_exec_from_clone rule"))?;
+
+        if singleton::is_lsp_mode() {
+            return Ok(NoneType);
+        }
+
+        let cloned_task = rules::get_cloned_task(clone_from)
+            .context(format_context!("Failed to clone task {}", clone_from))?;
+
+        match &cloned_task.executor {
+            executor::Task::Exec(_) => (),
+            executor::Task::Target => (),
+            _ => {
+                return Err(format_error!(
+                    "clone_from rule {} does not have an Exec/Target task",
+                    clone_from
+                ));
+            }
+        };
+
+        // Merge: cloned rule fields are used as defaults, new rule fields take precedence
+        let cloned_rule = cloned_task.rule;
+        if let Some(cloned_deps) = cloned_rule.deps {
+            let cloned_any_deps: Vec<rule::AnyDep> = match cloned_deps {
+                rule::Deps::Rules(rules) => rules.into_iter().map(rule::AnyDep::Rule).collect(),
+                rule::Deps::Any(any) => any,
+            };
+            rule::Deps::push_any_deps(&mut rule.deps, cloned_any_deps);
+        }
+        if rule.help.is_none() {
+            rule.help = cloned_rule.help;
+        }
+        if rule.inputs.is_none() {
+            rule.inputs = cloned_rule.inputs;
+        } else {
+            return Err(format_error!("Cloned rules cannot specify inputs"));
+        }
+        if rule.outputs.is_none() {
+            rule.outputs = cloned_rule.outputs;
+        } else {
+            return Err(format_error!("Cloned rules cannot specify outputs"));
+        }
+        if rule.targets.is_none() {
+            rule.targets = cloned_rule.targets;
+        } else {
+            return Err(format_error!(
+                "Cloned rules cannot specify targets (always cloned from the original)"
+            ));
+        }
+        if rule.platforms.is_none() {
+            rule.platforms = cloned_rule.platforms;
+        } else {
+            return Err(format_error!(
+                "Cloned rules cannot specify platforms (always cloned from the original)"
+            ));
+        }
+        if rule.type_.is_none() {
+            rule.type_ = cloned_rule.type_;
+        }
+
+        add_rule_to_all(&rule)
+            .context(format_context!("Internal Error: Failed to add rule to all"))?;
+
+        let rule_name = rule.name.clone();
+        rules::insert_task(task::Task::new(
+            rule,
+            task::Phase::Run,
+            cloned_task.executor,
         ))
         .context(format_context!("Failed to insert task {rule_name}"))?;
         Ok(NoneType)
