@@ -721,9 +721,7 @@ impl Workspace {
                     values: HashMap::new(),
                 });
             for (key, value) in args_store.iter() {
-                entry
-                    .values
-                    .insert(key.clone(), serde_json::Value::String(value.to_string()));
+                entry.values.insert(key.clone(), value.clone());
             }
             // store values may affect script behavior,
             // so they need to rerun if any are passed on the command line

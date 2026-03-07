@@ -19,7 +19,7 @@ struct State {
     max_queue_count: i64,
     error_chain: Vec<String>,
     args_env: HashMap<Arc<str>, Arc<str>>,
-    args_store: HashMap<Arc<str>, Arc<str>>,
+    args_store: HashMap<Arc<str>, serde_json::Value>,
     new_branches: Vec<Arc<str>>,
     inspect_globs: HashSet<Arc<str>>,
     has_help: bool,
@@ -148,7 +148,7 @@ pub fn set_args_env(args: Vec<Arc<str>>) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn get_args_store() -> HashMap<Arc<str>, Arc<str>> {
+pub fn get_args_store() -> HashMap<Arc<str>, serde_json::Value> {
     let state = get_state().read();
     state.args_store.clone()
 }
@@ -158,7 +158,9 @@ pub fn set_args_store(args: Vec<Arc<str>>) -> anyhow::Result<()> {
     for arg in args.iter() {
         let parts = arg.split_once('=');
         if let Some((key, value)) = parts {
-            state.args_store.insert(key.into(), value.into());
+            state
+                .args_store
+                .insert(key.into(), serde_json::Value::String(value.to_string()));
         } else {
             return Err(format_error!(
                 "Bad store argument: `{arg}` use `<key>=<value>`"
@@ -166,6 +168,35 @@ pub fn set_args_store(args: Vec<Arc<str>>) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+pub fn set_args_store_from_toml(store: HashMap<Arc<str>, toml::Value>) -> anyhow::Result<()> {
+    let mut state = get_state().write();
+    for (key, toml_value) in store {
+        let json_value = toml_value_to_json(toml_value);
+        state.args_store.insert(key, json_value);
+    }
+    Ok(())
+}
+
+fn toml_value_to_json(value: toml::Value) -> serde_json::Value {
+    match value {
+        toml::Value::String(s) => serde_json::Value::String(s),
+        toml::Value::Integer(i) => serde_json::json!(i),
+        toml::Value::Float(f) => serde_json::json!(f),
+        toml::Value::Boolean(b) => serde_json::Value::Bool(b),
+        toml::Value::Datetime(dt) => serde_json::Value::String(dt.to_string()),
+        toml::Value::Array(arr) => {
+            serde_json::Value::Array(arr.into_iter().map(toml_value_to_json).collect())
+        }
+        toml::Value::Table(table) => {
+            let map = table
+                .into_iter()
+                .map(|(k, v)| (k, toml_value_to_json(v)))
+                .collect();
+            serde_json::Value::Object(map)
+        }
+    }
 }
 
 pub fn get_new_branches() -> Vec<Arc<str>> {

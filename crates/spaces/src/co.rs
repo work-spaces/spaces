@@ -240,7 +240,7 @@ pub struct CheckoutWorkflow {
     pub workflow: Option<Arc<str>>,
     pub script: Option<Vec<Arc<str>>>,
     pub env: Option<Vec<Arc<str>>>,
-    pub store: Option<Vec<Arc<str>>>,
+    pub store: Option<HashMap<Arc<str>, toml::Value>>,
     #[serde(alias = "new-branch")]
     pub new_branch: Option<Vec<Arc<str>>>,
     #[serde(alias = "create-lock-file")]
@@ -260,6 +260,10 @@ impl CheckoutWorkflow {
             is_ci,
             format!("Spaces Checkout Workflow {name}").as_str(),
         )?;
+        if let Some(toml_store) = self.store {
+            singleton::set_args_store_from_toml(toml_store)
+                .context(format_context!("while setting toml store values"))?;
+        }
         let result = checkout_workflow(
             printer,
             name,
@@ -270,7 +274,7 @@ impl CheckoutWorkflow {
             },
             CheckoutArgs {
                 env: self.env.unwrap_or_default(),
-                store: self.store.unwrap_or_default(),
+                store: vec![],
                 new_branch: self.new_branch.unwrap_or_default(),
                 create_lock_file: self.create_lock_file.unwrap_or_default(),
                 force_install_tools: false,
@@ -294,7 +298,7 @@ pub struct CheckoutRepo {
     pub new_branch: Option<Vec<Arc<str>>>,
     pub clone: Option<git::Clone>,
     pub env: Option<Vec<Arc<str>>>,
-    pub store: Option<Vec<Arc<str>>>,
+    pub store: Option<HashMap<Arc<str>, toml::Value>>,
     #[serde(alias = "create-lock-file")]
     pub create_lock_file: Option<bool>,
 }
@@ -312,6 +316,10 @@ impl CheckoutRepo {
             is_ci,
             format!("Spaces Checkout Repo {}", self.url).as_str(),
         )?;
+        if let Some(toml_store) = self.store {
+            singleton::set_args_store_from_toml(toml_store)
+                .context(format_context!("while setting toml store values"))?;
+        }
         let result = checkout_repo(
             printer,
             name,
@@ -323,7 +331,7 @@ impl CheckoutRepo {
             },
             CheckoutArgs {
                 env: self.env.unwrap_or_default(),
-                store: self.store.unwrap_or_default(),
+                store: vec![],
                 new_branch: self.new_branch.unwrap_or_default(),
                 create_lock_file: self.create_lock_file.unwrap_or_default(),
                 force_install_tools: false,

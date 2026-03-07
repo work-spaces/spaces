@@ -304,7 +304,11 @@ fn execute_command(
                         repo.env.get_or_insert_default().push(entry);
                     }
                     for entry in store {
-                        repo.store.get_or_insert_default().push(entry);
+                        if let Some((key, value)) = entry.split_once('=') {
+                            repo.store
+                                .get_or_insert_default()
+                                .insert(key.into(), toml::Value::String(value.to_string()));
+                        }
                     }
                     for entry in new_branch {
                         repo.new_branch.get_or_insert_default().push(entry);
@@ -326,7 +330,12 @@ fn execute_command(
                         workflow.env.get_or_insert_default().push(entry);
                     }
                     for entry in store {
-                        workflow.store.get_or_insert_default().push(entry);
+                        if let Some((key, value)) = entry.split_once('=') {
+                            workflow
+                                .store
+                                .get_or_insert_default()
+                                .insert(key.into(), toml::Value::String(value.to_string()));
+                        }
                     }
                 }
             }
