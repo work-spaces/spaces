@@ -61,9 +61,35 @@ fn logger(progress: &mut printer::MultiProgressBar) -> logger::Logger<'_> {
     logger::Logger::new_progress(progress, "workspace".into())
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub enum CacheStatus {
+    /// No cache status available (legacy metrics entries or cache not used for this rule)
+    #[default]
+    None,
+    /// The rule was skipped (platform, cancelled, optional, unchanged deps)
+    Skipped(Arc<str>),
+    /// The rule was executed (cache miss or no caching)
+    Executed(Arc<str>),
+    /// The rule outputs were restored from the rule cache
+    Restored(Arc<str>),
+}
+
+impl std::fmt::Display for CacheStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CacheStatus::None => write!(f, "None"),
+            CacheStatus::Skipped(digest) => write!(f, "Skipped({digest})"),
+            CacheStatus::Executed(digest) => write!(f, "Executed({digest})"),
+            CacheStatus::Restored(digest) => write!(f, "Restored({digest})"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuleMetrics {
     elapsed_time: f64,
+    #[serde(default)]
+    cache_status: CacheStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -256,11 +282,17 @@ impl Workspace {
         }
     }
 
-    pub fn update_rule_metrics(&mut self, rule_name: &str, elapsed_time: std::time::Duration) {
+    pub fn update_rule_metrics(
+        &mut self,
+        rule_name: &str,
+        elapsed_time: std::time::Duration,
+        cache_status: CacheStatus,
+    ) {
         self.rule_metrics.insert(
             rule_name.into(),
             RuleMetrics {
                 elapsed_time: elapsed_time.as_secs_f64(),
+                cache_status,
             },
         );
     }
