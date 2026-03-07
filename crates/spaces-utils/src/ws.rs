@@ -272,8 +272,6 @@ pub struct JsonSettings {
     pub assets: HashMap<Arc<str>, Asset>,
     #[serde(default = "Vec::new")]
     pub dev_branches: Vec<Arc<str>>,
-    #[serde(default = "HashMap::new")]
-    pub checkout_store: HashMap<Arc<str>, CheckoutStoreEntry>,
     #[serde(skip)]
     pub bin_settings: BinSettings,
 }
@@ -298,7 +296,6 @@ impl JsonSettings {
             assets: HashMap::new(),
             minimum_version: None,
             dev_branches: Vec::new(),
-            checkout_store: HashMap::new(),
             bin_settings: Default::default(),
         }
     }

@@ -538,13 +538,21 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 .get(&member_path)
                 .and_then(|entry| entry.values.get(key))
         } else {
-            // Search all member entries for the key, return the first match
-            workspace
+            // Search all member entries for the key, error if more than one match
+            let mut matches: Vec<_> = workspace
                 .settings
                 .checkout_store
                 .entries
-                .values()
-                .find_map(|entry| entry.values.get(key))
+                .iter()
+                .filter_map(|(member_path, entry)| entry.values.get(key).map(|v| (member_path, v)))
+                .collect();
+            if matches.len() > 1 {
+                let paths: Vec<_> = matches.iter().map(|(p, _)| p.as_ref()).collect();
+                return Err(format_error!(
+                    "Key '{key}' found in multiple members: {paths:?}. Use `url` or `path` to disambiguate."
+                ));
+            }
+            matches.pop().map(|(_, v)| v)
         };
 
         match json_value {
