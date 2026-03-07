@@ -38,6 +38,59 @@ struct CargoBin {
 // This defines the function that is visible to Starlark
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
+    /// Stores a key-value pair in the workspace settings, namespaced by the
+    /// calling module's member path in the workspace.
+    ///
+    /// The value is available immediately after storing and persists across
+    /// checkout evaluations. Use `workspace.load_value()` to retrieve stored values.
+    ///
+    /// ```python
+    /// checkout.store_value("my_key", {"version": "1.0", "enabled": True})
+    /// checkout.store_value("build_count", 42)
+    /// checkout.store_value("name", "my_project")
+    /// ```
+    ///
+    /// # Arguments
+    /// * `key`: A string key to identify the stored value.
+    /// * `value`: Any JSON-compatible value (string, number, bool, list, dict, None).
+    fn store_value(key: &str, value: starlark::values::Value) -> anyhow::Result<NoneType> {
+        let json_value = value.to_json_value().context(format_context!(
+            "Failed to convert value to JSON for key '{key}'"
+        ))?;
+
+        if !singleton::get_is_checkout() && !singleton::get_is_sync() {
+            return Ok(NoneType);
+        }
+
+        let module_path = rules::get_latest_starlark_module()
+            .ok_or_else(|| format_error!("No active starlark module"))?;
+
+        let workspace_arc =
+            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+        let mut workspace = workspace_arc.write();
+
+        let (member_path, url): (Arc<str>, Arc<str>) = workspace
+            .settings
+            .json
+            .get_member_from_module_path(module_path.clone())
+            .map(|member| (member.path.clone(), member.url.clone()))
+            .unwrap_or_else(|| (module_path.clone(), module_path.clone()));
+
+        let entry = workspace
+            .settings
+            .checkout_store
+            .entries
+            .entry(member_path)
+            .or_insert_with(|| utils::ws::CheckoutStoreEntry {
+                url: url.clone(),
+                values: std::collections::HashMap::new(),
+            });
+        entry.url = url;
+        entry.values.insert(key.into(), json_value);
+
+        Ok(NoneType)
+    }
+
     /// Abort script evaluation with a message.
     ///
     /// ```python

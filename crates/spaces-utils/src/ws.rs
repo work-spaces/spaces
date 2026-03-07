@@ -10,6 +10,7 @@ pub const SPACES_LOGS_NAME: &str = ".spaces/logs";
 pub const METRICS_FILE_NAME: &str = ".spaces/metrics.spaces.json";
 pub const SETTINGS_FILE_NAME: &str = ".spaces/settings.spaces.json";
 const CHECKOUT_FILE_NAME: &str = ".spaces/checkout.spaces.json";
+const CHECKOUT_STORE_FILE_NAME: &str = ".spaces/store.spaces.json";
 const BIN_SETTINGS_FILE_NAME: &str = "build/workspace.settings.4.spaces";
 pub const SPACES_WORKSPACE_ENV_VAR: &str = "SPACES_WORKSPACE";
 const SPACES_HOME_ENV_VAR: &str = "SPACES_HOME";
@@ -102,6 +103,43 @@ impl Member {
 #[serde(deny_unknown_fields)]
 pub struct Asset {
     pub hash: Arc<str>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CheckoutStoreEntry {
+    pub url: Arc<str>,
+    pub values: HashMap<Arc<str>, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CheckoutStore {
+    pub entries: HashMap<Arc<str>, CheckoutStoreEntry>,
+}
+
+impl CheckoutStore {
+    pub fn load() -> Self {
+        match std::fs::read_to_string(CHECKOUT_STORE_FILE_NAME) {
+            Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+            Err(_) => Self::default(),
+        }
+    }
+
+    pub fn save(&self) -> anyhow::Result<()> {
+        let path = std::path::Path::new(CHECKOUT_STORE_FILE_NAME);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).context(format_context!(
+                "Failed to create parent directory {}",
+                parent.display()
+            ))?;
+        }
+        let content = serde_json::to_string_pretty(self)
+            .context(format_context!("Failed to serialize checkout store"))?;
+        std::fs::write(path, content.as_str()).context(format_context!(
+            "Failed to save checkout store file {}",
+            path.display()
+        ))?;
+        Ok(())
+    }
 }
 
 impl Asset {
@@ -234,6 +272,8 @@ pub struct JsonSettings {
     pub assets: HashMap<Arc<str>, Asset>,
     #[serde(default = "Vec::new")]
     pub dev_branches: Vec<Arc<str>>,
+    #[serde(default = "HashMap::new")]
+    pub checkout_store: HashMap<Arc<str>, CheckoutStoreEntry>,
     #[serde(skip)]
     pub bin_settings: BinSettings,
 }
@@ -258,6 +298,7 @@ impl JsonSettings {
             assets: HashMap::new(),
             minimum_version: None,
             dev_branches: Vec::new(),
+            checkout_store: HashMap::new(),
             bin_settings: Default::default(),
         }
     }
@@ -329,6 +370,27 @@ impl JsonSettings {
 
         path_option.flatten()
     }
+
+    pub fn get_member_from_module_path(&self, module_path: Arc<str>) -> Option<&Member> {
+        let mut best_match: Option<&Member> = None;
+        let mut best_len: usize = 0;
+
+        for members in self.members.values() {
+            for member in members {
+                let path = member.path.as_ref();
+                if (module_path.starts_with(path)
+                    && (module_path.len() == path.len()
+                        || module_path.as_bytes().get(path.len()) == Some(&b'/')))
+                    && path.len() > best_len
+                {
+                    best_len = path.len();
+                    best_match = Some(member);
+                }
+            }
+        }
+
+        best_match
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
@@ -398,6 +460,7 @@ pub struct Settings {
     pub json: JsonSettings,
     pub bin: BinSettings,
     pub checkout: CheckoutSettings,
+    pub checkout_store: CheckoutStore,
     pub existing_checkout: Option<CheckoutSettings>,
 }
 
@@ -421,11 +484,14 @@ impl Settings {
             bin_settings.changes.skip_folders = vec![SPACES_LOGS_NAME.into()];
         }
 
+        let checkout_store = CheckoutStore::load();
+
         (
             Self {
                 json: json_settings,
                 bin: bin_settings,
                 checkout: checkout_settings,
+                checkout_store,
                 existing_checkout: None,
             },
             is_json_available,
@@ -450,6 +516,13 @@ impl Settings {
         self.checkout
             .save(CHECKOUT_FILE_NAME)
             .context(format_context!("Checkout settings: {CHECKOUT_FILE_NAME}"))?;
+        Ok(())
+    }
+
+    pub fn save_checkout_store(&self) -> anyhow::Result<()> {
+        self.checkout_store.save().context(format_context!(
+            "Checkout store: {CHECKOUT_STORE_FILE_NAME}"
+        ))?;
         Ok(())
     }
 

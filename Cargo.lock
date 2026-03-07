@@ -3076,6 +3076,7 @@ dependencies = [
  "starstd",
  "state",
  "strum",
+ "sublime_fuzzy",
  "symlink",
  "tempfile",
  "thiserror 2.0.18",
@@ -3088,6 +3089,8 @@ dependencies = [
 [[package]]
 name = "spaces-archiver"
 version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af9e40e6d66696ea0a8fe29df9838f2b3e509be9aa6650a5999d7894eba7aff2"
 dependencies = [
  "anyhow",
  "anyhow-source-location",
@@ -3107,6 +3110,8 @@ dependencies = [
 [[package]]
 name = "spaces-printer"
 version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb0dc9cdc804a28394deabaeab2a5297f4904690e52027e14dcceed5e91c026c"
 dependencies = [
  "anyhow",
  "console",
@@ -3149,6 +3154,7 @@ dependencies = [
  "state",
  "strum",
  "symlink",
+ "tempfile",
  "tokio",
  "toml",
  "url",
@@ -3370,6 +3376,12 @@ dependencies = [
  "rustversion",
  "syn 2.0.116",
 ]
+
+[[package]]
+name = "sublime_fuzzy"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fa7986063f7c0ab374407e586d7048a3d5aac94f103f751088bf398e07cd5400"
 
 [[package]]
 name = "subtle"

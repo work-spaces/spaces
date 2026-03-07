@@ -190,6 +190,7 @@ fn execute_command(
             force_install_tools,
             keep_workspace_on_failure,
         } => {
+            singleton::set_is_checkout();
             co::checkout_workflow(
                 effective_printer,
                 name,
@@ -218,6 +219,7 @@ fn execute_command(
             locked,
         } => {
             singleton::set_execution_phase(task::Phase::Checkout);
+            singleton::set_is_checkout();
             if locked {
                 singleton::set_use_locks();
             }
@@ -258,6 +260,7 @@ fn execute_command(
             new_branch,
             locked,
         } => {
+            singleton::set_is_checkout();
             if locked {
                 singleton::set_use_locks();
             }

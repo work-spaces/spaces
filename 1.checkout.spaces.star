@@ -51,6 +51,11 @@ rust_add(
     deps = [":spaces0"],
 )
 
+checkout.store_value("rust_version", "1.81")
+
+rust_version = workspace.load_value("rust_version")
+script.print(content = "Rust version: {}".format(rust_version))
+
 coreutils_add_rs_tools("coreutils0", deps = ["rust_toolchain"])
 
 # Add spaces, printer, and archiver source repositories to the workspace

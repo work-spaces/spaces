@@ -464,4 +464,64 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         rules::set_latest_starlark_module_default_visibility(rule::Visibility::Private);
         Ok(NoneType)
     }
+
+    /// Loads a value previously stored with `checkout.store_value()`.
+    ///
+    /// Returns the stored value associated with the given key, or `None` if the key
+    /// does not exist. Values are namespaced by the member path in the workspace.
+    ///
+    /// ```python
+    /// # Load from a specific member URL
+    /// value = workspace.load_value("my_key", url = "https://github.com/example/repo")
+    ///
+    /// # Search all members for the key, returning the first match
+    /// value = workspace.load_value("my_key")
+    /// ```
+    ///
+    /// # Arguments
+    /// * `key`: The string key used when calling `checkout.store_value()`.
+    /// * `url`: Optional member URL to load from. If not specified, searches all members and returns the first match.
+    ///
+    /// # Returns
+    /// * The stored JSON value (string, number, bool, list, dict), or `None` if the key is not found.
+    fn load_value<'v>(
+        key: &str,
+        #[starlark(default = NoneType)] url: Value,
+        eval: &mut Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<Value<'v>> {
+        let workspace_arc =
+            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+        let workspace = workspace_arc.read();
+
+        let json_value = if url.is_none() {
+            // Search all member entries for the key, return the first match
+            workspace
+                .settings
+                .checkout_store
+                .entries
+                .values()
+                .find_map(|entry| entry.values.get(key))
+        } else {
+            let url_str = url
+                .unpack_str()
+                .ok_or_else(|| format_error!("url must be a string, got {}", url.get_type()))?;
+            // Find the entry whose url matches, then look up the key
+            workspace
+                .settings
+                .checkout_store
+                .entries
+                .values()
+                .find(|entry| entry.url.as_ref() == url_str)
+                .and_then(|entry| entry.values.get(key))
+        };
+
+        match json_value {
+            Some(json_value) => {
+                let heap = eval.heap();
+                let alloc_value = heap.alloc(json_value.clone());
+                Ok(alloc_value)
+            }
+            None => Ok(Value::new_none()),
+        }
+    }
 }
