@@ -43,7 +43,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// There is no specific action for the rule, but this rule can be useful for organizing dependencies.
     ///
-    /// This function is not properly named. `target` is not used correctly in this context.
+    /// This function will be deprecated in favor of `run.add_no_exec`.
     ///
     /// ```python
     /// run.add_target(
@@ -277,14 +277,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// ```
     ///
     /// # Arguments
-    /// * `rule`: Rule definition containing `name` (`str`), `deps` (`list`), `platforms` (`list`), `type` (`str`), and `help` (`str`).
+    /// * `rule`: Rule definition containing `name` (`str`), `deps` (`list`), `type` (`str`), and `help` (`str`).
     /// * `clone_from`: The name of an existing rule whose exec will be cloned.
     fn add_from_clone(
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] clone_from: &str,
     ) -> anyhow::Result<NoneType> {
         let mut rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for add_exec_from_clone rule"))?;
+            .context(format_context!("bad options for add_from_clone rule"))?;
 
         if singleton::is_lsp_mode() {
             return Ok(NoneType);
