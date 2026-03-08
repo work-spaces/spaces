@@ -22,6 +22,12 @@ pub struct ChangeDetail {
     pub detail_type: ChangeDetailType,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq)]
+enum HasAnyEntries {
+    No,
+    Yes,
+}
+
 fn changes_logger(progress: &mut printer::MultiProgressBar) -> logger::Logger<'_> {
     logger::Logger::new_progress(progress, "changes".into())
 }
@@ -92,10 +98,12 @@ impl Changes {
         glob_include_path: Arc<str>,
         check_is_modified: CheckIsModified,
         inputs: &glob::Globs,
-    ) -> Vec<walkdir::DirEntry> {
-        walkdir::WalkDir::new(glob_include_path.as_ref())
+    ) -> (Vec<walkdir::DirEntry>, HasAnyEntries) {
+        let mut has_any_entries = HasAnyEntries::No;
+        let entries = walkdir::WalkDir::new(glob_include_path.as_ref())
             .into_iter()
             .filter_entry(|e| {
+                has_any_entries = HasAnyEntries::Yes;
                 filter_update(
                     progress,
                     e,
@@ -109,7 +117,8 @@ impl Changes {
                 )
             })
             .filter_map(|entry| entry.ok())
-            .collect()
+            .collect();
+        (entries, has_any_entries)
     }
 
     pub fn inspect_inputs(
@@ -126,8 +135,12 @@ impl Changes {
                 let input_path = glob::get_glob_path(input.clone());
                 changes_logger(progress)
                     .trace(format!("inspect include input path `{input_path}`").as_str());
-                let walk_dir =
+                let (walk_dir, has_any_entries) =
                     self.walk_glob_dir(progress, input_path, CheckIsModified::No, inputs);
+
+                if has_any_entries == HasAnyEntries::No {
+                    return Err(format_error!("glob includes `{input}` but has no entries"));
+                }
                 for entry in walk_dir.into_iter() {
                     if !entry.file_type().is_dir() {
                         set.insert(entry.path().display().to_string());
@@ -155,15 +168,22 @@ impl Changes {
             let input_path = glob::get_glob_path(input.clone());
             changes_logger(progress).trace(format!("include input path `{input_path}`").as_str());
 
-            let walk_dir = self.walk_glob_dir(progress, input_path, CheckIsModified::Yes, globs);
+            let (walk_dir, has_any_entries) =
+                self.walk_glob_dir(progress, input_path, CheckIsModified::Yes, globs);
 
             changes_logger(progress).trace(format!("walked {} entries", walk_dir.len()).as_str());
 
+            if has_any_entries == HasAnyEntries::No {
+                return Err(format_error!("glob includes `{input}` but has no entries"));
+            }
+
+            let mut has_any_file_entries = HasAnyEntries::No;
             for entry in walk_dir.into_iter() {
                 if entry.file_type().is_dir() {
                     continue;
                 }
 
+                has_any_file_entries = HasAnyEntries::Yes;
                 let path = entry.path();
                 let path_string: Arc<str> = path.to_string_lossy().into();
                 changes_logger(progress).trace(format!("process {}", path.display()).as_str());
@@ -176,6 +196,12 @@ impl Changes {
                 }
 
                 progress.increment(1);
+            }
+
+            if has_any_file_entries == HasAnyEntries::No {
+                return Err(format_error!(
+                    "glob includes `{input}` but has no file entries (only the parent directory"
+                ));
             }
 
             if count > 0 {

@@ -193,7 +193,9 @@ pub fn execute_rule(
             workspace
                 .write()
                 .update_changes(&mut progress, &dep_globs)
-                .context(format_context!("Failed to update workspace changes"))?;
+                .context(format_context!(
+                    "[{rule_name}] Failed to update workspace changes"
+                ))?;
 
             task_logger(&mut progress, name.clone()).debug("check for new digest");
 
@@ -205,9 +207,7 @@ pub fn execute_rule(
                     task.digest.as_ref(),
                     &dep_globs[..],
                 )
-                .context(format_context!(
-                    "Failed to check deps globs for {rule_name}"
-                ))?;
+                .context(format_context!("[{rule_name}] Failed to check deps globs"))?;
 
             // digest has not changed
             if !check_changes.is_changed {
@@ -279,7 +279,7 @@ pub fn execute_rule(
                     || {
                         task.executor
                             .execute(progress, workspace.clone(), &rule_name)
-                            .context(format_context!("Failed to exec {}", name))
+                            .context(format_context!("[{rule_name}] Failed to exec"))
                     },
                     || task.rule.get_target_paths(),
                 );
@@ -292,7 +292,7 @@ pub fn execute_rule(
                     Some(Err(err)) => {
                         cache_status =
                             workspace::CacheStatus::Executed(effective_rule_digest.clone());
-                        Err(err).context(format_context!("while executing {rule_name}"))
+                        Err(err).context(format_context!("[{rule_name}] while executing/caching"))
                     }
                     None => {
                         cache_status =
@@ -303,7 +303,7 @@ pub fn execute_rule(
             } else {
                 task.executor
                     .execute(progress, workspace.clone(), &rule_name)
-                    .context(format_context!("Failed to exec {}", name))
+                    .context(format_context!("[{rule_name}] Failed to exec"))
             }
         };
 
