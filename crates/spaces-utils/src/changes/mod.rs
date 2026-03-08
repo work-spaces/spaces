@@ -193,7 +193,7 @@ impl Changes {
         input.strip_prefix("./").unwrap_or(input)
     }
 
-    pub fn get_digest(
+    pub fn calculate_digest(
         &self,
         progress: &mut printer::MultiProgressBar,
         seed: &str,

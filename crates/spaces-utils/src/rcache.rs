@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 const ARTIFACT_CACHE_DIR: &str = "artifacts";
 const RULE_DIGEST_CACHE_DIR: &str = "rule_digests";
+const STAGE_CACHE_DIR: &str = "stage";
 
 fn get_artifact_cache_path(cache_path: &std::path::Path, artifact: &str) -> std::path::PathBuf {
     cache_path.join(ARTIFACT_CACHE_DIR).join(artifact)
@@ -37,8 +38,45 @@ fn save_artifact_to_cache(
             ))?;
         }
 
-        // save the artifact to the cache
-        reflink_copy::reflink_or_copy(artifact_path, path_in_cache)?;
+        // save the artifact to a staged path first
+        let stage_dir = cache_path.join(STAGE_CACHE_DIR);
+        std::fs::create_dir_all(&stage_dir).context(format_context!(
+            "Failed to create stage directory for cache entry"
+        ))?;
+        let staged_path = stage_dir.join(&artifact_hash);
+        reflink_copy::reflink_or_copy(artifact_path, &staged_path).with_context(|| {
+            format_context!(
+                "Failed to copy artifact to staged cache path {}",
+                staged_path.display()
+            )
+        })?;
+
+        // verify the staged file hash matches the expected hash
+        let staged_contents = std::fs::read(&staged_path).with_context(|| {
+            format_context!(
+                "Failed to read staged cache artifact {}",
+                staged_path.display()
+            )
+        })?;
+        let staged_hash = blake3::hash(&staged_contents).to_string();
+        if staged_hash != artifact_hash {
+            let _ = std::fs::remove_file(&staged_path);
+            return Err(anyhow::anyhow!(format_context!(
+                "Hash mismatch for staged artifact {}: expected {} but got {}",
+                staged_path.display(),
+                artifact_hash,
+                staged_hash
+            )));
+        }
+
+        // hash verified - rename staged file to final cache path
+        std::fs::rename(&staged_path, &path_in_cache).with_context(|| {
+            format_context!(
+                "Failed to rename staged cache file {} to {}",
+                staged_path.display(),
+                path_in_cache.display()
+            )
+        })?;
 
         let artifact_metadata = std::fs::metadata(artifact_path)
             .with_context(|| format_context!("Failed to get metadata for {artifact_path:?}"))?;

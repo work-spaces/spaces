@@ -4,7 +4,7 @@ use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use utils::{age, environment, lock, logger, rule, store, ws};
+use utils::{age, environment, inputs, lock, logger, rule, store, ws};
 
 pub const WORKFLOW_TOML_NAME: &str = "workflows.spaces.toml";
 pub const SHELL_TOML_NAME: &str = "shell.spaces.toml";
@@ -1042,26 +1042,21 @@ impl Workspace {
         rule_name: &str,
         seed: &str,
         globs: &[rule::Globs],
-    ) -> anyhow::Result<Option<Arc<str>>> {
+    ) -> anyhow::Result<inputs::IsChanged> {
         let changes_globs = rule::Globs::to_changes_globs(globs);
         let digest = self
             .settings
             .bin
             .changes
-            .get_digest(progress, seed, &changes_globs)
+            .calculate_digest(progress, seed, &changes_globs)
             .context(format_context!("Failed to get digest for rule {rule_name}"))?;
 
-        let is_changed_result = self
-            .settings
-            .bin
-            .inputs
-            .is_changed(rule_name, digest)
-            .context(format_context!("Failed to check if rule inputs changed"))?;
+        let is_changed = self.settings.bin.inputs.is_changed(rule_name, digest);
 
         logger(progress)
-            .debug(format!("Rule {rule_name} inputs changed: {is_changed_result:?}",).as_str());
+            .debug(format!("Rule {rule_name} inputs changed: {is_changed:?}",).as_str());
 
-        Ok(is_changed_result)
+        Ok(is_changed)
     }
 
     pub fn save_bin(&self, printer: &mut printer::Printer) -> anyhow::Result<()> {

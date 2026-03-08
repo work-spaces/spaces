@@ -197,7 +197,7 @@ pub fn execute_rule(
 
             task_logger(&mut progress, name.clone()).debug("check for new digest");
 
-            let digest = workspace
+            let check_changes = workspace
                 .read()
                 .is_rule_deps_changed(
                     &mut progress,
@@ -208,13 +208,24 @@ pub fn execute_rule(
                 .context(format_context!(
                     "Failed to check deps globs for {rule_name}"
                 ))?;
-            if digest.is_none() {
-                // the digest has not changed - not need to execute
-                skip_execute_message = Some("skipping: same deps globs".into());
+
+            // digest has not changed
+            if !check_changes.is_changed {
+                if task.rule.uses_rule_cache() {
+                    // always run the rule cache even if inputs
+                    // are the same, rule cache will restore targets
+                    // if the user has manually deleted them
+                    Some(check_changes.digest)
+                } else {
+                    skip_execute_message = Some("skipping: same deps globs".into());
+                    None
+                }
+            } else {
+                let digest = check_changes.digest;
+                task_logger(&mut progress, name.clone())
+                    .debug(format!("New digest for {rule_name}={digest}").as_str());
+                Some(digest)
             }
-            task_logger(&mut progress, name.clone())
-                .debug(format!("New digest for {rule_name}={digest:?}").as_str());
-            digest
         } else {
             None
         };
@@ -234,18 +245,15 @@ pub fn execute_rule(
             .clone()
             .unwrap_or_else(|| task.digest.clone());
 
-        // Determine the initial cache_status:
-        // - If dep_globs is empty, the cache is not used for this rule -> None
-        // - If we have a skip_execute_message, the rule was skipped -> Skipped(digest)
-        // - Otherwise it will be updated below during execution
-        let mut cache_status = if dep_globs.is_empty() {
-            workspace::CacheStatus::None
-        } else {
-            workspace::CacheStatus::Skipped(effective_rule_digest.clone())
-        };
-
+        let mut cache_status = workspace::CacheStatus::None;
         progress.reset_elapsed();
         let task_result = if let Some(message) = skip_execute_message.as_ref() {
+            if task.rule.uses_rule_cache()
+                && let Some(digest) = updated_digest.clone()
+            {
+                cache_status = workspace::CacheStatus::Skipped(digest);
+            }
+
             if task.rule.type_ == Some(rule::RuleType::Setup) {
                 progress.set_ending_message_none();
             } else {
@@ -253,13 +261,9 @@ pub fn execute_rule(
             }
             Ok(executor::TaskResult::new())
         } else {
-            // Rule is actually executing - default to Executed unless rcache restores
-            if !dep_globs.is_empty() {
-                cache_status = workspace::CacheStatus::Executed(effective_rule_digest.clone());
-            }
             let store_path = ws::get_checkout_store_path_as_path();
             let cache_path = ws::get_rcache_path(&store_path);
-            if task.rule.has_targets()
+            if task.rule.uses_rule_cache()
                 && let Some(targets) = task.rule.targets.as_ref()
             {
                 // if the rule defines targets, the rule is run through
@@ -288,7 +292,7 @@ pub fn execute_rule(
                     Some(Err(err)) => {
                         cache_status =
                             workspace::CacheStatus::Executed(effective_rule_digest.clone());
-                        Err(err)
+                        Err(err).context(format_context!("while executing {rule_name}"))
                     }
                     None => {
                         cache_status =

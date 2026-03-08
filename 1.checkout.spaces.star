@@ -49,6 +49,7 @@ rust_add(
     "rust_toolchain",
     version = "1.80",
     deps = [":spaces0"],
+    rust_toolchain_toml_dir = "//spaces",
 )
 
 coreutils_add_rs_tools("coreutils0", deps = ["rust_toolchain"])

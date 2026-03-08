@@ -157,7 +157,8 @@ impl Rule {
         Ok(())
     }
 
-    pub fn has_targets(&self) -> bool {
+    pub fn uses_rule_cache(&self) -> bool {
+        // if the rule has targets, it uses the rule cache
         self.targets
             .as_ref()
             .is_some_and(|targets| !targets.is_empty())
