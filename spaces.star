@@ -27,6 +27,7 @@ ANNOTATED_INPUTS = [
     "-//spaces/target/**",
     "+//printer/**/*.rs",
     "+//archiver/**/*.rs",
+    "+//spaces/rust-toolchain.toml",
 ]
 
 run_add_exec(
