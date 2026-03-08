@@ -177,11 +177,13 @@ impl Changes {
                 return Err(format_error!("glob includes `{input}` but has no entries"));
             }
 
+            let mut has_any_file_entries = HasAnyEntries::No;
             for entry in walk_dir.into_iter() {
                 if entry.file_type().is_dir() {
                     continue;
                 }
 
+                has_any_file_entries = HasAnyEntries::Yes;
                 let path = entry.path();
                 let path_string: Arc<str> = path.to_string_lossy().into();
                 changes_logger(progress).trace(format!("process {}", path.display()).as_str());
@@ -194,6 +196,12 @@ impl Changes {
                 }
 
                 progress.increment(1);
+            }
+
+            if has_any_file_entries == HasAnyEntries::No {
+                return Err(format_error!(
+                    "glob includes `{input}` but has no file entries (only the parent directory"
+                ));
             }
 
             if count > 0 {
