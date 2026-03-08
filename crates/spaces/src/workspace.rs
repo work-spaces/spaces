@@ -66,11 +66,14 @@ pub enum CacheStatus {
     /// No cache status available (legacy metrics entries or cache not used for this rule)
     #[default]
     None,
-    /// The rule was skipped (platform, cancelled, optional, unchanged deps)
+    /// The rule was skipped (platform, cancelled, optional, unchanged deps); payload is the
+    /// rule digest used for caching this rule.
     Skipped(Arc<str>),
-    /// The rule was executed (cache miss or no caching)
+    /// The rule was executed (cache miss or no caching); payload is the rule digest used for
+    /// caching this rule.
     Executed(Arc<str>),
-    /// The rule outputs were restored from the rule cache
+    /// The rule outputs were restored from the rule cache; payload is the rule digest used for
+    /// caching this rule.
     Restored(Arc<str>),
 }
 
