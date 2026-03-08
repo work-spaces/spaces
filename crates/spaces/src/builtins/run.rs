@@ -2,7 +2,7 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use starlark::{environment::GlobalsBuilder, values::none::NoneType};
 
-use utils::{rule, targets};
+use utils::{logger, rule, targets};
 
 use crate::{executor, rules, singleton, task};
 
@@ -39,14 +39,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         }
     }
 
-    /// Adds a rule that depends on other rules.
+    /// Adds a rule that depends on other rules but doesn't execute any command.
     ///
     /// There is no specific action for the rule, but this rule can be useful for organizing dependencies.
     ///
-    /// This function will be deprecated in favor of `run.add_no_exec`.
-    ///
     /// ```python
-    /// run.add_target(
+    /// run.add(
     ///     rule = {
     ///         "name": "my_rule",
     ///         "deps": ["my_other_rule"],
@@ -56,9 +54,37 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// # Arguments
     /// * `rule`: Rule definition containing `name` (`str`), `deps` (`list`), `platforms` (`list`), `type` (`str`), and `help` (`str`).
+    fn add(#[starlark(require = named)] rule: starlark::values::Value) -> anyhow::Result<NoneType> {
+        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+            .context(format_context!("bad options for add target rule"))?;
+
+        add_rule_to_all(&rule)
+            .context(format_context!("Internal Error: Failed to add rule to all"))?;
+
+        let rule_name = rule.name.clone();
+        rules::insert_task(task::Task::new(
+            rule,
+            task::Phase::Run,
+            executor::Task::Target,
+        ))
+        .context(format_context!("Failed to insert task {rule_name}"))?;
+        Ok(NoneType)
+    }
+
+    /// Adds a rule that depends on other rules.
+    ///
+    /// This rule will be deprecated in favor of `run.add`.
+    ///
+    /// # Arguments
+    /// * `rule`: Rule definition containing `name` (`str`), `deps` (`list`), `platforms` (`list`), `type` (`str`), and `help` (`str`).
     fn add_target(
         #[starlark(require = named)] rule: starlark::values::Value,
     ) -> anyhow::Result<NoneType> {
+        logger::push_deprecation_warning(
+            rules::get_latest_starlark_module(),
+            "Support for checkout.add_which_asset() will be removed in v0.16. Use checkout.add_any_asset().",
+        );
+
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for add target rule"))?;
 
