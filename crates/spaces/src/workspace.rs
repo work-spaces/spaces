@@ -4,7 +4,7 @@ use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use utils::{age, environment, lock, logger, rule, store, ws};
+use utils::{age, environment, inputs, lock, logger, rule, store, ws};
 
 pub const WORKFLOW_TOML_NAME: &str = "workflows.spaces.toml";
 pub const SHELL_TOML_NAME: &str = "shell.spaces.toml";
@@ -61,9 +61,38 @@ fn logger(progress: &mut printer::MultiProgressBar) -> logger::Logger<'_> {
     logger::Logger::new_progress(progress, "workspace".into())
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub enum CacheStatus {
+    /// No cache status available (legacy metrics entries or cache not used for this rule)
+    #[default]
+    None,
+    /// The rule was skipped (platform, cancelled, optional, unchanged deps); payload is the
+    /// rule digest used for caching this rule.
+    Skipped(Arc<str>),
+    /// The rule was executed (cache miss or no caching); payload is the rule digest used for
+    /// caching this rule.
+    Executed(Arc<str>),
+    /// The rule outputs were restored from the rule cache; payload is the rule digest used for
+    /// caching this rule.
+    Restored(Arc<str>),
+}
+
+impl std::fmt::Display for CacheStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CacheStatus::None => write!(f, "None"),
+            CacheStatus::Skipped(digest) => write!(f, "Skipped({digest})"),
+            CacheStatus::Executed(digest) => write!(f, "Executed({digest})"),
+            CacheStatus::Restored(digest) => write!(f, "Restored({digest})"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuleMetrics {
     elapsed_time: f64,
+    #[serde(default)]
+    cache_status: CacheStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -256,11 +285,17 @@ impl Workspace {
         }
     }
 
-    pub fn update_rule_metrics(&mut self, rule_name: &str, elapsed_time: std::time::Duration) {
+    pub fn update_rule_metrics(
+        &mut self,
+        rule_name: &str,
+        elapsed_time: std::time::Duration,
+        cache_status: CacheStatus,
+    ) {
         self.rule_metrics.insert(
             rule_name.into(),
             RuleMetrics {
                 elapsed_time: elapsed_time.as_secs_f64(),
+                cache_status,
             },
         );
     }
@@ -1007,26 +1042,21 @@ impl Workspace {
         rule_name: &str,
         seed: &str,
         globs: &[rule::Globs],
-    ) -> anyhow::Result<Option<Arc<str>>> {
+    ) -> anyhow::Result<inputs::IsChanged> {
         let changes_globs = rule::Globs::to_changes_globs(globs);
         let digest = self
             .settings
             .bin
             .changes
-            .get_digest(progress, seed, &changes_globs)
+            .calculate_digest(progress, seed, &changes_globs)
             .context(format_context!("Failed to get digest for rule {rule_name}"))?;
 
-        let is_changed_result = self
-            .settings
-            .bin
-            .inputs
-            .is_changed(rule_name, digest)
-            .context(format_context!("Failed to check if rule inputs changed"))?;
+        let is_changed = self.settings.bin.inputs.is_changed(rule_name, digest);
 
         logger(progress)
-            .debug(format!("Rule {rule_name} inputs changed: {is_changed_result:?}",).as_str());
+            .debug(format!("Rule {rule_name} inputs changed: {is_changed:?}",).as_str());
 
-        Ok(is_changed_result)
+        Ok(is_changed)
     }
 
     pub fn save_bin(&self, printer: &mut printer::Printer) -> anyhow::Result<()> {

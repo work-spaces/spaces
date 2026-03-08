@@ -10,6 +10,7 @@ load("//@star/packages/star/spaces-cli.star", "spaces_add_star_formatter", "spac
 load("//@star/packages/star/starship.star", "starship_add_bash")
 load(
     "//@star/sdk/star/checkout.star",
+    "checkout_add_exec",
     "checkout_add_hard_link_asset",
     "checkout_add_repo",
     "checkout_update_asset",
@@ -49,6 +50,23 @@ rust_add(
     "rust_toolchain",
     version = "1.80",
     deps = [":spaces0"],
+    # Needs spaces v0.15.28 running in CI first
+    #rust_toolchain_toml_dir = "//spaces",
+)
+
+STORE_PATH = info_get_path_to_store()
+
+checkout_add_exec(
+    "rustup_show",
+    working_directory = "//spaces",
+    command = "rustup",
+    args = ["show"],
+    env = {
+        "PATH": "{}/cargo/bin".format(STORE_PATH),
+        "CARGO_HOME": "{}/cargo".format(STORE_PATH),
+        "RUSTUP_HOME": "{}/rustup".format(STORE_PATH),
+    },
+    deps = [":rust_toolchain"],
 )
 
 coreutils_add_rs_tools("coreutils0", deps = ["rust_toolchain"])

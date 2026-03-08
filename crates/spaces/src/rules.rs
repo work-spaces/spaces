@@ -197,7 +197,7 @@ pub fn execute_rule(
 
             task_logger(&mut progress, name.clone()).debug("check for new digest");
 
-            let digest = workspace
+            let check_changes = workspace
                 .read()
                 .is_rule_deps_changed(
                     &mut progress,
@@ -208,13 +208,24 @@ pub fn execute_rule(
                 .context(format_context!(
                     "Failed to check deps globs for {rule_name}"
                 ))?;
-            if digest.is_none() {
-                // the digest has not changed - not need to execute
-                skip_execute_message = Some("skipping: same deps globs".into());
+
+            // digest has not changed
+            if !check_changes.is_changed {
+                if task.rule.uses_rule_cache() {
+                    // always run the rule cache even if inputs
+                    // are the same, rule cache will restore targets
+                    // if the user has manually deleted them
+                    Some(check_changes.digest)
+                } else {
+                    skip_execute_message = Some("skipping: same deps globs".into());
+                    None
+                }
+            } else {
+                let digest = check_changes.digest;
+                task_logger(&mut progress, name.clone())
+                    .debug(format!("New digest for {rule_name}={digest}").as_str());
+                Some(digest)
             }
-            task_logger(&mut progress, name.clone())
-                .debug(format!("New digest for {rule_name}={digest:?}").as_str());
-            digest
         } else {
             None
         };
@@ -230,8 +241,19 @@ pub fn execute_rule(
         // time how long it takes to execute the task
         let start_time = std::time::Instant::now();
 
+        let effective_rule_digest: Arc<str> = updated_digest
+            .clone()
+            .unwrap_or_else(|| task.digest.clone());
+
+        let mut cache_status = workspace::CacheStatus::None;
         progress.reset_elapsed();
         let task_result = if let Some(message) = skip_execute_message.as_ref() {
+            if task.rule.uses_rule_cache()
+                && let Some(digest) = updated_digest.clone()
+            {
+                cache_status = workspace::CacheStatus::Skipped(digest);
+            }
+
             if task.rule.type_ == Some(rule::RuleType::Setup) {
                 progress.set_ending_message_none();
             } else {
@@ -241,22 +263,18 @@ pub fn execute_rule(
         } else {
             let store_path = ws::get_checkout_store_path_as_path();
             let cache_path = ws::get_rcache_path(&store_path);
-            if task.rule.has_targets()
+            if task.rule.uses_rule_cache()
                 && let Some(targets) = task.rule.targets.as_ref()
             {
                 // if the rule defines targets, the rule is run through
                 // the rule cache engine
 
-                let effective_digest = updated_digest
-                    .clone()
-                    .unwrap_or_else(|| task.digest.clone());
-
                 task_logger(&mut progress, name.clone())
-                    .debug(format!("rcache digest {effective_digest}").as_str());
+                    .debug(format!("rcache digest {effective_rule_digest}").as_str());
 
                 let task_result_option = rcache::execute(
                     cache_path.as_ref(),
-                    effective_digest,
+                    effective_rule_digest.clone(),
                     targets.as_slice(),
                     || {
                         task.executor
@@ -266,9 +284,21 @@ pub fn execute_rule(
                     || task.rule.get_target_paths(),
                 );
                 match task_result_option {
-                    Some(Ok(result)) => Ok(result),
-                    Some(Err(err)) => Err(err),
-                    None => Ok(executor::TaskResult::new()),
+                    Some(Ok(result)) => {
+                        cache_status =
+                            workspace::CacheStatus::Executed(effective_rule_digest.clone());
+                        Ok(result)
+                    }
+                    Some(Err(err)) => {
+                        cache_status =
+                            workspace::CacheStatus::Executed(effective_rule_digest.clone());
+                        Err(err).context(format_context!("while executing {rule_name}"))
+                    }
+                    None => {
+                        cache_status =
+                            workspace::CacheStatus::Restored(effective_rule_digest.clone());
+                        Ok(executor::TaskResult::new())
+                    }
                 }
             } else {
                 task.executor
@@ -280,7 +310,7 @@ pub fn execute_rule(
         let elapsed_time = start_time.elapsed();
         workspace
             .write()
-            .update_rule_metrics(&rule_name, elapsed_time);
+            .update_rule_metrics(&rule_name, elapsed_time, cache_status.clone());
 
         if task_result.is_ok()
             && let Some(digest) = updated_digest
@@ -294,12 +324,15 @@ pub fn execute_rule(
                 duration: elapsed_time,
                 file: if skip_execute_message.is_some() {
                     "<skipped>".into()
+                } else if matches!(cache_status, workspace::CacheStatus::Restored(_)) {
+                    "<restored>".into()
                 } else if singleton::get_is_logging_disabled() {
                     "<logging disabled>".into()
                 } else {
                     workspace.read().get_log_file(&rule_name)
                 },
                 status: executor::exec::Expect::Success,
+                cache_status,
             };
 
             let state = get_state().read();
@@ -334,6 +367,7 @@ pub struct LogStatus {
     pub status: executor::exec::Expect,
     pub duration: std::time::Duration,
     pub file: Arc<str>,
+    pub cache_status: workspace::CacheStatus,
 }
 
 #[derive(Debug)]
