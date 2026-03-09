@@ -2,7 +2,7 @@ use crate::{completions, evaluator, executor, rules, task, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use std::sync::Arc;
-use utils::{ci, git, labels, lock, logger, shell, store, version, ws};
+use utils::{ci, git, labels, lock, logger, logs, shell, store, version, ws};
 
 use crate::{lsp_context, singleton};
 use itertools::Itertools;
@@ -51,6 +51,7 @@ fn get_workspace(
     absolute_path_to_workspace: Option<Arc<str>>,
     is_clear_inputs: workspace::IsClearInputs,
     is_checkout_phase: workspace::IsCheckoutPhase,
+    is_create_log_folder: workspace::IsCreateLogFolder,
 ) -> anyhow::Result<workspace::Workspace> {
     let checkout_scripts: Option<Vec<Arc<str>>> = match &run_workspace {
         RunWorkspace::Target(_, _) => None,
@@ -66,6 +67,7 @@ fn get_workspace(
         is_clear_inputs,
         checkout_scripts,
         is_checkout_phase,
+        is_create_log_folder,
     )
     .context(format_context!("while running workspace"))
 }
@@ -110,6 +112,7 @@ pub fn foreach_repo(
         None,
         workspace::IsClearInputs::No,
         workspace::IsCheckoutPhase::No,
+        workspace::IsCreateLogFolder::Yes,
     )
     .context(format_context!("while getting workspace"))?;
 
@@ -231,6 +234,7 @@ pub fn run_shell_in_workspace(
         None,
         workspace::IsClearInputs::No,
         workspace::IsCheckoutPhase::No,
+        workspace::IsCreateLogFolder::No,
     )
     .context(format_context!("while getting workspace"))?;
 
@@ -307,6 +311,7 @@ pub fn run_store_command_in_workspace(
         None,
         workspace::IsClearInputs::No,
         workspace::IsCheckoutPhase::No,
+        workspace::IsCreateLogFolder::No,
     );
     let store_path_str = match workspace_result {
         Ok(workspace) => workspace.get_store_path(),
@@ -348,6 +353,27 @@ pub fn run_store_command_in_workspace(
     Ok(())
 }
 
+pub fn run_logs_command_in_workspace(
+    printer: &mut printer::Printer,
+    logs_command: logs::LogsCommand,
+) -> anyhow::Result<()> {
+    let workspace = get_workspace(
+        printer,
+        RunWorkspace::Target(None, vec![]),
+        None,
+        workspace::IsClearInputs::No,
+        workspace::IsCheckoutPhase::No,
+        workspace::IsCreateLogFolder::No,
+    )
+    .context(format_context!(
+        "Logs command must be run from within a workspace"
+    ))?;
+
+    let workspace_path = std::path::Path::new(workspace.absolute_path.as_ref());
+    logs::execute(printer, workspace_path, logs_command)
+        .context(format_context!("Failed to run logs command"))
+}
+
 pub fn run_version_command_in_workspace(
     printer: &mut printer::Printer,
     command: version::Command,
@@ -358,6 +384,7 @@ pub fn run_version_command_in_workspace(
         None,
         workspace::IsClearInputs::No,
         workspace::IsCheckoutPhase::No,
+        workspace::IsCreateLogFolder::No,
     );
     let store_path_str = match workspace_result {
         Ok(workspace) => workspace.get_store_path(),
@@ -489,12 +516,18 @@ pub fn run_starlark_modules_in_workspace(
     } else {
         workspace::IsCheckoutPhase::No
     };
+    let is_create_log_folder = if phase == task::Phase::Checkout || phase == task::Phase::Run {
+        workspace::IsCreateLogFolder::Yes
+    } else {
+        workspace::IsCreateLogFolder::No
+    };
     let workspace = get_workspace(
         printer,
         run_workspace.clone(),
         absolute_path_to_workspace,
         is_clear_inputs,
         is_checkout_phase,
+        is_create_log_folder,
     )
     .context(format_context!("while getting workspace"))?;
 
@@ -522,6 +555,7 @@ pub fn run_lsp(printer: &mut printer::Printer) -> anyhow::Result<()> {
             workspace::IsClearInputs::No,
             None,
             workspace::IsCheckoutPhase::No,
+            workspace::IsCreateLogFolder::No,
         )
         .context(format_context!("while running workspace"))?
     };

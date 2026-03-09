@@ -3,7 +3,7 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
 use std::{io::IsTerminal, sync::Arc};
-use utils::{ci, git, shell, store, version};
+use utils::{ci, git, logs, shell, store, version};
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
 pub enum Level {
@@ -619,6 +619,11 @@ fn execute_command(
             tools::handle_command(effective_printer, command)
                 .context(format_context!("Failed to handle tool command"))?;
         }
+        Commands::Logs { command } => {
+            effective_printer.verbosity.is_show_progress_bars = false;
+            runner::run_logs_command_in_workspace(effective_printer, command)
+                .context(format_context!("Failed to run logs command"))?
+        }
         Commands::Store { command } => {
             if effective_printer.verbosity.level > printer::Level::Info {
                 effective_printer.verbosity.level = printer::Level::Info;
@@ -959,6 +964,12 @@ create-lock-file = false # optionally create a lock file
         /// Include all run targets in completions not just those with help populated
         #[arg(long)]
         all_targets: bool,
+    },
+    /// Query the status of rules from the logs.
+    Logs {
+        /// The logs command to run.
+        #[command(subcommand)]
+        command: logs::LogsCommand,
     },
     /// Commands for managing the spaces store (cache).
     Store {

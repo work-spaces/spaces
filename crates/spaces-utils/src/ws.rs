@@ -14,6 +14,7 @@ const CHECKOUT_STORE_FILE_NAME: &str = ".spaces/store.spaces.json";
 const BIN_SETTINGS_FILE_NAME: &str = "build/workspace.settings.4.spaces";
 pub const SPACES_WORKSPACE_ENV_VAR: &str = "SPACES_WORKSPACE";
 const SPACES_HOME_ENV_VAR: &str = "SPACES_HOME";
+const SPACES_RCACHE_PATH_ENV_VAR: &str = "SPACES_ENV_RCACHE_PATH";
 
 fn logger(progress: &mut printer::MultiProgressBar) -> logger::Logger<'_> {
     logger::Logger::new_progress(progress, "ws".into())
@@ -38,6 +39,12 @@ pub fn get_spaces_tools_path(store_path: &str) -> Arc<str> {
 }
 
 pub fn get_rcache_path(store_path: &std::path::Path) -> Arc<std::path::Path> {
+    if let Ok(rcache_path) = std::env::var(SPACES_RCACHE_PATH_ENV_VAR) {
+        let trimmed = rcache_path.trim();
+        if !trimmed.is_empty() {
+            return std::path::Path::new(trimmed).into();
+        }
+    }
     store_path.join(store::SPACES_STORE_RCACHE).into()
 }
 

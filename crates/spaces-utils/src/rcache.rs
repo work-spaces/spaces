@@ -6,6 +6,33 @@ use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub enum CacheStatus {
+    /// No cache status available (legacy metrics entries or cache not used for this rule)
+    #[default]
+    None,
+    /// The rule was skipped (platform, cancelled, optional, unchanged deps); payload is the
+    /// rule digest used for caching this rule.
+    Skipped(Arc<str>),
+    /// The rule was executed (cache miss or no caching); payload is the rule digest used for
+    /// caching this rule.
+    Executed(Arc<str>),
+    /// The rule outputs were restored from the rule cache; payload is the rule digest used for
+    /// caching this rule.
+    Restored(Arc<str>),
+}
+
+impl std::fmt::Display for CacheStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CacheStatus::None => write!(f, "None"),
+            CacheStatus::Skipped(digest) => write!(f, "Skipped({digest})"),
+            CacheStatus::Executed(digest) => write!(f, "Executed({digest})"),
+            CacheStatus::Restored(digest) => write!(f, "Restored({digest})"),
+        }
+    }
+}
+
 const ARTIFACT_CACHE_DIR: &str = "artifacts";
 const RULE_DIGEST_CACHE_DIR: &str = "rule_digests";
 const STAGE_CACHE_DIR: &str = "stage";

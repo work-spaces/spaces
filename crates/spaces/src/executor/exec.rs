@@ -4,8 +4,9 @@ use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use strum::Display;
-use utils::{lock, logger};
+use utils::{lock, logger, rule};
+
+pub use rule::Expect;
 
 #[derive(Debug, Clone, Default)]
 struct State {
@@ -41,13 +42,6 @@ fn get_process_id(rule: &str) -> Option<u32> {
     state.processes.get(rule).copied()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default, Display)]
-pub enum Expect {
-    Failure,
-    #[default]
-    Success,
-    Any,
-}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Exec {
