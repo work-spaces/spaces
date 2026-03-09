@@ -491,11 +491,13 @@ impl Git {
 
         let mut member = match self.get_member() {
             Ok(mut member) => {
-                let latest_tag =
-                    git::get_latest_tag(progress, &self.url, &self.spaces_key).context(
-                        format_context!("Failed to get latest tag for {}", self.spaces_key),
-                    )?;
-                member.version = Self::rev_to_version(latest_tag.clone());
+                if member.version.is_none() {
+                    let latest_tag =
+                        git::get_latest_tag(progress, &self.url, &self.spaces_key).context(
+                            format_context!("Failed to get latest tag for {}", self.spaces_key),
+                        )?;
+                    member.version = Self::rev_to_version(latest_tag.clone());
+                }
                 Some(member)
             }
             Err(_) => {
