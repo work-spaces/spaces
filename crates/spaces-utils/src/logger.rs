@@ -75,6 +75,20 @@ impl Logger<'_> {
         self.log(printer::Level::Info, message);
     }
 
+    pub fn app(&mut self, message: &str) {
+        self.log(printer::Level::App, message);
+    }
+
+    pub fn raw(&mut self, message: &str) {
+        let _ = match &mut self.printer {
+            Printer::Printer(printer) => printer.raw(message),
+            Printer::Progress(progress) => {
+                progress.log(printer::Level::App, message);
+                Ok(())
+            }
+        };
+    }
+
     pub fn warning(&mut self, message: &str) {
         let deferred = format!("[{}] {message}", self.label);
         push_deferred_warning(deferred.into());

@@ -11,6 +11,7 @@ pub mod inputs;
 pub mod labels;
 pub mod lock;
 pub mod logger;
+pub mod logs;
 pub mod platform;
 pub mod rcache;
 pub mod rule;

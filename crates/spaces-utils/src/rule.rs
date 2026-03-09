@@ -4,6 +4,7 @@ use printer::markdown;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use strum::Display;
 
 pub use deps::{AnyDep, Deps, Globs};
 
@@ -338,4 +339,12 @@ impl Rule {
 
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default, Display)]
+pub enum Expect {
+    Failure,
+    #[default]
+    Success,
+    Any,
 }

@@ -3,12 +3,12 @@ use crate::{executor, singleton, task, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use utils::{changes::glob, targets};
 
-use utils::{environment, graph, labels, lock, logger, platform, rcache, rule, ws};
+use utils::{environment, graph, labels, lock, logger, logs, platform, rcache, rule, ws};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum HasHelp {
@@ -319,7 +319,7 @@ pub fn execute_rule(
         }
 
         {
-            let mut log_status = LogStatus {
+            let mut log_status = logs::Status {
                 name: rule_name.clone(),
                 duration: elapsed_time,
                 file: if skip_execute_message.is_some() {
@@ -331,16 +331,16 @@ pub fn execute_rule(
                 } else {
                     workspace.read().get_log_file(&rule_name)
                 },
-                status: executor::exec::Expect::Success,
+                status: logs::Expect::Success,
                 cache_status,
             };
 
             let state = get_state().read();
             let mut tasks = state.tasks.write();
             if task_result.is_ok() {
-                log_status.status = executor::exec::Expect::Success;
+                log_status.status = logs::Expect::Success;
             } else {
-                log_status.status = executor::exec::Expect::Failure;
+                log_status.status = logs::Expect::Failure;
                 // Cancel all pending tasks - exit gracefully
                 for task in tasks.values_mut() {
                     task.phase = task::Phase::Cancelled;
@@ -361,15 +361,6 @@ pub fn execute_rule(
     })
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct LogStatus {
-    pub name: Arc<str>,
-    pub status: executor::exec::Expect,
-    pub duration: std::time::Duration,
-    pub file: Arc<str>,
-    pub cache_status: workspace::CacheStatus,
-}
-
 #[derive(Debug)]
 pub struct State {
     pub tasks: lock::StateLock<HashMap<Arc<str>, task::Task>>,
@@ -379,7 +370,7 @@ pub struct State {
     pub latest_starlark_module: Option<Arc<str>>,
     pub default_module_visibility: rule::Visibility,
     pub all_modules: HashSet<Arc<str>>,
-    pub log_status: lock::StateLock<Vec<LogStatus>>,
+    pub log_status: lock::StateLock<Vec<logs::Status>>,
 }
 
 impl State {
@@ -1290,7 +1281,7 @@ pub fn export_log_status(workspace: WorkspaceArc) -> anyhow::Result<()> {
     let state = get_state().read();
     let log_status = state.log_status.read().clone();
     let log_output_folder = workspace.read().log_directory.clone();
-    let log_status_file_output = format!("{log_output_folder}/log_status.json");
+    let log_status_file_output = format!("{log_output_folder}/{}", logs::LOG_STATUS_FILE_NAME);
     let content = serde_json::to_string_pretty(&log_status)
         .context(format_context!("Failed to serialize log status"))?;
     std::fs::write(log_status_file_output.as_str(), content).context(format_context!(

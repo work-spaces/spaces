@@ -4,7 +4,9 @@ use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use utils::{age, environment, inputs, lock, logger, rule, store, ws};
+use utils::{age, environment, inputs, lock, logger, rcache, rule, store, ws};
+
+pub use rcache::CacheStatus;
 
 pub const WORKFLOW_TOML_NAME: &str = "workflows.spaces.toml";
 pub const SHELL_TOML_NAME: &str = "shell.spaces.toml";
@@ -51,6 +53,12 @@ impl From<bool> for IsClearInputs {
     }
 }
 
+#[derive(Copy, Clone, PartialEq)]
+pub enum IsCreateLogFolder {
+    No,
+    Yes,
+}
+
 pub type WorkspaceArc = std::sync::Arc<lock::StateLock<Workspace>>;
 
 fn logger_printer(printer: &mut printer::Printer) -> logger::Logger<'_> {
@@ -59,33 +67,6 @@ fn logger_printer(printer: &mut printer::Printer) -> logger::Logger<'_> {
 
 fn logger(progress: &mut printer::MultiProgressBar) -> logger::Logger<'_> {
     logger::Logger::new_progress(progress, "workspace".into())
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub enum CacheStatus {
-    /// No cache status available (legacy metrics entries or cache not used for this rule)
-    #[default]
-    None,
-    /// The rule was skipped (platform, cancelled, optional, unchanged deps); payload is the
-    /// rule digest used for caching this rule.
-    Skipped(Arc<str>),
-    /// The rule was executed (cache miss or no caching); payload is the rule digest used for
-    /// caching this rule.
-    Executed(Arc<str>),
-    /// The rule outputs were restored from the rule cache; payload is the rule digest used for
-    /// caching this rule.
-    Restored(Arc<str>),
-}
-
-impl std::fmt::Display for CacheStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CacheStatus::None => write!(f, "None"),
-            CacheStatus::Skipped(digest) => write!(f, "Skipped({digest})"),
-            CacheStatus::Executed(digest) => write!(f, "Executed({digest})"),
-            CacheStatus::Restored(digest) => write!(f, "Restored({digest})"),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -453,6 +434,7 @@ impl Workspace {
         is_clear_inputs: IsClearInputs,
         input_script_names: Option<Vec<Arc<str>>>,
         is_checkout_phase: IsCheckoutPhase,
+        is_create_log_folder: IsCreateLogFolder,
     ) -> anyhow::Result<Self> {
         let date = chrono::Local::now();
 
@@ -581,19 +563,21 @@ impl Workspace {
         let log_folder_name = format!("logs_{}", date.format("%Y%m%d-%H-%M-%S"));
         let log_directory: Arc<str> = format!("{}/{log_folder_name}", ws::SPACES_LOGS_NAME).into();
 
-        std::fs::create_dir_all(log_directory.as_ref()).context(format_context!(
-            "Failed to create log folder {log_directory}",
-        ))?;
+        if is_create_log_folder == IsCreateLogFolder::Yes {
+            std::fs::create_dir_all(log_directory.as_ref()).context(format_context!(
+                "Failed to create log folder {log_directory}",
+            ))?;
 
-        // Create or update a "latest" symlink pointing to the new log directory
-        let latest_symlink = format!("{}/latest", ws::SPACES_LOGS_NAME);
-        let latest_path = std::path::Path::new(latest_symlink.as_str());
-        // Remove existing symlink if it exists (ignore errors if it doesn't)
-        let _ = symlink::remove_symlink_auto(latest_path);
-        symlink::symlink_dir(&log_folder_name, latest_path).context(format_context!(
-            "Failed to create latest symlink in {}",
-            ws::SPACES_LOGS_NAME
-        ))?;
+            // Create or update a "latest" symlink pointing to the new log directory
+            let latest_symlink = format!("{}/latest", ws::SPACES_LOGS_NAME);
+            let latest_path = std::path::Path::new(latest_symlink.as_str());
+            // Remove existing symlink if it exists (ignore errors if it doesn't)
+            let _ = symlink::remove_symlink_auto(latest_path);
+            symlink::symlink_dir(&log_folder_name, latest_path).context(format_context!(
+                "Failed to create latest symlink in {}",
+                ws::SPACES_LOGS_NAME
+            ))?;
+        }
 
         // load the modules scanned from the workspace
         for module_path in settings.json.scanned_modules.iter() {
