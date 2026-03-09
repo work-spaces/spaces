@@ -265,7 +265,9 @@ pub fn execute(
                     .query_member(&rule_name, &member, is_json)
                     .context(format_context!("Failed to query member"))?;
                 logs_logger(printer).raw(&value);
-                logs_logger(printer).raw("\n");
+                if is_json == IsJson::Yes {
+                    logs_logger(printer).raw("\n");
+                }
             } else {
                 let status = rules_status
                     .rules
@@ -273,19 +275,20 @@ pub fn execute(
                     .find(|s| s.name.as_ref() == rule_name.as_ref())
                     .ok_or_else(|| format_error!("Rule '{}' not found in log status", rule_name))?;
 
-                let output = if json {
-                    serde_json::to_string(status).context(format_context!(
+                if json {
+                    let output = serde_json::to_string(status).context(format_context!(
                         "Failed to serialize status for rule '{}'",
                         rule_name
-                    ))?
+                    ))?;
+                    logs_logger(printer).raw(&output);
+                    logs_logger(printer).raw("\n");
                 } else {
-                    serde_yaml::to_string(status).context(format_context!(
+                    let output = serde_yaml::to_string(status).context(format_context!(
                         "Failed to serialize status for rule '{}'",
                         rule_name
-                    ))?
+                    ))?;
+                    logs_logger(printer).raw(&output);
                 };
-                logs_logger(printer).raw(&output);
-                logs_logger(printer).raw("\n");
             }
 
             Ok(())
