@@ -40,7 +40,10 @@ pub fn get_spaces_tools_path(store_path: &str) -> Arc<str> {
 
 pub fn get_rcache_path(store_path: &std::path::Path) -> Arc<std::path::Path> {
     if let Ok(rcache_path) = std::env::var(SPACES_RCACHE_PATH_ENV_VAR) {
-        return std::path::Path::new(&rcache_path).into();
+        let trimmed = rcache_path.trim();
+        if !trimmed.is_empty() {
+            return std::path::Path::new(trimmed).into();
+        }
     }
     store_path.join(store::SPACES_STORE_RCACHE).into()
 }
