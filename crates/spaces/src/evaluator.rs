@@ -633,6 +633,9 @@ fn execute_tasks(
         task::Phase::Checkout => {
             star_logger(printer).message("--Post Checkout Phase--");
 
+            rules::export_log_status(workspace.clone())
+                .context(format_context!("Failed to export log status"))?;
+
             rules::update_target_dependency_graph(printer, None).context(format_context!(
                 "Failed to update target dependency graph for {target:?}"
             ))?;
