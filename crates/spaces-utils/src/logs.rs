@@ -3,6 +3,21 @@ use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+fn parse_timestamp(value: &str) -> Result<Arc<str>, String> {
+    if value.is_empty() {
+        return Err("timestamp cannot be empty".to_string());
+    }
+    if !value
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return Err(format!(
+            "invalid timestamp '{value}': only [A-Za-z0-9_-] characters are allowed"
+        ));
+    }
+    Ok(value.into())
+}
+
 pub use crate::rcache::CacheStatus;
 pub use crate::rule::Expect;
 use crate::{logger, ws};
@@ -99,7 +114,7 @@ pub enum LogsCommand {
     /// List all log folders that contain a log_status.json file, or list rule names for a specific timestamp.
     List {
         /// A timestamp to list rule names from (e.g. 20250308-20-05-28 or "latest")
-        #[arg(long)]
+        #[arg(long, value_parser = parse_timestamp)]
         timestamp: Option<Arc<str>>,
         /// Print output as JSON on a single line
         #[arg(long)]
@@ -116,7 +131,7 @@ pub enum LogsCommand {
         #[arg(long)]
         json: bool,
         /// Use a specific log timestamp instead of latest (e.g. 20250308-20-05-28)
-        #[arg(long)]
+        #[arg(long, value_parser = parse_timestamp)]
         timestamp: Option<Arc<str>>,
     },
 }
@@ -139,6 +154,8 @@ pub fn execute(
             if let Some(ts) = &timestamp {
                 let logs_dir = if ts.as_ref() == "latest" {
                     logs_path.join("latest")
+                } else if ts.starts_with("logs_") {
+                    logs_path.join(ts.as_ref())
                 } else {
                     logs_path.join(format!("logs_{ts}"))
                 };
@@ -186,7 +203,10 @@ pub fn execute(
                 if json {
                     let names: Vec<String> = dirs
                         .iter()
-                        .map(|e| e.file_name().to_string_lossy().into_owned())
+                        .map(|e| {
+                            let name = e.file_name().to_string_lossy().into_owned();
+                            name.strip_prefix("logs_").map(String::from).unwrap_or(name)
+                        })
                         .collect();
                     let output = serde_json::to_string(&names)
                         .context(format_context!("Failed to serialize log folder names"))?;
@@ -195,7 +215,10 @@ pub fn execute(
                 } else {
                     let entries: Vec<_> = dirs
                         .iter()
-                        .map(|e| e.file_name().to_string_lossy().to_string())
+                        .map(|e| {
+                            let name = e.file_name().to_string_lossy().to_string();
+                            name.strip_prefix("logs_").map(String::from).unwrap_or(name)
+                        })
                         .collect();
                     let as_yaml = serde_yaml::to_string(&entries).context(format_context!(
                         "Failed to serialize log folder names as YAML"
@@ -213,9 +236,13 @@ pub fn execute(
             timestamp,
         } => {
             let logs_dir = if let Some(ts) = &timestamp {
-                workspace_path
-                    .join(ws::SPACES_LOGS_NAME)
-                    .join(format!("logs_{ts}"))
+                if ts.starts_with("logs_") {
+                    workspace_path.join(ws::SPACES_LOGS_NAME).join(ts.as_ref())
+                } else {
+                    workspace_path
+                        .join(ws::SPACES_LOGS_NAME)
+                        .join(format!("logs_{ts}"))
+                }
             } else {
                 workspace_path.join(ws::SPACES_LOGS_NAME).join("latest")
             };

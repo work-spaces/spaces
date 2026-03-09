@@ -112,7 +112,7 @@ pub fn foreach_repo(
         None,
         workspace::IsClearInputs::No,
         workspace::IsCheckoutPhase::No,
-        workspace::IsCreateLogFolder::No,
+        workspace::IsCreateLogFolder::Yes,
     )
     .context(format_context!("while getting workspace"))?;
 
