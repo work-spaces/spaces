@@ -116,17 +116,20 @@ impl Rule {
                 }
             }
 
-            if !includes.is_empty() || !excludes.is_empty() {
-                let mut globs = Vec::new();
-                if !includes.is_empty() {
-                    globs.push(AnyDep::Glob(Globs::Includes(includes)));
-                }
-                if !excludes.is_empty() {
-                    globs.push(AnyDep::Glob(Globs::Excludes(excludes)));
-                }
-
-                Deps::push_any_deps(&mut self.deps, globs);
+            let mut globs = Vec::new();
+            if !includes.is_empty() {
+                globs.push(AnyDep::Glob(Globs::Includes(includes)));
             }
+            if !excludes.is_empty() {
+                globs.push(AnyDep::Glob(Globs::Excludes(excludes)));
+            }
+            // When inputs was present but empty, we still need an empty
+            // Includes glob so the digest path is entered (run-once semantic).
+            if globs.is_empty() {
+                globs.push(AnyDep::Glob(Globs::Includes(Vec::new())));
+            }
+
+            Deps::push_any_deps(&mut self.deps, globs);
         }
 
         // update deps: sanitize rule names and glob vectors
