@@ -13,7 +13,8 @@ const CHECKOUT_FILE_NAME: &str = ".spaces/checkout.spaces.json";
 const CHECKOUT_STORE_FILE_NAME: &str = ".spaces/store.spaces.json";
 const BIN_SETTINGS_FILE_NAME: &str = "build/workspace.settings.4.spaces";
 pub const SPACES_WORKSPACE_ENV_VAR: &str = "SPACES_WORKSPACE";
-const SPACES_HOME_ENV_VAR: &str = "SPACES_HOME";
+const SPACES_HOME_ENV_VAR: &str = "SPACES_ENV_HOME";
+const SPACES_HOME_LEGACY_ENV_VAR: &str = "SPACES_HOME";
 const SPACES_RCACHE_PATH_ENV_VAR: &str = "SPACES_ENV_RCACHE_PATH";
 
 fn logger(progress: &mut printer::MultiProgressBar) -> logger::Logger<'_> {
@@ -22,6 +23,19 @@ fn logger(progress: &mut printer::MultiProgressBar) -> logger::Logger<'_> {
 
 pub fn get_checkout_store_path() -> Arc<str> {
     if let Ok(spaces_home) = std::env::var(SPACES_HOME_ENV_VAR) {
+        if std::env::var(SPACES_HOME_LEGACY_ENV_VAR).is_ok() {
+            logger::push_deprecation_warning(
+                None,
+                "SPACES_HOME is deprecated and will be removed in v0.16. Use SPACES_ENV_HOME instead. SPACES_ENV_HOME takes precedence.",
+            );
+        }
+        return format!("{spaces_home}/{}", store::SPACES_STORE).into();
+    }
+    if let Ok(spaces_home) = std::env::var(SPACES_HOME_LEGACY_ENV_VAR) {
+        logger::push_deprecation_warning(
+            None,
+            "SPACES_HOME is deprecated and will be removed in v0.16. Use SPACES_ENV_HOME instead.",
+        );
         return format!("{spaces_home}/{}", store::SPACES_STORE).into();
     }
     if let Ok(Some(home_path)) = homedir::my_home() {
