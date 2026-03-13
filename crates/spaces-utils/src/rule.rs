@@ -123,7 +123,7 @@ impl Rule {
             if !excludes.is_empty() {
                 globs.push(AnyDep::Glob(Globs::Excludes(excludes)));
             }
-            // When inputs was present but empty, we still need an empty
+            // When the `inputs` field was present but empty, we still need an empty
             // Includes glob so the digest path is entered (run-once semantic).
             if globs.is_empty() {
                 globs.push(AnyDep::Glob(Globs::Includes(Vec::new())));
