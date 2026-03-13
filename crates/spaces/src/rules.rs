@@ -217,7 +217,7 @@ pub fn execute_rule(
                     // if the user has manually deleted them
                     Some(check_changes.digest)
                 } else {
-                    skip_execute_message = Some("skipping: same deps globs".into());
+                    skip_execute_message = Some("skipping: file deps unchanged".into());
                     None
                 }
             } else {
@@ -735,9 +735,20 @@ impl State {
             let mut tasks = self.tasks.write();
             for node in topo_sorted.iter() {
                 let task_name = self.graph.get_task(*node);
-                if let Some(task_mut) = tasks.get_mut(task_name) {
-                    let digest = task_mut.calculate_digest();
-                    task_mut.digest = digest.to_string().into();
+                let task = tasks.get(task_name).cloned();
+                if let Some(task) = task {
+                    let mut task_hasher = blake3::Hasher::new();
+                    task_hasher.update(task.calculate_digest().as_bytes());
+                    let mut rule_deps = task.collect_rule_deps();
+                    rule_deps.sort();
+                    for dep in rule_deps {
+                        if let Some(dep_task) = tasks.get(&dep) {
+                            task_hasher.update(dep_task.digest.as_bytes());
+                        }
+                    }
+                    if let Some(task_mut) = tasks.get_mut(task_name) {
+                        task_mut.digest = task_hasher.finalize().to_string().into();
+                    }
                 }
             }
         }
