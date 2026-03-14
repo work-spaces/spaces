@@ -37,7 +37,7 @@ spaces_add_devutils(
     system_paths = ["/usr/bin", "/bin"],
 )
 
-spaces_add_star_formatter("star_formatter", configure_zed = True, deps = ["spaces0"])
+spaces_add_star_formatter("star_formatter", configure_zed = True, deps = [":spaces0"])
 
 if not info_is_ci():
     SHORTCUTS = {
