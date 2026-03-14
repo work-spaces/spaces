@@ -394,7 +394,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let sanitized_rule_name = rules::get_sanitized_rule_name(rule_name.into());
 
         Ok(format!(
-            "build/{sanitized_rule_name}/{}",
+            "//build/{sanitized_rule_name}/{}",
             create_archive.get_output_file()
         ))
     }

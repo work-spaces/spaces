@@ -269,12 +269,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         );
 
         let target_path = format!(
-            "build/{}/{}",
+            "//build/{}/{}",
             rules::get_sanitized_rule_name(rule_name.clone()),
             create_archive.get_output_file()
         )
         .into();
-        rule.push_target(targets::Target::Directory(target_path));
+        rule.push_target(targets::Target::File(target_path));
 
         let archive = executor::archive::Archive { create_archive };
 
