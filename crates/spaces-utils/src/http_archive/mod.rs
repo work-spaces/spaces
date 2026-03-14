@@ -1018,6 +1018,7 @@ mod tests {
     // -------------------------------------------------------
 
     #[test]
+    #[ignore]
     fn test_download_string_rejects_html_response() {
         // https://example.com always serves a small HTML page with Content-Type: text/html
         let result = download_string("https://the-internet.herokuapp.com/");
@@ -1033,6 +1034,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_download_rejects_html_content_type() {
         // Use the async `download` function which checks Content-Type on the response.
         // https://example.com returns text/html.
@@ -1074,6 +1076,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_download_rejects_soft_404_html_page() {
         // GitHub returns a 200 + HTML page for URLs that look valid but
         // point to a non-existent release asset. We use a URL that is
