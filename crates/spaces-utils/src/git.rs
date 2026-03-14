@@ -205,12 +205,10 @@ pub fn execute_git_command(
 ) -> anyhow::Result<Option<String>> {
     use std::ops::DerefMut;
 
-    let mut last_error: Option<anyhow::Error> = None;
-
     for attempt in 0..=GIT_MAX_RETRIES {
         if attempt > 0 {
             let wait = git_backoff_duration(attempt - 1);
-            url_logger(progress_bar, url).warning(
+            url_logger(progress_bar, url).debug(
                 format!("Retry attempt {attempt}/{GIT_MAX_RETRIES} after {wait:?}").as_str(),
             );
             std::thread::sleep(wait);
@@ -287,7 +285,7 @@ pub fn execute_git_command(
             }
             Err(err) => {
                 if attempt < GIT_MAX_RETRIES && is_retryable_git_error(&err) {
-                    url_logger(progress_bar, url).warning(
+                    url_logger(progress_bar, url).debug(
                         format!(
                             "Transient network error (attempt {}/{}): {err:#}",
                             attempt + 1,
@@ -295,7 +293,6 @@ pub fn execute_git_command(
                         )
                         .as_str(),
                     );
-                    last_error = Some(err);
                     continue;
                 }
                 return Err(err);
@@ -303,9 +300,9 @@ pub fn execute_git_command(
         }
     }
 
-    Err(last_error.unwrap_or_else(|| {
-        format_error!("git command for {url} failed after {GIT_MAX_RETRIES} retries")
-    }))
+    Err(format_error!(
+        "git command for {url} failed after {GIT_MAX_RETRIES} retries"
+    ))
 }
 
 pub fn get_commit_hash(
