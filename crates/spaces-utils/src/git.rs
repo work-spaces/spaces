@@ -113,6 +113,7 @@ fn git_backoff_duration(attempt: u32) -> std::time::Duration {
 /// - Common network/transport error patterns in the error message
 fn is_retryable_git_error(error: &anyhow::Error) -> bool {
     let error_string = format!("{error:#}");
+    let lower_error = error_string.to_lowercase();
 
     // Check for exit code 74 (EX_IOERR) — commonly a network I/O error
     if error_string.contains("exit code: 74") {
@@ -125,53 +126,51 @@ fn is_retryable_git_error(error: &anyhow::Error) -> bool {
 
     // Network-related patterns found in git stderr output
     let network_patterns = [
-        "Could not resolve host",
+        "could not resolve host",
         "unable to access",
-        "Connection refused",
-        "Connection timed out",
-        "Connection reset by peer",
-        "SSL_ERROR",
-        "SSL_connect",
-        "OpenSSL",
+        "connection refused",
+        "connection timed out",
+        "connection reset by peer",
+        "ssl_error",
+        "ssl_connect",
+        "openssl",
         "gnutls",
-        "Failed to connect",
-        "Couldn't connect to server",
-        "The requested URL returned error: 5", // 5xx server errors
-        "The requested URL returned error: 429", // rate limiting
+        "failed to connect",
+        "couldn't connect to server",
+        "the requested url returned error: 5", // 5xx server errors
+        "the requested url returned error: 429", // rate limiting
         "couldn't connect to host",
-        "Failed to connect to",
-        "Network is unreachable",
-        "No route to host",
-        "Operation timed out",
+        "failed to connect to",
+        "network is unreachable",
+        "no route to host",
+        "operation timed out",
         "name or service not known",
-        "Temporary failure in name resolution",
-        "early EOF",
+        "temporary failure in name resolution",
+        "early eof",
         "index-pack failed",
-        "RPC failed",
+        "rpc failed",
         "unexpected disconnect",
         "transfer closed",
         "the remote end hung up unexpectedly",
     ];
 
     if is_exit_128 {
-        let lower = error_string.to_lowercase();
         for pattern in &network_patterns {
-            if lower.contains(&pattern.to_lowercase()) {
+            if lower_error.contains(pattern) {
                 return true;
             }
         }
     }
 
     // Also check for network patterns regardless of exit code (e.g. exit code 56, etc.)
-    let lower = error_string.to_lowercase();
     for pattern in &[
         "the remote end hung up unexpectedly",
-        "early EOF",
-        "RPC failed",
+        "early eof",
+        "rpc failed",
         "unexpected disconnect",
         "transfer closed",
     ] {
-        if lower.contains(&pattern.to_lowercase()) {
+        if lower_error.contains(pattern) {
             return true;
         }
     }
