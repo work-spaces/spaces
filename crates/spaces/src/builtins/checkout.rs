@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use starlark::environment::GlobalsBuilder;
 use starlark::values::none::NoneType;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU32;
 use utils::{changes, environment, git, http_archive, logger, platform, rule};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -943,10 +944,9 @@ fn add_http_archive(
 
         archive.sha256 = if archive.sha256.starts_with("http") {
             // download the sha256 file
-            http_archive::download_string(&archive.sha256).context(format_context!(
-                "Failed to download sha256 file {}",
-                archive.sha256
-            ))?
+            http_archive::download_string(&archive.sha256, Arc::new(AtomicU32::new(0))).context(
+                format_context!("Failed to download sha256 file {}", archive.sha256),
+            )?
         } else {
             archive.sha256
         };
