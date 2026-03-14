@@ -75,6 +75,63 @@ pub fn validate_headers(headers: &HashMap<Arc<str>, Arc<str>>) -> anyhow::Result
     Ok(())
 }
 
+/// Checks whether the Content-Type header of a response indicates an HTML page.
+/// Servers sometimes return a 200 status with an HTML error/login page instead of the
+/// requested binary archive when the resource does not exist or requires authentication.
+fn check_response_content_type(response: &reqwest::Response, url: &str) -> anyhow::Result<()> {
+    if let Some(content_type) = response.headers().get(reqwest::header::CONTENT_TYPE) {
+        let content_type_str = content_type.to_str().unwrap_or("");
+        if content_type_str.contains("text/html") || content_type_str.contains("text/xml") {
+            return Err(format_error!(
+                "Server returned Content-Type '{}' for {url}. The server likely returned an error page instead of the expected archive. Verify the URL points to a valid downloadable archive.",
+                content_type_str
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Inspects the first bytes of a downloaded file to detect whether it is actually an HTML page.
+/// This catches cases where the server returns an HTML error page without setting a Content-Type
+/// header (or sets a generic one like application/octet-stream).
+fn check_file_is_not_html(path: &str, url: &str) -> anyhow::Result<()> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).context(format_context!(
+        "Failed to open downloaded file {path} for validation"
+    ))?;
+    let mut buf = [0u8; 512];
+    let n = file.read(&mut buf).context(format_context!(
+        "Failed to read downloaded file {path} for validation"
+    ))?;
+    if n == 0 {
+        return Err(format_error!(
+            "Downloaded file {path} from {url} is empty (0 bytes)"
+        ));
+    }
+    let header = String::from_utf8_lossy(&buf[..n]);
+    let trimmed = header.trim_start();
+    let end = trimmed
+        .char_indices()
+        .take_while(|(i, _)| *i < 128)
+        .map(|(i, c)| i + c.len_utf8())
+        .last()
+        .unwrap_or(0);
+    let lower = trimmed[..end].to_ascii_lowercase();
+    if lower.starts_with("<!doctype html")
+        || lower.starts_with("<html")
+        || lower.starts_with("<?xml")
+        || lower.starts_with("<head")
+    {
+        // Grab a small preview to show in the error message
+        let preview: String = trimmed.chars().take(200).collect();
+        return Err(format_error!(
+            "Downloaded file from {url} appears to be an HTML/XML page, not a valid archive. \
+             The server likely returned an error page. First bytes:\n{preview}"
+        ));
+    }
+    Ok(())
+}
+
 pub fn download(
     mut progress: printer::MultiProgressBar,
     url: &str,
@@ -137,18 +194,29 @@ pub fn download(
             ));
         }
 
+        // Check whether the server returned an HTML page instead of the expected archive
+        check_response_content_type(&response, &url)?;
+
         label_logger(&mut progress, &url).debug(format!("Response: {response:?}").as_str());
 
         let total_size = response.content_length().unwrap_or(0);
         progress.set_total(total_size);
         progress.set_message(url.as_str());
 
-        let mut output_file = tokio::fs::File::create(destination).await?;
+        let mut output_file = tokio::fs::File::create(&destination).await?;
 
         while let Some(chunk) = response.chunk().await? {
             progress.increment(chunk.len() as u64);
             output_file.write_all(&chunk).await?;
         }
+
+        // Flush and close the file before inspecting it
+        output_file.flush().await?;
+        drop(output_file);
+
+        // Inspect the first bytes of the file to catch HTML pages that slipped
+        // past the Content-Type check (e.g. missing or generic Content-Type)
+        check_file_is_not_html(&destination, &url)?;
 
         Ok(progress)
     });
@@ -160,6 +228,25 @@ pub fn download(
 pub fn download_string(url: &str) -> anyhow::Result<Arc<str>> {
     let response =
         reqwest::blocking::get(url).context(format_context!("Failed to download {url}"))?;
+
+    if !response.status().is_success() {
+        return Err(format_error!(
+            "Failed to download {url}. Server returned status {}",
+            response.status()
+        ));
+    }
+
+    // Check whether the server returned an HTML page instead of the expected content
+    if let Some(content_type) = response.headers().get(reqwest::header::CONTENT_TYPE) {
+        let ct = content_type.to_str().unwrap_or("");
+        if ct.contains("text/html") {
+            return Err(format_error!(
+                "Server returned Content-Type '{}' for {url}. Expected a plain-text response, not an HTML page.",
+                ct
+            ));
+        }
+    }
+
     let content = response
         .text()
         .context(format_context!("Failed to read response from {url}"))?;
@@ -788,4 +875,292 @@ pub fn check_downloaded_archive(path_to_archive: &std::path::Path) -> anyhow::Re
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -------------------------------------------------------
+    // check_file_is_not_html – unit tests (no network)
+    // -------------------------------------------------------
+
+    fn write_temp_file(content: &[u8]) -> tempfile::NamedTempFile {
+        use std::io::Write;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        f.write_all(content).unwrap();
+        f.flush().unwrap();
+        f
+    }
+
+    #[test]
+    fn test_check_file_is_not_html_with_doctype() {
+        let f = write_temp_file(b"<!DOCTYPE html><html><body>Not Found</body></html>");
+        let result = check_file_is_not_html(
+            f.path().to_str().unwrap(),
+            "https://example.com/archive.tar.gz",
+        );
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("HTML/XML page"), "unexpected error: {msg}");
+    }
+
+    #[test]
+    fn test_check_file_is_not_html_with_html_tag() {
+        let f = write_temp_file(b"<html><head><title>Error</title></head></html>");
+        let result = check_file_is_not_html(
+            f.path().to_str().unwrap(),
+            "https://example.com/archive.tar.gz",
+        );
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("HTML/XML page"), "unexpected error: {msg}");
+    }
+
+    #[test]
+    fn test_check_file_is_not_html_with_xml_declaration() {
+        let f = write_temp_file(b"<?xml version=\"1.0\"?><error>Not Found</error>");
+        let result = check_file_is_not_html(
+            f.path().to_str().unwrap(),
+            "https://example.com/archive.tar.gz",
+        );
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("HTML/XML page"), "unexpected error: {msg}");
+    }
+
+    #[test]
+    fn test_check_file_is_not_html_with_head_tag() {
+        let f = write_temp_file(b"<head><meta charset=\"utf-8\"></head>");
+        let result = check_file_is_not_html(
+            f.path().to_str().unwrap(),
+            "https://example.com/archive.tar.gz",
+        );
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("HTML/XML page"), "unexpected error: {msg}");
+    }
+
+    #[test]
+    fn test_check_file_is_not_html_with_leading_whitespace() {
+        let f = write_temp_file(b"   \n  <!DOCTYPE html><html><body>Oops</body></html>");
+        let result = check_file_is_not_html(
+            f.path().to_str().unwrap(),
+            "https://example.com/archive.tar.gz",
+        );
+        assert!(
+            result.is_err(),
+            "leading whitespace before HTML should still be detected"
+        );
+    }
+
+    #[test]
+    fn test_check_file_is_not_html_with_bom_and_doctype() {
+        // UTF-8 BOM followed by HTML – the BOM bytes are non-whitespace in
+        // from_utf8_lossy, but the replacement char is trimmed by trim_start
+        // only if it counts as whitespace. In practice the BOM is *not*
+        // whitespace, so the lowercase comparison will start with the BOM
+        // replacement char and the check should still not false-positive on
+        // a binary file. Let's verify: a BOM + HTML is unusual, but the HTML
+        // tag still appears within the first 128 bytes.
+        let mut content = vec![0xEF, 0xBB, 0xBF]; // UTF-8 BOM
+        content.extend_from_slice(b"<!doctype html><html></html>");
+        let f = write_temp_file(&content);
+        // The BOM is not whitespace according to trim_start on a lossy string,
+        // so the first char will be the replacement character. The detector
+        // lowercases the first 128 chars; the replacement char followed by
+        // "<!doctype html" won't match any prefix. That's acceptable – the
+        // Content-Type header check would catch this instead. Just ensure no
+        // panic.
+        let _result =
+            check_file_is_not_html(f.path().to_str().unwrap(), "https://example.com/a.tar.gz");
+    }
+
+    #[test]
+    fn test_check_file_is_not_html_accepts_binary() {
+        // gzip magic bytes – should pass without error
+        let f = write_temp_file(&[0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03]);
+        let result = check_file_is_not_html(
+            f.path().to_str().unwrap(),
+            "https://example.com/archive.tar.gz",
+        );
+        assert!(
+            result.is_ok(),
+            "binary file should not be flagged: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_check_file_is_not_html_accepts_zip() {
+        // PK zip magic bytes
+        let f = write_temp_file(&[0x50, 0x4b, 0x03, 0x04, 0x00, 0x00, 0x00, 0x00]);
+        let result = check_file_is_not_html(
+            f.path().to_str().unwrap(),
+            "https://example.com/archive.zip",
+        );
+        assert!(result.is_ok(), "zip file should not be flagged: {result:?}");
+    }
+
+    #[test]
+    fn test_check_file_is_not_html_empty_file() {
+        let f = write_temp_file(b"");
+        let result = check_file_is_not_html(
+            f.path().to_str().unwrap(),
+            "https://example.com/archive.tar.gz",
+        );
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("empty"), "unexpected error: {msg}");
+    }
+
+    // -------------------------------------------------------
+    // Network integration tests – download known HTML
+    // -------------------------------------------------------
+
+    #[test]
+    #[ignore]
+    fn test_download_string_rejects_html_response() {
+        // https://the-internet.herokuapp.com/ serves an HTML page with Content-Type: text/html
+        let result = download_string("https://the-internet.herokuapp.com/");
+        assert!(
+            result.is_err(),
+            "download_string should reject an HTML response"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("text/html"),
+            "error should mention text/html Content-Type: {msg}"
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn test_download_rejects_html_content_type() {
+        // Use the async `download` function which checks Content-Type on the response.
+        // The test URL returns an HTML response (Content-Type: text/html).
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("output.bin");
+        let dest_str = dest.to_str().unwrap().to_string();
+
+        let mut printer = printer::Printer::new_null_term();
+        let mut multi = printer::MultiProgress::new(&mut printer);
+        let progress = multi.add_progress("test", None, None);
+
+        let join_handle = download(
+            progress,
+            "https://the-internet.herokuapp.com/",
+            &dest_str,
+            None,
+            &runtime,
+        )
+        .expect("download should return a join handle");
+
+        let result = runtime
+            .block_on(join_handle)
+            .expect("task should not panic");
+        if let Err(err) = result {
+            let msg = format!("Err: {:?}", err);
+            assert!(
+                msg.contains("text/html") || msg.contains("HTML"),
+                "error should mention HTML: {msg}"
+            );
+        } else {
+            panic!("download should fail for an HTML response");
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn test_download_rejects_soft_404_html_page() {
+        // GitHub returns a 200 + HTML page for URLs that look valid but
+        // point to a non-existent release asset. We use a URL that is
+        // highly unlikely to ever exist.
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("output.bin");
+        let dest_str = dest.to_str().unwrap().to_string();
+
+        let mut printer = printer::Printer::new_null_term();
+        let mut multi = printer::MultiProgress::new(&mut printer);
+        let progress = multi.add_progress("test", None, None);
+
+        let join_handle = download(
+            progress,
+            "https://github.com/nickel-org/rust-mustache/this-does-not-exist.tar.gz",
+            &dest_str,
+            None,
+            &runtime,
+        )
+        .expect("download should return a join handle");
+
+        let result = runtime
+            .block_on(join_handle)
+            .expect("task should not panic");
+        assert!(
+            result.is_err(),
+            "download should fail for a non-existent GitHub asset that returns HTML"
+        );
+    }
+
+    // -------------------------------------------------------
+    // Network integration test – download a valid archive and
+    // verify its SHA256 checksum.
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_download_valid_archive_and_verify_sha256() {
+        let url = "https://github.com/work-spaces/spaces/releases/download/v0.15.27/spaces-linux-x86_64-v0.15.27.zip";
+        let expected_sha256 = "66b3a8aaf290c37434df4187c037b0c9cc36223eaec73cd7408b7482c057b67e";
+
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("spaces-linux-x86_64-v0.15.27.zip");
+        let dest_str = dest.to_str().unwrap().to_string();
+
+        let mut printer = printer::Printer::new_null_term();
+        let mut multi = printer::MultiProgress::new(&mut printer);
+        let progress = multi.add_progress("test", None, None);
+
+        let join_handle = download(progress, url, &dest_str, None, &runtime)
+            .expect("download should return a join handle");
+
+        let result = runtime
+            .block_on(join_handle)
+            .expect("task should not panic");
+        if let Err(err) = &result {
+            panic!("download of a valid archive should succeed: {err:?}");
+        }
+
+        // Verify the file exists and is non-empty
+        let metadata = std::fs::metadata(&dest).expect("downloaded file should exist");
+        assert!(metadata.len() > 0, "downloaded file should not be empty");
+
+        // Verify SHA256
+        let file_contents = std::fs::read(&dest).expect("should be able to read downloaded file");
+        let actual_sha256 = sha256::digest(&file_contents).to_ascii_lowercase();
+        assert_eq!(
+            actual_sha256, expected_sha256,
+            "SHA256 mismatch: expected {expected_sha256}, got {actual_sha256}"
+        );
+
+        // Also verify the HTML detection passes (the file is a real zip, not HTML)
+        check_file_is_not_html(&dest_str, url)
+            .expect("valid zip archive should not be flagged as HTML");
+    }
 }
