@@ -110,7 +110,13 @@ fn check_file_is_not_html(path: &str, url: &str) -> anyhow::Result<()> {
     }
     let header = String::from_utf8_lossy(&buf[..n]);
     let trimmed = header.trim_start();
-    let lower = trimmed[..trimmed.len().min(128)].to_ascii_lowercase();
+    let end = trimmed
+        .char_indices()
+        .take_while(|(i, _)| *i < 128)
+        .map(|(i, c)| i + c.len_utf8())
+        .last()
+        .unwrap_or(0);
+    let lower = trimmed[..end].to_ascii_lowercase();
     if lower.starts_with("<!doctype html")
         || lower.starts_with("<html")
         || lower.starts_with("<?xml")
