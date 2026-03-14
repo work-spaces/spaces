@@ -3,19 +3,18 @@ Spaces starlark checkout/run script to make changes to spaces, printer, and arch
 With VSCode/Zed integration
 """
 
-load("//@star/packages/star/coreutils.star", "coreutils_add_rs_tools")
 load("//@star/packages/star/rust.star", "rust_add")
 load("//@star/packages/star/sccache.star", "sccache_add")
-load("//@star/packages/star/spaces-cli.star", "spaces_add_star_formatter", "spaces_isolate_workspace")
+load("//@star/packages/star/spaces-cli.star", "spaces_add_devutils", "spaces_add_star_formatter")
 load("//@star/packages/star/starship.star", "starship_add_bash")
 load(
     "//@star/sdk/star/checkout.star",
-    "checkout_add_exec",
+    "checkout_add_env_vars",
     "checkout_add_hard_link_asset",
     "checkout_add_repo",
     "checkout_update_asset",
-    "checkout_update_env",
 )
+load("//@star/sdk/star/env.star", "env_assign")
 load(
     "//@star/sdk/star/info.star",
     "info_get_path_to_store",
@@ -31,6 +30,15 @@ load(
 
 SPACES_CHECKOUT_PATH = workspace_get_path_to_checkout()
 
+spaces_add_devutils(
+    "spaces0",
+    "v0.15.28",
+    devutils_version = "devutils-v0.1.5",
+    system_paths = ["/usr/bin", "/bin"],
+)
+
+spaces_add_star_formatter("star_formatter", configure_zed = True, deps = [":spaces0"])
+
 if not info_is_ci():
     SHORTCUTS = {
         "inspect": "spaces inspect",
@@ -41,35 +49,19 @@ if not info_is_ci():
         "format": "spaces run //spaces:format",
     }
 
-    starship_add_bash("starship0", shortcuts = SHORTCUTS)
-
-spaces_isolate_workspace("spaces0", "v0.15.27", system_paths = ["/usr/bin", "/bin"])
-spaces_add_star_formatter("star_formatter", configure_zed = True, deps = ["spaces0"])
+    starship_add_bash(
+        "starship0",
+        shortcuts = SHORTCUTS,
+        install_binary = False,
+        deps = [":spaces0"],
+    )
 
 rust_add(
     "rust_toolchain",
-    version = "1.80",
+    version = "1.93",
     deps = [":spaces0"],
-    # Needs spaces v0.15.28 running in CI first
-    #rust_toolchain_toml_dir = "//spaces",
+    rust_toolchain_toml_dir = "//spaces",
 )
-
-STORE_PATH = info_get_path_to_store()
-
-checkout_add_exec(
-    "rustup_show",
-    working_directory = "//spaces",
-    command = "rustup",
-    args = ["show"],
-    env = {
-        "PATH": "{}/cargo/bin".format(STORE_PATH),
-        "CARGO_HOME": "{}/cargo".format(STORE_PATH),
-        "RUSTUP_HOME": "{}/rustup".format(STORE_PATH),
-    },
-    deps = [":rust_toolchain"],
-)
-
-coreutils_add_rs_tools("coreutils0", deps = ["rust_toolchain"])
 
 # Add spaces, printer, and archiver source repositories to the workspace
 printer_url = "https://github.com/work-spaces/spaces-printer"
@@ -165,10 +157,18 @@ checkout_update_asset(
     },
 )
 
-checkout_update_env(
+checkout_add_env_vars(
     "spaces_env",
-    vars = {
-        "SPACES_PRINTER_SKIP_SDK_CHECKOUT": "TRUE",
-        "SPACES_ARCHIVER_SKIP_SDK_CHECKOUT": "TRUE",
-    },
+    vars = [
+        env_assign(
+            "SPACES_PRINTER_SKIP_SDK_CHECKOUT",
+            "TRUE",
+            help = "Skip SDK checkout for printer",
+        ),
+        env_assign(
+            "SPACES_ARCHIVER_SKIP_SDK_CHECKOUT",
+            "TRUE",
+            help = "Skip SDK checkout for archiver",
+        ),
+    ],
 )
