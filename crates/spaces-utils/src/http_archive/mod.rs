@@ -1020,7 +1020,7 @@ mod tests {
     #[test]
     #[ignore]
     fn test_download_string_rejects_html_response() {
-        // https://example.com always serves a small HTML page with Content-Type: text/html
+        // https://the-internet.herokuapp.com/ serves an HTML page with Content-Type: text/html
         let result = download_string("https://the-internet.herokuapp.com/");
         assert!(
             result.is_err(),
@@ -1037,7 +1037,7 @@ mod tests {
     #[ignore]
     fn test_download_rejects_html_content_type() {
         // Use the async `download` function which checks Content-Type on the response.
-        // https://example.com returns text/html.
+        // The test URL returns an HTML response (Content-Type: text/html).
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .enable_all()
