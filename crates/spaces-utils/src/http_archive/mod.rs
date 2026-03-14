@@ -1063,7 +1063,7 @@ mod tests {
                 "error should mention HTML: {msg}"
             );
         } else {
-            assert!(false, "download should fail for an HTML response");
+            panic!("download should fail for an HTML response");
         }
     }
 
