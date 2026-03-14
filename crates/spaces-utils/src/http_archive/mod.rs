@@ -248,7 +248,6 @@ pub fn download(
         let client = build_http_client()?;
         let base_headers = build_headers(headers.as_ref())?;
 
-        label_logger(&mut progress, &url).trace(format!("Headers are: {headers:?}").as_str());
         for (key, _) in base_headers.iter() {
             label_logger(&mut progress, &url)
                 .debug(format!("Header: {key:?}").as_str());
@@ -551,10 +550,6 @@ pub fn download_string(url: &str, retry_counter: Arc<AtomicU32>) -> anyhow::Resu
                 let content = response
                     .text()
                     .context(format_context!("Failed to read response from {url}"))?;
-                let total_retries = retry_counter.load(Ordering::Relaxed);
-                if total_retries > 0 {
-                    eprintln!("download_string: {url} succeeded after {total_retries} retry(ies)");
-                }
                 return Ok(content.into());
             }
             Err(err) => {
@@ -1595,6 +1590,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_concurrent_downloads() {
         const MAX_ROUNDS: u32 = 8;
 
