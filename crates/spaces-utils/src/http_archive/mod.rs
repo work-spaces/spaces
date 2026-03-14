@@ -346,6 +346,9 @@ pub fn download(
                 ));
             }
 
+            // Check whether the server returned an HTML page instead of the expected archive
+            check_response_content_type(&response, &url)?;
+
             label_logger(&mut progress, &url)
                 .debug(format!("Response: {response:?}").as_str());
 
@@ -471,6 +474,10 @@ pub fn download(
                 }
             }
 
+            // Inspect the first bytes of the file to catch HTML pages that slipped
+            // past the Content-Type check (e.g. missing or generic Content-Type)
+            check_file_is_not_html(&destination, &url)?;
+
             // Download succeeded
             let total_retries = retry_counter.load(Ordering::Relaxed);
             if total_retries > 0 {
@@ -491,43 +498,6 @@ pub fn download(
             return Ok(progress);
         }
 
-        let request = client.get(&url).headers(client_headers);
-
-        label_logger(&mut progress, &url).debug(format!("Reqwest request: {request:?}").as_str());
-
-        let mut response = request.send().await?;
-
-        if !response.status().is_success() {
-            return Err(format_error!(
-                "Failed to download {url}. got response {response:?}"
-            ));
-        }
-
-        // Check whether the server returned an HTML page instead of the expected archive
-        check_response_content_type(&response, &url)?;
-
-        label_logger(&mut progress, &url).debug(format!("Response: {response:?}").as_str());
-
-        let total_size = response.content_length().unwrap_or(0);
-        progress.set_total(total_size);
-        progress.set_message(url.as_str());
-
-        let mut output_file = tokio::fs::File::create(&destination).await?;
-
-        while let Some(chunk) = response.chunk().await? {
-            progress.increment(chunk.len() as u64);
-            output_file.write_all(&chunk).await?;
-        }
-
-        // Flush and close the file before inspecting it
-        output_file.flush().await?;
-        drop(output_file);
-
-        // Inspect the first bytes of the file to catch HTML pages that slipped
-        // past the Content-Type check (e.g. missing or generic Content-Type)
-        check_file_is_not_html(&destination, &url)?;
-
-        Ok(progress)
         // All retries exhausted
         cleanup_partial_download(&destination);
         Err(last_error.unwrap_or_else(|| {
@@ -536,35 +506,6 @@ pub fn download(
     });
 
     Ok(join_handle)
-}
-
-// TODO Add a version of this that uses GH
-pub fn download_string(url: &str) -> anyhow::Result<Arc<str>> {
-    let response =
-        reqwest::blocking::get(url).context(format_context!("Failed to download {url}"))?;
-
-    if !response.status().is_success() {
-        return Err(format_error!(
-            "Failed to download {url}. Server returned status {}",
-            response.status()
-        ));
-    }
-
-    // Check whether the server returned an HTML page instead of the expected content
-    if let Some(content_type) = response.headers().get(reqwest::header::CONTENT_TYPE) {
-        let ct = content_type.to_str().unwrap_or("");
-        if ct.contains("text/html") {
-            return Err(format_error!(
-                "Server returned Content-Type '{}' for {url}. Expected a plain-text response, not an HTML page.",
-                ct
-            ));
-        }
-    }
-
-    let content = response
-        .text()
-        .context(format_context!("Failed to read response from {url}"))?;
-    Ok(content.into())
 }
 
 pub fn download_string(url: &str, retry_counter: Arc<AtomicU32>) -> anyhow::Result<Arc<str>> {
@@ -595,6 +536,17 @@ pub fn download_string(url: &str, retry_counter: Arc<AtomicU32>) -> anyhow::Resu
                     }
                     return Err(format_error!("Failed to download {url}: HTTP {status}"));
                 }
+                // Check whether the server returned an HTML page instead of expected content
+                if let Some(content_type) = response.headers().get(reqwest::header::CONTENT_TYPE) {
+                    let ct = content_type.to_str().unwrap_or("");
+                    if ct.contains("text/html") {
+                        return Err(format_error!(
+                            "Server returned Content-Type '{}' for {url}. Expected a plain-text response, not an HTML page.",
+                            ct
+                        ));
+                    }
+                }
+
                 let content = response
                     .text()
                     .context(format_context!("Failed to read response from {url}"))?;
@@ -1390,7 +1342,10 @@ mod tests {
     #[ignore]
     fn test_download_string_rejects_html_response() {
         // https://the-internet.herokuapp.com/ serves an HTML page with Content-Type: text/html
-        let result = download_string("https://the-internet.herokuapp.com/");
+        let result = download_string(
+            "https://the-internet.herokuapp.com/",
+            Arc::new(AtomicU32::new(0)),
+        );
         assert!(
             result.is_err(),
             "download_string should reject an HTML response"
@@ -1426,6 +1381,7 @@ mod tests {
             "https://the-internet.herokuapp.com/",
             &dest_str,
             None,
+            Arc::new(AtomicU32::new(0)),
             &runtime,
         )
         .expect("download should return a join handle");
@@ -1469,6 +1425,7 @@ mod tests {
             "https://github.com/nickel-org/rust-mustache/this-does-not-exist.tar.gz",
             &dest_str,
             None,
+            Arc::new(AtomicU32::new(0)),
             &runtime,
         )
         .expect("download should return a join handle");
@@ -1506,8 +1463,15 @@ mod tests {
         let mut multi = printer::MultiProgress::new(&mut printer);
         let progress = multi.add_progress("test", None, None);
 
-        let join_handle = download(progress, url, &dest_str, None, &runtime)
-            .expect("download should return a join handle");
+        let join_handle = download(
+            progress,
+            url,
+            &dest_str,
+            None,
+            Arc::new(AtomicU32::new(0)),
+            &runtime,
+        )
+        .expect("download should return a join handle");
 
         let result = runtime
             .block_on(join_handle)
@@ -1531,6 +1495,8 @@ mod tests {
         // Also verify the HTML detection passes (the file is a real zip, not HTML)
         check_file_is_not_html(&dest_str, url)
             .expect("valid zip archive should not be flagged as HTML");
+    }
+
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
