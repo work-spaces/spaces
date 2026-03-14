@@ -86,6 +86,98 @@ struct State {
     log_directory: Option<Arc<str>>,
 }
 
+/// Maximum number of retry attempts for transient git network errors.
+const GIT_MAX_RETRIES: u32 = 3;
+/// Initial backoff duration in milliseconds before the first retry.
+const GIT_INITIAL_BACKOFF_MS: u64 = 1000;
+/// Multiplier applied to the backoff duration after each retry.
+const GIT_BACKOFF_MULTIPLIER: u64 = 2;
+
+/// Computes the backoff duration for a given retry attempt, with deterministic jitter.
+fn git_backoff_duration(attempt: u32) -> std::time::Duration {
+    let base_ms = GIT_INITIAL_BACKOFF_MS * GIT_BACKOFF_MULTIPLIER.saturating_pow(attempt);
+    let jitter_ms = base_ms / 4;
+    let effective_ms = if attempt.is_multiple_of(2) {
+        base_ms.saturating_sub(jitter_ms)
+    } else {
+        base_ms.saturating_add(jitter_ms)
+    };
+    std::time::Duration::from_millis(effective_ms)
+}
+
+/// Returns true if the git error is a transient network error worth retrying.
+///
+/// Checks for:
+/// - Exit code 74 (EX_IOERR from sysexits.h — I/O error, commonly network)
+/// - Exit code 128 with network-related stderr messages
+/// - Common network/transport error patterns in the error message
+fn is_retryable_git_error(error: &anyhow::Error) -> bool {
+    let error_string = format!("{error:#}");
+    let lower_error = error_string.to_lowercase();
+
+    // Check for exit code 74 (EX_IOERR) — commonly a network I/O error
+    if error_string.contains("exit code: 74") {
+        return true;
+    }
+
+    // Exit code 128 is git's generic fatal error — retry only if the message
+    // indicates a network/transport issue.
+    let is_exit_128 = error_string.contains("exit code: 128");
+
+    // Network-related patterns found in git stderr output
+    let network_patterns = [
+        "could not resolve host",
+        "unable to access",
+        "connection refused",
+        "connection timed out",
+        "connection reset by peer",
+        "ssl_error",
+        "ssl_connect",
+        "openssl",
+        "gnutls",
+        "failed to connect",
+        "couldn't connect to server",
+        "the requested url returned error: 5", // 5xx server errors
+        "the requested url returned error: 429", // rate limiting
+        "couldn't connect to host",
+        "failed to connect to",
+        "network is unreachable",
+        "no route to host",
+        "operation timed out",
+        "name or service not known",
+        "temporary failure in name resolution",
+        "early eof",
+        "index-pack failed",
+        "rpc failed",
+        "unexpected disconnect",
+        "transfer closed",
+        "the remote end hung up unexpectedly",
+    ];
+
+    if is_exit_128 {
+        for pattern in &network_patterns {
+            if lower_error.contains(pattern) {
+                return true;
+            }
+        }
+    }
+
+    // Also check for network patterns regardless of exit code (e.g. exit code 56, etc.)
+    for pattern in &[
+        "the remote end hung up unexpectedly",
+        "early eof",
+        "rpc failed",
+        "unexpected disconnect",
+        "transfer closed",
+    ] {
+        if lower_error.contains(pattern) {
+            return true;
+        }
+    }
+
+    false
+}
+
 static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
 
 fn get_state() -> &'static RwLock<State> {
@@ -111,68 +203,106 @@ pub fn execute_git_command(
     url: &str,
     options: printer::ExecuteOptions,
 ) -> anyhow::Result<Option<String>> {
-    let mut is_ready = false;
     use std::ops::DerefMut;
 
-    let log_file_name = format!(
-        "git_{}.log",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis()
-    );
+    for attempt in 0..=GIT_MAX_RETRIES {
+        if attempt > 0 {
+            let wait = git_backoff_duration(attempt - 1);
+            url_logger(progress_bar, url).debug(
+                format!("Retry attempt {attempt}/{GIT_MAX_RETRIES} after {wait:?}").as_str(),
+            );
+            std::thread::sleep(wait);
+        }
 
-    let mut log_file_path = None;
+        let mut is_ready = false;
 
-    url_logger(progress_bar, url).debug("Waiting for lock");
+        let log_file_name = format!(
+            "git_{}.log",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        );
 
-    while !is_ready {
+        let mut log_file_path = None;
+
+        url_logger(progress_bar, url).debug("Waiting for lock");
+
+        while !is_ready {
+            {
+                let mut state_lock = get_state().write().unwrap();
+                let state = state_lock.deref_mut();
+
+                if state.active_repos.contains(url) {
+                    is_ready = false;
+                } else {
+                    state.active_repos.insert(url.into());
+                    is_ready = true;
+                }
+                log_file_path = state
+                    .log_directory
+                    .as_ref()
+                    .map(|e| format!("{e}/{log_file_name}").into());
+            }
+
+            if !is_ready {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+        }
+
+        let mut attempt_options = options.clone();
+
+        attempt_options.log_file_path = log_file_path;
+        attempt_options
+            .environment
+            .push(("GIT_TERMINAL_PROMPT".into(), "0".into()));
+
+        if let Some(directory) = attempt_options.working_directory.as_ref() {
+            url_logger(progress_bar, url).debug(format!("cwd: {directory}").as_str());
+        }
+        url_logger(progress_bar, url)
+            .debug(format!("git {}", attempt_options.arguments.join(" ")).as_str());
+
+        let full_command = attempt_options.get_full_command_in_working_directory("git");
+        let result = progress_bar
+            .execute_process("git", attempt_options)
+            .context(format_context!("{full_command}"));
+
         {
             let mut state_lock = get_state().write().unwrap();
             let state = state_lock.deref_mut();
+            state.active_repos.remove(url);
+        }
+        url_logger(progress_bar, url).trace("Released");
 
-            if state.active_repos.contains(url) {
-                is_ready = false;
-            } else {
-                state.active_repos.insert(url.into());
-                is_ready = true;
+        match result {
+            Ok(value) => {
+                if attempt > 0 {
+                    url_logger(progress_bar, url)
+                        .info(format!("Succeeded after {attempt} retry(ies)").as_str());
+                }
+                return Ok(value);
             }
-            log_file_path = state
-                .log_directory
-                .as_ref()
-                .map(|e| format!("{e}/{log_file_name}").into());
+            Err(err) => {
+                if attempt < GIT_MAX_RETRIES && is_retryable_git_error(&err) {
+                    url_logger(progress_bar, url).debug(
+                        format!(
+                            "Transient network error (attempt {}/{}): {err:#}",
+                            attempt + 1,
+                            GIT_MAX_RETRIES + 1
+                        )
+                        .as_str(),
+                    );
+                    continue;
+                }
+                return Err(err);
+            }
         }
-
-        if !is_ready {
-            std::thread::sleep(std::time::Duration::from_millis(500));
-        }
     }
 
-    let mut options = options.clone();
-
-    options.log_file_path = log_file_path;
-    options
-        .environment
-        .push(("GIT_TERMINAL_PROMPT".into(), "0".into()));
-
-    if let Some(directory) = options.working_directory.as_ref() {
-        url_logger(progress_bar, url).debug(format!("cwd: {directory}").as_str());
-    }
-    url_logger(progress_bar, url).debug(format!("git {}", options.arguments.join(" ")).as_str());
-
-    let full_command = options.get_full_command_in_working_directory("git");
-    let result = progress_bar
-        .execute_process("git", options)
-        .context(format_context!("{full_command}"));
-
-    {
-        let mut state_lock = get_state().write().unwrap();
-        let state = state_lock.deref_mut();
-        state.active_repos.remove(url);
-    }
-    url_logger(progress_bar, url).trace("Released");
-
-    result
+    Err(format_error!(
+        "git command for {url} failed after {GIT_MAX_RETRIES} retries"
+    ))
 }
 
 pub fn get_commit_hash(
