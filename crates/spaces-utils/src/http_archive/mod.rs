@@ -4,8 +4,22 @@ use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, RwLock};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncSeekExt, AsyncWriteExt};
+
+/// Default maximum number of retry attempts for network operations.
+const DEFAULT_MAX_RETRIES: u32 = 3;
+/// Initial backoff duration in milliseconds before the first retry.
+const INITIAL_BACKOFF_MS: u64 = 1000;
+/// Multiplier applied to the backoff duration after each retry.
+const BACKOFF_MULTIPLIER: u64 = 2;
+/// Connection timeout in seconds for the HTTP client.
+const CONNECT_TIMEOUT_SECS: u64 = 30;
+/// Read timeout in seconds — detects stalled transfers.
+const READ_TIMEOUT_SECS: u64 = 60;
+/// Overall request timeout in seconds (safety net for large archives).
+const REQUEST_TIMEOUT_SECS: u64 = 600;
 
 mod gh;
 
@@ -132,11 +146,96 @@ fn check_file_is_not_html(path: &str, url: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Returns true if the HTTP status code is transient and worth retrying.
+fn is_retryable_status(status: reqwest::StatusCode) -> bool {
+    matches!(status.as_u16(), 408 | 429 | 500 | 502 | 503 | 504)
+}
+
+/// Returns true if the reqwest error is transient and worth retrying.
+fn is_retryable_error(err: &reqwest::Error) -> bool {
+    err.is_timeout() || err.is_connect() || err.is_request()
+}
+
+/// Computes the backoff duration for a given retry attempt, with deterministic jitter.
+/// The jitter alternates ±25% based on the attempt number to avoid thundering herd.
+fn backoff_duration(attempt: u32) -> std::time::Duration {
+    let base_ms = INITIAL_BACKOFF_MS * BACKOFF_MULTIPLIER.saturating_pow(attempt);
+    // Deterministic jitter: odd attempts get +25%, even attempts get -25%
+    let jitter_ms = base_ms / 4;
+    let effective_ms = if attempt.is_multiple_of(2) {
+        base_ms.saturating_sub(jitter_ms)
+    } else {
+        base_ms.saturating_add(jitter_ms)
+    };
+    std::time::Duration::from_millis(effective_ms)
+}
+
+/// Extracts the `Retry-After` header value (in seconds) from a response, if present.
+fn parse_retry_after(response: &reqwest::Response) -> Option<std::time::Duration> {
+    response
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|val| val.to_str().ok())
+        .and_then(|val| val.parse::<u64>().ok())
+        .map(std::time::Duration::from_secs)
+}
+
+/// Build a reqwest client with appropriate timeouts and redirect policy.
+fn build_http_client() -> anyhow::Result<reqwest::Client> {
+    reqwest::ClientBuilder::new()
+        .redirect(reqwest::redirect::Policy::limited(20))
+        .connect_timeout(std::time::Duration::from_secs(CONNECT_TIMEOUT_SECS))
+        .read_timeout(std::time::Duration::from_secs(READ_TIMEOUT_SECS))
+        .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
+        .build()
+        .context(format_context!("Failed to build reqwest client"))
+}
+
+/// Build default headers, merging in any user-supplied headers.
+fn build_headers(
+    extra_headers: Option<&HashMap<Arc<str>, Arc<str>>>,
+) -> anyhow::Result<reqwest::header::HeaderMap> {
+    let mut client_headers = reqwest::header::HeaderMap::new();
+
+    client_headers.insert(
+        reqwest::header::USER_AGENT,
+        reqwest::header::HeaderValue::from_str("wget").context(format_context!(
+            "Internal Error: failed to create wget error value"
+        ))?,
+    );
+    client_headers.insert(
+        reqwest::header::ACCEPT,
+        reqwest::header::HeaderValue::from_str("*/*").context(format_context!(
+            "Internal Error: failed to create accept header value"
+        ))?,
+    );
+
+    if let Some(headers) = extra_headers {
+        for (key, value) in headers {
+            let header_name = reqwest::header::HeaderName::from_str(key.as_ref()).context(
+                format_context!("While converting {} to a standard header", key),
+            )?;
+            let header_value = reqwest::header::HeaderValue::from_str(value.as_ref()).context(
+                format_context!("While converting {} to a standard header value", value),
+            )?;
+            let _ = client_headers.insert(header_name, header_value);
+        }
+    }
+
+    Ok(client_headers)
+}
+
+/// Cleans up a partially downloaded file, if it exists.
+fn cleanup_partial_download(destination: &str) {
+    let _ = std::fs::remove_file(destination);
+}
+
 pub fn download(
     mut progress: printer::MultiProgressBar,
     url: &str,
     destination: &str,
     headers: Option<HashMap<Arc<str>, Arc<str>>>,
+    retry_counter: Arc<AtomicU32>,
     runtime: &tokio::runtime::Runtime,
 ) -> anyhow::Result<tokio::task::JoinHandle<anyhow::Result<printer::MultiProgressBar>>> {
     label_logger(&mut progress, url)
@@ -146,111 +245,327 @@ pub fn download(
     let url = url.to_string();
 
     let join_handle = runtime.spawn(async move {
-        let client = reqwest::ClientBuilder::new()
-            .redirect(reqwest::redirect::Policy::limited(20))
-            .build()
-            .context(format_context!("Failed to build reqwest client"))?;
+        let client = build_http_client()?;
+        let base_headers = build_headers(headers.as_ref())?;
 
-        let mut client_headers = reqwest::header::HeaderMap::new();
+        for (key, _) in base_headers.iter() {
+            label_logger(&mut progress, &url)
+                .debug(format!("Header: {key:?}").as_str());
+        }
 
-        client_headers.insert(
-            reqwest::header::USER_AGENT,
-            reqwest::header::HeaderValue::from_str("wget").context(format_context!(
-                "Internal Error: failed to create wget error value"
-            ))?,
-        );
-        client_headers.insert(
-            reqwest::header::ACCEPT,
-            reqwest::header::HeaderValue::from_str("*/*").context(format_context!(
-                "Internal Error: failed to create accept header value"
-            ))?,
-        );
+        let mut last_error: Option<anyhow::Error> = None;
 
-        label_logger(&mut progress, &url).trace(format!("Headers are: {headers:?}").as_str());
-
-        if let Some(headers) = headers {
-            for (key, value) in headers {
-                let header_name = reqwest::header::HeaderName::from_str(key.as_ref()).context(
-                    format_context!("While converting {} to a standard header", key),
-                )?;
-                let header_value = reqwest::header::HeaderValue::from_str(value.as_ref()).context(
-                    format_context!("While converting {} to a standard header value", value),
-                )?;
-                label_logger(&mut progress, &url)
-                    .debug(format!("Inserting header as: {header_name:?}").as_str());
-                let _ = client_headers.insert(header_name, header_value);
+        for attempt in 0..=DEFAULT_MAX_RETRIES {
+            if attempt > 0 {
+                retry_counter.fetch_add(1, Ordering::Relaxed);
+                let wait = backoff_duration(attempt - 1);
+                label_logger(&mut progress, &url).warning(
+                    format!(
+                        "Retry attempt {attempt}/{DEFAULT_MAX_RETRIES} for {url} after {wait:?}"
+                    )
+                    .as_str(),
+                );
+                tokio::time::sleep(wait).await;
             }
+
+            // Check if we have bytes from a previous partial download attempt
+            let existing_bytes = tokio::fs::metadata(&destination)
+                .await
+                .map(|m| m.len())
+                .unwrap_or(0);
+
+            let mut request_headers = base_headers.clone();
+
+            // If we have partial content, attempt a range request to resume
+            if existing_bytes > 0 {
+                label_logger(&mut progress, &url).debug(
+                    format!("Resuming download from byte {existing_bytes}").as_str(),
+                );
+                request_headers.insert(
+                    reqwest::header::RANGE,
+                    reqwest::header::HeaderValue::from_str(
+                        &format!("bytes={existing_bytes}-"),
+                    )
+                    .context(format_context!(
+                        "Internal Error: failed to create Range header value"
+                    ))?,
+                );
+            }
+
+            let request = client.get(&url).headers(request_headers);
+
+            label_logger(&mut progress, &url)
+                .debug(format!("Reqwest request: {request:?}").as_str());
+
+            let response = match request.send().await {
+                Ok(resp) => resp,
+                Err(err) => {
+                    if is_retryable_error(&err) && attempt < DEFAULT_MAX_RETRIES {
+                        label_logger(&mut progress, &url).warning(
+                            format!("Transient error connecting to {url}: {err}").as_str(),
+                        );
+                        last_error = Some(err.into());
+                        continue;
+                    }
+                    // Non-retryable or final attempt — clean up and fail
+                    cleanup_partial_download(&destination);
+                    let human_attempt = attempt + 1;
+                    return Err(err).context(format_context!(
+                        "Failed to download {url} after {human_attempt} attempt(s)"
+                    ));
+                }
+            };
+
+            let status = response.status();
+
+            // Handle non-success, non-partial-content responses
+            if !status.is_success() && status != reqwest::StatusCode::PARTIAL_CONTENT {
+                if is_retryable_status(status) && attempt < DEFAULT_MAX_RETRIES {
+                    let retry_after = parse_retry_after(&response);
+                    let wait_override = retry_after
+                        .map(|d| format!(", server requested Retry-After: {d:?}"))
+                        .unwrap_or_default();
+                    label_logger(&mut progress, &url).warning(
+                        format!(
+                            "Retryable HTTP {status} from {url}{wait_override}"
+                        )
+                        .as_str(),
+                    );
+                    // If server gave a Retry-After, sleep for that duration instead
+                    if let Some(retry_wait) = retry_after {
+                        tokio::time::sleep(retry_wait).await;
+                    }
+                    last_error = Some(format_error!(
+                        "HTTP {status} from {url}"
+                    ));
+                    continue;
+                }
+                cleanup_partial_download(&destination);
+                return Err(format_error!(
+                    "Failed to download {url}. Got HTTP {status} (response: {response:?})"
+                ));
+            }
+
+            // Check whether the server returned an HTML page instead of the expected archive
+            check_response_content_type(&response, &url)?;
+
+            label_logger(&mut progress, &url)
+                .debug(format!("Response: {response:?}").as_str());
+
+            // Determine if this is a resumed download (206) or a fresh start (200)
+            let is_resumed = status == reqwest::StatusCode::PARTIAL_CONTENT;
+            let content_length = response.content_length();
+
+            let (mut output_file, mut bytes_written) = if is_resumed && existing_bytes > 0 {
+                // Server supports range requests — append to existing file
+                label_logger(&mut progress, &url).debug(
+                    format!("Server returned 206 Partial Content, resuming from byte {existing_bytes}").as_str(),
+                );
+                let total_size = content_length
+                    .map(|cl| cl + existing_bytes)
+                    .unwrap_or(0);
+                progress.set_total(total_size);
+                // Reset progress bar position and advance to the already-downloaded portion
+                progress.increment(existing_bytes);
+
+                let mut file = tokio::fs::OpenOptions::new()
+                    .write(true)
+                    .open(&destination)
+                    .await
+                    .context(format_context!(
+                        "Failed to open {destination} for append during resume"
+                    ))?;
+                file.seek(std::io::SeekFrom::End(0)).await.context(
+                    format_context!("Failed to seek to end of {destination}"),
+                )?;
+                (file, existing_bytes)
+            } else {
+                // Fresh download — create/truncate the file
+                let total_size = content_length.unwrap_or(0);
+                progress.set_total(total_size);
+
+                let file = tokio::fs::File::create(&destination).await.context(
+                    format_context!("Failed to create {destination}"),
+                )?;
+                (file, 0u64)
+            };
+
+            progress.set_message(url.as_str());
+
+            // Stream chunks to disk
+            let mut response = response;
+            let mut chunk_error: Option<anyhow::Error> = None;
+            loop {
+                let chunk_result = response.chunk().await;
+                match chunk_result {
+                    Ok(Some(chunk)) => {
+                        let chunk_len = chunk.len() as u64;
+                        if let Err(write_err) =
+                            output_file.write_all(&chunk).await
+                        {
+                            chunk_error = Some(write_err.into());
+                            break;
+                        }
+                        bytes_written += chunk_len;
+                        progress.increment(chunk_len);
+                    }
+                    Ok(None) => {
+                        // Stream complete
+                        break;
+                    }
+                    Err(err) => {
+                        // Network error during chunked read
+                        label_logger(&mut progress, &url).warning(
+                            format!(
+                                "Error reading chunk from {url} at byte {bytes_written}: {err}"
+                            )
+                            .as_str(),
+                        );
+                        chunk_error = Some(err.into());
+                        break;
+                    }
+                }
+            };
+
+            // Flush what we have so far
+            let _ = output_file.flush().await;
+            drop(output_file);
+
+            if let Some(err) = chunk_error {
+                if attempt < DEFAULT_MAX_RETRIES {
+                    label_logger(&mut progress, &url).warning(
+                        format!(
+                            "Download interrupted for {url} at {bytes_written} bytes, will retry"
+                        )
+                        .as_str(),
+                    );
+                    last_error = Some(err);
+                    continue;
+                }
+                cleanup_partial_download(&destination);
+                return Err(err).context(format_context!(
+                    "Failed to download {url}: stream interrupted after {bytes_written} bytes, all retries exhausted"
+                ));
+            }
+
+            // Validate that we received the expected number of bytes
+            if let Some(expected_total) = content_length {
+                let expected_bytes = expected_total; // Content-Length for 206 is the remaining bytes
+                let received_bytes = if is_resumed {
+                    bytes_written - existing_bytes
+                } else {
+                    bytes_written
+                };
+                if received_bytes != expected_bytes {
+                    let msg = format!(
+                        "Size mismatch for {url}: expected {expected_bytes} bytes, got {received_bytes} bytes"
+                    );
+                    if attempt < DEFAULT_MAX_RETRIES {
+                        label_logger(&mut progress, &url).warning(msg.as_str());
+                        last_error = Some(format_error!("{}", msg));
+                        // Delete partial file so next attempt starts fresh for size mismatch
+                        cleanup_partial_download(&destination);
+                        continue;
+                    }
+                    cleanup_partial_download(&destination);
+                    return Err(format_error!("{}", msg));
+                }
+            }
+
+            // Inspect the first bytes of the file to catch HTML pages that slipped
+            // past the Content-Type check (e.g. missing or generic Content-Type)
+            check_file_is_not_html(&destination, &url)?;
+
+            // Download succeeded
+            let total_retries = retry_counter.load(Ordering::Relaxed);
+            if total_retries > 0 {
+                label_logger(&mut progress, &url).debug(
+                    format!(
+                        "Download complete after {total_retries} retries: {bytes_written} bytes written to {destination}"
+                    )
+                    .as_str(),
+                );
+            } else {
+                label_logger(&mut progress, &url).debug(
+                    format!(
+                        "Download complete: {bytes_written} bytes written to {destination}"
+                    )
+                    .as_str(),
+                );
+            }
+            return Ok(progress);
         }
 
-        let request = client.get(&url).headers(client_headers);
-
-        label_logger(&mut progress, &url).debug(format!("Reqwest request: {request:?}").as_str());
-
-        let mut response = request.send().await?;
-
-        if !response.status().is_success() {
-            return Err(format_error!(
-                "Failed to download {url}. got response {response:?}"
-            ));
-        }
-
-        // Check whether the server returned an HTML page instead of the expected archive
-        check_response_content_type(&response, &url)?;
-
-        label_logger(&mut progress, &url).debug(format!("Response: {response:?}").as_str());
-
-        let total_size = response.content_length().unwrap_or(0);
-        progress.set_total(total_size);
-        progress.set_message(url.as_str());
-
-        let mut output_file = tokio::fs::File::create(&destination).await?;
-
-        while let Some(chunk) = response.chunk().await? {
-            progress.increment(chunk.len() as u64);
-            output_file.write_all(&chunk).await?;
-        }
-
-        // Flush and close the file before inspecting it
-        output_file.flush().await?;
-        drop(output_file);
-
-        // Inspect the first bytes of the file to catch HTML pages that slipped
-        // past the Content-Type check (e.g. missing or generic Content-Type)
-        check_file_is_not_html(&destination, &url)?;
-
-        Ok(progress)
+        // All retries exhausted
+        cleanup_partial_download(&destination);
+        Err(last_error.unwrap_or_else(|| {
+            format_error!("Failed to download {url} after {DEFAULT_MAX_RETRIES} retries")
+        }))
     });
 
     Ok(join_handle)
 }
 
-// TODO Add a version of this that uses GH
-pub fn download_string(url: &str) -> anyhow::Result<Arc<str>> {
-    let response =
-        reqwest::blocking::get(url).context(format_context!("Failed to download {url}"))?;
+pub fn download_string(url: &str, retry_counter: Arc<AtomicU32>) -> anyhow::Result<Arc<str>> {
+    let client = reqwest::blocking::ClientBuilder::new()
+        .connect_timeout(std::time::Duration::from_secs(CONNECT_TIMEOUT_SECS))
+        .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
+        .build()
+        .context(format_context!("Failed to build blocking reqwest client"))?;
 
-    if !response.status().is_success() {
-        return Err(format_error!(
-            "Failed to download {url}. Server returned status {}",
-            response.status()
-        ));
-    }
+    let mut last_error: Option<anyhow::Error> = None;
 
-    // Check whether the server returned an HTML page instead of the expected content
-    if let Some(content_type) = response.headers().get(reqwest::header::CONTENT_TYPE) {
-        let ct = content_type.to_str().unwrap_or("");
-        if ct.contains("text/html") {
-            return Err(format_error!(
-                "Server returned Content-Type '{}' for {url}. Expected a plain-text response, not an HTML page.",
-                ct
-            ));
+    for attempt in 0..=DEFAULT_MAX_RETRIES {
+        if attempt > 0 {
+            retry_counter.fetch_add(1, Ordering::Relaxed);
+            let wait = backoff_duration(attempt - 1);
+            std::thread::sleep(wait);
+        }
+
+        let result = client.get(url).send();
+
+        match result {
+            Ok(response) => {
+                let status: reqwest::StatusCode = response.status();
+                if !status.is_success() {
+                    if is_retryable_status(status) && attempt < DEFAULT_MAX_RETRIES {
+                        last_error = Some(format_error!("HTTP {status} from {url}"));
+                        continue;
+                    }
+                    return Err(format_error!("Failed to download {url}: HTTP {status}"));
+                }
+                // Check whether the server returned an HTML page instead of expected content
+                if let Some(content_type) = response.headers().get(reqwest::header::CONTENT_TYPE) {
+                    let ct = content_type.to_str().unwrap_or("");
+                    if ct.contains("text/html") {
+                        return Err(format_error!(
+                            "Server returned Content-Type '{}' for {url}. Expected a plain-text response, not an HTML page.",
+                            ct
+                        ));
+                    }
+                }
+
+                let content = response
+                    .text()
+                    .context(format_context!("Failed to read response from {url}"))?;
+                return Ok(content.into());
+            }
+            Err(err) => {
+                if is_retryable_error(&err) && attempt < DEFAULT_MAX_RETRIES {
+                    last_error = Some(err.into());
+                    continue;
+                }
+                let attempt_plus_one = attempt + 1;
+                return Err(err).context(format_context!(
+                    "Failed to download {url} after {attempt_plus_one} attempt(s)"
+                ));
+            }
         }
     }
 
-    let content = response
-        .text()
-        .context(format_context!("Failed to read response from {url}"))?;
-    Ok(content.into())
+    Err(last_error.unwrap_or_else(|| {
+        format_error!("Failed to download string from {url} after {DEFAULT_MAX_RETRIES} retries")
+    }))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -286,7 +601,7 @@ impl HttpArchive {
             .to_string();
 
         let (filename, effective_sha256) = if archive.sha256.starts_with("http") {
-            let sha256 = download_string(archive.sha256.as_ref())
+            let sha256 = download_string(archive.sha256.as_ref(), Arc::new(AtomicU32::new(0)))
                 .context(format_context!("Failed to download {}", archive.sha256))?;
             if sha256.len() != 64 {
                 return Err(format_error!(
@@ -629,6 +944,7 @@ impl HttpArchive {
             self.archive.url.as_ref(),
             full_path_to_archive.as_str(),
             self.archive.headers.clone(),
+            Arc::new(AtomicU32::new(0)),
             runtime,
         )
     }
@@ -1021,7 +1337,10 @@ mod tests {
     #[ignore]
     fn test_download_string_rejects_html_response() {
         // https://the-internet.herokuapp.com/ serves an HTML page with Content-Type: text/html
-        let result = download_string("https://the-internet.herokuapp.com/");
+        let result = download_string(
+            "https://the-internet.herokuapp.com/",
+            Arc::new(AtomicU32::new(0)),
+        );
         assert!(
             result.is_err(),
             "download_string should reject an HTML response"
@@ -1057,6 +1376,7 @@ mod tests {
             "https://the-internet.herokuapp.com/",
             &dest_str,
             None,
+            Arc::new(AtomicU32::new(0)),
             &runtime,
         )
         .expect("download should return a join handle");
@@ -1100,6 +1420,7 @@ mod tests {
             "https://github.com/nickel-org/rust-mustache/this-does-not-exist.tar.gz",
             &dest_str,
             None,
+            Arc::new(AtomicU32::new(0)),
             &runtime,
         )
         .expect("download should return a join handle");
@@ -1137,8 +1458,15 @@ mod tests {
         let mut multi = printer::MultiProgress::new(&mut printer);
         let progress = multi.add_progress("test", None, None);
 
-        let join_handle = download(progress, url, &dest_str, None, &runtime)
-            .expect("download should return a join handle");
+        let join_handle = download(
+            progress,
+            url,
+            &dest_str,
+            None,
+            Arc::new(AtomicU32::new(0)),
+            &runtime,
+        )
+        .expect("download should return a join handle");
 
         let result = runtime
             .block_on(join_handle)
@@ -1162,5 +1490,400 @@ mod tests {
         // Also verify the HTML detection passes (the file is a real zip, not HTML)
         check_file_is_not_html(&dest_str, url)
             .expect("valid zip archive should not be flagged as HTML");
+    }
+
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// Helper: create a no-op progress bar suitable for tests.
+    fn test_progress_bar() -> printer::MultiProgressBar {
+        let mut printer = printer::Printer::new_null_term();
+        let mut mp = printer::MultiProgress::new(&mut printer);
+        mp.add_progress("test", None, None)
+    }
+
+    const TEST_URLS: &[(&str, &str)] = &[
+        (
+            "https://github.com/koalaman/shellcheck/releases/download/v0.8.0/shellcheck-v0.8.0.linux.aarch64.tar.xz",
+            "shellcheck-v0.8.0.linux.aarch64.tar.xz",
+        ),
+        (
+            "https://github.com/mvdan/sh/releases/download/v3.10.0/shfmt_v3.10.0_linux_amd64",
+            "shfmt_v3.10.0_linux_amd64",
+        ),
+        (
+            "https://github.com/ninja-build/ninja/releases/download/v1.13.1/ninja-linux.zip",
+            "ninja-linux.zip",
+        ),
+        (
+            "https://github.com/astral-sh/ruff/releases/download/0.14.7/ruff-x86_64-unknown-linux-musl.tar.gz",
+            "ruff-x86_64-unknown-linux-musl.tar.gz",
+        ),
+    ];
+
+    /// Run one round of concurrent downloads for all test URLs.
+    /// Returns the total number of retries that occurred across all downloads.
+    fn run_concurrent_downloads() -> u32 {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(4)
+            .enable_all()
+            .build()
+            .expect("Failed to create tokio runtime");
+
+        let tmp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+
+        let destinations: Vec<String> = TEST_URLS
+            .iter()
+            .map(|(_, filename)| tmp_dir.path().join(filename).to_string_lossy().to_string())
+            .collect();
+
+        // One retry counter per download
+        let counters: Vec<Arc<AtomicU32>> = TEST_URLS
+            .iter()
+            .map(|_| Arc::new(AtomicU32::new(0)))
+            .collect();
+
+        // Kick off all downloads concurrently
+        let handles: Vec<_> = TEST_URLS
+            .iter()
+            .zip(destinations.iter())
+            .zip(counters.iter())
+            .map(|(((url, _), dest), counter)| {
+                download(
+                    test_progress_bar(),
+                    url,
+                    dest,
+                    None,
+                    Arc::clone(counter),
+                    &runtime,
+                )
+                .unwrap_or_else(|e| panic!("Failed to start download for {url}: {e}"))
+            })
+            .collect();
+
+        // Wait for all to complete and verify
+        for (handle, (url, filename)) in handles.into_iter().zip(TEST_URLS.iter()) {
+            let result = runtime
+                .block_on(handle)
+                .unwrap_or_else(|e| panic!("{filename} join handle panicked: {e}"));
+            result.unwrap_or_else(|e| panic!("{filename} download failed: {e}"));
+
+            let dest = tmp_dir.path().join(filename);
+            let meta = std::fs::metadata(&dest)
+                .unwrap_or_else(|e| panic!("{filename} missing after download: {e}"));
+            assert!(meta.len() > 0, "{url} download produced an empty file");
+        }
+
+        // Sum up retries across all downloads
+        let mut total_retries = 0u32;
+        for ((_, filename), counter) in TEST_URLS.iter().zip(counters.iter()) {
+            let retries = counter.load(Ordering::Relaxed);
+            if retries > 0 {
+                eprintln!("  {filename}: {retries} retry(ies)");
+            }
+            total_retries += retries;
+        }
+
+        total_retries
+    }
+
+    #[test]
+    #[ignore]
+    fn test_concurrent_downloads() {
+        const MAX_ROUNDS: u32 = 8;
+
+        for round in 1..=MAX_ROUNDS {
+            eprintln!("Download round {round}/{MAX_ROUNDS}");
+            let retries = run_concurrent_downloads();
+
+            if retries > 0 {
+                eprintln!("Observed {retries} total retry(ies) in round {round} — stopping early");
+                return;
+            }
+        }
+
+        eprintln!(
+            "Completed all {MAX_ROUNDS} rounds with no retries observed (network was stable)"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // wiremock-based tests that deterministically exercise retry logic
+    // ---------------------------------------------------------------
+
+    /// Helper to build a tokio runtime for mock tests.
+    fn mock_runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("Failed to create tokio runtime")
+    }
+
+    /// Server returns 503 on the first request, then 200 with a body on the second.
+    /// Verifies the retry counter is incremented and the download succeeds.
+    #[test]
+    fn test_retry_on_503_then_success() {
+        let runtime = mock_runtime();
+        let server = runtime.block_on(MockServer::start());
+
+        let body = b"hello world from mock server";
+
+        // First request: 503 Service Unavailable
+        runtime.block_on(
+            Mock::given(method("GET"))
+                .and(path("/file.bin"))
+                .respond_with(ResponseTemplate::new(503).set_body_string("service unavailable"))
+                .expect(1)
+                .up_to_n_times(1)
+                .mount(&server),
+        );
+
+        // Second request: 200 OK with the real body
+        runtime.block_on(
+            Mock::given(method("GET"))
+                .and(path("/file.bin"))
+                .respond_with(ResponseTemplate::new(200).set_body_bytes(body.as_slice()))
+                .expect(1)
+                .mount(&server),
+        );
+
+        let tmp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let dest = tmp_dir
+            .path()
+            .join("file.bin")
+            .to_string_lossy()
+            .to_string();
+
+        let url = format!("{}/file.bin", server.uri());
+        let counter = Arc::new(AtomicU32::new(0));
+
+        let handle = download(
+            test_progress_bar(),
+            &url,
+            &dest,
+            None,
+            Arc::clone(&counter),
+            &runtime,
+        )
+        .expect("Failed to start download");
+
+        let result = runtime.block_on(handle).expect("join handle panicked");
+        result.expect("download should have succeeded after retry");
+
+        let retries = counter.load(Ordering::Relaxed);
+        assert_eq!(retries, 1, "expected exactly 1 retry after 503");
+
+        let contents = std::fs::read(&dest).expect("failed to read downloaded file");
+        assert_eq!(contents, body, "downloaded content should match mock body");
+    }
+
+    /// Server returns 429 with a Retry-After header on the first request,
+    /// then 200 on the second. Verifies the retry counter and that the
+    /// Retry-After delay is respected (download still succeeds).
+    #[test]
+    fn test_retry_on_429_with_retry_after() {
+        let runtime = mock_runtime();
+        let server = runtime.block_on(MockServer::start());
+
+        let body = b"content after rate limit";
+
+        // First request: 429 Too Many Requests with Retry-After: 1
+        runtime.block_on(
+            Mock::given(method("GET"))
+                .and(path("/rate-limited.bin"))
+                .respond_with(
+                    ResponseTemplate::new(429)
+                        .insert_header("Retry-After", "1")
+                        .set_body_string("too many requests"),
+                )
+                .expect(1)
+                .up_to_n_times(1)
+                .mount(&server),
+        );
+
+        // Second request: 200 OK
+        runtime.block_on(
+            Mock::given(method("GET"))
+                .and(path("/rate-limited.bin"))
+                .respond_with(ResponseTemplate::new(200).set_body_bytes(body.as_slice()))
+                .expect(1)
+                .mount(&server),
+        );
+
+        let tmp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let dest = tmp_dir
+            .path()
+            .join("rate-limited.bin")
+            .to_string_lossy()
+            .to_string();
+
+        let url = format!("{}/rate-limited.bin", server.uri());
+        let counter = Arc::new(AtomicU32::new(0));
+
+        let handle = download(
+            test_progress_bar(),
+            &url,
+            &dest,
+            None,
+            Arc::clone(&counter),
+            &runtime,
+        )
+        .expect("Failed to start download");
+
+        let result = runtime.block_on(handle).expect("join handle panicked");
+        result.expect("download should have succeeded after 429 retry");
+
+        let retries = counter.load(Ordering::Relaxed);
+        assert_eq!(retries, 1, "expected exactly 1 retry after 429");
+
+        let contents = std::fs::read(&dest).expect("failed to read downloaded file");
+        assert_eq!(contents, body);
+    }
+
+    /// Server always returns 404. This is a non-retryable status so the
+    /// download should fail immediately without any retries.
+    #[test]
+    fn test_no_retry_on_404() {
+        let runtime = mock_runtime();
+        let server = runtime.block_on(MockServer::start());
+
+        runtime.block_on(
+            Mock::given(method("GET"))
+                .and(path("/not-found.bin"))
+                .respond_with(ResponseTemplate::new(404).set_body_string("not found"))
+                .expect(1)
+                .mount(&server),
+        );
+
+        let tmp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let dest = tmp_dir
+            .path()
+            .join("not-found.bin")
+            .to_string_lossy()
+            .to_string();
+
+        let url = format!("{}/not-found.bin", server.uri());
+        let counter = Arc::new(AtomicU32::new(0));
+
+        let handle = download(
+            test_progress_bar(),
+            &url,
+            &dest,
+            None,
+            Arc::clone(&counter),
+            &runtime,
+        )
+        .expect("Failed to start download");
+
+        let result = runtime.block_on(handle).expect("join handle panicked");
+        assert!(result.is_err(), "download should have failed on 404");
+
+        let retries = counter.load(Ordering::Relaxed);
+        assert_eq!(retries, 0, "should not retry on 404");
+
+        // Partial file should have been cleaned up
+        assert!(
+            !std::path::Path::new(&dest).exists(),
+            "partial file should be cleaned up on non-retryable failure"
+        );
+    }
+
+    /// Server returns 503 twice then 200 on the third request.
+    /// Verifies the retry counter accumulates across multiple retries.
+    #[test]
+    fn test_retry_multiple_503_then_success() {
+        let runtime = mock_runtime();
+        let server = runtime.block_on(MockServer::start());
+
+        let body = b"third time is the charm";
+
+        // First two requests: 503
+        runtime.block_on(
+            Mock::given(method("GET"))
+                .and(path("/flaky.bin"))
+                .respond_with(ResponseTemplate::new(503).set_body_string("service unavailable"))
+                .expect(2)
+                .up_to_n_times(2)
+                .mount(&server),
+        );
+
+        // Third request: 200 OK
+        runtime.block_on(
+            Mock::given(method("GET"))
+                .and(path("/flaky.bin"))
+                .respond_with(ResponseTemplate::new(200).set_body_bytes(body.as_slice()))
+                .expect(1)
+                .mount(&server),
+        );
+
+        let tmp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let dest = tmp_dir
+            .path()
+            .join("flaky.bin")
+            .to_string_lossy()
+            .to_string();
+
+        let url = format!("{}/flaky.bin", server.uri());
+        let counter = Arc::new(AtomicU32::new(0));
+
+        let handle = download(
+            test_progress_bar(),
+            &url,
+            &dest,
+            None,
+            Arc::clone(&counter),
+            &runtime,
+        )
+        .expect("Failed to start download");
+
+        let result = runtime.block_on(handle).expect("join handle panicked");
+        result.expect("download should succeed on third attempt");
+
+        let retries = counter.load(Ordering::Relaxed);
+        assert_eq!(retries, 2, "expected exactly 2 retries for two 503s");
+
+        let contents = std::fs::read(&dest).expect("failed to read downloaded file");
+        assert_eq!(contents, body);
+    }
+
+    /// download_string: server returns 503 on first request, 200 on second.
+    /// Verifies the blocking retry path works the same way.
+    #[test]
+    fn test_download_string_retry_on_503() {
+        let runtime = mock_runtime();
+        let server = runtime.block_on(MockServer::start());
+
+        let expected_text = "sha256hash_value_from_server";
+
+        // First request: 503
+        runtime.block_on(
+            Mock::given(method("GET"))
+                .and(path("/checksum.txt"))
+                .respond_with(ResponseTemplate::new(503).set_body_string("service unavailable"))
+                .expect(1)
+                .up_to_n_times(1)
+                .mount(&server),
+        );
+
+        // Second request: 200
+        runtime.block_on(
+            Mock::given(method("GET"))
+                .and(path("/checksum.txt"))
+                .respond_with(ResponseTemplate::new(200).set_body_string(expected_text))
+                .expect(1)
+                .mount(&server),
+        );
+
+        let url = format!("{}/checksum.txt", server.uri());
+        let counter = Arc::new(AtomicU32::new(0));
+
+        let result = download_string(&url, Arc::clone(&counter));
+        let content = result.expect("download_string should succeed after retry");
+
+        assert_eq!(content.as_ref(), expected_text);
+
+        let retries = counter.load(Ordering::Relaxed);
+        assert_eq!(retries, 1, "expected exactly 1 retry for download_string");
     }
 }
