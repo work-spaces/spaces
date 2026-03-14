@@ -366,7 +366,6 @@ pub fn download(
                     .unwrap_or(0);
                 progress.set_total(total_size);
                 // Reset progress bar position and advance to the already-downloaded portion
-                progress.reset_position();
                 progress.increment(existing_bytes);
 
                 let mut file = tokio::fs::OpenOptions::new()
@@ -384,7 +383,6 @@ pub fn download(
                 // Fresh download — create/truncate the file
                 let total_size = content_length.unwrap_or(0);
                 progress.set_total(total_size);
-                progress.reset_position();
 
                 let file = tokio::fs::File::create(&destination).await.context(
                     format_context!("Failed to create {destination}"),
