@@ -562,8 +562,9 @@ pub fn download_string(url: &str, retry_counter: Arc<AtomicU32>) -> anyhow::Resu
                     last_error = Some(err.into());
                     continue;
                 }
+                let attempt_plus_one = attempt + 1;
                 return Err(err).context(format_context!(
-                    "Failed to download {url} after {attempt} attempt(s)"
+                    "Failed to download {url} after {attempt_plus_one} attempt(s)"
                 ));
             }
         }
