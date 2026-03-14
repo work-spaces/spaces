@@ -310,8 +310,9 @@ pub fn download(
                     }
                     // Non-retryable or final attempt — clean up and fail
                     cleanup_partial_download(&destination);
+                    let human_attempt = attempt + 1;
                     return Err(err).context(format_context!(
-                        "Failed to download {url} after {attempt} attempt(s)"
+                        "Failed to download {url} after {human_attempt} attempt(s)"
                     ));
                 }
             };
