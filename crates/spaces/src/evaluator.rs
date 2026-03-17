@@ -432,6 +432,9 @@ pub fn evaluate_starlark_modules(
             let task_result = rules::execute(printer, workspace.clone(), phase)
                 .context(format_context!("Failed to execute tasks"))?;
 
+            update_secrets(printer, workspace.clone())
+                .context(format_context!("while running checkout tasks"))?;
+
             if !task_result.new_modules.is_empty() {
                 star_logger(printer)
                     .trace(format!("New Modules:{:?}", task_result.new_modules).as_str());
@@ -501,6 +504,20 @@ pub fn evaluate_starlark_modules(
     Ok(())
 }
 
+fn update_secrets(
+    printer: &mut printer::Printer,
+    workspace: workspace::WorkspaceArc,
+) -> anyhow::Result<()> {
+    let secrets = {
+        let read_workspace = workspace.read();
+        read_workspace
+            .get_secret_values()
+            .context(format_context!("while getting secrets for checkout phase"))?
+    };
+    printer.secrets = secrets;
+    Ok(())
+}
+
 fn execute_tasks(
     printer: &mut printer::Printer,
     workspace: workspace::WorkspaceArc,
@@ -526,6 +543,8 @@ fn execute_tasks(
 
     match phase {
         task::Phase::Run => {
+            update_secrets(printer, workspace.clone())
+                .context(format_context!("while entering run phase"))?;
             rules::update_target_dependency_graph(printer, run_target.clone()).context(
                 format_context!("Failed to update run target dependency graph for {target:?}"),
             )?;
@@ -579,6 +598,8 @@ fn execute_tasks(
                 execute_result.context(format_context!("Failed to execute tasks"))?;
         }
         task::Phase::Inspect => {
+            update_secrets(printer, workspace.clone())
+                .context(format_context!("while entering inspect phase"))?;
             star_logger(printer).message("--Inspect Phase--");
 
             rules::update_target_dependency_graph(printer, target.clone()).context(
@@ -631,6 +652,8 @@ fn execute_tasks(
             }
         }
         task::Phase::Checkout => {
+            update_secrets(printer, workspace.clone())
+                .context(format_context!("while entering post checkout phase"))?;
             star_logger(printer).message("--Post Checkout Phase--");
 
             rules::export_log_status(workspace.clone())
@@ -781,14 +804,6 @@ pub fn run_starlark_modules(
             star_logger(printer).trace(format!("tasks {}", rules::get_pretty_tasks()).as_str());
             (target.clone(), IsSaveBin::No)
         };
-
-    let secrets = {
-        let read_workspace = workspace.read();
-        read_workspace
-            .get_secret_values()
-            .context(format_context!("while getting secrets for checkout phase"))?
-    };
-    printer.secrets = secrets;
 
     let is_save_bin = if is_execute_tasks == IsExecuteTasks::Yes {
         execute_tasks(

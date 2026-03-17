@@ -676,7 +676,7 @@ impl AnyEnvironment {
             .context(format_context!("Failed to get secrets"))?;
 
         for secret in secrets {
-            result = result.replace(secret.as_ref(), "REDACTED");
+            result = result.replace(secret.as_ref(), "<REDACTED>");
         }
 
         Ok(result)
