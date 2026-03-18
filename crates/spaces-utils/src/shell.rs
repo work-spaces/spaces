@@ -291,6 +291,74 @@ pub fn run(
     Ok(())
 }
 
+pub fn exec(
+    command: Vec<Arc<str>>,
+    config: &Config,
+    environment_map: &std::collections::HashMap<Arc<str>, Arc<str>>,
+    working_directory: &std::path::Path,
+) -> anyhow::Result<()> {
+    // Split the command into the executable and arguments
+    let (exec, args) = command.split_first().ok_or_else(|| {
+        format_error!("No command specified")
+    })?;
+
+    // Check if the command is a shortcut and expand it
+    let shortcut_or_command: Vec<Arc<str>> = if let Some(shortcuts) = config.shortcuts.as_ref() {
+        if let Some(shortcut_value) = shortcuts.get(exec) {
+            // Expand the shortcut - parse the shortcut command into executable and arguments
+            let shortcut_command = shortcut_value.command();
+            let shortcut_parts: Vec<&str> = shortcut_command.split_whitespace().collect();
+            let mut expanded_command: Vec<Arc<str>> = shortcut_parts.iter().map(|s| (*s).into()).collect();
+            expanded_command.extend(args.iter().cloned());
+            expanded_command
+        } else {
+            command.to_vec()
+        }
+    } else {
+        command.to_vec()
+    };
+
+    let (exec, args) = shortcut_or_command.split_first().ok_or_else(|| {
+        format_error!("No command specified")
+    })?;
+
+    // Create the command
+    let mut process = std::process::Command::new(exec.as_ref());
+    process.env_clear();
+
+    // Set custom environment variables
+    for (key, value) in environment_map {
+        process.env(key.as_ref(), value.as_ref());
+    }
+
+    process.env(IS_SPACES_SHELL_ENV_NAME, IS_SPACES_SHELL_ENV_VALUE);
+    process.current_dir(&working_directory);
+
+    // Add arguments
+    for arg in args {
+        process.arg(arg.as_ref());
+    }
+
+    // Inherit stdin, stdout, and stderr
+    process
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit());
+
+    // Execute the command and get the exit status
+    let status = process
+        .status()
+        .context(format_context!("failed to execute command: {}", exec))?;
+
+    // Exit with the same code as the command
+    if let Some(code) = status.code() {
+        std::process::exit(code);
+    } else {
+        // If the command was terminated by a signal, exit with a non-zero code
+        std::process::exit(1);
+    }
+}
+
 pub fn is_spaces_shell() -> bool {
     std::env::var(IS_SPACES_SHELL_ENV_NAME).is_ok_and(|value| value == IS_SPACES_SHELL_ENV_VALUE)
 }

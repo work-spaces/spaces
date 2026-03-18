@@ -450,6 +450,11 @@ fn execute_command(
                 .context(format_context!("while running user shell"))?;
         }
 
+        Commands::Exec { command } => {
+            runner::run_exec_in_workspace(effective_printer, command)
+                .context(format_context!("while running exec command"))?;
+        }
+
         Commands::RunLsp {} => {
             #[cfg(feature = "lsp-debug")]
             {
@@ -964,6 +969,12 @@ create-lock-file = false # optionally create a lock file
         /// Include all run targets in completions not just those with help populated
         #[arg(long)]
         all_targets: bool,
+    },
+    /// Runs a command in the workspace environment.
+    Exec {
+        /// The command to run
+        #[arg(trailing_var_arg = true)]
+        command: Vec<Arc<str>>,
     },
     /// Query the status of rules from the logs.
     Logs {
