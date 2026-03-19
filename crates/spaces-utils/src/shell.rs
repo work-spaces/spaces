@@ -7,6 +7,8 @@ use std::sync::Arc;
 pub const IS_SPACES_SHELL_ENV_NAME: &str = "SPACES_IS_SPACES_SHELL";
 pub const IS_SPACES_SHELL_ENV_VALUE: &str = "SPACES_IS_RUNNING_IN_A_SPACES_SHELL";
 const SHORTCUTS_SCRIPTS_NAME: &str = "shortcuts.sh";
+const EXEC_SHELL_BINARY: &str = "sh";
+const EXEC_SHELL_ARGS: [&str; 1] = ["-c"];
 
 enum ShellType {
     Bash,
@@ -298,32 +300,33 @@ pub fn exec(
     working_directory: &std::path::Path,
 ) -> anyhow::Result<()> {
     // Split the command into the executable and arguments
-    let (exec, args) = command.split_first().ok_or_else(|| {
-        format_error!("No command specified")
-    })?;
+    let (exec, args) = command
+        .split_first()
+        .ok_or_else(|| format_error!("No command specified"))?;
 
     // Check if the command is a shortcut and expand it
-    let shortcut_or_command: Vec<Arc<str>> = if let Some(shortcuts) = config.shortcuts.as_ref() {
+    let shortcut_or_command = if let Some(shortcuts) = config.shortcuts.as_ref() {
         if let Some(shortcut_value) = shortcuts.get(exec) {
-            // Expand the shortcut - parse the shortcut command into executable and arguments
+            // Expand the shortcut
             let shortcut_command = shortcut_value.command();
-            let shortcut_parts: Vec<&str> = shortcut_command.split_whitespace().collect();
-            let mut expanded_command: Vec<Arc<str>> = shortcut_parts.iter().map(|s| (*s).into()).collect();
-            expanded_command.extend(args.iter().cloned());
-            expanded_command
+
+            // Combine expanded shortcut command with args
+            let mut resolved_shortcut = Vec::new();
+            resolved_shortcut.push(shortcut_command.clone());
+            resolved_shortcut.extend(args.iter().cloned());
+            resolved_shortcut.join(" ")
         } else {
-            command.to_vec()
+            command.join(" ")
         }
     } else {
-        command.to_vec()
+        command.join(" ")
     };
 
-    let (exec, args) = shortcut_or_command.split_first().ok_or_else(|| {
-        format_error!("No command specified")
-    })?;
-
     // Create the command
-    let mut process = std::process::Command::new(exec.as_ref());
+    let mut process = std::process::Command::new(EXEC_SHELL_BINARY);
+    process.args(EXEC_SHELL_ARGS);
+    process.arg(&shortcut_or_command);
+
     process.env_clear();
 
     // Set custom environment variables
@@ -332,12 +335,7 @@ pub fn exec(
     }
 
     process.env(IS_SPACES_SHELL_ENV_NAME, IS_SPACES_SHELL_ENV_VALUE);
-    process.current_dir(&working_directory);
-
-    // Add arguments
-    for arg in args {
-        process.arg(arg.as_ref());
-    }
+    process.current_dir(working_directory);
 
     // Inherit stdin, stdout, and stderr
     process
@@ -346,9 +344,10 @@ pub fn exec(
         .stderr(std::process::Stdio::inherit());
 
     // Execute the command and get the exit status
-    let status = process
-        .status()
-        .context(format_context!("failed to execute command: {}", exec))?;
+    let status = process.status().context(format_context!(
+        "failed to execute command: {}",
+        &shortcut_or_command
+    ))?;
 
     // Exit with the same code as the command
     if let Some(code) = status.code() {
