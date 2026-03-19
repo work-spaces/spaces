@@ -9,8 +9,6 @@ use crate::logger;
 pub const IS_SPACES_SHELL_ENV_NAME: &str = "SPACES_IS_SPACES_SHELL";
 pub const IS_SPACES_SHELL_ENV_VALUE: &str = "SPACES_IS_RUNNING_IN_A_SPACES_SHELL";
 const SHORTCUTS_SCRIPTS_NAME: &str = "shortcuts.sh";
-const EXEC_SHELL_BINARY: &str = "sh";
-const EXEC_SHELL_ARGS: [&str; 1] = ["-c"];
 
 #[derive(Debug)]
 pub struct CommandExitStatusError {
@@ -100,6 +98,7 @@ pub struct Config {
     pub path: Arc<str>,
     pub startup: Option<Startup>,
     pub args: Vec<Arc<str>>,
+    pub exec_args: Option<Vec<Arc<str>>>,
     pub shortcuts: Option<HashMap<Arc<str>, ShortcutValue>>,
 }
 
@@ -126,6 +125,7 @@ impl Config {
                 path: default_shell_path.unwrap_or("/bin/bash".into()),
                 startup: None,
                 args: Vec::new(),
+                exec_args: None,
                 shortcuts: None,
             })
         }
@@ -213,6 +213,23 @@ impl Config {
                 "Unsupported shell: {}",
                 program_name.display()
             )),
+        }
+    }
+
+    pub fn get_exec_args(&self) -> anyhow::Result<Vec<Arc<str>>> {
+        if self.exec_args.is_some() {
+            Ok(self.exec_args.clone().unwrap())
+        } else {
+            let program_name = std::path::Path::new(self.path.as_ref())
+                .file_name()
+                .ok_or(format_error!("Failed to get Shell from {}", self.path))?;
+            match program_name.to_str() {
+                Some("bash") => Ok(vec!["-c".into()]),
+                Some("zsh") => Ok(vec!["-c".into()]),
+                Some("fish") => Ok(vec!["-c".into()]),
+                Some("pwsh") => Ok(vec!["-Command".into()]),
+                _ => Ok(vec!["-c".into()]),
+            }
         }
     }
 }
@@ -348,11 +365,17 @@ pub fn exec(
     };
 
     shell_logger(printer)
-        .debug(format!("Resolved shell command: {}", shortcut_or_command).as_str());
+        .debug(format!("Resolved command: {}", shortcut_or_command).as_str());
+
+    let shell_path = config.path.as_ref();
+    let shell_args = config.get_exec_args().context(format_context!("while getting shell exec args"))?;
+
+    shell_logger(printer)
+        .debug(format!("Executing command with shell: {} {:?}", shell_path, shell_args).as_str());
 
     // Create the command
-    let mut process = std::process::Command::new(EXEC_SHELL_BINARY);
-    process.args(EXEC_SHELL_ARGS);
+    let mut process = std::process::Command::new(shell_path);
+    process.args(shell_args.iter().map(|a| a.as_ref()));
     process.arg(&shortcut_or_command);
 
     process.env_clear();
