@@ -451,8 +451,23 @@ fn execute_command(
         }
 
         Commands::Exec { command } => {
-            runner::run_exec_in_workspace(effective_printer, command)
-                .context(format_context!("while running exec command"))?;
+            match runner::run_exec_in_workspace(effective_printer, command) {
+                Ok(_) => {}
+                Err(error) => {
+                    let exit_code = error
+                        .downcast_ref::<shell::CommandExitStatusError>()
+                        .and_then(|e| e.status.code());
+
+                    if exit_code.is_some() {
+                        singleton::process_anyhow_error(error);
+                        singleton::show_error_chain();
+                        std::process::exit(exit_code.unwrap_or(1));
+                    } else {
+                        // Re-throw other errors
+                        return Err(error.context(format_context!("while running exec command")));
+                    }
+                }
+            }
         }
 
         Commands::RunLsp {} => {

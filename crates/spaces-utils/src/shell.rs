@@ -10,6 +10,17 @@ const SHORTCUTS_SCRIPTS_NAME: &str = "shortcuts.sh";
 const EXEC_SHELL_BINARY: &str = "sh";
 const EXEC_SHELL_ARGS: [&str; 1] = ["-c"];
 
+#[derive(Debug)]
+pub struct CommandExitStatusError {
+    pub status: std::process::ExitStatus,
+}
+impl std::fmt::Display for CommandExitStatusError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "command exited with status: {}", self.status.code().unwrap_or(-1))
+    }
+}
+impl std::error::Error for CommandExitStatusError {}
+
 enum ShellType {
     Bash,
     Zsh,
@@ -349,12 +360,10 @@ pub fn exec(
         &shortcut_or_command
     ))?;
 
-    // Exit with the same code as the command
-    if let Some(code) = status.code() {
-        std::process::exit(code);
+    if status.success() {
+        Ok(())
     } else {
-        // If the command was terminated by a signal, exit with a non-zero code
-        std::process::exit(1);
+        Err(anyhow::Error::new(CommandExitStatusError { status }))
     }
 }
 
