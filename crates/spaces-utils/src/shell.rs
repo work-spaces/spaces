@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::logger;
+
 pub const IS_SPACES_SHELL_ENV_NAME: &str = "SPACES_IS_SPACES_SHELL";
 pub const IS_SPACES_SHELL_ENV_VALUE: &str = "SPACES_IS_RUNNING_IN_A_SPACES_SHELL";
 const SHORTCUTS_SCRIPTS_NAME: &str = "shortcuts.sh";
@@ -16,7 +18,11 @@ pub struct CommandExitStatusError {
 }
 impl std::fmt::Display for CommandExitStatusError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "command exited with status: {}", self.status.code().unwrap_or(-1))
+        write!(
+            f,
+            "command exited with status: {}",
+            self.status.code().unwrap_or(-1)
+        )
     }
 }
 impl std::error::Error for CommandExitStatusError {}
@@ -211,6 +217,10 @@ impl Config {
     }
 }
 
+fn shell_logger(printer: &mut printer::Printer) -> logger::Logger<'_> {
+    logger::Logger::new_printer(printer, "shell".into())
+}
+
 fn create_shortcuts(
     path: Arc<str>,
     shortcuts: &HashMap<Arc<str>, ShortcutValue>,
@@ -305,6 +315,7 @@ pub fn run(
 }
 
 pub fn exec(
+    printer: &mut printer::Printer,
     command: Vec<Arc<str>>,
     config: &Config,
     environment_map: &std::collections::HashMap<Arc<str>, Arc<str>>,
@@ -321,6 +332,9 @@ pub fn exec(
             // Expand the shortcut
             let shortcut_command = shortcut_value.command();
 
+            shell_logger(printer)
+                .debug(format!("Found shortcut \"{}\": {}", exec, shortcut_command).as_str());
+
             // Combine expanded shortcut command with args
             let mut resolved_shortcut = Vec::new();
             resolved_shortcut.push(shortcut_command.clone());
@@ -332,6 +346,9 @@ pub fn exec(
     } else {
         command.join(" ")
     };
+
+    shell_logger(printer)
+        .debug(format!("Resolved shell command: {}", shortcut_or_command).as_str());
 
     // Create the command
     let mut process = std::process::Command::new(EXEC_SHELL_BINARY);

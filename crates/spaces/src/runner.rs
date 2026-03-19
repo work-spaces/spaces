@@ -346,8 +346,14 @@ pub fn run_exec_in_workspace(
     let shell_config = shell::Config::load(shell_config_path_option, None)
         .context(format_context!("while loading shell config"))?;
 
-    shell::exec(command, &shell_config, &run_environment, &working_directory)
-        .context(format_context!("while running exec"))?;
+    shell::exec(
+        printer,
+        command,
+        &shell_config,
+        &run_environment,
+        &working_directory,
+    )
+    .context(format_context!("while running exec"))?;
 
     Ok(())
 }
