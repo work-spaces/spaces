@@ -1,3 +1,4 @@
+use crate::builtins::eval_context::EvalContext;
 use crate::workspace::WorkspaceArc;
 use crate::{builtins, executor, rules, singleton, task, workspace};
 use anyhow::Context;
@@ -7,20 +8,7 @@ use starlark::eval::{Evaluator, ReturnFileLoader};
 use starlark::syntax::{AstModule, Dialect};
 use std::collections::HashSet;
 use std::sync::Arc;
-use utils::{lock, logger, rule, ws};
-
-#[derive(Debug)]
-struct State {}
-
-static STATE: state::InitCell<lock::StateLock<State>> = state::InitCell::new();
-
-fn get_state() -> &'static lock::StateLock<State> {
-    if let Some(state) = STATE.try_get() {
-        return state;
-    }
-    STATE.set(lock::StateLock::new(State {}));
-    STATE.get()
-}
+use utils::{logger, rule, ws};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WithRules {
@@ -121,6 +109,7 @@ pub fn evaluate_ast(
     workspace: Option<WorkspaceArc>,
     workspace_path: Arc<str>,
     with_rules: WithRules,
+    eval_context: Option<EvalContext>,
 ) -> starlark::Result<FrozenModule> {
     let loads = evaluate_loads(
         &ast,
@@ -136,8 +125,14 @@ pub fn evaluate_ast(
     let globals = globals_builder.build();
 
     Module::with_temp_heap(move |module| {
+        // `eval_context` is owned by the closure; `eval` borrows it for its
+        // lifetime, which is strictly shorter than the closure body.
+        let mut eval_context = eval_context;
         {
             let mut eval = Evaluator::new(&module);
+            if let Some(ref mut ctx) = eval_context {
+                eval.extra_mut = Some(ctx);
+            }
             eval.set_loader(&loader);
             eval.eval_module(ast, &globals)?;
         }
@@ -185,13 +180,29 @@ pub fn evaluate_module(
     content: String,
     with_rules: WithRules,
 ) -> starlark::Result<FrozenModule> {
+    // Register the module name so that the global task-graph machinery can
+    // track which modules exist, without writing to `latest_starlark_module`
+    // (which would race with parallel evaluations).
     if workspace::is_rules_module(name.as_ref()) {
-        rules::set_latest_starlark_module(name.clone());
+        rules::register_module(name.clone());
     }
+
+    // Build a per-evaluation context that builtins access via `eval.extra_mut`
+    // instead of through the global singleton.
+    let eval_context = workspace
+        .as_ref()
+        .map(|w| EvalContext::new(Some(w.clone()), name.clone()));
 
     let dialect = get_dialect();
     let ast = AstModule::parse(name.as_ref(), content, &dialect)?;
-    let module = evaluate_ast(ast, name, workspace, workspace_path, with_rules)?;
+    let module = evaluate_ast(
+        ast,
+        name,
+        workspace,
+        workspace_path,
+        with_rules,
+        eval_context,
+    )?;
     Ok(module)
 }
 
@@ -388,10 +399,10 @@ pub fn evaluate_starlark_modules(
     // During checkout additional modules may be added to the queue
     // For Run mode, the env module is processed first and available
     // to subsequent modules
+    const MAX_CONCURRENT_EVALS: usize = 8;
+    let mut eval_handles: Vec<(Arc<str>, std::thread::JoinHandle<anyhow::Result<()>>)> = Vec::new();
     while !module_queue.is_empty() {
         if let Some((name, content)) = module_queue.pop_front() {
-            let mut _workspace_lock = get_state().write();
-            singleton::set_active_workspace(workspace.clone());
             star_logger(printer).debug(format!("evaluating {name} from front of queue").as_str());
 
             let eval_name = name.clone();
@@ -410,79 +421,105 @@ pub fn evaluate_starlark_modules(
                 Ok(())
             });
 
-            show_eval_progress(printer, &name, handle)
-                .context(format_context!("Failed to show eval progress"))?;
-        }
+            if phase != task::Phase::Checkout {
+                // Drain any already-finished handles before checking the limit.
+                let mut i = 0;
+                while i < eval_handles.len() {
+                    if eval_handles[i].1.is_finished() {
+                        let (n, h) = eval_handles.remove(i);
+                        h.join()
+                            .map_err(|_| format_error!("eval thread panicked for {n}"))?
+                            .context(format_context!("Failed to evaluate module {n}"))?;
+                    } else {
+                        i += 1;
+                    }
+                }
+                // If still at the concurrency limit, wait with progress on the oldest handle.
+                if eval_handles.len() >= MAX_CONCURRENT_EVALS {
+                    let (n, h) = eval_handles.remove(0);
+                    show_eval_progress(printer, &n, h)
+                        .context(format_context!("Failed to evaluate module {n}"))?;
+                }
+                eval_handles.push((name, handle));
+            } else {
+                // During checkout phase, additional modules may be added to the queue
+                // if the repo contains more spaces.star files
 
-        // During checkout phase, additional modules may be added to the queue
-        // if the repo contains more spaces.star files
-        if phase == task::Phase::Checkout {
-            star_logger(printer).debug("--Checkout Phase--");
+                show_eval_progress(printer, &name, handle)
+                    .context(format_context!("Failed to show eval progress"))?;
 
-            rules::update_depedency_graph(printer, None, phase)
-                .context(format_context!("Failed to evaluate dependency graph"))?;
+                star_logger(printer).debug("--Checkout Phase--");
 
-            rules::update_target_dependency_graph(printer, None).context(format_context!(
-                "Failed to update run target dependency graph during checkout"
-            ))?;
+                rules::update_depedency_graph(printer, None, phase)
+                    .context(format_context!("Failed to evaluate dependency graph"))?;
 
-            rules::debug_sorted_tasks(printer, phase)
-                .context(format_context!("Failed to debug sorted tasks"))?;
+                rules::update_target_dependency_graph(printer, None).context(format_context!(
+                    "Failed to update run target dependency graph during checkout"
+                ))?;
 
-            let task_result = rules::execute(printer, workspace.clone(), phase)
-                .context(format_context!("Failed to execute tasks"))?;
+                rules::debug_sorted_tasks(printer, phase)
+                    .context(format_context!("Failed to debug sorted tasks"))?;
 
-            update_secrets(printer, workspace.clone())
-                .context(format_context!("while running checkout tasks"))?;
+                let task_result = rules::execute(printer, workspace.clone(), phase)
+                    .context(format_context!("Failed to execute tasks"))?;
 
-            if !task_result.new_modules.is_empty() {
-                star_logger(printer)
-                    .trace(format!("New Modules:{:?}", task_result.new_modules).as_str());
-            }
+                update_secrets(printer, workspace.clone())
+                    .context(format_context!("while running checkout tasks"))?;
 
-            {
-                let mut workspace_write = workspace.write();
-                workspace_write
-                    .get_env_mut()
-                    .repopulate_inherited_vars()
-                    .context(format_context!("While populating required inherited vars"))?;
-            }
-
-            let mut new_modules = Vec::new();
-            for module in task_result.new_modules {
-                let path_to_module = format!("{workspace_path}/{module}");
-                let content = std::fs::read_to_string(path_to_module.as_str())
-                    .context(format_context!("Failed to read file {path_to_module}"))?;
-
-                new_modules.push((module, content));
-            }
-
-            // sorts the modules lexicographically by the filename from back to front.
-            // push_front below will execute the modules in lexicographical order.
-            new_modules.sort_by(|first, second| second.0.cmp(&first.0));
-            star_logger(printer).debug(
-                format!(
-                    "Adding new modules: {:?}",
-                    new_modules
-                        .iter()
-                        .map(|(name, _content)| name)
-                        .collect::<Vec<_>>()
-                )
-                .as_str(),
-            );
-
-            for (module, content) in new_modules {
-                let hash = blake3::hash(content.as_bytes()).to_string();
-                if !known_modules.contains(&hash) {
+                if !task_result.new_modules.is_empty() {
                     star_logger(printer)
-                        .debug(format!("Pushing: {module} on front of queue").as_str());
-                    known_modules.insert(hash);
-                    module_queue.push_front((module, content.into()));
+                        .trace(format!("New Modules:{:?}", task_result.new_modules).as_str());
+                }
+
+                {
+                    let mut workspace_write = workspace.write();
+                    workspace_write
+                        .get_env_mut()
+                        .repopulate_inherited_vars()
+                        .context(format_context!("While populating required inherited vars"))?;
+                }
+
+                let mut new_modules = Vec::new();
+                for module in task_result.new_modules {
+                    let path_to_module = format!("{workspace_path}/{module}");
+                    let content = std::fs::read_to_string(path_to_module.as_str())
+                        .context(format_context!("Failed to read file {path_to_module}"))?;
+
+                    new_modules.push((module, content));
+                }
+
+                // sorts the modules lexicographically by the filename from back to front.
+                // push_front below will execute the modules in lexicographical order.
+                new_modules.sort_by(|first, second| second.0.cmp(&first.0));
+                star_logger(printer).debug(
+                    format!(
+                        "Adding new modules: {:?}",
+                        new_modules
+                            .iter()
+                            .map(|(name, _content)| name)
+                            .collect::<Vec<_>>()
+                    )
+                    .as_str(),
+                );
+
+                for (module, content) in new_modules {
+                    let hash = blake3::hash(content.as_bytes()).to_string();
+                    if !known_modules.contains(&hash) {
+                        star_logger(printer)
+                            .debug(format!("Pushing: {module} on front of queue").as_str());
+                        known_modules.insert(hash);
+                        module_queue.push_front((module, content.into()));
+                    }
                 }
             }
         }
     }
-    rules::set_latest_starlark_module("".into());
+    // Join any remaining parallel eval threads (non-checkout phase).
+    for (n, h) in eval_handles.drain(..) {
+        h.join()
+            .map_err(|_| format_error!("eval thread panicked for {n}"))?
+            .context(format_context!("Failed to evaluate module {n}"))?;
+    }
 
     if let Some(stardoc) = singleton::get_inspect_options().stardoc {
         let workspace = workspace.read();

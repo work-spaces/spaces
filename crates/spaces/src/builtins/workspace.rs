@@ -1,4 +1,5 @@
-use crate::{rules, singleton};
+use crate::builtins::eval_context::{get_eval_context, get_eval_context_mut};
+use crate::rules;
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use starlark::environment::GlobalsBuilder;
@@ -19,9 +20,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// # Returns
     /// * `bool`: True if the workspace is reproducible, False otherwise.
-    fn is_reproducible() -> anyhow::Result<bool> {
-        let workspace_arc =
-            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+    fn is_reproducible(eval: &mut Evaluator) -> anyhow::Result<bool> {
+        let ctx = get_eval_context(eval)?;
+        let workspace_arc = ctx
+            .workspace
+            .clone()
+            .ok_or_else(|| format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();
         Ok(workspace.is_reproducible())
     }
@@ -49,9 +53,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// # Returns
     /// * `str`: The unique digest string of the workspace.
-    fn get_digest() -> anyhow::Result<String> {
-        let workspace_arc =
-            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+    fn get_digest(eval: &mut Evaluator) -> anyhow::Result<String> {
+        let ctx = get_eval_context(eval)?;
+        let workspace_arc = ctx
+            .workspace
+            .clone()
+            .ok_or_else(|| format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();
         let digest = workspace.settings.json.digest.clone();
         Ok(digest.map(|e| e.to_string()).unwrap_or_default())
@@ -65,9 +72,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// # Returns
     /// * `str`: The short digest string of the workspace.
-    fn get_short_digest() -> anyhow::Result<String> {
-        let workspace_arc =
-            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+    fn get_short_digest(eval: &mut Evaluator) -> anyhow::Result<String> {
+        let ctx = get_eval_context(eval)?;
+        let workspace_arc = ctx
+            .workspace
+            .clone()
+            .ok_or_else(|| format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();
         Ok(workspace.get_short_digest().to_string())
     }
@@ -84,12 +94,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// # Returns
     /// * `bool`: True if the variable exists in the workspace environment, False otherwise.
-    fn is_env_var_set(var_name: &str) -> anyhow::Result<bool> {
+    fn is_env_var_set(var_name: &str, eval: &mut Evaluator) -> anyhow::Result<bool> {
         if var_name == "PATH" {
             return Ok(true);
         }
-        let workspace_arc = singleton::get_workspace()
-            .context(format_error!("Internal error: no active workspace found"))?;
+        let ctx = get_eval_context(eval)?;
+        let workspace_arc = ctx
+            .workspace
+            .clone()
+            .ok_or_else(|| format_error!("Internal error: no active workspace found"))?;
         let workspace = workspace_arc.read();
         Ok(workspace.is_env_var_set(var_name))
     }
@@ -107,9 +120,16 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// # Returns
     /// * `bool`: True if the variable exists and is equal to the expected value, False otherwise.
-    fn is_env_var_set_to(var_name: &str, var_value: &str) -> anyhow::Result<bool> {
-        let workspace_arc = singleton::get_workspace()
-            .context(format_error!("Internal error: no active workspace found"))?;
+    fn is_env_var_set_to(
+        var_name: &str,
+        var_value: &str,
+        eval: &mut Evaluator,
+    ) -> anyhow::Result<bool> {
+        let ctx = get_eval_context(eval)?;
+        let workspace_arc = ctx
+            .workspace
+            .clone()
+            .ok_or_else(|| format_error!("Internal error: no active workspace found"))?;
         let workspace = workspace_arc.read();
         Ok(workspace.is_env_var_set_to(var_name, var_value))
     }
@@ -125,9 +145,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// # Returns
     /// * `str`: The value of the environment variable.
-    fn get_env_var(var_name: &str) -> anyhow::Result<String> {
-        let workspace_arc =
-            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+    fn get_env_var(var_name: &str, eval: &mut Evaluator) -> anyhow::Result<String> {
+        let ctx = get_eval_context(eval)?;
+        let workspace_arc = ctx
+            .workspace
+            .clone()
+            .ok_or_else(|| format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();
 
         let env_vars = workspace
@@ -136,7 +159,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         if let Some(value) = env_vars.get(var_name) {
             Ok(value.clone().to_string())
-        } else if singleton::is_lsp_mode() {
+        } else if ctx.is_lsp {
             Ok("<not available to LSP>".to_string())
         } else {
             Err(format_error!(
@@ -161,9 +184,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// * `env`: Environment definition containing `vars` (`dict`), `paths` (`list`), and `inherited` (`list`).
     fn set_env(
         #[starlark(require = named)] env: starlark::values::Value,
+        eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let workspace_arc =
-            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+        let ctx = get_eval_context(eval)?;
+        let workspace_arc = ctx
+            .workspace
+            .clone()
+            .ok_or_else(|| format_error!("No active workspace found"))?;
 
         let any_env = environment::AnyEnvironment::try_from(env.to_json_value()?)
             .context(format_context!("Failed to parse set_env arguments"))?;
@@ -190,12 +217,16 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// * `locks`: A dictionary of lock names to lock values.
     fn set_locks(
         #[starlark(require = named)] locks: starlark::values::Value,
+        eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
         let locks = serde_json::from_value(locks.to_json_value()?)
             .context(format_context!("Failed to parse set_locks arguments"))?;
 
-        let workspace_arc = singleton::get_workspace()
-            .context(format_error!("Internal Error: No active workspace found"))?;
+        let ctx = get_eval_context(eval)?;
+        let workspace_arc = ctx
+            .workspace
+            .clone()
+            .ok_or_else(|| format_error!("Internal Error: No active workspace found"))?;
         let mut workspace = workspace_arc.write();
 
         workspace.update_locks(&locks);
@@ -211,9 +242,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// # Arguments
     /// * `always_evaluate`: If True, scripts will always be evaluated regardless of caching.
-    fn set_always_evaluate(always_evaluate: bool) -> anyhow::Result<NoneType> {
-        let workspace_arc = singleton::get_workspace()
-            .context(format_error!("Internal Error: No active workspace found"))?;
+    fn set_always_evaluate(
+        always_evaluate: bool,
+        eval: &mut Evaluator,
+    ) -> anyhow::Result<NoneType> {
+        let ctx = get_eval_context(eval)?;
+        let workspace_arc = ctx
+            .workspace
+            .clone()
+            .ok_or_else(|| format_error!("Internal Error: No active workspace found"))?;
         let mut workspace = workspace_arc.write();
         workspace.settings.bin.is_always_evaluate = always_evaluate;
         Ok(NoneType)
@@ -238,9 +275,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// * `str`: The workspace path to the matching member.
     fn get_path_to_member(
         #[starlark(require = named)] member: starlark::values::Value,
+        eval: &mut Evaluator,
     ) -> anyhow::Result<String> {
-        let workspace_arc = singleton::get_workspace()
-            .context(format_error!("Internal Error: No active workspace found"))?;
+        let ctx = get_eval_context(eval)?;
+        let workspace_arc = ctx
+            .workspace
+            .clone()
+            .ok_or_else(|| format_error!("Internal Error: No active workspace found"))?;
         let member_requirement_json = member.to_json_value()?;
         let member_requirement: ws::MemberRequirement =
             serde_json::from_value(member_requirement_json.clone())
@@ -279,9 +320,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// * `bool`: True if the workspace contains a member matching the requirements, False otherwise.
     fn is_path_to_member_available(
         #[starlark(require = named)] member: starlark::values::Value,
+        eval: &mut Evaluator,
     ) -> anyhow::Result<bool> {
-        let workspace_arc = singleton::get_workspace()
-            .context(format_error!("Internal Error: No active workspace found"))?;
+        let ctx = get_eval_context(eval)?;
+        let workspace_arc = ctx
+            .workspace
+            .clone()
+            .ok_or_else(|| format_error!("Internal Error: No active workspace found"))?;
         let member_requirement_json = member.to_json_value()?;
         let member_requirement: ws::MemberRequirement =
             serde_json::from_value(member_requirement_json.clone())
@@ -309,15 +354,18 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// # Returns
     /// * `str`: The relative path to the log file within the workspace.
-    fn get_path_to_log_file(rule: &str) -> anyhow::Result<String> {
-        let workspace_arc =
-            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+    fn get_path_to_log_file(rule: &str, eval: &mut Evaluator) -> anyhow::Result<String> {
+        let ctx = get_eval_context(eval)?;
+        let workspace_arc = ctx
+            .workspace
+            .clone()
+            .ok_or_else(|| format_error!("No active workspace found"))?;
         {
             let mut workspace = workspace_arc.write();
             workspace.settings.bin.is_always_evaluate = true;
         }
         let workspace = workspace_arc.read();
-        let rule_name = rules::get_sanitized_rule_name(rule.into());
+        let rule_name = rules::get_sanitized_rule_name_for_module(rule.into(), &ctx.module_name);
         Ok(workspace.get_log_file(rule_name.as_ref()).to_string())
     }
 
@@ -329,9 +377,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// # Returns
     /// * `str`: The absolute path to the workspace.
-    fn get_absolute_path() -> anyhow::Result<String> {
-        let workspace_arc =
-            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+    fn get_absolute_path(eval: &mut Evaluator) -> anyhow::Result<String> {
+        let ctx = get_eval_context(eval)?;
+        let workspace_arc = ctx
+            .workspace
+            .clone()
+            .ok_or_else(|| format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();
         Ok(workspace.absolute_path.clone().to_string())
     }
@@ -344,8 +395,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// # Returns
     /// * `str`: The path to the directory containing the current script.
-    fn get_path_to_checkout() -> anyhow::Result<String> {
-        rules::get_checkout_path().map(|path| path.to_string())
+    fn get_path_to_checkout(eval: &mut Evaluator) -> anyhow::Result<String> {
+        let ctx = get_eval_context(eval)?;
+        Ok(rules::get_checkout_path_for_module(&ctx.module_name).to_string())
     }
 
     /// Returns the path to the workspace build folder for the current script.
@@ -361,8 +413,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// * `str`: The path to the build directory associated with the current script evaluation.
     fn get_path_to_build_checkout(
         #[starlark(require = named)] rule_name: &str,
+        eval: &mut Evaluator,
     ) -> anyhow::Result<String> {
-        rules::get_path_to_build_checkout(rule_name.into()).map(|p| p.to_string())
+        let ctx = get_eval_context(eval)?;
+        Ok(
+            rules::get_path_to_build_checkout_for_module(rule_name.into(), &ctx.module_name)
+                .to_string(),
+        )
     }
 
     /// Returns the path to where `run.add_archive()` creates the output archive.
@@ -386,12 +443,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     fn get_path_to_build_archive(
         #[starlark(require = named)] rule_name: &str,
         #[starlark(require = named)] archive: starlark::values::Value,
+        eval: &mut Evaluator,
     ) -> anyhow::Result<String> {
+        let ctx = get_eval_context(eval)?;
         let create_archive: archiver::CreateArchive =
             serde_json::from_value(archive.to_json_value()?)
                 .context(format_context!("bad options for archive"))?;
 
-        let sanitized_rule_name = rules::get_sanitized_rule_name(rule_name.into());
+        let sanitized_rule_name =
+            rules::get_sanitized_rule_name_for_module(rule_name.into(), &ctx.module_name);
 
         Ok(format!(
             "//build/{sanitized_rule_name}/{}",
@@ -422,7 +482,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] archive: starlark::values::Value,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<Value<'v>> {
-        let heap = eval.heap();
+        let ctx = get_eval_context(eval)?;
         let create_archive: archiver::CreateArchive =
             serde_json::from_value(archive.to_json_value()?)
                 .context(format_context!("bad options for archive"))?;
@@ -431,7 +491,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let output_path = std::path::Path::new(create_archive_output.as_str());
         let output_sha_suffix = output_path.with_extension("").with_extension("sha256.txt");
 
-        let sanitized_rule_name = rules::get_sanitized_rule_name(rule_name.into());
+        let sanitized_rule_name =
+            rules::get_sanitized_rule_name_for_module(rule_name.into(), &ctx.module_name);
 
         let mut output = HashMap::new();
         let rule_output_path = format!("build/{sanitized_rule_name}");
@@ -449,6 +510,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .context(format_context!("Failed to convert Result to JSON"))?;
 
         // Convert the JSON value to a Starlark value
+        let heap = eval.heap();
         let alloc_value = heap.alloc(json_value);
 
         Ok(alloc_value)
@@ -460,8 +522,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// ```python
     /// workspace.set_default_module_visibility_private()
     /// ```
-    fn set_default_module_visibility_private() -> anyhow::Result<NoneType> {
-        rules::set_latest_starlark_module_default_visibility(rule::Visibility::Private);
+    fn set_default_module_visibility_private(eval: &mut Evaluator) -> anyhow::Result<NoneType> {
+        let ctx = get_eval_context_mut(eval)?;
+        ctx.default_module_visibility = rule::Visibility::Private;
         Ok(NoneType)
     }
 
@@ -515,8 +578,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             ));
         }
 
-        let workspace_arc =
-            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+        let ctx = get_eval_context(eval)?;
+        let workspace_arc = ctx
+            .workspace
+            .clone()
+            .ok_or_else(|| format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();
 
         // Command-line store values (path "//") always take priority
