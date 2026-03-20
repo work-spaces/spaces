@@ -302,6 +302,8 @@ impl Store {
         }
 
         if !is_dry_run {
+            make_path_dirs_user_writable(path_to_store.as_path());
+
             for key in remove_entries {
                 logger(printer).info(format!("Removing entry: {key}").as_str());
                 self.entries.remove(&key);
@@ -343,6 +345,9 @@ impl Store {
         let group = ci::GithubLogGroup::new_group(printer, is_ci, "Spaces Store Prune")?;
         let mut remove_entries = Vec::new();
         let path_to_store = self.path_to_store.clone();
+        if !is_dry_run {
+            make_path_dirs_user_writable(path_to_store.as_path());
+        }
 
         let mut total_size_removed = ByteSize(0);
         for (key, entry) in self.entries.iter() {
@@ -377,6 +382,28 @@ impl Store {
         group.end_group(printer, is_ci)?;
 
         Ok(())
+    }
+}
+
+fn make_path_dirs_user_writable(path: &std::path::Path) {
+    for entry in walkdir::WalkDir::new(path)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_dir())
+    {
+        if let Ok(metadata) = entry.metadata() {
+            let mut perms = metadata.permissions();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                perms.set_mode(perms.mode() | 0o200);
+            }
+            #[cfg(windows)]
+            {
+                perms.set_readonly(false);
+            }
+            let _ = std::fs::set_permissions(entry.path(), perms);
+        }
     }
 }
 
