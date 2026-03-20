@@ -143,7 +143,7 @@ pub fn evaluate_ast(
         }
 
         if let Some(workspace) = workspace
-            && singleton::get_inspect_stardoc_path().is_some()
+            && singleton::get_inspect_options().stardoc.is_some()
         {
             let mut workspace = workspace.write();
             let doc_items: Vec<(Arc<str>, _)> = module
@@ -484,7 +484,7 @@ pub fn evaluate_starlark_modules(
     }
     rules::set_latest_starlark_module("".into());
 
-    if let Some(stardoc) = singleton::get_inspect_stardoc_path() {
+    if let Some(stardoc) = singleton::get_inspect_options().stardoc {
         let workspace = workspace.read();
         workspace
             .stardoc
@@ -611,10 +611,9 @@ fn execute_tasks(
             rules::debug_sorted_tasks(printer, task::Phase::Run)
                 .context(format_context!("Failed to debug sorted tasks"))?;
 
-            let inspect_globs = singleton::get_inspect_globs();
-
             // if not filters and called from a relative path, filter on the relative path
-            let mut globs = inspect_globs;
+            let inspect_options = singleton::get_inspect_options();
+            let mut globs = inspect_options.filter_globs;
             let relative_path = workspace.read().relative_invoked_path.clone();
             let mut strip_prefix = None;
             if globs.is_empty() && !relative_path.is_empty() {
@@ -622,33 +621,53 @@ fn execute_tasks(
                 strip_prefix = Some(format!("//{relative_path}").into());
             }
 
-            if let Some(markdown_path) = singleton::get_inspect_markdown_path() {
+            if let Some(markdown_path) = inspect_options.markdown {
                 rules::export_tasks_as_mardown(&markdown_path)
                     .context(format_context!("Failed to export tasks as markdown"))?;
             } else {
-                //only show checkout if log level is message or higher
-                let fuzzy_query = singleton::get_fuzzy_query();
-                let fuzzy_query_ref = fuzzy_query.as_deref();
-                if printer.verbosity.level <= printer::Level::Message {
+                if inspect_options.details {
+                    if let Some(target) = inspect_options.target {
+                        let task = rules::get_cloned_task(target.as_ref())
+                            .context(format_context!("Failed to get task {target}"))?;
+                        let output = if inspect_options.json {
+                            let mut json = serde_json::to_string_pretty(&task)
+                                .context(format_context!("Failed to serialize task as JSON"))?;
+                            json.push('\n');
+                            json
+                        } else {
+                            serde_yaml::to_string(&task)
+                                .context(format_context!("Failed to serialize task as YAML"))?
+                        };
+                        printer.raw(output.as_str())?;
+                    } else {
+                        return Err(format_error!(
+                            "Internal Error: details requires a rule to be specified"
+                        ));
+                    }
+                } else {
+                    //only show checkout if log level is message or higher
+                    let fuzzy_query_ref = inspect_options.fuzzy.as_deref();
+                    if printer.verbosity.level <= printer::Level::Message {
+                        rules::show_tasks(
+                            printer,
+                            workspace.clone(),
+                            task::Phase::Checkout,
+                            &globs,
+                            strip_prefix.clone(),
+                            fuzzy_query_ref,
+                        )
+                        .context(format_context!("Failed to show tasks"))?;
+                    }
                     rules::show_tasks(
                         printer,
                         workspace.clone(),
-                        task::Phase::Checkout,
+                        task::Phase::Run,
                         &globs,
-                        strip_prefix.clone(),
+                        strip_prefix,
                         fuzzy_query_ref,
                     )
                     .context(format_context!("Failed to show tasks"))?;
                 }
-                rules::show_tasks(
-                    printer,
-                    workspace.clone(),
-                    task::Phase::Run,
-                    &globs,
-                    strip_prefix,
-                    fuzzy_query_ref,
-                )
-                .context(format_context!("Failed to show tasks"))?;
             }
         }
         task::Phase::Checkout => {

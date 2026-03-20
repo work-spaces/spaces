@@ -8,6 +8,7 @@ pub mod git;
 pub mod graph;
 pub mod http_archive;
 pub mod inputs;
+pub mod inspect;
 pub mod labels;
 pub mod lock;
 pub mod logger;
