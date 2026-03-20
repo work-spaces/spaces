@@ -811,7 +811,7 @@ impl State {
                 .get(task_name)
                 .ok_or(format_error!("Task not found {task_name}"))?;
 
-            if singleton::get_has_help() && task.rule.help.is_none() {
+            if singleton::get_inspect_options().has_help && task.rule.help.is_none() {
                 continue;
             }
 

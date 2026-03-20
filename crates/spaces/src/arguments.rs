@@ -531,11 +531,26 @@ fn execute_command(
             markdown,
             stardoc,
             fuzzy,
+            details,
+            json,
         } => {
             singleton::set_execution_phase(task::Phase::Inspect);
 
             if effective_printer.verbosity.level > printer::Level::Info {
                 effective_printer.verbosity.level = printer::Level::Info;
+            }
+
+            if details && target.is_none() {
+                return Err(format_error!("details requires a rule to be specified"));
+            }
+
+            if json && !details {
+                return Err(format_error!("json requires `--details`"));
+            }
+
+            if details {
+                effective_printer.verbosity.is_show_progress_bars = false;
+                effective_printer.verbosity.level = printer::Level::Warning;
             }
 
             let mut filter_globs = std::collections::HashSet::new();
@@ -561,16 +576,19 @@ fn execute_command(
                 }
             }
 
-            singleton::set_inspect_globs(filter_globs);
-            singleton::set_has_help(has_help);
-            singleton::set_inspect_markdown_path(markdown);
-            if let Some(fuzzy_query) = fuzzy {
-                singleton::set_fuzzy_query(fuzzy_query);
-            }
             if stardoc.is_some() {
                 singleton::set_rescan(true);
             }
-            singleton::set_inspect_stardoc_path(stardoc);
+            singleton::set_inspect_options(utils::inspect::Options {
+                target: target.clone(),
+                filter_globs,
+                has_help,
+                markdown,
+                stardoc,
+                fuzzy,
+                details,
+                json,
+            });
 
             runner::run_starlark_modules_in_workspace(
                 effective_printer,
@@ -926,6 +944,12 @@ create-lock-file = false # optionally create a lock file
         /// Use fuzzy matching when searching for targets (e.g. `--fuzzy="my query"`)
         #[arg(long)]
         fuzzy: Option<Arc<str>>,
+        /// Show the rule details of the specified rule
+        #[arg(long)]
+        details: bool,
+        /// Show the rule details in JSON format (works with details)
+        #[arg(long)]
+        json: bool,
     },
     /// Generates shell completions for the spaces command.
     Completions {

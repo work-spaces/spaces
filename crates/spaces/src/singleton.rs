@@ -1,8 +1,9 @@
 use crate::{task, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
+use utils::inspect;
 use utils::lock;
 
 #[derive(Debug)]
@@ -21,11 +22,7 @@ struct State {
     args_env: HashMap<Arc<str>, Arc<str>>,
     args_store: HashMap<Arc<str>, serde_json::Value>,
     new_branches: Vec<Arc<str>>,
-    inspect_globs: HashSet<Arc<str>>,
-    has_help: bool,
-    inspect_markdown_path: Option<Arc<str>>,
-    inspect_stardoc_path: Option<Arc<str>>,
-    fuzzy_query: Option<Arc<str>>,
+    inspect: inspect::Options,
     execution_phase: task::Phase,
 }
 
@@ -56,12 +53,17 @@ fn get_state() -> &'static lock::StateLock<State> {
         max_queue_count: 8,
         active_workspace: None,
         error_chain: Vec::new(),
-        inspect_globs: HashSet::new(),
-        has_help: false,
         new_branches: Vec::new(),
-        inspect_markdown_path: None,
-        inspect_stardoc_path: None,
-        fuzzy_query: None,
+        inspect: inspect::Options {
+            target: None,
+            filter_globs: std::collections::HashSet::new(),
+            has_help: false,
+            markdown: None,
+            stardoc: None,
+            fuzzy: None,
+            details: false,
+            json: false,
+        },
         args_env: HashMap::new(),
         args_store: HashMap::new(),
         execution_phase: task::Phase::Complete,
@@ -91,11 +93,6 @@ pub fn show_error_chain() {
         let show_error = error.to_string().replace('\n', "\n    ");
         eprintln!("  [{offset}]: {show_error}");
     }
-}
-
-pub fn get_has_help() -> bool {
-    let state = get_state().read();
-    state.has_help
 }
 
 pub fn enable_lsp_mode() {
@@ -219,54 +216,19 @@ pub fn set_is_sync() {
     state.is_sync = true;
 }
 
-pub fn set_has_help(has_help: bool) {
-    let mut state = get_state().write();
-    state.has_help = has_help;
-}
-
 pub fn get_max_queue_count() -> i64 {
     let state = get_state().read();
     state.max_queue_count
 }
 
-pub fn get_inspect_stardoc_path() -> Option<Arc<str>> {
-    let state = get_state().read();
-    state.inspect_stardoc_path.clone()
-}
-
-pub fn set_inspect_stardoc_path(inspect_stardoc_path: Option<Arc<str>>) {
+pub fn set_inspect_options(options: inspect::Options) {
     let mut state = get_state().write();
-    state.inspect_stardoc_path = inspect_stardoc_path;
+    state.inspect = options;
 }
 
-pub fn set_inspect_markdown_path(inspect_markdown_path: Option<Arc<str>>) {
-    let mut state = get_state().write();
-    state.inspect_markdown_path = inspect_markdown_path;
-}
-
-pub fn get_inspect_markdown_path() -> Option<Arc<str>> {
+pub fn get_inspect_options() -> inspect::Options {
     let state = get_state().read();
-    state.inspect_markdown_path.clone()
-}
-
-pub fn set_inspect_globs(inspect_globs: HashSet<Arc<str>>) {
-    let mut state = get_state().write();
-    state.inspect_globs = inspect_globs;
-}
-
-pub fn get_inspect_globs() -> HashSet<Arc<str>> {
-    let state = get_state().read();
-    state.inspect_globs.clone()
-}
-
-pub fn set_fuzzy_query(fuzzy_query: Arc<str>) {
-    let mut state = get_state().write();
-    state.fuzzy_query = Some(fuzzy_query);
-}
-
-pub fn get_fuzzy_query() -> Option<Arc<str>> {
-    let state = get_state().read();
-    state.fuzzy_query.clone()
+    state.inspect.clone()
 }
 
 pub fn get_is_use_locks() -> bool {
