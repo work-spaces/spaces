@@ -1,21 +1,29 @@
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
+use starlark::eval::Evaluator;
 use starlark::{environment::GlobalsBuilder, values::none::NoneType};
 
+use std::sync::Arc;
 use utils::{logger, rule, targets};
 
-use crate::{executor, rules, singleton, task};
+use crate::builtins::eval_context::get_eval_context;
+use crate::{executor, rules, task};
 
-fn add_rule_to_all(rule: &rule::Rule) -> anyhow::Result<()> {
+fn add_rule_to_all(
+    rule: &rule::Rule,
+    workspace_arc: &crate::workspace::WorkspaceArc,
+    module_name: &Arc<str>,
+) -> anyhow::Result<()> {
     if let Some(rule::RuleType::Run) = rule.type_.as_ref() {
-        let workspace = singleton::get_workspace()
-            .context(format_context!("Internal Error: workspace not available"))?;
-        let mut workspace = workspace.write();
+        let mut workspace = workspace_arc.write();
         workspace
             .settings
             .bin
             .run_all
-            .insert(rules::get_sanitized_rule_name(rule.name.clone()));
+            .insert(rules::get_sanitized_rule_name_for_module(
+                rule.name.clone(),
+                module_name,
+            ));
     }
     Ok(())
 }
@@ -31,8 +39,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// # Arguments
     /// * `message`: Abort message to show the user.
-    fn abort(message: &str) -> anyhow::Result<NoneType> {
-        if singleton::is_lsp_mode() {
+    fn abort(message: &str, eval: &mut Evaluator) -> anyhow::Result<NoneType> {
+        let ctx = get_eval_context(eval)?;
+        if ctx.is_lsp {
             Ok(NoneType)
         } else {
             Err(format_error!("Run Aborting: {}", message))
@@ -54,19 +63,25 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// # Arguments
     /// * `rule`: Rule definition containing `name` (`str`), `deps` (`list`), `platforms` (`list`), `type` (`str`), and `help` (`str`).
-    fn add(#[starlark(require = named)] rule: starlark::values::Value) -> anyhow::Result<NoneType> {
+    fn add(
+        #[starlark(require = named)] rule: starlark::values::Value,
+        eval: &mut Evaluator,
+    ) -> anyhow::Result<NoneType> {
+        let ctx = get_eval_context(eval)?;
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for add target rule"))?;
 
-        add_rule_to_all(&rule)
-            .context(format_context!("Internal Error: Failed to add rule to all"))?;
+        if let Some(workspace_arc) = ctx.workspace.clone() {
+            add_rule_to_all(&rule, &workspace_arc, &ctx.module_name)
+                .context(format_context!("Internal Error: Failed to add rule to all"))?;
+        }
 
         let rule_name = rule.name.clone();
-        rules::insert_task(task::Task::new(
-            rule,
-            task::Phase::Run,
-            executor::Task::Target,
-        ))
+        rules::insert_task_for_module(
+            task::Task::new(rule, task::Phase::Run, executor::Task::Target),
+            &ctx.module_name,
+            ctx.default_module_visibility.clone(),
+        )
         .context(format_context!("Failed to insert task {rule_name}"))?;
         Ok(NoneType)
     }
@@ -79,24 +94,28 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// * `rule`: Rule definition containing `name` (`str`), `deps` (`list`), `platforms` (`list`), `type` (`str`), and `help` (`str`).
     fn add_target(
         #[starlark(require = named)] rule: starlark::values::Value,
+        eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
+        let ctx = get_eval_context(eval)?;
         logger::push_deprecation_warning(
-            rules::get_latest_starlark_module(),
+            Some(ctx.module_name.clone()),
             "Support for checkout.add_which_asset() will be removed in v0.16. Use checkout.add_any_asset().",
         );
 
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for add target rule"))?;
 
-        add_rule_to_all(&rule)
-            .context(format_context!("Internal Error: Failed to add rule to all"))?;
+        if let Some(workspace_arc) = ctx.workspace.clone() {
+            add_rule_to_all(&rule, &workspace_arc, &ctx.module_name)
+                .context(format_context!("Internal Error: Failed to add rule to all"))?;
+        }
 
         let rule_name = rule.name.clone();
-        rules::insert_task(task::Task::new(
-            rule,
-            task::Phase::Run,
-            executor::Task::Target,
-        ))
+        rules::insert_task_for_module(
+            task::Task::new(rule, task::Phase::Run, executor::Task::Target),
+            &ctx.module_name,
+            ctx.default_module_visibility.clone(),
+        )
         .context(format_context!("Failed to insert task {rule_name}"))?;
         Ok(NoneType)
     }
@@ -123,7 +142,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     fn add_exec(
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] exec: starlark::values::Value,
+        eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
+        let ctx = get_eval_context(eval)?;
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for exec rule"))?;
 
@@ -138,25 +159,30 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             }
         }
 
-        add_rule_to_all(&rule)
-            .context(format_context!("Internal Error: Failed to add rule to all"))?;
+        if let Some(workspace_arc) = ctx.workspace.clone() {
+            add_rule_to_all(&rule, &workspace_arc, &ctx.module_name)
+                .context(format_context!("Internal Error: Failed to add rule to all"))?;
+        }
 
         let mut exec: executor::exec::Exec = serde_json::from_value(exec.to_json_value()?)
             .context(format_context!("bad options for exec"))?;
 
         if let Some(working_directory) = exec.working_directory.as_mut() {
-            *working_directory = rules::get_sanitized_working_directory(working_directory.clone());
+            *working_directory = rules::get_sanitized_working_directory_for_module(
+                working_directory.clone(),
+                &ctx.module_name,
+            );
         }
 
         if let Some(redirect_stdout) = exec.redirect_stdout.as_mut() {
             *redirect_stdout = format!("build/{redirect_stdout}").into();
         }
         let rule_name = rule.name.clone();
-        rules::insert_task(task::Task::new(
-            rule,
-            task::Phase::Run,
-            executor::Task::Exec(exec),
-        ))
+        rules::insert_task_for_module(
+            task::Task::new(rule, task::Phase::Run, executor::Task::Exec(exec)),
+            &ctx.module_name,
+            ctx.default_module_visibility.clone(),
+        )
         .context(format_context!("Failed to insert task {rule_name}"))?;
         Ok(NoneType)
     }
@@ -180,7 +206,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     fn add_kill_exec(
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] kill: starlark::values::Value,
+        eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
+        let ctx = get_eval_context(eval)?;
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for kill rule"))?;
 
@@ -195,19 +223,22 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             }
         }
 
-        add_rule_to_all(&rule)
-            .context(format_context!("Internal Error: Failed to add rule to all"))?;
+        if let Some(workspace_arc) = ctx.workspace.clone() {
+            add_rule_to_all(&rule, &workspace_arc, &ctx.module_name)
+                .context(format_context!("Internal Error: Failed to add rule to all"))?;
+        }
 
         let mut kill_exec: executor::exec::Kill = serde_json::from_value(kill.to_json_value()?)
             .context(format_context!("bad options for kill"))?;
-        kill_exec.target = rules::get_sanitized_rule_name(kill_exec.target.clone());
+        kill_exec.target =
+            rules::get_sanitized_rule_name_for_module(kill_exec.target.clone(), &ctx.module_name);
 
         let rule_name = rule.name.clone();
-        rules::insert_task(task::Task::new(
-            rule,
-            task::Phase::Run,
-            executor::Task::Kill(kill_exec),
-        ))
+        rules::insert_task_for_module(
+            task::Task::new(rule, task::Phase::Run, executor::Task::Kill(kill_exec)),
+            &ctx.module_name,
+            ctx.default_module_visibility.clone(),
+        )
         .context(format_context!("Failed to insert task {rule_name}"))?;
         Ok(NoneType)
     }
@@ -232,7 +263,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     fn add_archive(
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] archive: starlark::values::Value,
+        eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
+        let ctx = get_eval_context(eval)?;
         let mut rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for add_archive rule"))?;
 
@@ -270,7 +303,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let target_path = format!(
             "//build/{}/{}",
-            rules::get_sanitized_rule_name(rule_name.clone()),
+            rules::get_sanitized_rule_name_for_module(rule_name.clone(), &ctx.module_name),
             create_archive.get_output_file()
         )
         .into();
@@ -278,11 +311,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let archive = executor::archive::Archive { create_archive };
 
-        rules::insert_task(task::Task::new(
-            rule,
-            task::Phase::Run,
-            executor::Task::CreateArchive(archive),
-        ))
+        rules::insert_task_for_module(
+            task::Task::new(
+                rule,
+                task::Phase::Run,
+                executor::Task::CreateArchive(archive),
+            ),
+            &ctx.module_name,
+            ctx.default_module_visibility.clone(),
+        )
         .context(format_context!("Failed to insert task {rule_name}"))?;
         Ok(NoneType)
     }
@@ -308,15 +345,17 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     fn add_from_clone(
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] clone_from: &str,
+        eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
+        let ctx = get_eval_context(eval)?;
         let mut rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for add_from_clone rule"))?;
 
-        if singleton::is_lsp_mode() {
+        if ctx.is_lsp {
             return Ok(NoneType);
         }
 
-        let cloned_task = rules::get_cloned_task(clone_from)
+        let cloned_task = rules::get_cloned_task_for_module(clone_from, &ctx.module_name)
             .context(format_context!("Failed to clone task {}", clone_from))?;
 
         match &cloned_task.executor {
@@ -370,15 +409,17 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             rule.type_ = cloned_rule.type_;
         }
 
-        add_rule_to_all(&rule)
-            .context(format_context!("Internal Error: Failed to add rule to all"))?;
+        if let Some(workspace_arc) = ctx.workspace.clone() {
+            add_rule_to_all(&rule, &workspace_arc, &ctx.module_name)
+                .context(format_context!("Internal Error: Failed to add rule to all"))?;
+        }
 
         let rule_name = rule.name.clone();
-        rules::insert_task(task::Task::new(
-            rule,
-            task::Phase::Run,
-            cloned_task.executor,
-        ))
+        rules::insert_task_for_module(
+            task::Task::new(rule, task::Phase::Run, cloned_task.executor),
+            &ctx.module_name,
+            ctx.default_module_visibility.clone(),
+        )
         .context(format_context!("Failed to insert task {rule_name}"))?;
         Ok(NoneType)
     }

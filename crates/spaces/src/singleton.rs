@@ -290,11 +290,3 @@ pub fn set_active_workspace(workspace: workspace::WorkspaceArc) {
     let mut state = get_state().write();
     state.active_workspace = Some(workspace);
 }
-
-pub fn get_workspace() -> anyhow::Result<workspace::WorkspaceArc> {
-    let state = get_state().read();
-    state
-        .active_workspace
-        .clone()
-        .ok_or(format_error!("Internal Error: No active workspace"))
-}

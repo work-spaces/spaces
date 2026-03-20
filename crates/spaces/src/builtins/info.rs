@@ -1,3 +1,4 @@
+use crate::builtins::eval_context::get_eval_context;
 use crate::singleton;
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
@@ -66,8 +67,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// # Returns
     /// * `bool`: True if the `--ci` flag is present, False otherwise.
-    fn is_ci() -> anyhow::Result<bool> {
-        Ok(singleton::get_is_ci())
+    fn is_ci(eval: &mut Evaluator) -> anyhow::Result<bool> {
+        let ctx = get_eval_context(eval)?;
+        Ok(ctx.is_ci)
     }
 
     /// Returns the current execution phase of the system.
@@ -80,9 +82,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// # Returns
     /// * `str`: The current phase, which will be "Run", "Checkout", or "Inspect".
-    fn get_execution_phase() -> anyhow::Result<String> {
-        let phase = singleton::get_execution_phase();
-        Ok(format!("{phase}"))
+    fn get_execution_phase(eval: &mut Evaluator) -> anyhow::Result<String> {
+        let ctx = get_eval_context(eval)?;
+        Ok(format!("{}", ctx.execution_phase))
     }
 
     /// Returns true if the current platform is Windows.
@@ -247,9 +249,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// # Returns
     /// * `str`: The absolute path to the local spaces store directory.
-    fn get_path_to_store() -> anyhow::Result<String> {
-        let workspace_arc =
-            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+    fn get_path_to_store(eval: &mut Evaluator) -> anyhow::Result<String> {
+        let ctx = get_eval_context(eval)?;
+        let workspace_arc = ctx
+            .workspace
+            .clone()
+            .ok_or_else(|| format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();
         Ok(workspace.get_store_path().to_string())
     }
@@ -262,9 +267,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// # Returns
     /// * `str`: The absolute path to the spaces tools directory.
-    fn get_path_to_spaces_tools() -> anyhow::Result<String> {
-        let workspace_arc =
-            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+    fn get_path_to_spaces_tools(eval: &mut Evaluator) -> anyhow::Result<String> {
+        let ctx = get_eval_context(eval)?;
+        let workspace_arc = ctx
+            .workspace
+            .clone()
+            .ok_or_else(|| format_error!("No active workspace found"))?;
         let workspace = workspace_arc.read();
         Ok(workspace.get_spaces_tools_path().to_string())
     }
@@ -289,15 +297,18 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// # Arguments
     /// * `version`: The minimum version string (e.g., "1.5.0") required.
-    fn set_minimum_version(version: &str) -> anyhow::Result<NoneType> {
+    fn set_minimum_version(version: &str, eval: &mut Evaluator) -> anyhow::Result<NoneType> {
         let current_version = singleton::get_spaces_version()
             .context(format_context!("While checking minimum version"))?;
         let version = version
             .parse::<semver::Version>()
             .context(format_context!("bad version format"))?;
 
-        let workspace_arc =
-            singleton::get_workspace().context(format_error!("No active workspace found"))?;
+        let ctx = get_eval_context(eval)?;
+        let workspace_arc = ctx
+            .workspace
+            .clone()
+            .ok_or_else(|| format_error!("No active workspace found"))?;
 
         {
             let mut workspace_write = workspace_arc.write();
