@@ -809,7 +809,7 @@ impl HttpArchive {
         #[allow(clippy::readonly_write_lock)]
         let _state = get_state().write().unwrap();
 
-        if make_read_only == MakeReadOnly::Yes {
+        if !original.is_dir() && make_read_only == MakeReadOnly::Yes {
             // original file needs to be updated to be read-only
             let original_metadata = std::fs::metadata(original)
                 .context(format_context!("Failed to get metadata for {original:?}"))?;
