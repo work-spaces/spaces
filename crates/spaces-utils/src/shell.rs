@@ -4,9 +4,26 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::logger;
+
 pub const IS_SPACES_SHELL_ENV_NAME: &str = "SPACES_IS_SPACES_SHELL";
 pub const IS_SPACES_SHELL_ENV_VALUE: &str = "SPACES_IS_RUNNING_IN_A_SPACES_SHELL";
 const SHORTCUTS_SCRIPTS_NAME: &str = "shortcuts.sh";
+
+#[derive(Debug)]
+pub struct CommandExitStatusError {
+    pub status: std::process::ExitStatus,
+}
+impl std::fmt::Display for CommandExitStatusError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "command exited with status: {}",
+            self.status.code().unwrap_or(-1)
+        )
+    }
+}
+impl std::error::Error for CommandExitStatusError {}
 
 enum ShellType {
     Bash,
@@ -81,6 +98,7 @@ pub struct Config {
     pub path: Arc<str>,
     pub startup: Option<Startup>,
     pub args: Vec<Arc<str>>,
+    pub exec_args: Option<Vec<Arc<str>>>,
     pub shortcuts: Option<HashMap<Arc<str>, ShortcutValue>>,
 }
 
@@ -107,6 +125,7 @@ impl Config {
                 path: default_shell_path.unwrap_or("/bin/bash".into()),
                 startup: None,
                 args: Vec::new(),
+                exec_args: None,
                 shortcuts: None,
             })
         }
@@ -196,6 +215,27 @@ impl Config {
             )),
         }
     }
+
+    pub fn get_exec_args(&self) -> anyhow::Result<Vec<Arc<str>>> {
+        if self.exec_args.is_some() {
+            Ok(self.exec_args.clone().unwrap())
+        } else {
+            let program_name = std::path::Path::new(self.path.as_ref())
+                .file_name()
+                .ok_or(format_error!("Failed to get Shell from {}", self.path))?;
+            match program_name.to_str() {
+                Some("bash") => Ok(vec!["-c".into()]),
+                Some("zsh") => Ok(vec!["-c".into()]),
+                Some("fish") => Ok(vec!["-c".into()]),
+                Some("pwsh") => Ok(vec!["-Command".into()]),
+                _ => Ok(vec!["-c".into()]),
+            }
+        }
+    }
+}
+
+fn shell_logger(printer: &mut printer::Printer) -> logger::Logger<'_> {
+    logger::Logger::new_printer(printer, "shell".into())
 }
 
 fn create_shortcuts(
@@ -289,6 +329,82 @@ pub fn run(
         .context(format_context!("failed to launch shell: {}", config.path))?;
 
     Ok(())
+}
+
+pub fn exec(
+    printer: &mut printer::Printer,
+    command: Vec<Arc<str>>,
+    config: &Config,
+    environment_map: &std::collections::HashMap<Arc<str>, Arc<str>>,
+    working_directory: &std::path::Path,
+) -> anyhow::Result<()> {
+    // Split the command into the executable and arguments
+    let (exec, args) = command
+        .split_first()
+        .ok_or_else(|| format_error!("No command specified"))?;
+
+    // Check if the command is a shortcut and expand it
+    let shortcut_or_command = if let Some(shortcuts) = config.shortcuts.as_ref() {
+        if let Some(shortcut_value) = shortcuts.get(exec) {
+            // Expand the shortcut
+            let shortcut_command = shortcut_value.command();
+
+            shell_logger(printer)
+                .debug(format!("Found shortcut \"{}\": {}", exec, shortcut_command).as_str());
+
+            // Combine expanded shortcut command with args
+            let mut resolved_shortcut = Vec::new();
+            resolved_shortcut.push(shortcut_command.clone());
+            resolved_shortcut.extend(args.iter().cloned());
+            resolved_shortcut.join(" ")
+        } else {
+            command.join(" ")
+        }
+    } else {
+        command.join(" ")
+    };
+
+    shell_logger(printer)
+        .debug(format!("Resolved command: {}", shortcut_or_command).as_str());
+
+    let shell_path = config.path.as_ref();
+    let shell_args = config.get_exec_args().context(format_context!("while getting shell exec args"))?;
+
+    shell_logger(printer)
+        .debug(format!("Executing command with shell: {} {:?}", shell_path, shell_args).as_str());
+
+    // Create the command
+    let mut process = std::process::Command::new(shell_path);
+    process.args(shell_args.iter().map(|a| a.as_ref()));
+    process.arg(&shortcut_or_command);
+
+    process.env_clear();
+
+    // Set custom environment variables
+    for (key, value) in environment_map {
+        process.env(key.as_ref(), value.as_ref());
+    }
+
+    process.env(IS_SPACES_SHELL_ENV_NAME, IS_SPACES_SHELL_ENV_VALUE);
+    process.current_dir(working_directory);
+
+    // Inherit stdin, stdout, and stderr
+    process
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit());
+
+    // Execute the command and get the exit status
+    let status = process.status().context(format_context!(
+        "failed to execute command: {}",
+        &shortcut_or_command
+    ))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(anyhow::Error::new(CommandExitStatusError { status }))
+    }
 }
 
 pub fn is_spaces_shell() -> bool {

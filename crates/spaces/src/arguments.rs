@@ -450,6 +450,26 @@ fn execute_command(
                 .context(format_context!("while running user shell"))?;
         }
 
+        Commands::Exec { command } => {
+            match runner::run_exec_in_workspace(effective_printer, command) {
+                Ok(_) => {}
+                Err(error) => {
+                    let exit_code = error
+                        .downcast_ref::<shell::CommandExitStatusError>()
+                        .and_then(|e| e.status.code());
+
+                    if exit_code.is_some() {
+                        singleton::process_anyhow_error(error);
+                        singleton::show_error_chain();
+                        std::process::exit(exit_code.unwrap_or(1));
+                    } else {
+                        // Re-throw other errors
+                        return Err(error.context(format_context!("while running exec command")));
+                    }
+                }
+            }
+        }
+
         Commands::RunLsp {} => {
             #[cfg(feature = "lsp-debug")]
             {
@@ -964,6 +984,12 @@ create-lock-file = false # optionally create a lock file
         /// Include all run targets in completions not just those with help populated
         #[arg(long)]
         all_targets: bool,
+    },
+    /// Runs a command in the workspace environment.
+    Exec {
+        /// The command to run
+        #[arg(trailing_var_arg = true)]
+        command: Vec<Arc<str>>,
     },
     /// Query the status of rules from the logs.
     Logs {
