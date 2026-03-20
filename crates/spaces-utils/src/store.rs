@@ -345,7 +345,9 @@ impl Store {
         let group = ci::GithubLogGroup::new_group(printer, is_ci, "Spaces Store Prune")?;
         let mut remove_entries = Vec::new();
         let path_to_store = self.path_to_store.clone();
-        make_path_dirs_user_writable(path_to_store.as_path());
+        if !is_dry_run {
+            make_path_dirs_user_writable(path_to_store.as_path());
+        }
 
         let mut total_size_removed = ByteSize(0);
         for (key, entry) in self.entries.iter() {
