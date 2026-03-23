@@ -3140,7 +3140,7 @@ dependencies = [
 
 [[package]]
 name = "spaces"
-version = "0.15.30"
+version = "0.15.31"
 dependencies = [
  "anyhow",
  "anyhow-source-location",
@@ -3226,7 +3226,7 @@ dependencies = [
 
 [[package]]
 name = "spaces-utils"
-version = "0.15.30"
+version = "0.15.31"
 dependencies = [
  "anyhow",
  "anyhow-source-location",
