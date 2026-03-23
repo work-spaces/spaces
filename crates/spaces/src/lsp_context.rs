@@ -15,6 +15,7 @@
  * limitations under the License.
  */
 
+use crate::builtins::eval_context::EvalContext;
 use crate::label;
 use crate::{evaluator, rules, workspace};
 use anyhow::Context;
@@ -201,15 +202,18 @@ impl SpacesContext {
 
         let name = name.trim_start_matches("/");
 
-        rules::set_latest_starlark_module(name.into());
+        rules::register_module(name.into());
         eprintln!("run: {name}");
+
+        let eval_context = Some(EvalContext::new(Some(self.workspace.clone()), name.into()));
 
         let eval_result = evaluator::evaluate_ast(
             ast.clone(),
             name.into(),
-            None,
+            Some(self.workspace.clone()),
             workspace_path.clone(),
             evaluator::WithRules::Yes,
+            eval_context,
         );
 
         eprintln!("run: {name} - got result");

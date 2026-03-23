@@ -367,29 +367,26 @@ pub struct State {
     pub workspace_destinations: lock::StateLock<HashMap<Arc<str>, Arc<str>>>,
     pub graph: graph::Graph,
     pub sorted: Vec<petgraph::prelude::NodeIndex>,
-    pub latest_starlark_module: Option<Arc<str>>,
     pub default_module_visibility: rule::Visibility,
     pub all_modules: HashSet<Arc<str>>,
     pub log_status: lock::StateLock<Vec<logs::Status>>,
 }
 
 impl State {
-    pub fn get_sanitized_rule_name(&self, rule_name: Arc<str>) -> Arc<str> {
-        labels::sanitize_rule(
-            rule_name,
-            self.latest_starlark_module.clone(),
-            workspace::SPACES_MODULE_NAME,
-            labels::IsDep::No,
-        )
+    pub fn insert_task(&self, task: task::Task) -> anyhow::Result<()> {
+        self.insert_task_with_context(task, &Arc::from(""), self.default_module_visibility.clone())
     }
 
-    pub fn get_sanitized_working_directory(&self, rule_name: Arc<str>) -> Arc<str> {
-        labels::sanitize_working_directory(rule_name, self.latest_starlark_module.clone())
-    }
-
-    pub fn insert_task(&self, mut task_to_insert: task::Task) -> anyhow::Result<()> {
-        // update the rule name to have the starlark module name
-
+    /// Insert a task using an explicitly supplied module name and default
+    /// visibility.  This variant is called from builtin functions that carry an
+    /// `EvalContext`, allowing multiple modules to be evaluated in parallel
+    /// without races on `latest_starlark_module`.
+    pub fn insert_task_with_context(
+        &self,
+        mut task_to_insert: task::Task,
+        module_name: &Arc<str>,
+        default_visibility: rule::Visibility,
+    ) -> anyhow::Result<()> {
         // don't insert tasks in lsp mode
         if singleton::is_lsp_mode() {
             return Ok(());
@@ -406,38 +403,42 @@ impl State {
             _ => None,
         };
 
+        let module_opt = if module_name.is_empty() {
+            None
+        } else {
+            Some(module_name.clone())
+        };
+
         let rule_label = labels::sanitize_rule(
             task_to_insert.rule.name,
-            self.latest_starlark_module.clone(),
+            module_opt.clone(),
             workspace::SPACES_MODULE_NAME,
             labels::IsDep::No,
         );
 
         if let Some(ws_dest) = workspace_destination {
-            if let Some(rule_name) = self.workspace_destinations.read().get(&ws_dest) {
+            let mut workspace_destinations = self.workspace_destinations.write();
+            if let Some(rule_name) = workspace_destinations.get(&ws_dest) {
                 return Err(format_error!(
                     "The workspace destination `{ws_dest}` is already being used by rule `{rule_name}`"
                 ));
             }
-            let _ = self
-                .workspace_destinations
-                .write()
-                .insert(ws_dest, rule_label.clone());
+            let _ = workspace_destinations.insert(ws_dest, rule_label.clone());
         }
 
         task_to_insert.rule.name = rule_label.clone();
         task_to_insert.signal = task::SignalArc::new(rule_label.clone());
 
-        // Apply default visibility from workspace member when the rule has no explicit visibility
+        // Apply default visibility when the rule has no explicit visibility
         if task_to_insert.rule.visibility.is_none() {
-            task_to_insert.rule.visibility = Some(self.default_module_visibility.clone());
+            task_to_insert.rule.visibility = Some(default_visibility);
         }
 
         task_to_insert
             .rule
             .sanitize(
                 rule_label.clone(),
-                self.latest_starlark_module.clone(),
+                module_opt,
                 workspace::SPACES_MODULE_NAME,
             )
             .context(format_context!("while sanitizing rule {rule_label}"))?;
@@ -1085,7 +1086,6 @@ fn get_state() -> &'static lock::StateLock<State> {
         workspace_destinations: lock::StateLock::new(HashMap::new()),
         graph: graph::Graph::default(),
         sorted: Vec::new(),
-        latest_starlark_module: None,
         default_module_visibility: rule::Visibility::Public,
         all_modules: HashSet::new(),
         log_status: lock::StateLock::new(Vec::new()),
@@ -1093,34 +1093,41 @@ fn get_state() -> &'static lock::StateLock<State> {
     STATE.get()
 }
 
-pub fn get_checkout_path() -> anyhow::Result<Arc<str>> {
-    let state = get_state().read();
-    if let Some(latest) = state.latest_starlark_module.as_ref() {
-        let path = std::path::Path::new(latest.as_ref());
-        let parent = path
-            .parent()
-            .map(|e| e.to_string_lossy().to_string())
-            .unwrap_or_default();
-        Ok(parent.into())
-    } else {
-        Err(format_error!("Internal Error: No starlark module set"))
-    }
+/// Derive the checkout directory path directly from a module name,
+/// without consulting global state. Used by builtins that have an `EvalContext`.
+pub fn get_checkout_path_for_module(module_name: &Arc<str>) -> Arc<str> {
+    let path = std::path::Path::new(module_name.as_ref());
+    path.parent()
+        .map(|e| e.to_string_lossy().to_string())
+        .unwrap_or_default()
+        .into()
 }
 
-pub fn get_path_to_build_checkout(rule_name: Arc<str>) -> anyhow::Result<Arc<str>> {
-    let state = get_state().read();
-    let rule_name = state.get_sanitized_rule_name(rule_name);
-    Ok(format!("build/{rule_name}").into())
+/// Build-checkout path derived from a module name, without global state.
+pub fn get_path_to_build_checkout_for_module(
+    rule_name: Arc<str>,
+    module_name: &Arc<str>,
+) -> Arc<str> {
+    let sanitized = get_sanitized_rule_name_for_module(rule_name, module_name);
+    format!("build/{sanitized}").into()
 }
 
-pub fn get_sanitized_rule_name(rule_name: Arc<str>) -> Arc<str> {
-    let state = get_state().read();
-    state.get_sanitized_rule_name(rule_name)
+/// Sanitize a rule name using a caller-supplied module name instead of global state.
+pub fn get_sanitized_rule_name_for_module(rule_name: Arc<str>, module_name: &Arc<str>) -> Arc<str> {
+    labels::sanitize_rule(
+        rule_name,
+        Some(module_name.clone()),
+        workspace::SPACES_MODULE_NAME,
+        labels::IsDep::No,
+    )
 }
 
-pub fn get_sanitized_working_directory(rule_name: Arc<str>) -> Arc<str> {
-    let state = get_state().read();
-    state.get_sanitized_working_directory(rule_name)
+/// Sanitize a working directory path using a caller-supplied module name.
+pub fn get_sanitized_working_directory_for_module(
+    rule_name: Arc<str>,
+    module_name: &Arc<str>,
+) -> Arc<str> {
+    labels::sanitize_working_directory(rule_name, Some(module_name.clone()))
 }
 
 pub fn insert_task(task: task::Task) -> anyhow::Result<()> {
@@ -1128,21 +1135,24 @@ pub fn insert_task(task: task::Task) -> anyhow::Result<()> {
     state.insert_task(task)
 }
 
-pub fn get_latest_starlark_module() -> Option<Arc<str>> {
+/// Insert a task using caller-supplied module name and default visibility,
+/// without relying on the global `latest_starlark_module` state.
+/// This is the preferred path when an `EvalContext` is available, as it
+/// allows multiple modules to be evaluated concurrently.
+pub fn insert_task_for_module(
+    task: task::Task,
+    module_name: &Arc<str>,
+    default_visibility: rule::Visibility,
+) -> anyhow::Result<()> {
     let state = get_state().read();
-    state.latest_starlark_module.clone()
+    state.insert_task_with_context(task, module_name, default_visibility)
 }
 
-pub fn set_latest_starlark_module(name: Arc<str>) {
+/// Register a module name in `all_modules`.
+/// Called by `evaluate_module` when an `EvalContext` carries the per-eval state.
+pub fn register_module(name: Arc<str>) {
     let mut state = get_state().write();
-    state.latest_starlark_module = Some(name.clone());
-    state.default_module_visibility = rule::Visibility::Public;
     state.all_modules.insert(name);
-}
-
-pub fn set_latest_starlark_module_default_visibility(visibility: rule::Visibility) {
-    let mut state = get_state().write();
-    state.default_module_visibility = visibility;
 }
 
 pub fn show_tasks(
@@ -1259,9 +1269,23 @@ pub fn get_clean_rules() -> rule::Deps {
     get_rules_by_type(rule::RuleType::Clean)
 }
 
-pub fn get_cloned_task(name: &str) -> anyhow::Result<task::Task> {
+/// Get a task by its exact (already-sanitized) name.
+pub fn get_task(name: &str) -> anyhow::Result<task::Task> {
     let state = get_state().read();
-    let sanitized_name = state.get_sanitized_rule_name(name.into());
+    let tasks = state.tasks.read();
+    tasks
+        .get(name)
+        .cloned()
+        .ok_or_else(|| format_error!("Task {} not found", name))
+}
+
+/// Clone a task using a caller-supplied module name instead of global state.
+pub fn get_cloned_task_for_module(
+    name: &str,
+    module_name: &Arc<str>,
+) -> anyhow::Result<task::Task> {
+    let sanitized_name = get_sanitized_rule_name_for_module(name.into(), module_name);
+    let state = get_state().read();
     let tasks = state.tasks.read();
     if let Some(task) = tasks.get(&sanitized_name) {
         Ok(task.clone())

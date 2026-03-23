@@ -1,4 +1,4 @@
-use crate::{task, workspace};
+use crate::task;
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use std::collections::HashMap;
@@ -8,7 +8,6 @@ use utils::lock;
 
 #[derive(Debug)]
 struct State {
-    active_workspace: Option<workspace::WorkspaceArc>,
     is_sync: bool,
     is_ci: bool,
     is_checkout: bool,
@@ -51,7 +50,6 @@ fn get_state() -> &'static lock::StateLock<State> {
         is_skip_deps: false,
         is_use_locks: false,
         max_queue_count: 8,
-        active_workspace: None,
         error_chain: Vec::new(),
         new_branches: Vec::new(),
         inspect: inspect::Options {
@@ -284,17 +282,4 @@ pub fn get_is_checkout() -> bool {
 pub fn set_is_checkout() {
     let mut state = get_state().write();
     state.is_checkout = true;
-}
-
-pub fn set_active_workspace(workspace: workspace::WorkspaceArc) {
-    let mut state = get_state().write();
-    state.active_workspace = Some(workspace);
-}
-
-pub fn get_workspace() -> anyhow::Result<workspace::WorkspaceArc> {
-    let state = get_state().read();
-    state
-        .active_workspace
-        .clone()
-        .ok_or(format_error!("Internal Error: No active workspace"))
 }
