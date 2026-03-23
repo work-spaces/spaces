@@ -373,15 +373,6 @@ pub struct State {
 }
 
 impl State {
-    pub fn get_sanitized_rule_name(&self, rule_name: Arc<str>) -> Arc<str> {
-        labels::sanitize_rule(
-            rule_name,
-            None,
-            workspace::SPACES_MODULE_NAME,
-            labels::IsDep::No,
-        )
-    }
-
     pub fn insert_task(&self, task: task::Task) -> anyhow::Result<()> {
         self.insert_task_with_context(task, &Arc::from(""), self.default_module_visibility.clone())
     }
@@ -426,15 +417,13 @@ impl State {
         );
 
         if let Some(ws_dest) = workspace_destination {
-            if let Some(rule_name) = self.workspace_destinations.read().get(&ws_dest) {
+            let mut workspace_destinations = self.workspace_destinations.write();
+            if let Some(rule_name) = workspace_destinations.get(&ws_dest) {
                 return Err(format_error!(
                     "The workspace destination `{ws_dest}` is already being used by rule `{rule_name}`"
                 ));
             }
-            let _ = self
-                .workspace_destinations
-                .write()
-                .insert(ws_dest, rule_label.clone());
+            let _ = workspace_destinations.insert(ws_dest, rule_label.clone());
         }
 
         task_to_insert.rule.name = rule_label.clone();
@@ -1280,18 +1269,14 @@ pub fn get_clean_rules() -> rule::Deps {
     get_rules_by_type(rule::RuleType::Clean)
 }
 
-pub fn get_cloned_task(name: &str) -> anyhow::Result<task::Task> {
+/// Get a task by its exact (already-sanitized) name.
+pub fn get_task(name: &str) -> anyhow::Result<task::Task> {
     let state = get_state().read();
-    let sanitized_name = state.get_sanitized_rule_name(name.into());
     let tasks = state.tasks.read();
-    if let Some(task) = tasks.get(&sanitized_name) {
-        Ok(task.clone())
-    } else {
-        Err(format_error!(
-            "Task {} not found for cloning",
-            sanitized_name
-        ))
-    }
+    tasks
+        .get(name)
+        .cloned()
+        .ok_or_else(|| format_error!("Task {} not found", name))
 }
 
 /// Clone a task using a caller-supplied module name instead of global state.

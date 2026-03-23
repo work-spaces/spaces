@@ -565,8 +565,6 @@ pub fn run_lsp(printer: &mut printer::Printer) -> anyhow::Result<()> {
     use starlark_lsp::server;
     eprintln!("Starting Spaces Starlark server-");
 
-    singleton::set_active_workspace(workspace_arc.clone());
-
     // collect .star files in workspace
     let workspace_path = workspace_arc.read().absolute_path.to_owned();
     let mut modules = Vec::new();

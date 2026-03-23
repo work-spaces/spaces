@@ -395,6 +395,21 @@ pub fn evaluate_starlark_modules(
 
     star_logger(printer).trace(format!("Input module queue:{module_queue:?}").as_str());
 
+    // first module is the env module. It is always evaluated first.
+    // It can't be evaluated in parallel with other modules.
+    if phase != task::Phase::Checkout
+        && let Some((name, content)) = module_queue.pop_front()
+    {
+        let _ = evaluate_module(
+            Some(workspace.clone()),
+            workspace_path.clone(),
+            name,
+            content.to_string(),
+            WithRules::Yes,
+        )
+        .map_err(|e| format_error!("Failed to evaluate module {:?}", e))?;
+    }
+
     // All modules are evaulated in this loop
     // During checkout additional modules may be added to the queue
     // For Run mode, the env module is processed first and available
@@ -664,7 +679,7 @@ fn execute_tasks(
             } else {
                 if inspect_options.details {
                     if let Some(target) = inspect_options.target {
-                        let task = rules::get_cloned_task(target.as_ref())
+                        let task = rules::get_task(target.as_ref())
                             .context(format_context!("Failed to get task {target}"))?;
                         let output = if inspect_options.json {
                             let mut json = serde_json::to_string_pretty(&task)
