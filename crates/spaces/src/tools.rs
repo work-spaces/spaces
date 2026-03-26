@@ -1,7 +1,7 @@
 use crate::{builtins, singleton, workspace};
 use anyhow::Context;
 use anyhow_source_location::format_context;
-use utils::{ci, http_archive, logger, platform, ws};
+use utils::{ci, http_archive, logger, platform, store, ws};
 
 #[derive(Debug, clap::Subcommand, Clone, strum::Display)]
 pub enum Command {
@@ -38,7 +38,7 @@ fn download_and_install(
     name: &str,
     platform_archive: builtins::checkout::PlatformArchive,
     is_force_link: bool,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Option<String>> {
     let this_platform =
         platform::Platform::get_platform().context(format_context!("Failed to get platform"))?;
     let archive = match this_platform {
@@ -53,6 +53,12 @@ fn download_and_install(
     let spaces_tools = ws::get_spaces_tools_path(store_path.as_ref());
 
     if let Some(archive) = archive.as_ref() {
+        let relative_path = http_archive::HttpArchive::url_to_relative_path(
+            archive.url.as_ref(),
+            &archive.filename,
+        )
+        .context(format_context!("Failed to get relative path for archive"))?;
+
         let mut http_archive =
             http_archive::HttpArchive::new(store_path.as_ref(), "unused", archive, "no tools path")
                 .context(format_context!("Failed to create http archive"))?;
@@ -85,12 +91,14 @@ fn download_and_install(
                 .create_links(progress_bar, spaces_tools.as_ref(), "unused", &mut links)
                 .context(format_context!("Failed to create links"))?;
         }
+
+        return Ok(Some(relative_path));
     } else {
         tools_logger(multi_progress.printer)
             .debug(format!("{name} not available for {this_platform}").as_str());
     }
 
-    Ok(())
+    Ok(None)
 }
 
 pub fn handle_command(printer: &mut printer::Printer, command: Command) -> anyhow::Result<()> {
@@ -178,15 +186,33 @@ pub fn install_tools(printer: &mut printer::Printer, is_force_link: bool) -> any
         "Failed to create directory {store_sysroot_bin}"
     ))?;
 
+    // Load the store manifest to track installed tools
+    let mut manifest_store =
+        store::Store::new_from_store_path(std::path::Path::new(store_path.as_ref())).context(
+            format_context!("Failed to load store manifest from {}", store_path),
+        )?;
+
     let mut multi_progress = printer::MultiProgress::new(printer);
 
     for (name, json) in TOOLS {
         tools_logger(multi_progress.printer).debug(format!("dowload and install {name}").as_str());
         let tool: builtins::checkout::PlatformArchive =
             serde_json::from_str(json).context(format_context!("Failed to parse oras json"))?;
-        download_and_install(&mut multi_progress, name, tool, is_force_link)
-            .context(format_context!("Failed to download and install tools"))?;
+
+        if let Some(relative_path) =
+            download_and_install(&mut multi_progress, name, tool, is_force_link)
+                .context(format_context!("Failed to download and install tools"))?
+        {
+            manifest_store
+                .add_entry(std::path::Path::new(&relative_path))
+                .context(format_context!("Failed to add tool to store manifest"))?;
+        }
     }
+
+    // Save the updated store manifest
+    manifest_store
+        .save(std::path::Path::new(store_path.as_ref()))
+        .context(format_context!("Failed to save store manifest"))?;
 
     Ok(())
 }
