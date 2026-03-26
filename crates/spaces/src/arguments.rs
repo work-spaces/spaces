@@ -965,7 +965,7 @@ create-lock-file = false # optionally create a lock file
     },
     /// Shows the documentation for spaces starlark modules.
     Docs {},
-    /// Shows the documentation for spaces starlark modules.
+    /// Commands for managing internal spaces tools.
     Tools {
         /// The mode to run the command in.
         #[command(subcommand)]
