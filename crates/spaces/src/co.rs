@@ -85,7 +85,11 @@ pub fn checkout_repo(
 ) -> anyhow::Result<()> {
     set_workspace_env(args.env).context(format_context!("While checking out repo"))?;
     set_workspace_store(args.store).context(format_context!("While checking out repo"))?;
+    if !args.lock.is_empty() {
+        singleton::set_use_locks();
+    }
     singleton::set_args_locks(args.lock).context(format_context!("While checking out repo"))?;
+
     let clone = repo_args.clone.unwrap_or(git::Clone::Default);
 
     // get the repo name from the url
@@ -156,6 +160,9 @@ pub fn checkout_workflow(
 
     set_workspace_env(args.env).context(format_context!("While checking out workflow"))?;
     set_workspace_store(args.store).context(format_context!("While checking out workflow"))?;
+    if !args.lock.is_empty() {
+        singleton::set_use_locks();
+    }
     singleton::set_args_locks(args.lock).context(format_context!("While checking out workflow"))?;
 
     if let Some(workflow) = workflow_args.workflow.or(workflow_args.wf) {
