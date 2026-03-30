@@ -190,6 +190,7 @@ fn execute_command(
             create_lock_file,
             force_install_tools,
             keep_workspace_on_failure,
+            lock,
         } => {
             singleton::set_is_checkout();
             co::checkout_workflow(
@@ -207,6 +208,7 @@ fn execute_command(
                     create_lock_file,
                     force_install_tools,
                     keep_workspace_on_failure,
+                    lock,
                 },
             )
             .context(format_context!("While checking out workflow"))?;
@@ -223,6 +225,7 @@ fn execute_command(
             create_lock_file,
             force_install_tools,
             keep_workspace_on_failure,
+            lock,
             locked,
         } => {
             singleton::set_execution_phase(task::Phase::Checkout);
@@ -254,6 +257,7 @@ fn execute_command(
                     create_lock_file,
                     force_install_tools,
                     keep_workspace_on_failure,
+                    lock,
                 },
             )
             .context(format_context!("while checking out repo"));
@@ -271,12 +275,15 @@ fn execute_command(
             env,
             store,
             new_branch,
+            lock,
             locked,
         } => {
             singleton::set_is_checkout();
             if locked {
                 singleton::set_use_locks();
             }
+            singleton::set_args_locks(lock)
+                .context(format_context!("While setting lock overrides"))?;
             let checkout_map =
                 co::Checkout::load().context(format_context!("Failed to load co file"))?;
 
@@ -761,6 +768,12 @@ Executes the checkout rules in the specified scripts or workflow files."#)]
         /// Do not delete the workspace directory if checkout fails.
         #[arg(long)]
         keep_workspace_on_failure: bool,
+        #[arg(
+            long,
+            help = r#"Override locks set in the rules.
+  Use `--lock=REPO=REV`. Can be used multiple times."#
+        )]
+        lock: Vec<Arc<str>>,
     },
     #[command(about = r#"
 Uses git to clone a repository in a new workspace and evaluates the top level [*]spaces.star files.
@@ -817,6 +830,12 @@ This can be used if the repository defines all of its own dependencies."#)]
         /// Do not delete the workspace directory if checkout fails.
         #[arg(long)]
         keep_workspace_on_failure: bool,
+        #[arg(
+            long,
+            help = r#"Override locks set in the rules.
+  Use `--lock=REPO=REV`. Can be used multiple times."#
+        )]
+        lock: Vec<Arc<str>>,
         /// The workspaces lock rev's will override the rule rev for repos
         #[arg(long)]
         locked: bool,
@@ -871,6 +890,12 @@ create-lock-file = false # optionally create a lock file
         /// Additional new-branch values to augment co.spaces.toml
         #[arg(long)]
         new_branch: Vec<Arc<str>>,
+        #[arg(
+            long,
+            help = r#"Override locks set in the rules.
+  Use `--lock=REPO=REV`. Can be used multiple times."#
+        )]
+        lock: Vec<Arc<str>>,
         /// The workspaces lock rev's will override the rule rev for repos
         #[arg(long)]
         locked: bool,
