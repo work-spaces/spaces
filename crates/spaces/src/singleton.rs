@@ -254,7 +254,7 @@ pub fn set_args_locks(args: Vec<Arc<str>>) -> anyhow::Result<()> {
             state.args_locks.insert(key.into(), value.into());
         } else {
             return Err(format_error!(
-                "Bad lock argument: `{lock}` use `<REPO>=<REV>`"
+                "Bad lock argument: `{lock}` use `--lock=<REPO>=<REV>`"
             ));
         }
     }
