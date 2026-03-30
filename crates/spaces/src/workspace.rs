@@ -1,3 +1,4 @@
+use crate::label;
 use crate::{singleton, stardoc};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
@@ -260,9 +261,26 @@ pub struct Workspace {
 }
 
 impl Workspace {
+    /// Checks if a lock key is overridden by a command line lock.
+    /// Handles both simple repo names and fully qualified labels.
+    fn is_lock_overridden_by_command_line(lock_key: &str) -> bool {
+        let args_locks = singleton::get_args_locks();
+        let repo_name = label::get_rule_name_from_label(lock_key);
+
+        // Check if this lock key conflicts with any command line lock
+        args_locks.contains_key(lock_key)
+            || args_locks.contains_key(repo_name)
+            || args_locks
+                .keys()
+                .any(|cmd_key| label::get_rule_name_from_label(cmd_key.as_ref()) == repo_name)
+    }
+
     pub fn update_locks(&mut self, locks: &HashMap<Arc<str>, Arc<str>>) {
         for (key, value) in locks.iter() {
-            self.locks.insert(key.clone(), value.clone());
+            // Don't override locks that were set from command line
+            if !Self::is_lock_overridden_by_command_line(key.as_ref()) {
+                self.locks.insert(key.clone(), value.clone());
+            }
         }
     }
 
@@ -514,6 +532,9 @@ impl Workspace {
             settings.json.is_use_locks = Some(true);
         }
 
+        // Load command line locks
+        let locks = singleton::get_args_locks();
+
         if is_checkout_phase == IsCheckoutPhase::Yes {
             settings.json.scanned_modules = HashSet::default();
         }
@@ -752,7 +773,7 @@ impl Workspace {
             log_directory,
             is_reproducible: true,
             is_create_lock_file: false,
-            locks: HashMap::new(),
+            locks,
             env,
             is_dirty,
             is_env_set: false,
@@ -994,7 +1015,10 @@ impl Workspace {
     }
 
     pub fn add_git_commit_lock(&mut self, rule_name: &str, commit: Arc<str>) {
-        self.locks.insert(rule_name.into(), commit);
+        // Don't override locks that were set from command line
+        if !Self::is_lock_overridden_by_command_line(rule_name) {
+            self.locks.insert(rule_name.into(), commit);
+        }
     }
 
     pub fn get_short_digest(&self) -> Arc<str> {

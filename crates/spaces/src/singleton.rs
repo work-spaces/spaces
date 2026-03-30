@@ -20,6 +20,7 @@ struct State {
     error_chain: Vec<String>,
     args_env: HashMap<Arc<str>, Arc<str>>,
     args_store: HashMap<Arc<str>, serde_json::Value>,
+    args_locks: HashMap<Arc<str>, Arc<str>>,
     new_branches: Vec<Arc<str>>,
     inspect: inspect::Options,
     execution_phase: task::Phase,
@@ -64,6 +65,7 @@ fn get_state() -> &'static lock::StateLock<State> {
         },
         args_env: HashMap::new(),
         args_store: HashMap::new(),
+        args_locks: HashMap::new(),
         execution_phase: task::Phase::Complete,
     }));
 
@@ -237,6 +239,26 @@ pub fn get_is_use_locks() -> bool {
 pub fn set_use_locks() {
     let mut state = get_state().write();
     state.is_use_locks = true;
+}
+
+pub fn get_args_locks() -> HashMap<Arc<str>, Arc<str>> {
+    let state = get_state().read();
+    state.args_locks.clone()
+}
+
+pub fn set_args_locks(args: Vec<Arc<str>>) -> anyhow::Result<()> {
+    let mut state = get_state().write();
+    for lock in args.iter() {
+        let parts = lock.split_once('=');
+        if let Some((key, value)) = parts {
+            state.args_locks.insert(key.into(), value.into());
+        } else {
+            return Err(format_error!(
+                "Bad lock argument: `{lock}` use `--lock=<REPO>=<REV>`"
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub fn get_is_rescan() -> bool {

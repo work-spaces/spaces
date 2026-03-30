@@ -74,6 +74,7 @@ pub struct CheckoutArgs {
     pub create_lock_file: bool,
     pub force_install_tools: bool,
     pub keep_workspace_on_failure: bool,
+    pub lock: Vec<Arc<str>>,
 }
 
 pub fn checkout_repo(
@@ -84,6 +85,11 @@ pub fn checkout_repo(
 ) -> anyhow::Result<()> {
     set_workspace_env(args.env).context(format_context!("While checking out repo"))?;
     set_workspace_store(args.store).context(format_context!("While checking out repo"))?;
+    if !args.lock.is_empty() {
+        singleton::set_use_locks();
+    }
+    singleton::set_args_locks(args.lock).context(format_context!("While checking out repo"))?;
+
     let clone = repo_args.clone.unwrap_or(git::Clone::Default);
 
     // get the repo name from the url
@@ -154,6 +160,10 @@ pub fn checkout_workflow(
 
     set_workspace_env(args.env).context(format_context!("While checking out workflow"))?;
     set_workspace_store(args.store).context(format_context!("While checking out workflow"))?;
+    if !args.lock.is_empty() {
+        singleton::set_use_locks();
+    }
+    singleton::set_args_locks(args.lock).context(format_context!("While checking out workflow"))?;
 
     if let Some(workflow) = workflow_args.workflow.or(workflow_args.wf) {
         let parts: Vec<_> = workflow.split(':').collect();
@@ -279,6 +289,7 @@ impl CheckoutWorkflow {
                 create_lock_file: self.create_lock_file.unwrap_or_default(),
                 force_install_tools: false,
                 keep_workspace_on_failure,
+                lock: vec![],
             },
         );
         group.end_group(printer, is_ci)?;
@@ -336,6 +347,7 @@ impl CheckoutRepo {
                 create_lock_file: self.create_lock_file.unwrap_or_default(),
                 force_install_tools: false,
                 keep_workspace_on_failure,
+                lock: vec![],
             },
         );
         group.end_group(printer, is_ci)?;
