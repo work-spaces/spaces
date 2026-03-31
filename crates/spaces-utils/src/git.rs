@@ -312,7 +312,7 @@ pub fn get_commit_hash(
 ) -> anyhow::Result<Option<Arc<str>>> {
     let options = printer::ExecuteOptions {
         working_directory: Some(directory.into()),
-        arguments: vec!["show".into(), "-s".into(), "--format=%H".into()],
+        arguments: vec!["rev-parse".into(), "HEAD".into()],
         is_return_stdout: true,
         ..Default::default()
     };
@@ -443,26 +443,6 @@ pub fn get_commit_tag(
     let options = printer::ExecuteOptions {
         working_directory: Some(directory.into()),
         arguments: vec!["describe".into(), "--exact-match".into(), "HEAD".into()],
-        is_return_stdout: true,
-        ..Default::default()
-    };
-
-    if let Ok(Some(stdout)) = execute_git_command(progress_bar, url, options) {
-        let stdout_trimmed = stdout.trim();
-        Some(stdout_trimmed.into())
-    } else {
-        None
-    }
-}
-
-pub fn get_commit_short_hash(
-    progress_bar: &mut printer::MultiProgressBar,
-    url: &str,
-    directory: &str,
-) -> Option<Arc<str>> {
-    let options = printer::ExecuteOptions {
-        working_directory: Some(directory.into()),
-        arguments: vec!["rev-parse".into(), "--short".into(), "HEAD".into()],
         is_return_stdout: true,
         ..Default::default()
     };
@@ -984,11 +964,11 @@ impl Repository {
         get_commit_tag(progress_bar, &self.url, &self.full_path)
     }
 
-    pub fn get_commit_short_hash(
+    pub fn get_commit_hash(
         &self,
         progress_bar: &mut printer::MultiProgressBar,
-    ) -> Option<Arc<str>> {
-        get_commit_short_hash(progress_bar, &self.url, &self.full_path)
+    ) -> anyhow::Result<Option<Arc<str>>> {
+        get_commit_hash(progress_bar, &self.url, &self.full_path)
     }
 
     pub fn is_head_branch(&self, progress_bar: &mut printer::MultiProgressBar) -> bool {

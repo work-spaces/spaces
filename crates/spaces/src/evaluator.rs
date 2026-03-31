@@ -705,6 +705,7 @@ fn execute_tasks(
                                 Some(inspect::GitTask {
                                     url: git_task.url.clone(),
                                     rule_name: e.rule.name.clone(),
+                                    spaces_key: git_task.spaces_key.clone(),
                                 })
                             } else {
                                 None

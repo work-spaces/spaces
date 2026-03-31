@@ -558,7 +558,7 @@ fn execute_command(
 
                 if has_help {
                     return Err(format_error!(
-                        "checkout mode does not support specifying `--help`"
+                        "checkout mode does not support specifying `--has-help`"
                     ));
                 }
 
