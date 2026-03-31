@@ -540,8 +540,46 @@ fn execute_command(
             fuzzy,
             details,
             json,
+            checkout,
         } => {
             singleton::set_execution_phase(task::Phase::Inspect);
+            if checkout {
+                if target.is_some() {
+                    return Err(format_error!(
+                        "checkout mode does not support specifying a target"
+                    ));
+                }
+
+                if details {
+                    return Err(format_error!(
+                        "checkout mode does not support specifying `--details`"
+                    ));
+                }
+
+                if has_help {
+                    return Err(format_error!(
+                        "checkout mode does not support specifying `--has-help`"
+                    ));
+                }
+
+                if json {
+                    return Err(format_error!(
+                        "checkout mode does not support specifying `--json`"
+                    ));
+                }
+
+                if filter.is_some() {
+                    return Err(format_error!(
+                        "checkout mode does not support specifying `--filter`"
+                    ));
+                }
+
+                if markdown.is_some() {
+                    return Err(format_error!(
+                        "checkout mode does not support specifying `--markdown`"
+                    ));
+                }
+            }
 
             if effective_printer.verbosity.level > printer::Level::Info {
                 effective_printer.verbosity.level = printer::Level::Info;
@@ -595,6 +633,7 @@ fn execute_command(
                 fuzzy,
                 details,
                 json,
+                checkout,
             });
 
             runner::run_starlark_modules_in_workspace(
@@ -960,6 +999,9 @@ create-lock-file = false # optionally create a lock file
         /// Only show rules with the help entry populated
         #[arg(long)]
         has_help: bool,
+        /// Inspect the command that will checkout the workspace in the current state
+        #[arg(long)]
+        checkout: bool,
         /// Write the output of the inspect command to a markdown file
         #[arg(long)]
         markdown: Option<Arc<str>>,

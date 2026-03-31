@@ -1241,6 +1241,16 @@ pub fn add_setup_dep_to_run_rules() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn get_rules_by_phase(phase: task::Phase) -> Vec<task::Task> {
+    let state = get_state().read();
+    let tasks = state.tasks.read();
+    tasks
+        .values()
+        .filter(|task| task.phase == phase)
+        .cloned()
+        .collect()
+}
+
 fn get_rules_by_type(rule_type: rule::RuleType) -> rule::Deps {
     let state = get_state().read();
     let tasks = state.tasks.read();
@@ -1251,6 +1261,10 @@ fn get_rules_by_type(rule_type: rule::RuleType) -> rule::Deps {
             .map(|task| rule::AnyDep::Rule(task.rule.name.clone()))
             .collect(),
     )
+}
+
+pub fn get_checkout_rules() -> Vec<task::Task> {
+    get_rules_by_phase(task::Phase::Checkout)
 }
 
 pub fn get_setup_rules() -> rule::Deps {

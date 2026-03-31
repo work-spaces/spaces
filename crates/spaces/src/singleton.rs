@@ -62,6 +62,7 @@ fn get_state() -> &'static lock::StateLock<State> {
             fuzzy: None,
             details: false,
             json: false,
+            checkout: false,
         },
         args_env: HashMap::new(),
         args_store: HashMap::new(),

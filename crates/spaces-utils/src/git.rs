@@ -312,7 +312,7 @@ pub fn get_commit_hash(
 ) -> anyhow::Result<Option<Arc<str>>> {
     let options = printer::ExecuteOptions {
         working_directory: Some(directory.into()),
-        arguments: vec!["show".into(), "-s".into(), "--format=%H".into()],
+        arguments: vec!["rev-parse".into(), "HEAD".into()],
         is_return_stdout: true,
         ..Default::default()
     };
@@ -958,6 +958,17 @@ impl Repository {
 
     pub fn is_dirty(&self, progress_bar: &mut printer::MultiProgressBar) -> bool {
         is_dirty(progress_bar, &self.url, &self.full_path)
+    }
+
+    pub fn get_commit_tag(&self, progress_bar: &mut printer::MultiProgressBar) -> Option<Arc<str>> {
+        get_commit_tag(progress_bar, &self.url, &self.full_path)
+    }
+
+    pub fn get_commit_hash(
+        &self,
+        progress_bar: &mut printer::MultiProgressBar,
+    ) -> anyhow::Result<Option<Arc<str>>> {
+        get_commit_hash(progress_bar, &self.url, &self.full_path)
     }
 
     pub fn is_head_branch(&self, progress_bar: &mut printer::MultiProgressBar) -> bool {
