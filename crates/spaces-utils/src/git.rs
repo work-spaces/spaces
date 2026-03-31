@@ -455,6 +455,26 @@ pub fn get_commit_tag(
     }
 }
 
+pub fn get_commit_short_hash(
+    progress_bar: &mut printer::MultiProgressBar,
+    url: &str,
+    directory: &str,
+) -> Option<Arc<str>> {
+    let options = printer::ExecuteOptions {
+        working_directory: Some(directory.into()),
+        arguments: vec!["rev-parse".into(), "--short".into(), "HEAD".into()],
+        is_return_stdout: true,
+        ..Default::default()
+    };
+
+    if let Ok(Some(stdout)) = execute_git_command(progress_bar, url, options) {
+        let stdout_trimmed = stdout.trim();
+        Some(stdout_trimmed.into())
+    } else {
+        None
+    }
+}
+
 fn get_branch_log(
     progress_bar: &mut printer::MultiProgressBar,
     url: &str,
@@ -958,6 +978,17 @@ impl Repository {
 
     pub fn is_dirty(&self, progress_bar: &mut printer::MultiProgressBar) -> bool {
         is_dirty(progress_bar, &self.url, &self.full_path)
+    }
+
+    pub fn get_commit_tag(&self, progress_bar: &mut printer::MultiProgressBar) -> Option<Arc<str>> {
+        get_commit_tag(progress_bar, &self.url, &self.full_path)
+    }
+
+    pub fn get_commit_short_hash(
+        &self,
+        progress_bar: &mut printer::MultiProgressBar,
+    ) -> Option<Arc<str>> {
+        get_commit_short_hash(progress_bar, &self.url, &self.full_path)
     }
 
     pub fn is_head_branch(&self, progress_bar: &mut printer::MultiProgressBar) -> bool {

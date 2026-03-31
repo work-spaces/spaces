@@ -8,7 +8,7 @@ use starlark::eval::{Evaluator, ReturnFileLoader};
 use starlark::syntax::{AstModule, Dialect};
 use std::collections::HashSet;
 use std::sync::Arc;
-use utils::{logger, rule, ws};
+use utils::{inspect, logger, rule, ws};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WithRules {
@@ -665,7 +665,7 @@ fn execute_tasks(
 
             // if not filters and called from a relative path, filter on the relative path
             let inspect_options = singleton::get_inspect_options();
-            let mut globs = inspect_options.filter_globs;
+            let mut globs = inspect_options.filter_globs.clone();
             let relative_path = workspace.read().relative_invoked_path.clone();
             let mut strip_prefix = None;
             if globs.is_empty() && !relative_path.is_empty() {
@@ -696,6 +696,25 @@ fn execute_tasks(
                             "Internal Error: details requires a rule to be specified"
                         ));
                     }
+                } else if inspect_options.checkout {
+                    let checkout_rules = rules::get_checkout_rules();
+                    let inspect_checkout_git_rules: Vec<_> = checkout_rules
+                        .into_iter()
+                        .filter_map(|e| {
+                            if let executor::Task::Git(git_task) = e.executor {
+                                Some(inspect::GitTask {
+                                    url: git_task.url.clone(),
+                                    rule_name: e.rule.name.clone(),
+                                })
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+
+                    inspect_options
+                        .execute_inspect_checkout(printer, inspect_checkout_git_rules.as_slice())
+                        .context(format_context!("while inspecting checkout rules"))?;
                 } else {
                     //only show checkout if log level is message or higher
                     let fuzzy_query_ref = inspect_options.fuzzy.as_deref();
