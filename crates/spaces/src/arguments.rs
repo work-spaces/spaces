@@ -580,6 +580,12 @@ fn execute_command(
                         "checkout mode does not support specifying `--markdown`"
                     ));
                 }
+            } else {
+                if force {
+                    return Err(format_error!(
+                        "`--force` is only supported with `--checkout`"
+                    ));
+                }
             }
 
             if effective_printer.verbosity.level > printer::Level::Info {
