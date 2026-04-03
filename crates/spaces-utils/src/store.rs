@@ -90,7 +90,15 @@ impl Store {
 
     pub fn merge(&mut self, other: Store) {
         for (key, value) in other.entries {
-            self.entries.insert(key, value);
+            let full_path = self.get_path_in_store(std::path::Path::new(key.as_ref()));
+            let size = get_size_of_path(full_path.as_path()).unwrap_or(0);
+            self.entries.insert(
+                key,
+                Entry {
+                    last_used: value.last_used,
+                    size,
+                },
+            );
         }
     }
 
