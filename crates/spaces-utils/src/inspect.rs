@@ -54,9 +54,7 @@ impl Options {
                 .get_commit_hash(&mut progress_bar)
                 .context(format_context!("Failed to get commit for {rule_name}"))?;
 
-            if let Some(commit_description) = repo
-                .get_commit_tag(&mut progress_bar)
-                .or_else(|| commit_hash)
+            if let Some(commit_description) = repo.get_commit_tag(&mut progress_bar).or(commit_hash)
             {
                 locks.push((dir_name, commit_description))
             }

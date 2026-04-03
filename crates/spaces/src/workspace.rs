@@ -767,6 +767,8 @@ impl Workspace {
             settings.bin.is_always_evaluate = true;
         }
 
+        let store = store::Store::new(std::path::Path::new(settings.json.store_path.as_ref()));
+
         Ok(Self {
             modules,
             absolute_path,
@@ -787,7 +789,7 @@ impl Workspace {
             relative_invoked_path,
             settings,
             is_any_digest_updated: false,
-            store: store::Store::default(),
+            store,
         })
     }
 

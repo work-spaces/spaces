@@ -69,6 +69,13 @@ pub struct Store {
 }
 
 impl Store {
+    pub fn new(path_to_store: &std::path::Path) -> Self {
+        Self {
+            entries: HashMap::new(),
+            path_to_store: path_to_store.into(),
+        }
+    }
+
     pub fn new_from_store_path(path_to_store: &std::path::Path) -> anyhow::Result<Self> {
         let path = std::path::Path::new(path_to_store).join(MANIFEST_FILE_NAME);
         if path.exists() {
