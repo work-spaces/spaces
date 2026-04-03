@@ -541,6 +541,7 @@ fn execute_command(
             details,
             json,
             checkout,
+            force,
         } => {
             singleton::set_execution_phase(task::Phase::Inspect);
             if checkout {
@@ -577,6 +578,12 @@ fn execute_command(
                 if markdown.is_some() {
                     return Err(format_error!(
                         "checkout mode does not support specifying `--markdown`"
+                    ));
+                }
+            } else {
+                if force {
+                    return Err(format_error!(
+                        "`--force` is only supported with `--checkout`"
                     ));
                 }
             }
@@ -634,6 +641,7 @@ fn execute_command(
                 details,
                 json,
                 checkout,
+                force,
             });
 
             runner::run_starlark_modules_in_workspace(
@@ -1002,6 +1010,9 @@ create-lock-file = false # optionally create a lock file
         /// Inspect the command that will checkout the workspace in the current state
         #[arg(long)]
         checkout: bool,
+        /// When used with --checkout, warn if a repo is dirty but still print the checkout command
+        #[arg(long)]
+        force: bool,
         /// Write the output of the inspect command to a markdown file
         #[arg(long)]
         markdown: Option<Arc<str>>,

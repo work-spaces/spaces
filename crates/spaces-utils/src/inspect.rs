@@ -1,8 +1,12 @@
-use crate::git;
+use crate::{git, logger};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use std::collections::HashSet;
 use std::sync::Arc;
+
+pub fn logger(progress: &mut printer::MultiProgressBar) -> logger::Logger<'_> {
+    logger::Logger::new_progress(progress, "inspect".into())
+}
 
 pub struct GitTask {
     pub url: Arc<str>,
@@ -10,7 +14,7 @@ pub struct GitTask {
     pub spaces_key: Arc<str>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Options {
     pub target: Option<Arc<str>>,
     pub filter_globs: HashSet<Arc<str>>,
@@ -21,6 +25,7 @@ pub struct Options {
     pub details: bool,
     pub json: bool,
     pub checkout: bool,
+    pub force: bool,
 }
 
 impl Options {
@@ -43,11 +48,18 @@ impl Options {
 
             let repo = git::Repository::new(git_task.url.clone(), dir_name.clone());
             if repo.is_dirty(&mut progress_bar) {
-                return Err(format_error!(
-                    "[{}] {} is dirty - cannot inspect checkout with dirty repo. Commit and push changes.",
-                    git_task.url,
-                    rule_name
-                ));
+                if self.force {
+                    logger(&mut progress_bar).warning(&format!(
+                        "[{}] {} is dirty - checkout command may not be reproducible.",
+                        git_task.url, rule_name
+                    ));
+                } else {
+                    return Err(format_error!(
+                        "[{}] {} is dirty - cannot inspect checkout with dirty repo. Commit and push changes.",
+                        git_task.url,
+                        rule_name
+                    ));
+                }
             }
 
             let commit_hash = repo
