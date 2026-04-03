@@ -69,6 +69,13 @@ pub struct Store {
 }
 
 impl Store {
+    pub fn new(path_to_store: &std::path::Path) -> Self {
+        Self {
+            entries: HashMap::new(),
+            path_to_store: path_to_store.into(),
+        }
+    }
+
     pub fn new_from_store_path(path_to_store: &std::path::Path) -> anyhow::Result<Self> {
         let path = std::path::Path::new(path_to_store).join(MANIFEST_FILE_NAME);
         if path.exists() {
@@ -90,15 +97,7 @@ impl Store {
 
     pub fn merge(&mut self, other: Store) {
         for (key, value) in other.entries {
-            let full_path = self.get_path_in_store(std::path::Path::new(key.as_ref()));
-            let size = get_size_of_path(full_path.as_path()).unwrap_or(0);
-            self.entries.insert(
-                key,
-                Entry {
-                    last_used: value.last_used,
-                    size,
-                },
-            );
+            self.entries.insert(key, value);
         }
     }
 
