@@ -14,8 +14,10 @@ pub use verbosity::{Level, Verbosity};
 trait ConsoleWriter: Send {
     fn write_str(&mut self, s: &dyn std::fmt::Display) -> anyhow::Result<()>;
     fn emit_line(&mut self, line: superconsole::Line);
-    fn add_progress(&mut self, label: &str);
+    fn add_progress(&mut self, label: &str, total: Option<u64>);
     fn set_progress_status(&mut self, label: &str, message: &str);
+    fn update_progress(&mut self, label: &str, current: u64, total: u64);
+    fn increment_progress(&mut self, label: &str);
     fn remove_progress(&mut self, label: &str);
 }
 
@@ -44,12 +46,12 @@ impl ConsoleWriter for SuperConsoleWriter {
         }
     }
 
-    fn add_progress(&mut self, label: &str) {
+    fn add_progress(&mut self, label: &str, total: Option<u64>) {
         self.component.active_progress.push(ui::ActiveProgress {
             name: label.to_string(),
             message: String::new(),
             position: 0,
-            total: None,
+            total,
             start_time: std::time::Instant::now(),
         });
         if let Some(console) = self.console.as_mut() {
@@ -65,6 +67,34 @@ impl ConsoleWriter for SuperConsoleWriter {
             .find(|p| p.name == label)
         {
             entry.message = message.to_string();
+        }
+        if let Some(console) = self.console.as_mut() {
+            let _ = console.render(&self.component);
+        }
+    }
+
+    fn update_progress(&mut self, label: &str, current: u64, total: u64) {
+        if let Some(entry) = self
+            .component
+            .active_progress
+            .iter_mut()
+            .find(|p| p.name == label)
+        {
+            entry.position = current;
+            entry.total = Some(total);
+        }
+        if let Some(console) = self.console.as_mut() {
+            let _ = console.render(&self.component);
+        }
+    }
+
+    fn increment_progress(&mut self, label: &str) {
+        if let Some(entry) = self
+            .component
+            .active_progress
+            .iter_mut()
+            .find(|p| p.name == label)
+        {
             entry.position += 1;
         }
         if let Some(console) = self.console.as_mut() {
@@ -102,6 +132,15 @@ pub struct Console {
     state: Arc<RwLock<sealed::State>>,
 }
 
+impl Clone for Console {
+    fn clone(&self) -> Self {
+        Self {
+            writer: Arc::clone(&self.writer),
+            state: Arc::clone(&self.state),
+        }
+    }
+}
+
 impl Console {
     pub fn new_stdout(verbosity: Verbosity) -> anyhow::Result<Self> {
         let console = superconsole::SuperConsole::new().context(format_context!(
@@ -135,84 +174,107 @@ impl Console {
         self.writer.lock().unwrap().emit_line(line);
     }
 
-    pub fn add_progress(&self, label: &str) {
-        self.writer.lock().unwrap().add_progress(label);
+    fn add_progress(&self, label: &str, total: Option<u64>) {
+        if self.state.read().unwrap().verbosity.is_show_progress_bars {
+            self.writer.lock().unwrap().add_progress(label, total);
+        }
     }
 
-    pub fn set_progress_status(&self, label: &str, message: &str) {
-        self.writer
-            .lock()
-            .unwrap()
-            .set_progress_status(label, message);
+    fn set_progress_status(&self, label: &str, message: &str) {
+        if self.state.read().unwrap().verbosity.is_show_progress_bars {
+            self.writer
+                .lock()
+                .unwrap()
+                .set_progress_status(label, message);
+        }
     }
 
-    pub fn remove_progress(&self, label: &str) {
+    fn update_progress(&self, label: &str, current: u64, total: u64) {
+        if self.state.read().unwrap().verbosity.is_show_progress_bars {
+            self.writer
+                .lock()
+                .unwrap()
+                .update_progress(label, current, total);
+        }
+    }
+
+    fn increment_progress(&self, label: &str) {
+        if self.state.read().unwrap().verbosity.is_show_progress_bars {
+            self.writer.lock().unwrap().increment_progress(label);
+        }
+    }
+
+    fn remove_progress(&self, label: &str) {
         self.writer.lock().unwrap().remove_progress(label);
     }
 
-    pub fn trace<Type: std::fmt::Display>(&self, name: &str, value: &Type) -> anyhow::Result<()> {
-        if self.state.read().unwrap().verbosity.level <= Level::Trace {
-            self.write(format!("{name}: {value}\n").as_str())
-        } else {
-            Ok(())
-        }
+    pub fn trace<Type: std::fmt::Display>(&self, name: &str, value: Type) -> anyhow::Result<()> {
+        self.log(Level::Trace, &format!("{name}: {value}"))
     }
 
-    pub fn debug<Type: std::fmt::Display>(&self, name: &str, value: &Type) -> anyhow::Result<()> {
-        if self.state.read().unwrap().verbosity.level <= Level::Debug {
-            self.write(format!("{name}: {value}\n").as_str())
-        } else {
-            Ok(())
-        }
+    pub fn debug<Type: std::fmt::Display>(&self, name: &str, value: Type) -> anyhow::Result<()> {
+        self.log(Level::Debug, &format!("{name}: {value}"))
     }
 
-    pub fn message<Type: std::fmt::Display>(&self, name: &str, value: &Type) -> anyhow::Result<()> {
-        if self.state.read().unwrap().verbosity.level <= Level::Message {
-            self.write(format!("{name}: {value}\n").as_str())
-        } else {
-            Ok(())
-        }
+    pub fn message<Type: std::fmt::Display>(&self, name: &str, value: Type) -> anyhow::Result<()> {
+        self.log(Level::Message, &format!("{name}: {value}"))
     }
 
-    pub fn info<Type: std::fmt::Display>(&self, name: &str, value: &Type) -> anyhow::Result<()> {
-        if self.state.read().unwrap().verbosity.level <= Level::Info {
-            self.write(format!("{name}: {value}\n").as_str())
-        } else {
-            Ok(())
-        }
+    pub fn info<Type: std::fmt::Display>(&self, name: &str, value: Type) -> anyhow::Result<()> {
+        self.log(Level::Info, &format!("{name}: {value}"))
     }
 
-    pub fn warning<Type: std::fmt::Display>(&self, name: &str, value: &Type) -> anyhow::Result<()> {
-        if self.state.read().unwrap().verbosity.level <= Level::Warning {
-            self.write(format!("{name}: {value}\n").as_str())
-        } else {
-            Ok(())
-        }
+    pub fn warning<Type: std::fmt::Display>(&self, name: &str, value: Type) -> anyhow::Result<()> {
+        self.log(Level::Warning, &format!("{name}: {value}"))
     }
 
-    pub fn error<Type: std::fmt::Display>(&self, name: &str, value: &Type) -> anyhow::Result<()> {
-        if self.state.read().unwrap().verbosity.level <= Level::Error {
-            self.write(format!("{name}: {value}\n").as_str())
-        } else {
-            Ok(())
-        }
+    pub fn error<Type: std::fmt::Display>(&self, name: &str, value: Type) -> anyhow::Result<()> {
+        self.log(Level::Error, &format!("{name}: {value}"))
     }
 
     pub fn log(&self, level: Level, message: &str) -> anyhow::Result<()> {
         let state = self.state.read().unwrap();
         if state.verbosity.level <= level {
-            let line = verbosity::format_log(
-                level,
-                message,
-                state.verbosity.is_show_elapsed_time,
-                state.start_time,
-            );
+            let line =
+                verbosity::format_log(&state.verbosity, level, None, message, state.start_time);
             drop(state);
             self.emit_line(line);
             Ok(())
         } else {
             Ok(())
         }
+    }
+
+    pub fn get_level(&self) -> Level {
+        self.state.read().unwrap().verbosity.level
+    }
+
+    pub fn set_level(&self, level: Level) {
+        self.state.write().unwrap().verbosity.level = level;
+    }
+
+    pub fn is_show_progress_bars(&self) -> bool {
+        self.state.read().unwrap().verbosity.is_show_progress_bars
+    }
+
+    pub fn set_is_show_progress_bars(&self, value: bool) {
+        self.state.write().unwrap().verbosity.is_show_progress_bars = value;
+    }
+
+    pub fn is_show_elapsed_time(&self) -> bool {
+        self.state.read().unwrap().verbosity.is_show_elapsed_time
+    }
+
+    pub fn set_is_show_elapsed_time(&self, value: bool) {
+        self.state.write().unwrap().verbosity.is_show_elapsed_time = value;
+    }
+
+    pub fn is_tty(&self) -> bool {
+        self.state.read().unwrap().verbosity.is_tty
+    }
+
+    pub fn set_is_tty(&self, value: bool) {
+        self.state.write().unwrap().verbosity.is_tty = value;
     }
 
     pub fn execute_process(
@@ -227,19 +289,37 @@ impl Console {
             .context(format_context!("Failed to spawn command {command}"))?;
         let (tx, rx) = mpsc::channel::<String>();
         let label = options.label.clone();
-        let writer = Arc::clone(&self.writer);
 
-        writer.lock().unwrap().add_progress(&label);
+        self.writer.lock().unwrap().add_progress(&label, None);
 
         let label_clone = label.clone();
+        let command_clone = command.to_string();
+        let log_level = options.log_level.clone();
+        let verbosity = self.state.read().unwrap().verbosity.clone();
+
+        let console = self.clone();
         let status_thread = std::thread::spawn(move || {
+            let start_time = std::time::Instant::now();
+
+            let is_app = log_level.is_some_and(|level| level == Level::App);
+            let is_passhrough = log_level.is_some_and(|level| level == Level::Passthrough);
             while let Ok(message) = rx.recv() {
-                writer
-                    .lock()
-                    .unwrap()
-                    .set_progress_status(&label_clone, &message);
+                let mut writer = console.writer.lock().unwrap();
+                writer.set_progress_status(&label_clone, &message);
+                if (is_passhrough || is_app)
+                    && let Some(level) = log_level.as_ref()
+                {
+                    let line = verbosity::format_log(
+                        &verbosity,
+                        *level,
+                        Some(command_clone.as_ref()),
+                        message.as_str(),
+                        start_time,
+                    );
+                    writer.emit_line(line);
+                }
             }
-            writer.lock().unwrap().remove_progress(&label_clone);
+            console.writer.lock().unwrap().remove_progress(&label_clone);
         });
 
         let secrets = self.state.read().unwrap().secrets.clone();
@@ -247,5 +327,49 @@ impl Console {
         drop(tx);
         let _ = status_thread.join();
         result
+    }
+}
+
+pub struct Progress {
+    pub console: Console,
+    label: Arc<str>,
+    finalize: Option<Arc<str>>,
+}
+
+impl Progress {
+    pub fn new(console: Console, label: Arc<str>, total: Option<u64>) -> Self {
+        console.add_progress(label.as_ref(), total);
+        Self {
+            console,
+            label,
+            finalize: None,
+        }
+    }
+
+    pub fn set_finalize(&mut self, finalize: Arc<str>) {
+        self.finalize = Some(finalize);
+    }
+
+    pub fn set_progress_status(&self, message: &str) {
+        self.console
+            .set_progress_status(self.label.as_ref(), message);
+    }
+
+    pub fn update_progress(&self, current: u64, total: u64) {
+        self.console
+            .update_progress(self.label.as_ref(), current, total);
+    }
+
+    pub fn increment_progress(&self) {
+        self.console.increment_progress(self.label.as_ref());
+    }
+}
+
+impl Drop for Progress {
+    fn drop(&mut self) {
+        self.console.remove_progress(self.label.as_ref());
+        if let Some(finalize) = self.finalize.as_ref() {
+            let _ = self.console.write(finalize);
+        }
     }
 }

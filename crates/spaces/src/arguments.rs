@@ -721,13 +721,43 @@ fn execute_command(
             };
             let console = console::Console::new_stdout(verbosity)?;
 
+            console.set_is_show_elapsed_time(false);
+            console.set_level(console::Level::Trace);
+
             console.raw("Hello, World!")?;
             let progress_label = "Testing";
-            console.add_progress(progress_label);
+            let progress_label_1 = "Testing2";
+            let progress = console::Progress::new(console.clone(), progress_label.into(), Some(10));
+            let progress_1 = console::Progress::new(console.clone(), progress_label_1.into(), None);
+
+            let options = console::ExecuteOptions {
+                arguments: vec!["-alt".into()],
+                log_level: Some(console::Level::Passthrough),
+                ..Default::default()
+            };
+            console.execute_process("ls", options)?;
+
+            let options_app = console::ExecuteOptions {
+                arguments: vec!["-alt".into()],
+                log_level: Some(console::Level::App),
+                ..Default::default()
+            };
+
+            console.execute_process("ls", options_app)?;
+
             for i in 0..10 {
                 std::thread::sleep(std::time::Duration::from_millis(500));
                 console.raw("Hello, World!")?;
-                console.set_progress_status(progress_label, &format!("Progress: {}/10", i + 1));
+                console.info("[test]", "Some info")?;
+                console.warning("[test]", "Some warning")?;
+                console.message("[test]", "Some message")?;
+                console.debug("[test]", "Some debug")?;
+                console.error("[test]", "Some error")?;
+                console.trace("[test]", String::from("Some error"))?;
+                progress.set_progress_status(&format!("[{}/10]", i + 1));
+                progress_1.set_progress_status(&format!("[{}/10]", i + 1));
+                progress.increment_progress();
+                progress_1.increment_progress();
             }
         }
     }

@@ -3,7 +3,7 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogHeader {
@@ -114,37 +114,6 @@ impl ExecuteOptions {
     }
 }
 
-pub(crate) fn sanitize_output(input: &str, max_length: usize) -> String {
-    let escaped: Vec<_> = input.chars().flat_map(|c| c.escape_default()).collect();
-
-    let mut result = String::new();
-    let mut length = 0usize;
-    for character in escaped.into_iter() {
-        if length < max_length {
-            result.push(character);
-            length += 1;
-        }
-    }
-    while result.len() < max_length {
-        result.push(' ');
-    }
-
-    result
-}
-
-pub(crate) fn format_monitor_log_message(
-    level: Level,
-    source: &str,
-    command: &str,
-    message: &str,
-) -> String {
-    if level == Level::Passthrough {
-        message.to_string()
-    } else {
-        format!("[{source}:{command}] {message}")
-    }
-}
-
 pub(crate) fn monitor_process(
     command: &str,
     mut child_process: std::process::Child,
@@ -164,9 +133,6 @@ pub(crate) fn monitor_process(
         .take()
         .ok_or(anyhow::anyhow!("Internal Error: Child has no stderr"))?;
 
-    let log_level_stdout = options.log_level;
-    let log_level_stderr = options.log_level;
-
     let (stdout_thread, stdout_rx) = ExecuteOptions::process_child_output(child_stdout)?;
     let (stderr_thread, stderr_rx) = ExecuteOptions::process_child_output(child_stderr)?;
 
@@ -182,11 +148,6 @@ pub(crate) fn monitor_process(
                 stdout.push('\n');
             }
             let _ = sender.send(redacted.to_string());
-            if let Some(level) = log_level_stdout.as_ref() {
-                let log_message =
-                    format_monitor_log_message(*level, "stdout", command, redacted.as_ref());
-                let _ = sender.send(log_message);
-            }
         }
 
         if let Some(content) = content {
@@ -209,11 +170,6 @@ pub(crate) fn monitor_process(
             stderr.push_str(redacted.as_ref());
             stderr.push('\n');
             let _ = sender.send(redacted.to_string());
-            if let Some(level) = log_level_stderr.as_ref() {
-                let log_message =
-                    format_monitor_log_message(*level, "stderr", command, redacted.as_ref());
-                let _ = sender.send(log_message);
-            }
         }
         content.push_str(stderr.as_str());
 

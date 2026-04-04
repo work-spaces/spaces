@@ -35,7 +35,7 @@ impl ActiveProgress {
         let elapsed = self.start_time.elapsed();
         let secs = elapsed.as_secs();
         let elapsed_str = format!(
-            "[{}:{:02}:{:02}]",
+            "{:02}:{:02}:{:02}",
             secs / 3600,
             (secs % 3600) / 60,
             secs % 60
@@ -51,7 +51,7 @@ impl ActiveProgress {
             if total == 0 {
                 0
             } else {
-                ((self.position as f64 / total as f64) * BAR_WIDTH as f64) as usize
+                (self.position as usize * BAR_WIDTH / total as usize) % BAR_WIDTH
             }
         } else {
             // Spinner: animate position within the bar width
@@ -77,7 +77,7 @@ impl ActiveProgress {
 
         let bar_style = ContentStyle {
             foreground_color: Some(Color::Cyan),
-            background_color: Some(Color::Blue),
+            background_color: None,
             underline_color: None,
             attributes: Attributes::default(),
         };
