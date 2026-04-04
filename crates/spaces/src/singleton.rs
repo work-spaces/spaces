@@ -16,7 +16,7 @@ struct State {
     is_lsp: bool,
     is_use_locks: bool,
     is_skip_deps: bool,
-    logs_for_failed_rules: Vec<Arc<str>>,
+    logs_for_failed_rules: Option<Vec<Arc<str>>>,
     max_queue_count: i64,
     error_chain: Vec<String>,
     args_env: HashMap<Arc<str>, Arc<str>>,
@@ -51,7 +51,7 @@ fn get_state() -> &'static lock::StateLock<State> {
         is_lsp: false,
         is_skip_deps: false,
         is_use_locks: false,
-        logs_for_failed_rules: Vec::new(),
+        logs_for_failed_rules: None,
         max_queue_count: 8,
         error_chain: Vec::new(),
         new_branches: Vec::new(),
@@ -90,15 +90,10 @@ pub fn show_error_chain() {
 
 pub fn set_rule_failure(log_files: Vec<Arc<str>>) {
     let mut state = get_state().write();
-    state.logs_for_failed_rules = log_files;
+    state.logs_for_failed_rules = Some(log_files);
 }
 
-pub fn has_rule_failure() -> bool {
-    let state = get_state().read();
-    !state.logs_for_failed_rules.is_empty()
-}
-
-pub fn get_logs_for_failed_rules() -> Vec<Arc<str>> {
+pub fn get_logs_for_failed_rules() -> Option<Vec<Arc<str>>> {
     let state = get_state().read();
     state.logs_for_failed_rules.clone()
 }
