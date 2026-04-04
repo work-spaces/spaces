@@ -1,13 +1,8 @@
 use crate::lock;
 use std::sync::Arc;
 
-enum Printer<'a> {
-    Printer(&'a mut printer::Printer),
-    Progress(&'a mut printer::MultiProgressBar),
-}
-
-pub struct Logger<'a> {
-    printer: Printer<'a>,
+pub struct Logger {
+    console: console::Console,
     label: Arc<str>,
 }
 
@@ -44,49 +39,33 @@ pub fn get_deferred_warnings() -> Vec<Arc<str>> {
     state.clone()
 }
 
-impl Logger<'_> {
-    pub fn new_printer(printer: &mut printer::Printer, label: Arc<str>) -> Logger<'_> {
-        Logger {
-            printer: Printer::Printer(printer),
-            label,
-        }
+impl Logger {
+    pub fn new(console: console::Console, label: Arc<str>) -> Logger {
+        Logger { console, label }
     }
 
-    pub fn new_progress(progress: &mut printer::MultiProgressBar, label: Arc<str>) -> Logger<'_> {
-        Logger {
-            printer: Printer::Progress(progress),
-            label,
-        }
+    pub fn trace(&self, message: &str) {
+        self.log(console::Level::Trace, message);
     }
 
-    pub fn trace(&mut self, message: &str) {
-        self.log(printer::Level::Trace, message);
+    pub fn debug(&self, message: &str) {
+        self.log(console::Level::Debug, message);
     }
 
-    pub fn debug(&mut self, message: &str) {
-        self.log(printer::Level::Debug, message);
+    pub fn message(&self, message: &str) {
+        self.log(console::Level::Message, message);
     }
 
-    pub fn message(&mut self, message: &str) {
-        self.log(printer::Level::Message, message);
+    pub fn info(&self, message: &str) {
+        self.log(console::Level::Info, message);
     }
 
-    pub fn info(&mut self, message: &str) {
-        self.log(printer::Level::Info, message);
-    }
-
-    pub fn app(&mut self, message: &str) {
-        self.log(printer::Level::App, message);
+    pub fn app(&self, message: &str) {
+        self.log(console::Level::App, message);
     }
 
     pub fn raw(&mut self, message: &str) {
-        let _ = match &mut self.printer {
-            Printer::Printer(printer) => printer.raw(message),
-            Printer::Progress(progress) => {
-                progress.log(printer::Level::App, message);
-                Ok(())
-            }
-        };
+        let _ = self.console.raw(message);
     }
 
     pub fn warning(&mut self, message: &str) {
@@ -95,17 +74,11 @@ impl Logger<'_> {
     }
 
     pub fn error(&mut self, message: &str) {
-        self.log(printer::Level::Error, message);
+        self.log(console::Level::Error, message);
     }
 
-    fn log(&mut self, level: printer::Level, message: &str) {
+    fn log(&self, level: console::Level, message: &str) {
         let output = format!("[{}] {message}", self.label);
-        let _ = match &mut self.printer {
-            Printer::Printer(printer) => printer.log(level, output.as_str()),
-            Printer::Progress(progress) => {
-                progress.log(level, output.as_str());
-                Ok(())
-            }
-        };
+        let _ = self.console.log(level, &output);
     }
 }
