@@ -231,7 +231,7 @@ fn cleanup_partial_download(destination: &str) {
 }
 
 pub fn download(
-    mut progress: printer::MultiProgressBar,
+    console: console::Console,
     url: &str,
     destination: &str,
     headers: Option<HashMap<Arc<str>, Arc<str>>>,
@@ -689,7 +689,7 @@ impl HttpArchive {
 
     pub fn create_links(
         &self,
-        mut progress_bar: printer::MultiProgressBar,
+        console: console::Console,
         workspace_directory: &str,
         space_directory: &str,
         link_set: &mut HashSet<Arc<str>>,
@@ -876,7 +876,7 @@ impl HttpArchive {
 
     pub fn sync(
         &self,
-        mut progress_bar: printer::MultiProgressBar,
+        console: console::Console,
     ) -> anyhow::Result<printer::MultiProgressBar> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
@@ -967,7 +967,7 @@ impl HttpArchive {
 
     fn extract(
         &self,
-        mut progress_bar: printer::MultiProgressBar,
+        console: console::Console,
     ) -> anyhow::Result<printer::MultiProgressBar> {
         if !self.is_extract_required() {
             label_logger(&mut progress_bar, &self.archive.url).debug("Extract not required");

@@ -28,8 +28,8 @@ enum HasAnyEntries {
     Yes,
 }
 
-fn changes_logger(progress: &mut printer::MultiProgressBar) -> logger::Logger<'_> {
-    logger::Logger::new_progress(progress, "changes".into())
+fn changes_logger(console: console::Console) -> logger::Logger {
+    logger::Logger::new(console, "changes".into())
 }
 
 pub fn get_modified_time<ErrorType>(
@@ -68,12 +68,12 @@ pub struct Changes {
 impl Changes {
     fn update_entry(
         &mut self,
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
         path: Arc<str>,
         change_detail: ChangeDetail,
     ) -> bool {
         let sane_path = Self::sanitize_path(&path);
-        let mut logger = logger::Logger::new_progress(progress, "Changes".into());
+        let mut logger = logger::Logger::new(progress.console.clone(), "Changes".into());
         if let Some(previous_entry) = self.entries.insert(sane_path.into(), change_detail.clone())
             && let (ChangeDetailType::File(previous_hash), ChangeDetailType::File(new_hash))
             | (ChangeDetailType::Symlink(previous_hash), ChangeDetailType::Symlink(new_hash)) =
@@ -94,7 +94,7 @@ impl Changes {
 
     fn walk_glob_dir(
         &self,
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
         glob_include_path: Arc<str>,
         check_is_modified: CheckIsModified,
         inputs: &glob::Globs,
@@ -125,17 +125,18 @@ impl Changes {
 
     pub fn inspect_inputs(
         &self,
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
         inputs: &glob::Globs,
     ) -> anyhow::Result<Vec<String>> {
         let mut set = HashSet::new();
         for input in inputs.includes.iter() {
-            changes_logger(progress).message(format!("Inspecting input {input}").as_str());
+            changes_logger(progress.console.clone())
+                .message(format!("Inspecting input {input}").as_str());
             if let Some(path) = input_includes_no_asterisk(input.as_ref()) {
                 set.insert(path.display().to_string());
             } else {
                 let input_path = glob::get_glob_path(input.clone());
-                changes_logger(progress)
+                changes_logger(progress.console.clone())
                     .trace(format!("inspect include input path `{input_path}`").as_str());
                 let (walk_dir, has_any_entries) =
                     self.walk_glob_dir(progress, input_path, CheckIsModified::No, inputs);
@@ -160,20 +161,23 @@ impl Changes {
     /// Processes all the files that are specified in the input globs
     pub fn update_from_globs(
         &mut self,
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
         globs: &glob::Globs,
     ) -> anyhow::Result<()> {
         for input in globs.includes.iter() {
-            changes_logger(progress).trace(format!("Update changes for {input}").as_str());
+            changes_logger(progress.console.clone())
+                .trace(format!("Update changes for {input}").as_str());
 
             let mut count = 0usize;
             let input_path = glob::get_glob_path(input.clone());
-            changes_logger(progress).trace(format!("include input path `{input_path}`").as_str());
+            changes_logger(progress.console.clone())
+                .trace(format!("include input path `{input_path}`").as_str());
 
             let (walk_dir, has_any_entries) =
                 self.walk_glob_dir(progress, input_path, CheckIsModified::Yes, globs);
 
-            changes_logger(progress).trace(format!("walked {} entries", walk_dir.len()).as_str());
+            changes_logger(progress.console.clone())
+                .trace(format!("walked {} entries", walk_dir.len()).as_str());
 
             if has_any_entries == HasAnyEntries::No {
                 return Err(format_error!("glob includes `{input}` but has no entries"));
@@ -186,7 +190,8 @@ impl Changes {
 
                 let path = entry.path();
                 let path_string: Arc<str> = path.to_string_lossy().into();
-                changes_logger(progress).trace(format!("process {}", path.display()).as_str());
+                changes_logger(progress.console.clone())
+                    .trace(format!("process {}", path.display()).as_str());
 
                 let change_detail = process_entry(progress, path)
                     .context(format_context!("Failed to process entry"))?;
@@ -199,11 +204,12 @@ impl Changes {
             }
 
             if count > 0 {
-                changes_logger(progress)
+                changes_logger(progress.console.clone())
                     .debug(format!("Updated {count} items from {input}").as_str());
             }
 
-            changes_logger(progress).trace(format!("Done updating {input}").as_str());
+            changes_logger(progress.console.clone())
+                .trace(format!("Done updating {input}").as_str());
         }
 
         Ok(())
@@ -215,7 +221,7 @@ impl Changes {
 
     pub fn calculate_digest(
         &self,
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
         seed: &str,
         globs: &glob::Globs,
     ) -> anyhow::Result<Arc<str>> {
@@ -238,14 +244,16 @@ impl Changes {
             if let Some(change_detail) = self.entries.get(*input)
                 && let ChangeDetailType::File(hash) = &change_detail.detail_type
             {
-                changes_logger(progress).trace(format!("Hashing {input}:{hash}").as_str());
+                changes_logger(progress.console.clone())
+                    .trace(format!("Hashing {input}:{hash}").as_str());
                 count += 1;
                 hasher.update(hash.as_bytes());
             }
         }
 
         if count > 0 {
-            changes_logger(progress).debug(format!("Hashed {count} items").as_str());
+            changes_logger(progress.console.clone())
+                .debug(format!("Hashed {count} items").as_str());
         }
 
         Ok(hasher.finalize().to_string().into())
@@ -267,7 +275,7 @@ fn input_includes_no_asterisk(input: &str) -> Option<std::path::PathBuf> {
 // callback used when walking a directory to filter out directory entries
 // that do not match the globs specified in globs
 fn filter_update(
-    progress: &mut printer::MultiProgressBar,
+    progress: &mut console::Progress,
     entry: &walkdir::DirEntry,
     entries: Option<&HashMap<Arc<str>, ChangeDetail>>,
     skip_folders: &[Arc<str>],
@@ -288,7 +296,7 @@ fn filter_update(
     let file_path: Arc<str> = entry.path().to_string_lossy().into();
 
     if !globs.is_match(file_path.as_ref()) {
-        changes_logger(progress).trace(format!("filtered `{file_path}`").as_str());
+        changes_logger(progress.console.clone()).trace(format!("filtered `{file_path}`").as_str());
         return false;
     }
 
@@ -308,7 +316,7 @@ fn skip_hashing(entry: &walkdir::DirEntry, skip_folders: &[Arc<str>]) -> bool {
 }
 
 fn process_entry(
-    progress: &mut printer::MultiProgressBar,
+    progress: &mut console::Progress,
     path: &std::path::Path,
 ) -> anyhow::Result<ChangeDetail> {
     progress.set_message(format!("Processing {path:?}").as_str());
@@ -347,7 +355,7 @@ fn process_entry(
         }
         Err(err) => {
             if path.is_symlink() {
-                changes_logger(progress).warning(
+                changes_logger(progress.console.clone()).warning(
                     format!("metadata for symlink destination not found for {path:?}").as_str(),
                 );
                 Ok(ChangeDetail {

@@ -46,7 +46,7 @@ pub enum RunWorkspace {
 }
 
 fn get_workspace(
-    printer: &mut printer::Printer,
+    console: console::Console,
     run_workspace: RunWorkspace,
     absolute_path_to_workspace: Option<Arc<str>>,
     is_clear_inputs: workspace::IsClearInputs,
@@ -73,7 +73,7 @@ fn get_workspace(
 }
 
 fn evaluate_environment(
-    printer: &mut printer::Printer,
+    console: console::Console,
     workspace_arc: workspace::WorkspaceArc,
 ) -> anyhow::Result<()> {
     let workspace_modules = workspace_arc.read().modules.clone();
@@ -101,7 +101,7 @@ fn evaluate_environment(
 }
 
 pub fn foreach_repo(
-    printer: &mut printer::Printer,
+    console: console::Console,
     run_workspace: RunWorkspace,
     for_each_repo: ForEachRepo,
     command_arguments: &[Arc<str>],
@@ -224,7 +224,7 @@ pub fn foreach_repo(
 }
 
 pub fn run_shell_in_workspace(
-    printer: &mut printer::Printer,
+    console: console::Console,
     path: Option<Arc<str>>,
     completions_command: Option<(clap::Command, rules::HasHelp)>,
 ) -> anyhow::Result<()> {
@@ -302,7 +302,7 @@ pub fn run_shell_in_workspace(
 }
 
 pub fn run_store_command_in_workspace(
-    printer: &mut printer::Printer,
+    console: console::Console,
     store_command: store::StoreCommand,
 ) -> anyhow::Result<()> {
     let workspace_result = get_workspace(
@@ -354,7 +354,7 @@ pub fn run_store_command_in_workspace(
 }
 
 pub fn run_logs_command_in_workspace(
-    printer: &mut printer::Printer,
+    console: console::Console,
     logs_command: logs::LogsCommand,
 ) -> anyhow::Result<()> {
     let workspace = get_workspace(
@@ -375,7 +375,7 @@ pub fn run_logs_command_in_workspace(
 }
 
 pub fn run_version_command_in_workspace(
-    printer: &mut printer::Printer,
+    console: console::Console,
     command: version::Command,
 ) -> anyhow::Result<()> {
     let workspace_result = get_workspace(
@@ -413,7 +413,7 @@ pub fn run_version_command_in_workspace(
 }
 
 fn run_starlark_with_workspace_get_targets(
-    printer: &mut printer::Printer,
+    console: console::Console,
     workspace: workspace::WorkspaceArc,
     has_help: rules::HasHelp,
 ) -> anyhow::Result<Vec<Arc<str>>> {
@@ -431,7 +431,7 @@ fn run_starlark_with_workspace_get_targets(
 }
 
 pub fn run_starlark_get_targets(
-    printer: &mut printer::Printer,
+    console: console::Console,
     has_help: rules::HasHelp,
 ) -> anyhow::Result<Vec<Arc<str>>> {
     run_starlark_modules_in_workspace(
@@ -449,7 +449,7 @@ pub fn run_starlark_get_targets(
 }
 
 fn run_starlark_modules_with_workspace(
-    printer: &mut printer::Printer,
+    console: console::Console,
     workspace: workspace::WorkspaceArc,
     phase: task::Phase,
     run_workspace: RunWorkspace,
@@ -503,7 +503,7 @@ fn run_starlark_modules_with_workspace(
 }
 
 pub fn run_starlark_modules_in_workspace(
-    printer: &mut printer::Printer,
+    console: console::Console,
     phase: task::Phase,
     absolute_path_to_workspace: Option<Arc<str>>,
     is_clear_inputs: workspace::IsClearInputs,
@@ -545,7 +545,7 @@ pub fn run_starlark_modules_in_workspace(
     Ok(())
 }
 
-pub fn run_lsp(printer: &mut printer::Printer) -> anyhow::Result<()> {
+pub fn run_lsp(console: console::Console) -> anyhow::Result<()> {
     let workspace = {
         let mut multi_progress = printer::MultiProgress::new(printer);
         let progress = multi_progress.add_progress("workspace", Some(100), Some("Complete"));
@@ -598,7 +598,7 @@ pub fn run_lsp(printer: &mut printer::Printer) -> anyhow::Result<()> {
 }
 
 pub fn checkout(
-    printer: &mut printer::Printer,
+    console: console::Console,
     name: Arc<str>,
     script: Vec<Arc<str>>,
     checkout_repo_script: Option<Arc<str>>,

@@ -35,13 +35,13 @@ impl OrasArchive {
 
     pub fn download(
         &self,
-        progress_bar: &mut printer::MultiProgressBar,
+        progress_bar: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         output_folder: &str,
     ) -> anyhow::Result<()> {
         let artifact_label = self.get_artifact_label();
 
-        let options = printer::ExecuteOptions {
+        let options = console::ExecuteOptions {
             arguments: vec![
                 "pull".into(),
                 "--no-tty".into(),
@@ -69,11 +69,11 @@ impl OrasArchive {
 
     fn get_manifest_details(
         &self,
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
     ) -> anyhow::Result<ManifestDetails> {
         let artifact_label = self.get_artifact_label();
-        let options = printer::ExecuteOptions {
+        let options = console::ExecuteOptions {
             arguments: vec!["manifest".into(), "fetch".into(), artifact_label.clone()],
             is_return_stdout: true,
             ..Default::default()
@@ -123,7 +123,7 @@ impl OrasArchive {
 
     pub fn execute(
         &self,
-        mut progress: printer::MultiProgressBar,
+        progress: console::ProgressBar,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
@@ -175,7 +175,7 @@ impl OrasArchive {
 
         // sync will skip the download because the file is already there
         let next_progress_bar = http_archive
-            .sync(progress)
+            .sync(progress.console.clone())
             .context(format_context!("Failed to sync http_archive {}", name))?;
 
         let mut workspace_write_lock = workspace.write();

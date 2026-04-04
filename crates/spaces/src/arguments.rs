@@ -17,17 +17,17 @@ pub enum Level {
     Error,
 }
 
-impl From<Level> for printer::Level {
+impl From<Level> for console::Level {
     fn from(level: Level) -> Self {
         match level {
-            Level::Trace => printer::Level::Trace,
-            Level::Debug => printer::Level::Debug,
-            Level::Message => printer::Level::Message,
-            Level::Info => printer::Level::Info,
-            Level::App => printer::Level::App,
-            Level::Passthrough => printer::Level::Passthrough,
-            Level::Warning => printer::Level::Warning,
-            Level::Error => printer::Level::Error,
+            Level::Trace => console::Level::Trace,
+            Level::Debug => console::Level::Debug,
+            Level::Message => console::Level::Message,
+            Level::Info => console::Level::Info,
+            Level::App => console::Level::App,
+            Level::Passthrough => console::Level::Passthrough,
+            Level::Warning => console::Level::Warning,
+            Level::Error => console::Level::Error,
         }
     }
 }
@@ -57,7 +57,7 @@ pub struct Arguments {
 }
 
 fn handle_verbosity(
-    printer: &mut printer::Printer,
+    console: console::Console,
     verbosity: printer::Level,
     is_ci: bool,
     disable_logs: bool,
@@ -137,13 +137,11 @@ pub fn execute() -> anyhow::Result<()> {
         hide_progress_bars
     };
 
-    let mut stdout_printer = printer::Printer::new_stdout();
-    let mut null_printer = printer::Printer::new_null_term();
+    let mut stdout_console = console::Console::new_stdout(verbosity.into());
+    let mut null_console = console::Console::new_null(verbosity.into());
 
-    let effective_printer = if matches!(commands, Commands::RunLsp { .. })
-        || matches!(commands, Commands::SuperConsole { .. })
-    {
-        &mut null_printer
+    let effective_console = if matches!(commands, Commands::RunLsp { .. }) {
+        &null_console
     } else {
         // terminate immediately if ctrl+c is received twice
         use signal_hook::consts::SIGINT;
@@ -151,11 +149,11 @@ pub fn execute() -> anyhow::Result<()> {
         signal_hook::flag::register_conditional_shutdown(SIGINT, 1, Arc::clone(&term_now))?;
         signal_hook::flag::register(SIGINT, Arc::clone(&term_now))?;
 
-        &mut stdout_printer
+        &stdout_console
     };
 
     handle_verbosity(
-        effective_printer,
+        effective_console.clone(),
         verbosity.into(),
         ci,
         disable_logs,
@@ -176,10 +174,7 @@ pub fn execute() -> anyhow::Result<()> {
     result
 }
 
-fn execute_command(
-    command: Commands,
-    effective_printer: &mut printer::Printer,
-) -> anyhow::Result<()> {
+fn execute_command(command: Commands, effective_console: console::Console) -> anyhow::Result<()> {
     match command {
         Commands::Checkout {
             name,
@@ -712,54 +707,6 @@ fn execute_command(
             runner::run_version_command_in_workspace(effective_printer, command)
                 .context(format_context!("Failed to run version command"))?
         }
-        Commands::SuperConsole {} => {
-            let verbosity = console::Verbosity {
-                level: console::Level::Info,
-                is_show_progress_bars: true,
-                is_show_elapsed_time: false,
-                is_tty: true,
-            };
-            let console = console::Console::new_stdout(verbosity)?;
-
-            console.set_is_show_elapsed_time(false);
-            console.set_level(console::Level::Trace);
-
-            console.raw("Hello, World!")?;
-            let progress_label = "Testing";
-            let progress_label_1 = "Testing2";
-            let progress = console::Progress::new(console.clone(), progress_label.into(), Some(10));
-            let progress_1 = console::Progress::new(console.clone(), progress_label_1.into(), None);
-
-            let options = console::ExecuteOptions {
-                arguments: vec!["-alt".into()],
-                log_level: Some(console::Level::Passthrough),
-                ..Default::default()
-            };
-            console.execute_process("ls", options)?;
-
-            let options_app = console::ExecuteOptions {
-                arguments: vec!["-alt".into()],
-                log_level: Some(console::Level::App),
-                ..Default::default()
-            };
-
-            console.execute_process("ls", options_app)?;
-
-            for i in 0..10 {
-                std::thread::sleep(std::time::Duration::from_millis(500));
-                console.raw("Hello, World!")?;
-                console.info("[test]", "Some info")?;
-                console.warning("[test]", "Some warning")?;
-                console.message("[test]", "Some message")?;
-                console.debug("[test]", "Some debug")?;
-                console.error("[test]", "Some error")?;
-                console.trace("[test]", String::from("Some error"))?;
-                progress.set_progress_status(&format!("[{}/10]", i + 1));
-                progress_1.set_progress_status(&format!("[{}/10]", i + 1));
-                progress.increment_progress();
-                progress_1.increment_progress();
-            }
-        }
     }
     Ok(())
 }
@@ -1137,5 +1084,4 @@ create-lock-file = false # optionally create a lock file
     },
     /// Run the Spaces language server protocol (experimental).
     RunLsp {},
-    SuperConsole {},
 }

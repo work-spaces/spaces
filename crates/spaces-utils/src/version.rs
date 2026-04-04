@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 const VERSION_FILE_NAME: &str = "spaces.version.json";
 
-pub fn logger(printer: &mut printer::Printer) -> logger::Logger<'_> {
+pub fn logger(console: console::Console) -> logger::Logger<'_> {
     logger::Logger::new_printer(printer, "version".into())
 }
 
@@ -64,7 +64,7 @@ impl Manager {
 
     fn load_from_store(
         &self,
-        printer: &mut printer::Printer,
+        console: console::Console,
     ) -> anyhow::Result<Vec<GithubRelease>> {
         let save_path = self.path_to_store.join(VERSION_FILE_NAME);
         if save_path.exists() {
@@ -78,8 +78,8 @@ impl Manager {
         }
     }
 
-    fn fetch_latest(&self, printer: &mut printer::Printer) -> anyhow::Result<Vec<GithubRelease>> {
-        let options = printer::ExecuteOptions {
+    fn fetch_latest(&self, console: console::Console) -> anyhow::Result<Vec<GithubRelease>> {
+        let options = console::ExecuteOptions {
             arguments: vec!["api".into(), "repos/work-spaces/spaces/releases".into()],
             is_return_stdout: true,
             environment: vec![("GH_HOST".into(), "github.com".into())],
@@ -117,7 +117,7 @@ impl Manager {
 
     fn get_store_path_to_release(
         &self,
-        printer: &mut printer::Printer,
+        console: console::Console,
         asset: &GithubAsset,
     ) -> Option<Arc<std::path::Path>> {
         match http_archive::HttpArchive::url_to_relative_path(&asset.browser_download_url, &None) {
@@ -135,7 +135,7 @@ impl Manager {
 
     fn get_store_path_to_store_binary(
         &self,
-        printer: &mut printer::Printer,
+        console: console::Console,
         asset: &GithubAsset,
     ) -> Option<Arc<std::path::Path>> {
         let store_path_to_release = self.get_store_path_to_release(printer, asset);
@@ -160,7 +160,7 @@ impl Manager {
 
     fn create_hard_links_to_tools(
         &self,
-        printer: &mut printer::Printer,
+        console: console::Console,
         releases: &Vec<GithubRelease>,
     ) -> anyhow::Result<()> {
         for release in releases {
@@ -218,7 +218,7 @@ impl Manager {
         Ok(())
     }
 
-    pub fn list(&self, printer: &mut printer::Printer) -> anyhow::Result<()> {
+    pub fn list(&self, console: console::Console) -> anyhow::Result<()> {
         let releases = self
             .load_from_store(printer)
             .context(format_context!("Failed to load/fetch available releases"))?;
@@ -262,7 +262,7 @@ impl Manager {
 
     pub fn fetch(
         &self,
-        printer: &mut printer::Printer,
+        console: console::Console,
         tag: Option<Arc<str>>,
     ) -> Result<(), anyhow::Error> {
         let releases = self

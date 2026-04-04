@@ -22,22 +22,22 @@ pub struct GithubLogGroup {
 
 impl GithubLogGroup {
     pub fn new_group(
-        printer: &mut printer::Printer,
+        console: console::Console,
         is_ci: IsCi,
         group_name: &str,
     ) -> anyhow::Result<Self> {
         let is_github = is_github_actions();
 
         if is_github && is_ci == IsCi::Yes {
-            printer.raw(format!("::group::{group_name}\n").as_str())?;
+            console.raw(format!("::group::{group_name}\n").as_str())?;
         }
 
         Ok(GithubLogGroup { is_github })
     }
 
-    pub fn end_group(&self, printer: &mut printer::Printer, is_ci: IsCi) -> anyhow::Result<()> {
+    pub fn end_group(&self, console: console::Console, is_ci: IsCi) -> anyhow::Result<()> {
         if self.is_github && is_ci == IsCi::Yes {
-            printer.raw("::endgroup::\n")?;
+            console.raw("::endgroup::\n")?;
         }
         Ok(())
     }

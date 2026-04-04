@@ -1,6 +1,6 @@
 use crate::{evaluator, stardoc};
 
-pub fn show(printer: &mut printer::Printer) -> anyhow::Result<()> {
+pub fn show(console: console::Console) -> anyhow::Result<()> {
     let markdown = printer::markdown::Markdown::new(printer);
 
     let globals = evaluator::get_globals(evaluator::WithRules::Yes).build();

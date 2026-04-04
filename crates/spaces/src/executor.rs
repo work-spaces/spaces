@@ -49,19 +49,19 @@ pub enum Task {
 impl Task {
     pub fn execute(
         &self,
-        mut progress: printer::MultiProgressBar,
+        console: console::Console,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<TaskResult> {
         let mut check_new_modules = false;
         match self {
-            Task::HttpArchive(archive) => archive.execute(progress, workspace.clone(), name),
-            Task::OrasArchive(archive) => archive.execute(progress, workspace.clone(), name),
-            Task::Exec(exec) => exec.execute(&mut progress, workspace.clone(), name),
-            Task::Kill(kill) => kill.execute(name, &mut progress),
-            Task::CreateArchive(archive) => archive.execute(progress, workspace.clone(), name),
-            Task::UpdateAsset(asset) => asset.execute(progress, workspace.clone(), name),
-            Task::AddWhichAsset(asset) => asset.execute(&mut progress, workspace.clone(), name),
+            Task::HttpArchive(archive) => archive.execute(console, workspace.clone(), name),
+            Task::OrasArchive(archive) => archive.execute(console, workspace.clone(), name),
+            Task::Exec(exec) => exec.execute(&mut console, workspace.clone(), name),
+            Task::Kill(kill) => kill.execute(name, &mut console),
+            Task::CreateArchive(archive) => archive.execute(console, workspace.clone(), name),
+            Task::UpdateAsset(asset) => asset.execute(console, workspace.clone(), name),
+            Task::AddWhichAsset(asset) => asset.execute(&mut console, workspace.clone(), name),
             Task::AddHardLink(asset) => asset.execute(&mut progress, workspace.clone(), name),
             Task::AddSoftLink(asset) => asset.execute(&mut progress, workspace.clone(), name),
             Task::UpdateEnv(update_env) => update_env.execute(progress, workspace.clone(), name),

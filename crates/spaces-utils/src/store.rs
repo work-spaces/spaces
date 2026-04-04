@@ -10,7 +10,7 @@ const MANIFEST_FILE_NAME: &str = "store.spaces.json";
 pub const SPACES_STORE: &str = ".spaces/store";
 pub const SPACES_STORE_RCACHE: &str = "rcache";
 
-pub fn logger(printer: &mut printer::Printer) -> logger::Logger<'_> {
+pub fn logger(console: console::Console) -> logger::Logger<'_> {
     logger::Logger::new_printer(printer, "store".into())
 }
 
@@ -145,7 +145,7 @@ impl Store {
 
     pub fn show_info(
         &self,
-        printer: &mut printer::Printer,
+        console: console::Console,
         sort_by: SortBy,
         is_ci: ci::IsCi,
     ) -> anyhow::Result<()> {
@@ -197,7 +197,7 @@ impl Store {
 
     fn remove_unlisted_entries(
         &self,
-        printer: &mut printer::Printer,
+        console: console::Console,
         is_dry_run: bool,
     ) -> anyhow::Result<()> {
         let path_to_store = self.path_to_store.clone();
@@ -270,7 +270,7 @@ impl Store {
 
     pub fn fix(
         &mut self,
-        printer: &mut printer::Printer,
+        console: console::Console,
         is_dry_run: bool,
         is_ci: ci::IsCi,
     ) -> anyhow::Result<()> {
@@ -344,7 +344,7 @@ impl Store {
 
     pub fn prune(
         &mut self,
-        printer: &mut printer::Printer,
+        console: console::Console,
         age: u16,
         is_dry_run: bool,
         is_ci: ci::IsCi,

@@ -22,8 +22,8 @@ pub use crate::rcache::CacheStatus;
 pub use crate::rule::Expect;
 use crate::{logger, ws};
 
-fn logs_logger(printer: &mut printer::Printer) -> logger::Logger<'_> {
-    logger::Logger::new_printer(printer, "logs".into())
+fn logs_logger(console: console::Console) -> logger::Logger {
+    logger::Logger::new(console, "logs".into())
 }
 
 pub const LOG_STATUS_FILE_NAME: &str = "log_status.json";
@@ -137,7 +137,7 @@ pub enum LogsCommand {
 }
 
 pub fn execute(
-    printer: &mut printer::Printer,
+    console: console::Console,
     workspace_path: &std::path::Path,
     command: LogsCommand,
 ) -> anyhow::Result<()> {

@@ -4,8 +4,8 @@ use anyhow_source_location::{format_context, format_error};
 use std::collections::HashSet;
 use std::sync::Arc;
 
-pub fn logger(progress: &mut printer::MultiProgressBar) -> logger::Logger<'_> {
-    logger::Logger::new_progress(progress, "inspect".into())
+pub fn logger(console: console::Console) -> logger::Logger {
+    logger::Logger::new(console, "inspect".into())
 }
 
 pub struct GitTask {
@@ -31,10 +31,10 @@ pub struct Options {
 impl Options {
     pub fn execute_inspect_checkout(
         &self,
-        printer: &mut printer::Printer,
+        console: console::Console,
         checkout_rules: &[GitTask],
     ) -> anyhow::Result<()> {
-        let mut progress = printer::MultiProgress::new(printer);
+        let mut progress = console::Progress::new(console, "inspect-checkout".into(), None);
         let mut locks = Vec::new();
         let mut checkout_repo = None;
         for git_task in checkout_rules {
@@ -43,13 +43,11 @@ impl Options {
             if rule_name.starts_with("//checkout:") {
                 checkout_repo = Some((dir_name.clone(), git_task.url.clone()));
             }
-            let mut progress_bar = progress.add_progress(&git_task.url, None, None);
-            progress_bar.set_message("checking if repo is dirty");
 
             let repo = git::Repository::new(git_task.url.clone(), dir_name.clone());
             if repo.is_dirty(&mut progress_bar) {
                 if self.force {
-                    logger(&mut progress_bar).warning(&format!(
+                    logger(progress.console.clone()).warning(&format!(
                         "[{}] {} is dirty - checkout command may not be reproducible.",
                         git_task.url, rule_name
                     ));

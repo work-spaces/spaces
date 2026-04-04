@@ -168,7 +168,7 @@ impl FileLock {
         Ok(LockStatus::Locked)
     }
 
-    pub fn lock(&mut self, progress: &mut printer::MultiProgressBar) -> anyhow::Result<()> {
+    pub fn lock(&mut self, progress: &mut console::Progress) -> anyhow::Result<()> {
         while self
             .try_lock()
             .context(format_context!("Failed to try lock"))?
@@ -197,7 +197,7 @@ impl FileLock {
         Ok(())
     }
 
-    fn wait(&self, progress: &mut printer::MultiProgressBar) -> anyhow::Result<()> {
+    fn wait(&self, progress: &mut console::Progress) -> anyhow::Result<()> {
         progress.set_message("already started, waiting for it to finish");
         let lock_file_path = std::path::Path::new(self.path.as_ref());
         let mut log_count = 0;

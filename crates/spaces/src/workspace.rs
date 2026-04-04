@@ -62,12 +62,12 @@ pub enum IsCreateLogFolder {
 
 pub type WorkspaceArc = std::sync::Arc<lock::StateLock<Workspace>>;
 
-fn logger_printer(printer: &mut printer::Printer) -> logger::Logger<'_> {
-    logger::Logger::new_printer(printer, "workspace".into())
+fn logger_printer(console: console::Console) -> logger::Logger {
+    logger::Logger::new(console, "workspace".into())
 }
 
-fn logger(progress: &mut printer::MultiProgressBar) -> logger::Logger<'_> {
-    logger::Logger::new_progress(progress, "workspace".into())
+fn logger(console: console::Console) -> logger::Logger {
+    logger::Logger::new(console, "workspace".into())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -390,7 +390,7 @@ impl Workspace {
     }
 
     fn get_relative_invoked_path(
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
         current_working_directory: &str,
         absolute_path_to_workspace: &str,
     ) -> Arc<str> {
@@ -447,7 +447,7 @@ impl Workspace {
     }
 
     pub fn new(
-        mut progress: printer::MultiProgressBar,
+        console: console::Console,
         absolute_path_to_workspace: Option<Arc<str>>,
         is_clear_inputs: IsClearInputs,
         input_script_names: Option<Vec<Arc<str>>>,
@@ -989,7 +989,7 @@ impl Workspace {
 
     pub fn update_changes(
         &mut self,
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
         rule_globs: &[rule::Globs],
     ) -> anyhow::Result<()> {
         self.is_bin_dirty = true;
@@ -1005,7 +1005,7 @@ impl Workspace {
 
     pub fn inspect_inputs(
         &self,
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
         globs: &[rule::Globs],
     ) -> anyhow::Result<Vec<String>> {
         let changes_globs = rule::Globs::to_changes_globs(globs);
@@ -1048,7 +1048,7 @@ impl Workspace {
 
     pub fn is_rule_deps_changed(
         &self,
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
         rule_name: &str,
         seed: &str,
         globs: &[rule::Globs],
@@ -1069,7 +1069,7 @@ impl Workspace {
         Ok(is_changed)
     }
 
-    pub fn save_bin(&self, printer: &mut printer::Printer) -> anyhow::Result<()> {
+    pub fn save_bin(&self, console: console::Console) -> anyhow::Result<()> {
         if !self.settings.bin.changes.entries.is_empty() {
             for (key, _) in self.settings.bin.changes.entries.iter() {
                 logger_printer(printer).trace(format!("Changes: {key}").as_str());

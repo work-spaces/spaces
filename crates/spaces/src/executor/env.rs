@@ -13,7 +13,7 @@ pub struct UpdateEnv {
 impl UpdateEnv {
     pub fn execute(
         &self,
-        mut progress: printer::MultiProgressBar,
+        console: console::Console,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {

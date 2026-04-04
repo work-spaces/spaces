@@ -29,8 +29,8 @@ const TOOLS: &[(&str, &str)] = &[
     ("oras", ORAS_JSON),
 ];
 
-fn tools_logger(printer: &mut printer::Printer) -> logger::Logger<'_> {
-    logger::Logger::new_printer(printer, "tools".into())
+fn tools_logger(console: console::Console) -> logger::Logger {
+    logger::Logger::new(console, "tools".into())
 }
 
 fn download_and_install(
@@ -101,7 +101,7 @@ fn download_and_install(
     Ok(None)
 }
 
-pub fn handle_command(printer: &mut printer::Printer, command: Command) -> anyhow::Result<()> {
+pub fn handle_command(console: console::Console, command: Command) -> anyhow::Result<()> {
     let is_ci = singleton::get_is_ci().into();
 
     let group =
@@ -117,7 +117,7 @@ pub fn handle_command(printer: &mut printer::Printer, command: Command) -> anyho
     result
 }
 
-pub fn list_tools(printer: &mut printer::Printer) -> anyhow::Result<()> {
+pub fn list_tools(console: console::Console) -> anyhow::Result<()> {
     let store_path = ws::get_checkout_store_path_as_path();
     tools_logger(printer).info(
         format!(
@@ -137,7 +137,7 @@ pub fn list_tools(printer: &mut printer::Printer) -> anyhow::Result<()> {
 }
 
 fn cleanup_checkouts(
-    printer: &mut printer::Printer,
+    console: console::Console,
     age: u16,
     is_dry_run: bool,
 ) -> anyhow::Result<()> {
@@ -178,7 +178,7 @@ fn cleanup_checkouts(
     Ok(())
 }
 
-pub fn install_tools(printer: &mut printer::Printer, is_force_link: bool) -> anyhow::Result<()> {
+pub fn install_tools(console: console::Console, is_force_link: bool) -> anyhow::Result<()> {
     // install gh in the store bin if it does not exist
     let store_path = ws::get_checkout_store_path();
     let store_sysroot_bin = ws::get_spaces_tools_path(store_path.as_ref());

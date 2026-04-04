@@ -118,6 +118,26 @@ impl Drop for SuperConsoleWriter {
     }
 }
 
+struct NullWriter;
+
+impl ConsoleWriter for NullWriter {
+    fn write_str(&mut self, _s: &dyn std::fmt::Display) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    fn emit_line(&mut self, _line: superconsole::Line) {}
+
+    fn add_progress(&mut self, _label: &str, _total: Option<u64>) {}
+
+    fn set_progress_status(&mut self, _label: &str, _message: &str) {}
+
+    fn update_progress(&mut self, _label: &str, _current: u64, _total: u64) {}
+
+    fn increment_progress(&mut self, _label: &str) {}
+
+    fn remove_progress(&mut self, _label: &str) {}
+}
+
 mod sealed {
     use super::*;
     pub struct State {
@@ -142,6 +162,17 @@ impl Clone for Console {
 }
 
 impl Console {
+    pub fn new_null(verbosity: Verbosity) -> Self {
+        Self {
+            writer: Arc::new(Mutex::new(Box::new(NullWriter))),
+            state: Arc::new(RwLock::new(sealed::State {
+                secrets: Secrets::default(),
+                verbosity,
+                start_time: std::time::Instant::now(),
+            })),
+        }
+    }
+
     pub fn new_stdout(verbosity: Verbosity) -> anyhow::Result<Self> {
         let console = superconsole::SuperConsole::new().context(format_context!(
             "Internal Error: failed to create super console",
@@ -277,10 +308,11 @@ impl Console {
         self.state.write().unwrap().verbosity.is_tty = value;
     }
 
-    pub fn execute_process(
+    fn execute_process_with_progress_label(
         &self,
         command: &str,
         options: ExecuteOptions,
+        label: &str,
     ) -> anyhow::Result<Option<String>> {
         use std::sync::mpsc;
 
@@ -288,11 +320,10 @@ impl Console {
             .spawn(command)
             .context(format_context!("Failed to spawn command {command}"))?;
         let (tx, rx) = mpsc::channel::<String>();
-        let label = options.label.clone();
 
-        self.writer.lock().unwrap().add_progress(&label, None);
+        self.writer.lock().unwrap().add_progress(label, None);
 
-        let label_clone = label.clone();
+        let label_clone = label.to_string();
         let command_clone = command.to_string();
         let log_level = options.log_level.clone();
         let verbosity = self.state.read().unwrap().verbosity.clone();
@@ -328,6 +359,15 @@ impl Console {
         let _ = status_thread.join();
         result
     }
+
+    pub fn execute_process(
+        &self,
+        command: &str,
+        options: ExecuteOptions,
+    ) -> anyhow::Result<Option<String>> {
+        let label = options.label.clone();
+        self.execute_process_with_progress_label(command, options, &label)
+    }
 }
 
 pub struct Progress {
@@ -362,6 +402,15 @@ impl Progress {
 
     pub fn increment_progress(&self) {
         self.console.increment_progress(self.label.as_ref());
+    }
+
+    pub fn execute_process(
+        &self,
+        command: &str,
+        options: ExecuteOptions,
+    ) -> anyhow::Result<Option<String>> {
+        self.console
+            .execute_process_with_progress_label(command, options, self.label.as_ref())
     }
 }
 

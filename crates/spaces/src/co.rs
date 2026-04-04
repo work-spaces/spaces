@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use utils::{ci, git, logger, workflows};
 
-fn co_logger(printer: &mut printer::Printer) -> logger::Logger<'_> {
-    logger::Logger::new_printer(printer, "co".into())
+fn co_logger(console: console::Console) -> logger::Logger {
+    logger::Logger::new(console, "co".into())
 }
 
 pub const CO_FILE_NAME: &str = "co.spaces.toml";
@@ -78,7 +78,7 @@ pub struct CheckoutArgs {
 }
 
 pub fn checkout_repo(
-    printer: &mut printer::Printer,
+    console: console::Console,
     name: Arc<str>,
     repo_args: CheckoutRepoArgs,
     args: CheckoutArgs,
@@ -144,7 +144,7 @@ checkout.add_repo(
 }
 
 pub fn checkout_workflow(
-    printer: &mut printer::Printer,
+    console: console::Console,
     name: Arc<str>,
     workflow_args: CheckoutWorkflowArgs,
     args: CheckoutArgs,
@@ -260,7 +260,7 @@ pub struct CheckoutWorkflow {
 impl CheckoutWorkflow {
     fn checkout(
         self,
-        printer: &mut printer::Printer,
+        console: console::Console,
         name: Arc<str>,
         keep_workspace_on_failure: bool,
     ) -> anyhow::Result<()> {
@@ -317,7 +317,7 @@ pub struct CheckoutRepo {
 impl CheckoutRepo {
     fn checkout(
         self,
-        printer: &mut printer::Printer,
+        console: console::Console,
         name: Arc<str>,
         keep_workspace_on_failure: bool,
     ) -> anyhow::Result<()> {
@@ -391,7 +391,7 @@ impl Checkout {
 
     pub fn checkout(
         self,
-        printer: &mut printer::Printer,
+        console: console::Console,
         name: Arc<str>,
         keep_workspace_on_failure: bool,
     ) -> anyhow::Result<()> {

@@ -191,24 +191,21 @@ fn get_state() -> &'static RwLock<State> {
     STATE.get()
 }
 
-fn url_logger<'a>(
-    progress_bar: &'a mut printer::MultiProgressBar,
-    url: &str,
-) -> logger::Logger<'a> {
-    logger::Logger::new_progress(progress_bar, url.into())
+fn url_logger(console: console::Console, url: &str) -> logger::Logger<'a> {
+    logger::Logger::new(console, url.into())
 }
 
 pub fn execute_git_command(
-    progress_bar: &mut printer::MultiProgressBar,
+    progress: &mut console::Progress,
     url: &str,
-    options: printer::ExecuteOptions,
+    options: console::ExecuteOptions,
 ) -> anyhow::Result<Option<String>> {
     use std::ops::DerefMut;
 
     for attempt in 0..=GIT_MAX_RETRIES {
         if attempt > 0 {
             let wait = git_backoff_duration(attempt - 1);
-            url_logger(progress_bar, url).debug(
+            url_logger(progress.console.clone(), url).debug(
                 format!("Retry attempt {attempt}/{GIT_MAX_RETRIES} after {wait:?}").as_str(),
             );
             std::thread::sleep(wait);
@@ -306,11 +303,11 @@ pub fn execute_git_command(
 }
 
 pub fn get_commit_hash(
-    progress_bar: &mut printer::MultiProgressBar,
+    progress_bar: &mut console::Progress,
     url: &str,
     directory: &str,
 ) -> anyhow::Result<Option<Arc<str>>> {
-    let options = printer::ExecuteOptions {
+    let options = console::ExecuteOptions {
         working_directory: Some(directory.into()),
         arguments: vec!["rev-parse".into(), "HEAD".into()],
         is_return_stdout: true,
@@ -325,12 +322,8 @@ pub fn get_commit_hash(
     Ok(commit_hash)
 }
 
-pub fn is_head_branch(
-    progress_bar: &mut printer::MultiProgressBar,
-    url: &str,
-    directory: &str,
-) -> bool {
-    let options = printer::ExecuteOptions {
+pub fn is_head_branch(progress_bar: &mut console::Progress, url: &str, directory: &str) -> bool {
+    let options = console::ExecuteOptions {
         working_directory: Some(directory.into()),
         arguments: vec!["symbolic-ref".into(), "--quiet".into(), "HEAD".into()],
         ..Default::default()
@@ -339,12 +332,12 @@ pub fn is_head_branch(
 }
 
 pub fn is_branch(
-    progress_bar: &mut printer::MultiProgressBar,
+    progress_bar: &mut console::Progress,
     url: &str,
     directory: &str,
     ref_name: &str,
 ) -> bool {
-    let options = printer::ExecuteOptions {
+    let options = console::ExecuteOptions {
         working_directory: Some(directory.into()),
         arguments: vec![
             "show-ref".into(),
@@ -358,12 +351,12 @@ pub fn is_branch(
 }
 
 pub fn is_current_branch(
-    progress_bar: &mut printer::MultiProgressBar,
+    progress_bar: &mut console::Progress,
     url: &str,
     directory: &str,
     ref_name: &str,
 ) -> bool {
-    let options = printer::ExecuteOptions {
+    let options = console::ExecuteOptions {
         working_directory: Some(directory.into()),
         arguments: vec!["branch".into(), "--show-current".into()],
         is_return_stdout: true,
@@ -381,11 +374,11 @@ pub fn is_current_branch(
 }
 
 pub fn is_currently_on_a_branch(
-    progress_bar: &mut printer::MultiProgressBar,
+    progress_bar: &mut console::Progress,
     url: &str,
     directory: &str,
 ) -> bool {
-    let options = printer::ExecuteOptions {
+    let options = console::ExecuteOptions {
         working_directory: Some(directory.into()),
         arguments: vec![
             "symbolic-ref".into(),
@@ -399,8 +392,8 @@ pub fn is_currently_on_a_branch(
     execute_git_command(progress_bar, url, options).is_ok()
 }
 
-pub fn is_dirty(progress_bar: &mut printer::MultiProgressBar, url: &str, directory: &str) -> bool {
-    let options = printer::ExecuteOptions {
+pub fn is_dirty(progress_bar: &mut console::Progress, url: &str, directory: &str) -> bool {
+    let options = console::ExecuteOptions {
         working_directory: Some(directory.into()),
         arguments: vec!["status".into(), "--porcelain".into()],
         is_return_stdout: true,
@@ -415,7 +408,7 @@ pub fn is_dirty(progress_bar: &mut printer::MultiProgressBar, url: &str, directo
 }
 
 pub fn get_latest_tag(
-    progress_bar: &mut printer::MultiProgressBar,
+    progress_bar: &mut console::Progress,
     url: &str,
     directory: &str,
 ) -> anyhow::Result<Option<Arc<str>>> {
@@ -436,11 +429,11 @@ pub fn get_latest_tag(
 }
 
 pub fn get_commit_tag(
-    progress_bar: &mut printer::MultiProgressBar,
+    progress_bar: &mut console::Progress,
     url: &str,
     directory: &str,
 ) -> Option<Arc<str>> {
-    let options = printer::ExecuteOptions {
+    let options = console::ExecuteOptions {
         working_directory: Some(directory.into()),
         arguments: vec!["describe".into(), "--exact-match".into(), "HEAD".into()],
         is_return_stdout: true,
@@ -456,12 +449,12 @@ pub fn get_commit_tag(
 }
 
 fn get_branch_log(
-    progress_bar: &mut printer::MultiProgressBar,
+    progress_bar: &mut console::Progress,
     url: &str,
     directory: &str,
     branch: &str,
 ) -> anyhow::Result<Vec<LogEntry>> {
-    let options = printer::ExecuteOptions {
+    let options = console::ExecuteOptions {
         working_directory: Some(directory.into()),
         arguments: vec![
             "log".into(),
@@ -514,12 +507,12 @@ pub struct BareRepository {
 
 impl BareRepository {
     pub fn new(
-        progress_bar: &mut printer::MultiProgressBar,
+        progress_bar: &mut console::Progress,
         bare_store_path: &str,
         spaces_key: &str,
         url: &str,
     ) -> anyhow::Result<Self> {
-        let mut options = printer::ExecuteOptions::default();
+        let mut options = console::ExecuteOptions::default();
 
         let (relative_bare_store_path, name_dot_git) = Self::url_to_relative_path_and_name(url)
             .context(format_context!("Failed to parse {spaces_key} url: {url}"))?;
@@ -545,7 +538,7 @@ impl BareRepository {
             execute_git_command(progress_bar, url, options)
                 .context(format_context!("while creating bare repo"))?;
 
-            let options_git_config_auto_push = printer::ExecuteOptions {
+            let options_git_config_auto_push = console::ExecuteOptions {
                 working_directory: Some(full_path.clone()),
                 arguments: vec![
                     "config".into(),
@@ -560,7 +553,7 @@ impl BareRepository {
             execute_git_command(progress_bar, url, options_git_config_auto_push)
                 .context(format_context!("while configuring auto-push"))?;
 
-            let options_git_config = printer::ExecuteOptions {
+            let options_git_config = console::ExecuteOptions {
                 working_directory: Some(full_path.clone()),
                 arguments: vec![
                     "config".into(),
@@ -584,7 +577,7 @@ impl BareRepository {
 
     pub fn add_worktree(
         &self,
-        progress_bar: &mut printer::MultiProgressBar,
+        progress_bar: &mut console::Progress,
         path: &str,
     ) -> anyhow::Result<Worktree> {
         let result = Worktree::new(progress_bar, self, path)
@@ -637,11 +630,11 @@ pub struct Worktree {
 
 impl Worktree {
     fn new(
-        progress_bar: &mut printer::MultiProgressBar,
+        progress_bar: &mut console::Progress,
         repository: &BareRepository,
         path: &str,
     ) -> anyhow::Result<Self> {
-        let mut options = printer::ExecuteOptions::default();
+        let mut options = console::ExecuteOptions::default();
 
         if !std::path::Path::new(&path).is_absolute() {
             return Err(format_error!(
@@ -693,7 +686,7 @@ impl Worktree {
 
     pub fn checkout(
         &self,
-        progress_bar: &mut printer::MultiProgressBar,
+        progress_bar: &mut console::Progress,
         revision: &str,
     ) -> anyhow::Result<()> {
         let repo = self.to_repository();
@@ -709,7 +702,7 @@ impl Worktree {
 
     pub fn checkout_detached_head(
         &self,
-        progress_bar: &mut printer::MultiProgressBar,
+        progress_bar: &mut console::Progress,
     ) -> anyhow::Result<()> {
         let repo = self.to_repository();
         let arguments = vec!["checkout".into(), "--detach".into(), "HEAD".into()];
@@ -721,7 +714,7 @@ impl Worktree {
 
     pub fn switch_new_branch(
         &self,
-        progress_bar: &mut printer::MultiProgressBar,
+        progress_bar: &mut console::Progress,
         dev_branch: &str,
         revision: &str,
     ) -> anyhow::Result<()> {
@@ -749,15 +742,16 @@ impl Repository {
     }
 
     pub fn new_clone(
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
         url: Arc<str>,
         working_directory: Arc<str>,
         clone_name: Arc<str>,
         arguments: Vec<Arc<str>>,
     ) -> anyhow::Result<Self> {
-        url_logger(progress, url.as_ref()).message(format!("git {}", arguments.join(" ")).as_str());
+        url_logger(progress.console.clone(), url.as_ref())
+            .message(format!("git {}", arguments.join(" ")).as_str());
 
-        let clone_options = printer::ExecuteOptions {
+        let clone_options = console::ExecuteOptions {
             arguments,
             working_directory: Some(working_directory.clone()),
             ..Default::default()
@@ -774,7 +768,7 @@ impl Repository {
 
     pub fn resolve_revision(
         &self,
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
         revision: &str,
     ) -> anyhow::Result<ResolveRevision> {
         let mut result = ResolveRevision {
@@ -800,12 +794,12 @@ impl Repository {
             for log in logs {
                 let current_commit = log.commit.clone();
                 if let Some(tag) = log.tag.as_ref() {
-                    url_logger(progress, self.url.as_ref())
+                    url_logger(progress.console.clone(), self.url.as_ref())
                         .debug(format!("Found tag:{tag}").as_str());
                     let stripped_tag = tag.trim_matches('v');
                     if let Ok(version) = semver::Version::parse(stripped_tag) {
                         if required.matches(&version) {
-                            url_logger(progress, self.url.as_ref()).debug(
+                            url_logger(progress.console.clone(), self.url.as_ref()).debug(
                                 format!(
                                     "Found tag {stripped_tag} for branch {branch} that satisfies semver requirement"
                                 )
@@ -814,7 +808,7 @@ impl Repository {
                             is_semver_satisfied = true;
                             result.latest_semver_tag = Some(tag.clone());
                         } else if is_semver_satisfied {
-                            url_logger(progress, self.url.as_ref()).debug(
+                            url_logger(progress.console.clone(), self.url.as_ref()).debug(
                             format!("Using commit {commit:?} for branch {branch} as it is the newest commit that satisfies semver requirement").as_str());
                             break;
                         }
@@ -834,7 +828,7 @@ impl Repository {
                 "Invalid revision format. Use `<branch>:<semver requirement>`"
             ));
         }
-        url_logger(progress, self.url.as_ref()).message(
+        url_logger(progress.console.clone(), self.url.as_ref()).message(
             format!(
                 "Resolved revision {} to latest tag:{:?}, commit:{}",
                 revision, result.latest_semver_tag, result.commit
@@ -846,16 +840,16 @@ impl Repository {
 
     pub fn execute(
         &self,
-        progress_bar: &mut printer::MultiProgressBar,
+        progress_bar: &mut console::Progress,
         args: Vec<Arc<str>>,
     ) -> anyhow::Result<()> {
-        let options = printer::ExecuteOptions {
+        let options = console::ExecuteOptions {
             working_directory: Some(self.full_path.clone()),
             arguments: args,
             ..Default::default()
         };
 
-        url_logger(progress_bar, self.url.as_ref())
+        url_logger(progress.console.clone(), self.url.as_ref())
             .debug(format!("git {}", options.arguments.join(" ")).as_str());
 
         execute_git_command(progress_bar, &self.url, options)
@@ -865,7 +859,7 @@ impl Repository {
 
     pub fn setup_sparse_checkout(
         &self,
-        progress_bar: &mut printer::MultiProgressBar,
+        progress_bar: &mut console::Progress,
         sparse_checkout: &SparseCheckout,
     ) -> anyhow::Result<()> {
         let mode_arg = match sparse_checkout.mode {
@@ -895,7 +889,7 @@ impl Repository {
         Ok(())
     }
 
-    pub fn is_remote_branch_tracked(&self, progress_bar: &mut printer::MultiProgressBar) -> bool {
+    pub fn is_remote_branch_tracked(&self, progress_bar: &mut console::Progress) -> bool {
         self.execute(
             progress_bar,
             vec![
@@ -908,7 +902,7 @@ impl Repository {
         .is_ok()
     }
 
-    pub fn pull(&self, progress_bar: &mut printer::MultiProgressBar) -> anyhow::Result<()> {
+    pub fn pull(&self, progress_bar: &mut console::Progress) -> anyhow::Result<()> {
         self.execute(progress_bar, vec!["pull".into()])
             .context(format_context!("while pulling from {}", self.full_path))?;
         Ok(())
@@ -916,7 +910,7 @@ impl Repository {
 
     pub fn reset_hard_origin_branch(
         &self,
-        progress_bar: &mut printer::MultiProgressBar,
+        progress_bar: &mut console::Progress,
         branch: &str,
     ) -> anyhow::Result<()> {
         self.execute(
@@ -934,50 +928,46 @@ impl Repository {
         Ok(())
     }
 
-    pub fn fetch(&self, progress_bar: &mut printer::MultiProgressBar) -> anyhow::Result<()> {
+    pub fn fetch(&self, progress_bar: &mut console::Progress) -> anyhow::Result<()> {
         self.execute(progress_bar, vec!["fetch".into()])
             .context(format_context!("while fetching from {}", self.full_path))?;
         Ok(())
     }
 
-    pub fn is_branch(&self, progress_bar: &mut printer::MultiProgressBar, ref_name: &str) -> bool {
+    pub fn is_branch(&self, progress_bar: &mut console::Progress, ref_name: &str) -> bool {
         is_branch(progress_bar, &self.url, &self.full_path, ref_name)
     }
 
-    pub fn is_current_branch(
-        &self,
-        progress_bar: &mut printer::MultiProgressBar,
-        ref_name: &str,
-    ) -> bool {
+    pub fn is_current_branch(&self, progress_bar: &mut console::Progress, ref_name: &str) -> bool {
         is_current_branch(progress_bar, &self.url, &self.full_path, ref_name)
     }
 
-    pub fn is_currently_on_a_branch(&self, progress_bar: &mut printer::MultiProgressBar) -> bool {
+    pub fn is_currently_on_a_branch(&self, progress_bar: &mut console::Progress) -> bool {
         is_currently_on_a_branch(progress_bar, &self.url, &self.full_path)
     }
 
-    pub fn is_dirty(&self, progress_bar: &mut printer::MultiProgressBar) -> bool {
+    pub fn is_dirty(&self, progress_bar: &mut console::Progress) -> bool {
         is_dirty(progress_bar, &self.url, &self.full_path)
     }
 
-    pub fn get_commit_tag(&self, progress_bar: &mut printer::MultiProgressBar) -> Option<Arc<str>> {
+    pub fn get_commit_tag(&self, progress_bar: &mut console::Progress) -> Option<Arc<str>> {
         get_commit_tag(progress_bar, &self.url, &self.full_path)
     }
 
     pub fn get_commit_hash(
         &self,
-        progress_bar: &mut printer::MultiProgressBar,
+        progress_bar: &mut console::Progress,
     ) -> anyhow::Result<Option<Arc<str>>> {
         get_commit_hash(progress_bar, &self.url, &self.full_path)
     }
 
-    pub fn is_head_branch(&self, progress_bar: &mut printer::MultiProgressBar) -> bool {
+    pub fn is_head_branch(&self, progress_bar: &mut console::Progress) -> bool {
         is_head_branch(progress_bar, &self.url, &self.full_path)
     }
 
     pub fn checkout(
         &self,
-        progress_bar: &mut printer::MultiProgressBar,
+        progress_bar: &mut console::Progress,
         checkout: &Checkout,
     ) -> anyhow::Result<ResolveRevision> {
         let mut checkout_args = Vec::new();

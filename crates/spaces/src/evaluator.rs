@@ -206,8 +206,8 @@ pub fn evaluate_module(
     Ok(module)
 }
 
-fn star_logger(printer: &mut printer::Printer) -> logger::Logger<'_> {
-    logger::Logger::new_printer(printer, "starlark".into())
+fn star_logger(console: console::Console) -> logger::Logger {
+    logger::Logger::new(console, "starlark".into())
 }
 
 fn insert_setup_and_all_rules(
@@ -330,7 +330,7 @@ fn insert_setup_and_all_rules(
 }
 
 fn show_eval_progress(
-    printer: &mut printer::Printer,
+    console: console::Console,
     name: &str,
     handle: std::thread::JoinHandle<anyhow::Result<()>>,
 ) -> anyhow::Result<()> {
@@ -369,7 +369,7 @@ fn show_eval_progress(
 }
 
 pub fn evaluate_starlark_modules(
-    printer: &mut printer::Printer,
+    console: console::Console,
     workspace: workspace::WorkspaceArc,
     modules: &[(Arc<str>, Arc<str>)],
     phase: task::Phase,
@@ -557,7 +557,7 @@ pub fn evaluate_starlark_modules(
 }
 
 fn update_secrets(
-    printer: &mut printer::Printer,
+    console: console::Console,
     workspace: workspace::WorkspaceArc,
 ) -> anyhow::Result<()> {
     let secrets = {
@@ -571,7 +571,7 @@ fn update_secrets(
 }
 
 fn execute_tasks(
-    printer: &mut printer::Printer,
+    console: console::Console,
     workspace: workspace::WorkspaceArc,
     phase: task::Phase,
     target: Option<Arc<str>>,
@@ -850,7 +850,7 @@ fn execute_tasks(
 }
 
 pub fn run_starlark_modules(
-    printer: &mut printer::Printer,
+    console: console::Console,
     workspace: workspace::WorkspaceArc,
     modules: Vec<(Arc<str>, Arc<str>)>,
     phase: task::Phase,

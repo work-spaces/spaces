@@ -22,16 +22,16 @@ pub enum NeedsGraph {
     Yes(task::Phase),
 }
 
-fn rules_printer_logger(printer: &mut printer::Printer) -> logger::Logger<'_> {
-    logger::Logger::new_printer(printer, "rules".into())
+fn rules_printer_logger(console: console::Console) -> logger::Logger {
+    logger::Logger::new(console, "rules".into())
 }
 
-fn _rules_progress_logger(progress: &mut printer::MultiProgressBar) -> logger::Logger<'_> {
-    logger::Logger::new_progress(progress, "rules".into())
+fn _rules_progress_logger(console: console::Console) -> logger::Logger {
+    logger::Logger::new(console, "rules".into())
 }
 
-fn task_logger(progress: &mut printer::MultiProgressBar, name: Arc<str>) -> logger::Logger<'_> {
-    logger::Logger::new_progress(progress, name)
+fn task_logger(console: console::Console, name: Arc<str>) -> logger::Logger {
+    logger::Logger::new(console, name)
 }
 
 fn get_task_signal_deps(task: &task::Task) -> anyhow::Result<Vec<task::SignalArc>> {
@@ -93,7 +93,7 @@ fn get_task_signal_deps(task: &task::Task) -> anyhow::Result<Vec<task::SignalArc
 }
 
 pub fn execute_rule(
-    mut progress: printer::MultiProgressBar,
+    mut progress: console::Progress,
     workspace: workspace::WorkspaceArc,
     task: &task::Task,
 ) -> std::thread::JoinHandle<anyhow::Result<executor::TaskResult>> {
@@ -108,6 +108,8 @@ pub fn execute_rule(
             self.signal.set_ready_notify_all();
         }
     }
+
+    let console = progress.console.clone();
 
     progress.set_message(format!("Waiting for dependencies ({:?})", task.phase).as_str());
 
@@ -129,7 +131,7 @@ pub fn execute_rule(
             skip_execute_message = Some("Skipping: platform not enabled".into());
         }
 
-        task_logger(&mut progress, name.clone()).debug(
+        task_logger(progress.console.clone(), name.clone()).debug(
             format!("Skip execute message after platform check? {skip_execute_message:?}").as_str(),
         );
 
@@ -137,7 +139,8 @@ pub fn execute_rule(
             get_task_signal_deps(&task).context(format_context!("Failed to get signal deps"))?;
         let total = deps_signals.len();
 
-        task_logger(&mut progress, name.clone()).trace(format!("{total} dependencies").as_str());
+        task_logger(progress.console.clone(), name.clone())
+            .trace(format!("{total} dependencies").as_str());
 
         let mut count = 1;
         for deps_rule_signal in deps_signals {
@@ -147,7 +150,7 @@ pub fn execute_rule(
                 signal_access.name.clone()
             };
 
-            task_logger(&mut progress, name.clone()).debug(
+            task_logger(progress.console.clone(), name.clone()).debug(
                 format!("{name} Waiting for dependency {signal_name} {count}/{total}").as_str(),
             );
 
@@ -155,11 +158,11 @@ pub fn execute_rule(
             count += 1;
         }
 
-        task_logger(&mut progress, name.clone())
+        task_logger(progress.console.clone(), name.clone())
             .debug(format!("{name} All dependencies are done").as_str());
 
         {
-            task_logger(&mut progress, name.clone())
+            task_logger(progress.console.clone(), name.clone())
                 .debug(format!("{name} check for skipping/cancelation").as_str());
             let state = get_state().read();
             let tasks = state.tasks.read();
@@ -167,14 +170,15 @@ pub fn execute_rule(
                 .get(name.as_ref())
                 .context(format_context!("Task not found {name}"))?;
             if task.phase == task::Phase::Cancelled {
-                task_logger(&mut progress, name.clone())
+                task_logger(progress.console.clone(), name.clone())
                     .debug(format!("Skipping {name}: cancelled").as_str());
                 skip_execute_message = Some("Skipping because it was cancelled".into());
             } else if task.rule.type_ == Some(rule::RuleType::Optional) {
-                task_logger(&mut progress, name.clone()).debug("Skipping because it is optional");
+                task_logger(progress.console.clone(), name.clone())
+                    .debug("Skipping because it is optional");
                 skip_execute_message = Some("Skipping: optional".into());
             }
-            task_logger(&mut progress, name.clone())
+            task_logger(progress.console.clone(), name.clone())
                 .trace(format!("{name} done checking skip cancellation").as_str());
         }
 
@@ -187,7 +191,7 @@ pub fn execute_rule(
         };
 
         let updated_digest = if !dep_globs.is_empty() && skip_execute_message.is_none() {
-            task_logger(&mut progress, name.clone())
+            task_logger(progress.console.clone(), name.clone())
                 .debug(format!("update workspace changes with deps globs {dep_globs:?}").as_str());
 
             workspace
@@ -197,7 +201,7 @@ pub fn execute_rule(
                     "[{rule_name}] Failed to update workspace changes"
                 ))?;
 
-            task_logger(&mut progress, name.clone()).debug("check for new digest");
+            task_logger(console.clone(), name.clone()).debug("check for new digest");
 
             let check_changes = workspace
                 .read()
@@ -222,7 +226,7 @@ pub fn execute_rule(
                 }
             } else {
                 let digest = check_changes.digest;
-                task_logger(&mut progress, name.clone())
+                task_logger(progress.console.clone(), name.clone())
                     .debug(format!("New digest for {rule_name}={digest}").as_str());
                 Some(digest)
             }
@@ -231,10 +235,10 @@ pub fn execute_rule(
         };
 
         if let Some(skip_message) = skip_execute_message.as_ref() {
-            task_logger(&mut progress, name.clone()).info(skip_message.as_ref());
+            task_logger(console.clone(), name.clone()).info(skip_message.as_ref());
             progress.set_message(skip_message);
         } else {
-            task_logger(&mut progress, name.clone()).debug("Running task");
+            task_logger(console.clone(), name.clone()).debug("Running task");
             progress.set_message("Running");
         }
 
@@ -269,7 +273,7 @@ pub fn execute_rule(
                 // if the rule defines targets, the rule is run through
                 // the rule cache engine
 
-                task_logger(&mut progress, name.clone())
+                task_logger(progress.console.clone(), name.clone())
                     .debug(format!("rcache digest {effective_rule_digest}").as_str());
 
                 let task_result_option = rcache::execute(
@@ -278,7 +282,7 @@ pub fn execute_rule(
                     targets.as_slice(),
                     || {
                         task.executor
-                            .execute(progress, workspace.clone(), &rule_name)
+                            .execute(console.clone(), workspace.clone(), &rule_name)
                             .context(format_context!("[{rule_name}] Failed to exec"))
                     },
                     || task.rule.get_target_paths(),
@@ -302,7 +306,7 @@ pub fn execute_rule(
                 }
             } else {
                 task.executor
-                    .execute(progress, workspace.clone(), &rule_name)
+                    .execute(console.clone(), workspace.clone(), &rule_name)
                     .context(format_context!("[{rule_name}] Failed to exec"))
             }
         };
@@ -504,7 +508,7 @@ impl State {
 
     pub fn update_dependency_graph(
         &mut self,
-        printer: &mut printer::Printer,
+        console: console::Console,
         workspace: Option<WorkspaceArc>,
         phase: task::Phase,
     ) -> anyhow::Result<()> {
@@ -529,7 +533,7 @@ impl State {
         rules_printer_logger(printer).debug("Adding deps to graph tasks");
 
         {
-            let mut multiprogress = printer::MultiProgress::new(printer);
+            let mut progress = console::Progress::new(console.clone());
             let start_time = std::time::Instant::now();
             let mut progress: Option<printer::MultiProgressBar> = None;
             for task in tasks.values_mut() {
@@ -581,7 +585,7 @@ impl State {
 
     pub fn update_target_dependency_graph(
         &mut self,
-        printer: &mut printer::Printer,
+        console: console::Console,
         target: Option<Arc<str>>,
     ) -> anyhow::Result<()> {
         rules_printer_logger(printer)
@@ -620,7 +624,7 @@ impl State {
 
     pub fn import_tasks_from_workspace_settings(
         &mut self,
-        printer: &mut printer::Printer,
+        console: console::Console,
         workspace: workspace::WorkspaceArc,
         needs_graph: NeedsGraph,
     ) -> anyhow::Result<()> {
@@ -712,7 +716,7 @@ impl State {
 
     pub fn update_tasks_digests(
         &self,
-        printer: &mut printer::Printer,
+        console: console::Console,
         workspace: WorkspaceArc,
     ) -> anyhow::Result<()> {
         if !workspace.read().is_dirty {
@@ -767,7 +771,7 @@ impl State {
 
     pub fn show_tasks(
         &self,
-        printer: &mut printer::Printer,
+        console: console::Console,
         workspace: WorkspaceArc,
         phase: task::Phase,
         filter: &HashSet<Arc<str>>,
@@ -859,7 +863,11 @@ impl State {
                             let tasks = state.tasks.read();
                             task.collects_glob_deps(&tasks)
                         };
-                        let mut progress = printer::MultiProgress::new(printer);
+                        let mut progress = console::Progress::new(
+                            console.clone(),
+                            "inspecting deps globs".into(),
+                            None,
+                        );
                         let mut progress_bar =
                             progress.add_progress("inspecting deps globs", None, Some("Complete"));
                         let files = workspace
@@ -985,12 +993,11 @@ impl State {
 
     fn execute(
         &self,
-        printer: &mut printer::Printer,
+        console: console::Console,
         workspace: workspace::WorkspaceArc,
         phase: task::Phase,
     ) -> anyhow::Result<executor::TaskResult> {
         let mut task_result = executor::TaskResult::new();
-        let mut multi_progress = printer::MultiProgress::new(printer);
         let mut handle_list = Vec::new();
 
         for node_index in self.sorted.iter() {
@@ -1021,7 +1028,7 @@ impl State {
                     Some(message.as_str()),
                 );
 
-                task_logger(&mut progress_bar, task_name.into())
+                task_logger(console.clone(), task_name.into())
                     .debug(format!("Staging task {}", task.rule.name).as_str());
 
                 handle_list.push(execute_rule(progress_bar, workspace.clone(), &task));
@@ -1168,7 +1175,7 @@ pub fn register_module(name: Arc<str>) {
 }
 
 pub fn show_tasks(
-    printer: &mut printer::Printer,
+    console: console::Console,
     workspace: WorkspaceArc,
     phase: task::Phase,
     filter: &HashSet<Arc<str>>,
@@ -1190,7 +1197,7 @@ pub fn export_tasks_as_mardown(path: &str) -> anyhow::Result<()> {
 }
 
 pub fn update_tasks_digests(
-    printer: &mut printer::Printer,
+    console: console::Console,
     workspace: workspace::WorkspaceArc,
 ) -> anyhow::Result<()> {
     let state = get_state().read();
@@ -1198,7 +1205,7 @@ pub fn update_tasks_digests(
 }
 
 pub fn update_depedency_graph(
-    printer: &mut printer::Printer,
+    console: console::Console,
     workspace: Option<workspace::WorkspaceArc>,
     phase: task::Phase,
 ) -> anyhow::Result<()> {
@@ -1207,7 +1214,7 @@ pub fn update_depedency_graph(
 }
 
 pub fn update_target_dependency_graph(
-    printer: &mut printer::Printer,
+    console: console::Console,
     target: Option<Arc<str>>,
 ) -> anyhow::Result<()> {
     let mut state = get_state().write();
@@ -1215,7 +1222,7 @@ pub fn update_target_dependency_graph(
 }
 
 pub fn import_tasks_from_workspace_settings(
-    printer: &mut printer::Printer,
+    console: console::Console,
     workspace: workspace::WorkspaceArc,
     needs_graph: NeedsGraph,
 ) -> anyhow::Result<()> {
@@ -1231,7 +1238,7 @@ pub fn get_pretty_tasks() -> String {
 }
 
 pub fn execute(
-    printer: &mut printer::Printer,
+    console: console::Console,
     workspace: workspace::WorkspaceArc,
     phase: task::Phase,
 ) -> anyhow::Result<executor::TaskResult> {
@@ -1351,10 +1358,7 @@ pub fn export_log_status(workspace: WorkspaceArc) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn debug_sorted_tasks(
-    printer: &mut printer::Printer,
-    phase: task::Phase,
-) -> anyhow::Result<()> {
+pub fn debug_sorted_tasks(console: console::Console, phase: task::Phase) -> anyhow::Result<()> {
     let state = get_state().read();
     for node_index in state.sorted.iter() {
         let task_name = state.graph.get_task(*node_index);

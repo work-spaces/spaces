@@ -50,7 +50,7 @@ fn format_value(format: AssetFormat, value: &serde_json::Value) -> anyhow::Resul
 impl UpdateAsset {
     pub fn execute(
         &self,
-        mut progress: printer::MultiProgressBar,
+        console: console::Console,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
@@ -142,7 +142,7 @@ pub struct AddWhichAsset {
 impl AddWhichAsset {
     pub fn execute(
         &self,
-        _progress: &mut printer::MultiProgressBar,
+        _progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         _name: &str,
     ) -> anyhow::Result<()> {
@@ -191,7 +191,7 @@ pub struct AddHardLink {
 impl AddHardLink {
     pub fn execute(
         &self,
-        _progress: &mut printer::MultiProgressBar,
+        _progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         _name: &str,
     ) -> anyhow::Result<()> {
@@ -238,7 +238,7 @@ pub struct AddAsset {
 impl AddAsset {
     pub fn execute(
         &self,
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
@@ -288,7 +288,7 @@ pub struct AddSoftLink {
 impl AddSoftLink {
     pub fn execute(
         &self,
-        _progress: &mut printer::MultiProgressBar,
+        _progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         _name: &str,
     ) -> anyhow::Result<()> {
@@ -364,7 +364,7 @@ pub struct AddAnyAssets {
 impl AddAnyAssets {
     pub fn execute(
         &self,
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {

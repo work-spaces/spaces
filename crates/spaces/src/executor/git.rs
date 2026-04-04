@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use utils::{copy, git, lock, logger, ws};
 
-fn logger(progress: &mut printer::MultiProgressBar, url: Arc<str>) -> logger::Logger<'_> {
-    logger::Logger::new_progress(progress, url)
+fn logger(console: console::Console, url: Arc<str>) -> logger::Logger {
+    logger::Logger::new(console, url)
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -83,7 +83,7 @@ impl Git {
 
     fn execute_worktree_clone(
         &self,
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
@@ -141,7 +141,7 @@ impl Git {
 
     fn execute_default_clone(
         &self,
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         name: &str,
         filter: Option<String>,
@@ -393,7 +393,7 @@ impl Git {
 
     fn execute_shallow_clone(
         &self,
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
@@ -410,7 +410,7 @@ impl Git {
 
         let workspace_directory = self.get_clone_working_directory(workspace.clone());
 
-        let clone_options = printer::ExecuteOptions {
+        let clone_options = console::ExecuteOptions {
             arguments: vec![
                 "clone".into(),
                 "--depth".into(),
@@ -446,7 +446,7 @@ impl Git {
 
     pub fn execute(
         &self,
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
@@ -553,7 +553,7 @@ impl Git {
                 logger(progress, self.url.clone())
                     .info(format!("applying {commit_hash} from lock file at {name}").as_str());
 
-                let options = printer::ExecuteOptions {
+                let options = console::ExecuteOptions {
                     working_directory: Some(working_directory.clone()),
                     arguments: vec!["checkout".into(), "--detach".into(), commit_hash.clone()],
                     ..Default::default()
@@ -579,7 +579,7 @@ impl Git {
         if is_new_branch == IsNewBranch::Yes && !singleton::get_is_sync() {
             logger(progress, self.url.clone()).message("creating new branch");
             let new_branch = workspace.read().get_new_branch_name();
-            let options = printer::ExecuteOptions {
+            let options = console::ExecuteOptions {
                 working_directory: Some(working_directory.clone()),
                 arguments: vec!["switch".into(), "-c".into(), new_branch],
                 ..Default::default()

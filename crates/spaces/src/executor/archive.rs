@@ -13,7 +13,7 @@ pub struct Archive {
 impl Archive {
     pub fn execute(
         &self,
-        mut progress: printer::MultiProgressBar,
+        console: console::Console,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
