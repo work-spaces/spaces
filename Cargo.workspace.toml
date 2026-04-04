@@ -25,6 +25,7 @@ serde_yaml = "0.9"
 strum = { version = "0.26", features = ["derive"] }
 
 archiver = { package = "spaces-archiver", path = "./archiver", features = ["printer"] }
+console = { path = "spaces/crates/spaces-console", package = "spaces-console" }
 utils = { path = "spaces/crates/spaces-utils", package = "spaces-utils" }
 printer = { package = "spaces-printer", path = "./printer" }
 starstd.path = "spaces/crates/starstd"

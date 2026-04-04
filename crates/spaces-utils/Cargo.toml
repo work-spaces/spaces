@@ -24,6 +24,7 @@ clap_complete = { version = "4" }
 chrono = "0.4"
 homedir = "0.3"
 arboard = "3"
+superconsole = { git = "https://github.com/facebookincubator/superconsole", rev = "008c8068f980a110341887db4b74dff54650b8a7"}
 
 anyhow.workspace = true
 archiver.workspace = true

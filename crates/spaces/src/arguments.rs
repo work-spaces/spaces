@@ -140,7 +140,9 @@ pub fn execute() -> anyhow::Result<()> {
     let mut stdout_printer = printer::Printer::new_stdout();
     let mut null_printer = printer::Printer::new_null_term();
 
-    let effective_printer = if matches!(commands, Commands::RunLsp { .. }) {
+    let effective_printer = if matches!(commands, Commands::RunLsp { .. })
+        || matches!(commands, Commands::SuperConsole { .. })
+    {
         &mut null_printer
     } else {
         // terminate immediately if ctrl+c is received twice
@@ -710,6 +712,24 @@ fn execute_command(
             runner::run_version_command_in_workspace(effective_printer, command)
                 .context(format_context!("Failed to run version command"))?
         }
+        Commands::SuperConsole {} => {
+            let verbosity = console::Verbosity {
+                level: console::Level::Info,
+                is_show_progress_bars: true,
+                is_show_elapsed_time: false,
+                is_tty: true,
+            };
+            let console = console::Console::new_stdout(verbosity)?;
+
+            console.raw("Hello, World!")?;
+            let progress_label = "Testing";
+            console.add_progress(progress_label);
+            for i in 0..10 {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                console.raw("Hello, World!")?;
+                console.set_progress_status(progress_label, &format!("Progress: {}/10", i + 1));
+            }
+        }
     }
     Ok(())
 }
@@ -1087,4 +1107,5 @@ create-lock-file = false # optionally create a lock file
     },
     /// Run the Spaces language server protocol (experimental).
     RunLsp {},
+    SuperConsole {},
 }
