@@ -1055,7 +1055,15 @@ impl State {
                     Err(err) => {
                         let err_message = err.to_string();
                         singleton::process_anyhow_error(err);
-                        first_error = Some(format_error!("Task failed: {err_message}"));
+                        let log_status = self.log_status.read();
+                        let mut logs = Vec::new();
+                        for log in log_status.iter() {
+                            if log.status == logs::Expect::Failure {
+                                logs.push(log.file.clone());
+                            }
+                        }
+                        singleton::set_rule_failure(logs);
+                        first_error = Some(format_error!("Rule failed: {err_message}"));
                     }
                 },
                 Err(err) => {
