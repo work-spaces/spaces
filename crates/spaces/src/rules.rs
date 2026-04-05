@@ -122,16 +122,21 @@ pub fn execute_rule(
             signal: task.signal.clone(),
         };
 
-        let mut skip_execute_message: Option<Arc<str>> = None;
+        let bracketed_rule = format!(
+            "[{}]",
+            utils::labels::sanitize_rule_for_display(name.clone())
+        );
+        let mut skip_execute_message: Vec<console::Line> = Vec::new();
         if let (Some(platforms), Some(current_platform)) = (
             task.rule.platforms.as_ref(),
             platform::Platform::get_platform(),
         ) && !platforms.contains(&current_platform)
         {
-            skip_execute_message = Some("Skipping: platform not enabled".into());
+            skip_execute_message =
+                logger::make_finalize_line(logger::FinalType::NotPlatform, bracketed_rule.as_str());
         }
 
-        task_logger(progress.console.clone(), name.clone()).debug(
+        task_logger(console.clone(), name.clone()).debug(
             format!("Skip execute message after platform check? {skip_execute_message:?}").as_str(),
         );
 
@@ -139,8 +144,7 @@ pub fn execute_rule(
             get_task_signal_deps(&task).context(format_context!("Failed to get signal deps"))?;
         let total = deps_signals.len();
 
-        task_logger(progress.console.clone(), name.clone())
-            .trace(format!("{total} dependencies").as_str());
+        task_logger(console.clone(), name.clone()).trace(format!("{total} dependencies").as_str());
 
         let mut count = 1;
         for deps_rule_signal in deps_signals {
@@ -172,11 +176,17 @@ pub fn execute_rule(
             if task.phase == task::Phase::Cancelled {
                 task_logger(progress.console.clone(), name.clone())
                     .debug(format!("Skipping {name}: cancelled").as_str());
-                skip_execute_message = Some("Skipping because it was cancelled".into());
+                skip_execute_message = logger::make_finalize_line(
+                    logger::FinalType::Cancelled,
+                    bracketed_rule.as_str(),
+                );
             } else if task.rule.type_ == Some(rule::RuleType::Optional) {
                 task_logger(progress.console.clone(), name.clone())
                     .debug("Skipping because it is optional");
-                skip_execute_message = Some("Skipping: optional".into());
+                skip_execute_message = logger::make_finalize_line(
+                    logger::FinalType::NotRequired,
+                    bracketed_rule.as_str(),
+                );
             }
             task_logger(progress.console.clone(), name.clone())
                 .trace(format!("{name} done checking skip cancellation").as_str());
@@ -190,7 +200,7 @@ pub fn execute_rule(
             task.collects_glob_deps(&tasks)
         };
 
-        let updated_digest = if !dep_globs.is_empty() && skip_execute_message.is_none() {
+        let updated_digest = if !dep_globs.is_empty() && skip_execute_message.is_empty() {
             task_logger(progress.console.clone(), name.clone())
                 .debug(format!("update workspace changes with deps globs {dep_globs:?}").as_str());
 
@@ -221,7 +231,10 @@ pub fn execute_rule(
                     // if the user has manually deleted them
                     Some(check_changes.digest)
                 } else {
-                    skip_execute_message = Some("skipping: file deps unchanged".into());
+                    skip_execute_message = logger::make_finalize_line(
+                        logger::FinalType::NoChanges,
+                        bracketed_rule.as_str(),
+                    );
                     None
                 }
             } else {
@@ -234,10 +247,7 @@ pub fn execute_rule(
             None
         };
 
-        if let Some(skip_message) = skip_execute_message.as_ref() {
-            task_logger(console.clone(), name.clone()).info(skip_message.as_ref());
-            progress.set_message(skip_message);
-        } else {
+        if skip_execute_message.is_empty() {
             task_logger(console.clone(), name.clone()).debug("Running task");
             progress.set_message("Running");
         }
@@ -251,7 +261,7 @@ pub fn execute_rule(
 
         let mut cache_status = workspace::CacheStatus::None;
         progress.reset_elapsed();
-        let task_result = if let Some(message) = skip_execute_message.as_ref() {
+        let task_result = if !skip_execute_message.is_empty() {
             if task.rule.uses_rule_cache()
                 && let Some(digest) = updated_digest.clone()
             {
@@ -261,7 +271,10 @@ pub fn execute_rule(
             if task.rule.type_ == Some(rule::RuleType::Setup) {
                 progress.set_finalize_none();
             } else {
-                progress.set_finalize(message);
+                progress.set_finalize_lines(logger::make_finalize_line(
+                    logger::FinalType::NoChanges,
+                    bracketed_rule.as_str(),
+                ));
             }
             Ok(executor::TaskResult::new())
         } else {
@@ -282,7 +295,7 @@ pub fn execute_rule(
                     targets.as_slice(),
                     || {
                         task.executor
-                            .execute(console.clone(), workspace.clone(), &rule_name)
+                            .execute(&mut progress, workspace.clone(), &rule_name)
                             .context(format_context!("[{rule_name}] Failed to exec"))
                     },
                     || task.rule.get_target_paths(),
@@ -306,7 +319,7 @@ pub fn execute_rule(
                 }
             } else {
                 task.executor
-                    .execute(console.clone(), workspace.clone(), &rule_name)
+                    .execute(&mut progress, workspace.clone(), &rule_name)
                     .context(format_context!("[{rule_name}] Failed to exec"))
             }
         };
@@ -326,7 +339,7 @@ pub fn execute_rule(
             let mut log_status = logs::Status {
                 name: rule_name.clone(),
                 duration: elapsed_time,
-                file: if skip_execute_message.is_some() {
+                file: if !skip_execute_message.is_empty() {
                     "<skipped>".into()
                 } else if matches!(cache_status, workspace::CacheStatus::Restored(_)) {
                     "<restored>".into()
@@ -345,6 +358,11 @@ pub fn execute_rule(
                 log_status.status = logs::Expect::Success;
             } else {
                 log_status.status = logs::Expect::Failure;
+                progress.set_finalize_lines(logger::make_finalize_line(
+                    logger::FinalType::Failed,
+                    bracketed_rule.as_str(),
+                ));
+
                 // Cancel all pending tasks - exit gracefully
                 for task in tasks.values_mut() {
                     task.phase = task::Phase::Cancelled;
@@ -546,7 +564,7 @@ impl State {
                             console.clone(),
                             "workspace",
                             Some(200),
-                            Some("Populated Graph".to_string()),
+                            None,
                         ));
                     }
                 }
@@ -927,10 +945,10 @@ impl State {
         }
 
         if task_info_list.is_empty() {
-            console.error("No Results", &"No matching rules available")?;
+            console.error("No Results", "No matching rules available")?;
         } else {
             let task_info_list_yaml = serde_yaml::to_string(&task_info_list).unwrap_or_default();
-            console.info(phase.to_string().as_str(), &task_info_list_yaml)?;
+            console.write(&task_info_list_yaml)?;
         }
 
         Ok(())
@@ -997,12 +1015,24 @@ impl State {
 
     fn execute(
         &self,
-        console: console::Console,
+        progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         phase: task::Phase,
     ) -> anyhow::Result<executor::TaskResult> {
         let mut task_result = executor::TaskResult::new();
         let mut handle_list = Vec::new();
+        let console = progress.console.clone();
+        let task_count = self.sorted.len() as u64;
+        let mut started = 0 as u64;
+
+        progress.set_message(format!("Executing {task_count} {phase} rules").as_str());
+        progress.update_progress(0, task_count);
+
+        let mut task_pending_set = HashSet::new();
+        for node_index in self.sorted.iter() {
+            let task_name = self.graph.get_task(*node_index);
+            task_pending_set.insert(task_name);
+        }
 
         for node_index in self.sorted.iter() {
             let task_name = self.graph.get_task(*node_index);
@@ -1015,36 +1045,58 @@ impl State {
             };
 
             if task.phase == phase {
-                let message = if task.rule.type_ == Some(rule::RuleType::Optional) {
-                    "Skipped (Optional)".to_string()
-                } else {
-                    let message = if let Some(rule_type) = task.rule.type_ {
-                        format!("{rule_type:?}")
-                    } else {
-                        format!("{phase:?}")
-                    };
-                    format!("Complete ({message})")
-                };
+                let mut progress_bar =
+                    console::Progress::new(console.clone(), task.rule.name.clone(), None, None);
 
-                let progress_bar = console::Progress::new(
-                    console.clone(),
-                    &labels::sanitize_rule_for_display(task.rule.name.clone()),
-                    Some(100),
-                    Some(message),
+                let bracketed_rule = format!(
+                    "[{}]",
+                    utils::labels::sanitize_rule_for_display(task.rule.name.clone())
                 );
+                if task.rule.type_ == Some(rule::RuleType::Optional) {
+                    progress_bar.set_finalize_lines(logger::make_finalize_line(
+                        logger::FinalType::NotRequired,
+                        bracketed_rule.as_str(),
+                    ));
+                } else {
+                    progress_bar.set_finalize_lines(logger::make_finalize_line(
+                        logger::FinalType::Completed,
+                        bracketed_rule.as_str(),
+                    ));
+                }
 
                 task_logger(console.clone(), task_name.into())
                     .debug(format!("Staging task {}", task.rule.name).as_str());
 
-                handle_list.push(execute_rule(progress_bar, workspace.clone(), &task));
+                started += 1;
+                progress.set_prefix(format!("Queued {started}/{task_count}").as_str());
+                handle_list.push((
+                    task.rule.name.clone(),
+                    execute_rule(progress_bar, workspace.clone(), &task),
+                ));
 
                 loop {
                     let mut number_running = 0;
-                    for handle in handle_list.iter() {
+                    for (name, handle) in handle_list.iter() {
                         if !handle.is_finished() {
                             number_running += 1;
+                            if task_pending_set.remove(name.as_ref()) {
+                                progress.increment(1);
+                            }
                         }
                     }
+
+                    let active_tasks: Vec<_> = handle_list
+                        .iter()
+                        .filter_map(|(name, handle)| {
+                            if !handle.is_finished() {
+                                Some(utils::labels::get_rule_name_from_label(name.as_ref()))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+
+                    progress.set_message(active_tasks.join(",").as_str());
 
                     // this could be configured with a another global starlark function
                     if number_running < singleton::get_max_queue_count() {
@@ -1056,9 +1108,31 @@ impl State {
             }
         }
 
+        let mut active_tasks: Vec<_> = handle_list
+            .iter()
+            .filter_map(|(name, handle)| {
+                if !handle.is_finished() {
+                    Some(name.to_owned())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
         let mut first_error = None;
-        for handle in handle_list {
+        for (name, handle) in handle_list {
             let handle_join_result = handle.join();
+
+            if let Some(offset) = active_tasks.iter().position(|e| *e == name) {
+                active_tasks.remove(offset);
+                let active_rule_names: Vec<_> = active_tasks
+                    .iter()
+                    .map(|e| utils::labels::get_rule_name_from_label(e.as_ref()))
+                    .collect();
+                progress.set_message(active_rule_names.join(",").as_str());
+                progress.increment(1);
+            }
+
             match handle_join_result {
                 Ok(handle_result) => match handle_result {
                     Ok(handle_task_result) => {
@@ -1243,12 +1317,12 @@ pub fn get_pretty_tasks() -> String {
 }
 
 pub fn execute(
-    console: console::Console,
+    progress: &mut console::Progress,
     workspace: workspace::WorkspaceArc,
     phase: task::Phase,
 ) -> anyhow::Result<executor::TaskResult> {
     let state: std::sync::RwLockReadGuard<'_, State> = get_state().read();
-    state.execute(console, workspace, phase)
+    state.execute(progress, workspace, phase)
 }
 
 pub fn add_setup_dep_to_run_rules() -> anyhow::Result<()> {

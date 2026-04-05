@@ -293,6 +293,12 @@ pub fn run_shell_in_workspace(
         std::path::Path::new(workspace_arc.read().absolute_path.clone().as_ref())
             .join(relative_directory.as_ref());
 
+    console.shutdown_refresh_thread();
+
+    while !console.is_refresh_thread_ready_to_join() {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+
     shell::run(
         &shell_config,
         &run_environment,

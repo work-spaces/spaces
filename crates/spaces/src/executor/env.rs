@@ -13,10 +13,11 @@ pub struct UpdateEnv {
 impl UpdateEnv {
     pub fn execute(
         &self,
-        console: console::Console,
+        progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
+        let console = progress.console.clone();
         logger::Logger::new(console, name.into())
             .debug(format!("Update env {name}: {:?}", &self).as_str());
         workspace

@@ -6,139 +6,17 @@ mod file;
 mod null;
 mod process;
 mod secrets;
+mod super_console;
 pub mod ui;
 mod verbosity;
 mod writer;
 
+pub use crossterm::style;
 pub use process::{ExecuteOptions, LogHeader, get_log_divider};
 pub use secrets::Secrets;
+pub use superconsole::{Line, Span};
 pub use verbosity::{Level, Verbosity};
 use writer::ConsoleWriter;
-
-struct SuperConsoleWriter {
-    console: Option<superconsole::SuperConsole>,
-    component: ui::UiComponent,
-}
-
-impl ConsoleWriter for SuperConsoleWriter {
-    fn write_str(&mut self, s: &dyn std::fmt::Display) -> anyhow::Result<()> {
-        let s = s.to_string();
-        let message = s.trim_end_matches('\n');
-        if !message.is_empty() {
-            let line =
-                superconsole::Line::from_iter([superconsole::Span::new_unstyled_lossy(message)]);
-            if let Some(console) = self.console.as_mut() {
-                console.emit(superconsole::Lines(vec![line]));
-            }
-        }
-        Ok(())
-    }
-
-    fn emit_line(&mut self, line: superconsole::Line) {
-        if let Some(console) = self.console.as_mut() {
-            console.emit(superconsole::Lines(vec![line]));
-        }
-    }
-
-    fn add_progress(&mut self, label: &str, total: Option<u64>) {
-        self.component.active_progress.push(ui::ActiveProgress {
-            name: label.to_string(),
-            message: String::new(),
-            position: 0,
-            total,
-            start_time: std::time::Instant::now(),
-        });
-        if let Some(console) = self.console.as_mut() {
-            let _ = console.render(&self.component);
-        }
-    }
-
-    fn set_progress_status(&mut self, label: &str, message: &str) {
-        if let Some(entry) = self
-            .component
-            .active_progress
-            .iter_mut()
-            .find(|p| p.name == label)
-        {
-            entry.message = message.to_string();
-        }
-        if let Some(console) = self.console.as_mut() {
-            let _ = console.render(&self.component);
-        }
-    }
-
-    fn update_progress(&mut self, label: &str, current: u64, total: u64) {
-        if let Some(entry) = self
-            .component
-            .active_progress
-            .iter_mut()
-            .find(|p| p.name == label)
-        {
-            entry.position = current;
-            entry.total = Some(total);
-        }
-        if let Some(console) = self.console.as_mut() {
-            let _ = console.render(&self.component);
-        }
-    }
-
-    fn increment_progress(&mut self, label: &str, increment: u64) {
-        if let Some(entry) = self
-            .component
-            .active_progress
-            .iter_mut()
-            .find(|p| p.name == label)
-        {
-            entry.position += increment;
-        }
-        if let Some(console) = self.console.as_mut() {
-            let _ = console.render(&self.component);
-        }
-    }
-
-    fn set_progress_total(&mut self, label: &str, total: Option<u64>) {
-        if let Some(entry) = self
-            .component
-            .active_progress
-            .iter_mut()
-            .find(|p| p.name == label)
-        {
-            entry.total = total;
-        }
-        if let Some(console) = self.console.as_mut() {
-            let _ = console.render(&self.component);
-        }
-    }
-
-    fn remove_progress(&mut self, label: &str) {
-        self.component.active_progress.retain(|p| p.name != label);
-        if let Some(console) = self.console.as_mut() {
-            let _ = console.render(&self.component);
-        }
-    }
-
-    fn reset_progress_elapsed(&mut self, label: &str) {
-        if let Some(entry) = self
-            .component
-            .active_progress
-            .iter_mut()
-            .find(|p| p.name == label)
-        {
-            entry.start_time = std::time::Instant::now();
-        }
-        if let Some(console) = self.console.as_mut() {
-            let _ = console.render(&self.component);
-        }
-    }
-}
-
-impl Drop for SuperConsoleWriter {
-    fn drop(&mut self) {
-        if let Some(console) = self.console.take() {
-            let _ = console.finalize(&self.component);
-        }
-    }
-}
 
 mod sealed {
     use super::*;
@@ -146,6 +24,8 @@ mod sealed {
         pub(crate) secrets: Secrets,
         pub(crate) verbosity: Verbosity,
         pub(crate) start_time: std::time::Instant,
+        pub(crate) shutdown_flag: Option<Arc<std::sync::atomic::AtomicBool>>,
+        pub(crate) is_refresh_thread_ready_to_join: Arc<std::sync::atomic::AtomicBool>,
     }
 }
 
@@ -171,40 +51,77 @@ impl Console {
                 secrets: Secrets::default(),
                 verbosity: Verbosity::default(),
                 start_time: std::time::Instant::now(),
+                shutdown_flag: None,
+                is_refresh_thread_ready_to_join: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             })),
         }
     }
 
     pub fn new_file(path: &str) -> anyhow::Result<Self> {
-        let file = std::fs::File::create(path)
-            .context(format_context!("Failed to create file {path}"))?;
+        let file =
+            std::fs::File::create(path).context(format_context!("Failed to create file {path}"))?;
         Ok(Self {
             writer: Arc::new(Mutex::new(Box::new(file::Writer::new(file)))),
             state: Arc::new(RwLock::new(sealed::State {
                 secrets: Secrets::default(),
                 verbosity: Verbosity::default(),
                 start_time: std::time::Instant::now(),
+                shutdown_flag: None,
+                is_refresh_thread_ready_to_join: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             })),
         })
     }
 
     pub fn new_stdout(verbosity: Verbosity) -> anyhow::Result<Self> {
-        let console = superconsole::SuperConsole::new().context(format_context!(
+        let super_console = super_console::Writer::new().context(format_context!(
             "Internal Error: failed to create super console",
         ))?;
         Ok(Self {
-            writer: Arc::new(Mutex::new(Box::new(SuperConsoleWriter {
-                console: Some(console),
-                component: ui::UiComponent {
-                    active_progress: Vec::new(),
-                },
-            }))),
+            writer: Arc::new(Mutex::new(Box::new(super_console))),
             state: Arc::new(RwLock::new(sealed::State {
                 secrets: Secrets::default(),
                 verbosity,
                 start_time: std::time::Instant::now(),
+                shutdown_flag: None,
+                is_refresh_thread_ready_to_join: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             })),
         })
+    }
+
+    pub fn start_refresh_thread(&self) -> std::thread::JoinHandle<()> {
+        let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let shutdown_flag = Arc::clone(&shutdown);
+        let is_ready_to_join = Arc::clone(
+            &self.state.read().unwrap().is_refresh_thread_ready_to_join,
+        );
+        is_ready_to_join.store(false, std::sync::atomic::Ordering::Relaxed);
+        self.state.write().unwrap().shutdown_flag = Some(shutdown_flag.clone());
+        let refresh_handle = {
+            let refresh_console = self.clone();
+            std::thread::spawn(move || {
+                while !shutdown_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    refresh_console.refresh();
+                }
+                is_ready_to_join.store(true, std::sync::atomic::Ordering::Relaxed);
+            })
+        };
+        refresh_handle
+    }
+
+    pub fn is_refresh_thread_ready_to_join(&self) -> bool {
+        self.state
+            .read()
+            .unwrap()
+            .is_refresh_thread_ready_to_join
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn shutdown_refresh_thread(&self) {
+        let state = self.state.read().unwrap();
+        if let Some(shutdown_flag) = state.shutdown_flag.as_ref() {
+            shutdown_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 
     pub fn raw<Type: std::fmt::Display>(&self, message: Type) -> anyhow::Result<()> {
@@ -220,9 +137,18 @@ impl Console {
         self.writer.lock().unwrap().emit_line(line);
     }
 
-    fn add_progress(&self, label: &str, total: Option<u64>) {
+    pub(crate) fn emit_progress_line(&self, line: superconsole::Line) {
         if self.state.read().unwrap().verbosity.is_show_progress_bars {
-            self.writer.lock().unwrap().add_progress(label, total);
+            self.writer.lock().unwrap().emit_line(line);
+        }
+    }
+
+    fn add_progress(&self, label: &str, prefix: &str, total: Option<u64>) {
+        if self.state.read().unwrap().verbosity.is_show_progress_bars {
+            self.writer
+                .lock()
+                .unwrap()
+                .add_progress(label, prefix, total);
         }
     }
 
@@ -238,6 +164,15 @@ impl Console {
                 .lock()
                 .unwrap()
                 .set_progress_status(label, message);
+        }
+    }
+
+    fn set_progress_prefix(&self, label: &str, prefix: &str) {
+        if self.state.read().unwrap().verbosity.is_show_progress_bars {
+            self.writer
+                .lock()
+                .unwrap()
+                .set_progress_prefix(label, prefix);
         }
     }
 
@@ -267,6 +202,10 @@ impl Console {
         self.writer.lock().unwrap().reset_progress_elapsed(label);
     }
 
+    pub fn refresh(&self) {
+        self.writer.lock().unwrap().refresh();
+    }
+
     pub fn trace<Type: std::fmt::Display>(&self, name: &str, value: Type) -> anyhow::Result<()> {
         self.log(Level::Trace, &format!("{name}: {value}"))
     }
@@ -294,10 +233,12 @@ impl Console {
     pub fn log(&self, level: Level, message: &str) -> anyhow::Result<()> {
         let state = self.state.read().unwrap();
         if state.verbosity.level <= level {
-            let line =
+            let lines =
                 verbosity::format_log(&state.verbosity, level, None, message, state.start_time);
             drop(state);
-            self.emit_line(line);
+            for line in lines {
+                self.emit_line(line);
+            }
             Ok(())
         } else {
             Ok(())
@@ -353,8 +294,6 @@ impl Console {
             .context(format_context!("Failed to spawn command {command}"))?;
         let (tx, rx) = mpsc::channel::<String>();
 
-        self.writer.lock().unwrap().add_progress(label, None);
-
         let label_clone = label.to_string();
         let command_clone = command.to_string();
         let log_level = options.log_level.clone();
@@ -372,14 +311,16 @@ impl Console {
                 if (is_passhrough || is_app)
                     && let Some(level) = log_level.as_ref()
                 {
-                    let line = verbosity::format_log(
+                    let lines = verbosity::format_log(
                         &verbosity,
                         *level,
                         Some(command_clone.as_ref()),
                         message.as_str(),
                         start_time,
                     );
-                    writer.emit_line(line);
+                    for line in lines {
+                        writer.emit_line(line);
+                    }
                 }
             }
             console.writer.lock().unwrap().remove_progress(&label_clone);
@@ -405,7 +346,7 @@ impl Console {
 pub struct Progress {
     pub console: Console,
     label: String,
-    final_message: Option<String>,
+    final_message: Vec<superconsole::Line>,
 }
 
 impl Progress {
@@ -416,20 +357,24 @@ impl Progress {
         final_message: Option<String>,
     ) -> Self {
         let label = label.to_string();
-        console.add_progress(label.as_str(), total);
+        console.add_progress(label.as_str(), label.as_str(), total);
         Self {
             console,
             label,
-            final_message,
+            final_message: super_console::string_to_lines(final_message.as_deref()),
         }
     }
 
+    pub fn set_finalize_lines(&mut self, lines: Vec<Line>) {
+        self.final_message = lines;
+    }
+
     pub fn set_finalize_none(&mut self) {
-        self.final_message = None;
+        self.final_message = vec![];
     }
 
     pub fn set_finalize<FinalType: std::fmt::Display>(&mut self, final_message: FinalType) {
-        self.final_message = Some(final_message.to_string());
+        self.final_message = super_console::string_to_lines(Some(&final_message.to_string()));
     }
 
     pub fn set_total(&self, total: Option<u64>) {
@@ -438,7 +383,7 @@ impl Progress {
 
     pub fn set_prefix(&self, message: &str) {
         self.console
-            .set_progress_status(self.label.as_ref(), message);
+            .set_progress_prefix(self.label.as_ref(), message);
     }
 
     pub fn set_message(&self, message: &str) {
@@ -482,8 +427,8 @@ impl Progress {
 impl Drop for Progress {
     fn drop(&mut self) {
         self.console.remove_progress(self.label.as_ref());
-        if let Some(finalize) = self.final_message.as_ref() {
-            let _ = self.console.write(finalize);
+        for line in self.final_message.drain(..) {
+            self.console.emit_progress_line(line);
         }
     }
 }

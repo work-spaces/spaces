@@ -12,18 +12,18 @@ pub struct HttpArchive {
 impl HttpArchive {
     pub fn execute(
         &self,
-        console: console::Console,
+        progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
         let mut lock_file = self.http_archive.get_file_lock();
+        let console = progress.console.clone();
         lock_file.lock(console.clone()).context(format_context!(
             "{name} - Failed to lock the spaces store for {}",
             self.http_archive.archive.url
         ))?;
 
-        let _next_progress_bar = self
-            .http_archive
+        self.http_archive
             .sync(console.clone())
             .context(format_context!("Failed to sync http_archive {}", name))?;
 

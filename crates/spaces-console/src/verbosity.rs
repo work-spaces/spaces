@@ -41,7 +41,7 @@ pub(crate) fn format_log(
     app_message: Option<&str>,
     message: &str,
     start_time: std::time::Instant,
-) -> superconsole::Line {
+) -> Vec<superconsole::Line> {
     let timestamp = if verbosity.is_show_elapsed_time {
         let elapsed = std::time::Instant::now() - start_time;
         format!("[{:.3}] ", elapsed.as_secs_f64())
@@ -49,11 +49,15 @@ pub(crate) fn format_log(
         String::new()
     };
 
-    let mut line = superconsole::Line::default();
+    let mut message_lines = message.split('\n');
+    let first_line = message_lines.next().unwrap_or("");
+    let rest_lines: Vec<&str> = message_lines.collect();
+
+    let mut first = superconsole::Line::default();
 
     if level == Level::Passthrough {
-        line.push(superconsole::Span::new_unstyled_lossy(&format!(
-            "{timestamp}{message}"
+        first.push(superconsole::Span::new_unstyled_lossy(&format!(
+            "{timestamp}{first_line}"
         )));
     } else if verbosity.is_tty {
         let foreground_color = match level {
@@ -70,29 +74,31 @@ pub(crate) fn format_log(
             attributes: Attributes::from(Attribute::Bold),
         };
         if !timestamp.is_empty() {
-            line.push(superconsole::Span::new_unstyled_lossy(&format!(
-                "{timestamp}"
-            )));
+            first.push(superconsole::Span::new_unstyled_lossy(&timestamp));
         }
         if let Some(app_message) = app_message {
-            line.push(superconsole::Span::new_unstyled_lossy(&format!(
-                "{app_message}"
-            )));
+            first.push(superconsole::Span::new_unstyled_lossy(app_message));
         } else {
-            let level_label = format!("{}", level.to_string().to_lowercase());
-            line.push(superconsole::Span::new_styled_lossy(
+            let level_label = level.to_string().to_lowercase();
+            first.push(superconsole::Span::new_styled_lossy(
                 crossterm::style::StyledContent::new(bold_style, level_label),
             ));
         }
-        line.push(superconsole::Span::new_unstyled_lossy(&format!(
-            "|{message}"
+        first.push(superconsole::Span::new_unstyled_lossy(&format!(
+            "|{first_line}"
         )));
     } else {
-        let level_label = format!("{}", level.to_string().to_lowercase());
-        line.push(superconsole::Span::new_unstyled_lossy(&format!(
-            "::{level_label}::{timestamp}{message}"
+        let level_label = level.to_string().to_lowercase();
+        first.push(superconsole::Span::new_unstyled_lossy(&format!(
+            "::{level_label}::{timestamp}{first_line}"
         )));
     }
 
-    line
+    let mut result = vec![first];
+    for line in rest_lines {
+        result.push(superconsole::Line::from_iter([
+            superconsole::Span::new_unstyled_lossy(line),
+        ]));
+    }
+    result
 }

@@ -125,14 +125,15 @@ impl OrasArchive {
 
     pub fn execute(
         &self,
-        mut progress: console::Progress,
+        progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
         // download the manifest and get the digest
+        let console = progress.console.clone();
 
         let manifest_details = self
-            .get_manifest_details(&mut progress, workspace.clone())
+            .get_manifest_details(progress, workspace.clone())
             .context(format_context!("Failed to fetch manifest"))?;
 
         let archive = http_archive::Archive {
@@ -152,12 +153,10 @@ impl OrasArchive {
         let full_path = std::path::Path::new(&http_archive.full_path_to_archive);
 
         let mut lock_file = http_archive.get_file_lock();
-        lock_file
-            .lock(progress.console.clone())
-            .context(format_context!(
-                "{name} - Failed to lock the spaces store for {}",
-                http_archive.archive.url
-            ))?;
+        lock_file.lock(console.clone()).context(format_context!(
+            "{name} - Failed to lock the spaces store for {}",
+            http_archive.archive.url
+        ))?;
 
         if !full_path.exists() {
             let parent = full_path
@@ -166,7 +165,7 @@ impl OrasArchive {
                 .to_string_lossy()
                 .to_string();
             // need to ensure the archive is downloaded before using http_archive which doesn't know how to download
-            self.download(&mut progress, workspace.clone(), &parent)
+            self.download(progress, workspace.clone(), &parent)
                 .context(format_context!("Failed to download using oras"))?;
 
             let full_path_to_download =
@@ -179,7 +178,7 @@ impl OrasArchive {
 
         // sync will skip the download because the file is already there
         let _next_progress_bar = http_archive
-            .sync(progress.console.clone())
+            .sync(console.clone())
             .context(format_context!("Failed to sync http_archive {}", name))?;
 
         let mut workspace_write_lock = workspace.write();
@@ -187,7 +186,7 @@ impl OrasArchive {
 
         http_archive
             .create_links(
-                progress.console.clone(),
+                console.clone(),
                 workspace_directory.as_ref(),
                 name,
                 &mut workspace_write_lock.settings.checkout.links,

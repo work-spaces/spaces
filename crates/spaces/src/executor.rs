@@ -49,33 +49,28 @@ pub enum Task {
 impl Task {
     pub fn execute(
         &self,
-        console: console::Console,
+        progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<TaskResult> {
         let mut check_new_modules = false;
-        let mut progress = console::Progress::new(console.clone(), name, None, None);
         match self {
-            Task::HttpArchive(archive) => archive.execute(console.clone(), workspace.clone(), name),
+            Task::HttpArchive(archive) => archive.execute(progress, workspace.clone(), name),
             Task::OrasArchive(archive) => archive.execute(progress, workspace.clone(), name),
-            Task::Exec(exec) => exec.execute(&mut progress, workspace.clone(), name),
-            Task::Kill(kill) => kill.execute(name, &mut progress),
-            Task::CreateArchive(archive) => archive.execute(console, workspace.clone(), name),
-            Task::UpdateAsset(asset) => asset.execute(console, workspace.clone(), name),
-            Task::AddWhichAsset(asset) => asset.execute(&mut progress, workspace.clone(), name),
-            Task::AddHardLink(asset) => asset.execute(&mut progress, workspace.clone(), name),
-            Task::AddSoftLink(asset) => asset.execute(&mut progress, workspace.clone(), name),
-            Task::UpdateEnv(update_env) => {
-                update_env.execute(console.clone(), workspace.clone(), name)
-            }
-            Task::AddAsset(asset) => asset.execute(&mut progress, workspace.clone(), name),
-            Task::AddAnyAssets(any_assets) => {
-                any_assets.execute(&mut progress, workspace.clone(), name)
-            }
+            Task::Exec(exec) => exec.execute(progress, workspace.clone(), name),
+            Task::Kill(kill) => kill.execute(name, progress),
+            Task::CreateArchive(archive) => archive.execute(progress, workspace.clone(), name),
+            Task::UpdateAsset(asset) => asset.execute(progress, workspace.clone(), name),
+            Task::AddWhichAsset(asset) => asset.execute(progress, workspace.clone(), name),
+            Task::AddHardLink(asset) => asset.execute(progress, workspace.clone(), name),
+            Task::AddSoftLink(asset) => asset.execute(progress, workspace.clone(), name),
+            Task::UpdateEnv(update_env) => update_env.execute(progress, workspace.clone(), name),
+            Task::AddAsset(asset) => asset.execute(progress, workspace.clone(), name),
+            Task::AddAnyAssets(any_assets) => any_assets.execute(progress, workspace.clone(), name),
             Task::Git(git) => {
                 check_new_modules =
                     git.is_evaluate_spaces_modules && git.working_directory.is_none();
-                git.execute(&mut progress, workspace.clone(), name)
+                git.execute(progress, workspace.clone(), name)
             }
             Task::Target => Ok(()),
         }

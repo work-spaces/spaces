@@ -9,9 +9,10 @@ impl ConsoleWriter for Writer {
 
     fn emit_line(&mut self, _line: superconsole::Line) {}
 
-    fn add_progress(&mut self, _label: &str, _total: Option<u64>) {}
+    fn add_progress(&mut self, _label: &str, _prefix: &str, _total: Option<u64>) {}
 
     fn set_progress_status(&mut self, _label: &str, _message: &str) {}
+    fn set_progress_prefix(&mut self, _label: &str, _prefix: &str) {}
 
     fn update_progress(&mut self, _label: &str, _current: u64, _total: u64) {}
 

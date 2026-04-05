@@ -13,12 +13,13 @@ pub struct Archive {
 impl Archive {
     pub fn execute(
         &self,
-        console: console::Console,
+        progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
         let workspace_directory = workspace.read().get_absolute_path();
         let output_directory = format!("{workspace_directory}/build/{name}");
+        let console = progress.console.clone();
 
         std::fs::create_dir_all(output_directory.as_str()).context(format_context!(
             "failed to create output directory {output_directory}"
@@ -27,7 +28,7 @@ impl Archive {
         logger::Logger::new(console.clone(), name.into())
             .debug(format!("Creating archive {output_directory}").as_str());
 
-        let progress = console::Progress::new(
+        let archive_progress = console::Progress::new(
             console.clone(),
             self.create_archive.get_output_file(),
             None,
@@ -36,7 +37,7 @@ impl Archive {
 
         let (output_file_path, digest) = self
             .create_archive
-            .create(output_directory.as_str(), progress)
+            .create(output_directory.as_str(), archive_progress)
             .context(format_context!(
                 "failed to create archive {output_directory}"
             ))?;

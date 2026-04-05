@@ -75,6 +75,7 @@ fn handle_verbosity(
         }
         console.set_is_show_progress_bars(false);
         console.set_is_show_elapsed_time(true);
+        console.set_is_tty(false);
     } else {
         console.set_is_show_progress_bars(!is_hide_progress_bars);
         console.set_is_show_elapsed_time(show_elapsed_time);
@@ -165,6 +166,7 @@ pub fn execute() -> anyhow::Result<()> {
         show_elapsed_time,
     );
 
+    let refresh_handle = effective_console.start_refresh_thread();
     let result = execute_command(commands, effective_console.clone());
     {
         let deferred_warnings = utils::logger::get_deferred_warnings();
@@ -174,6 +176,9 @@ pub fn execute() -> anyhow::Result<()> {
             }
         }
     }
+
+    effective_console.shutdown_refresh_thread();
+    let _ = refresh_handle.join();
     result
 }
 
@@ -440,7 +445,6 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             if shell::is_spaces_shell() {
                 return Err(format_error!("Already running in a `spaces shell`"));
             }
-
             let completions_command = if completions {
                 let has_help = if all_targets {
                     rules::HasHelp::No

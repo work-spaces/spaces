@@ -13,6 +13,7 @@ pub struct LogLine {
 /// Mirrors the indicatif template: `{elapsed_precise}|{bar:.cyan/blue}|{name}: {message}`
 pub struct ActiveProgress {
     pub name: String,
+    pub prefix: String,
     pub message: String,
     /// Current progress position.
     pub position: u64,
@@ -27,8 +28,11 @@ const BAR_WIDTH: usize = 20;
 /// Characters used for a bounded bar: filled, tip, empty.
 const BAR_CHARS_BOUNDED: (char, char, char) = ('#', '>', '-');
 
-/// Characters used for an indeterminate bar: fill, tip, empty.
-const BAR_CHARS_SPINNER: (char, char, char) = ('*', '>', '-');
+/// Frames for the indeterminate spinner, cycled by time elapsed.
+const SPINNER_FRAMES: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
+/// How many milliseconds each spinner frame is shown.
+const SPINNER_FRAME_MS: u128 = 100;
 
 impl ActiveProgress {
     fn render_bar(&self, max_width: usize) -> anyhow::Result<Line> {
@@ -41,24 +45,13 @@ impl ActiveProgress {
             secs % 60
         );
 
-        let (filled_char, tip_char, empty_char) = if self.total.is_some() {
-            BAR_CHARS_BOUNDED
-        } else {
-            BAR_CHARS_SPINNER
-        };
-
-        let filled_count = if let Some(total) = self.total {
-            if total == 0 {
+        let bar_str: String = if let Some(total) = self.total {
+            let (filled_char, tip_char, empty_char) = BAR_CHARS_BOUNDED;
+            let filled_count = if total == 0 {
                 0
             } else {
                 (self.position as usize * BAR_WIDTH / total as usize) % BAR_WIDTH
-            }
-        } else {
-            // Spinner: animate position within the bar width
-            (self.position as usize) % BAR_WIDTH
-        };
-
-        let bar_str: String = {
+            };
             let filled = filled_char
                 .to_string()
                 .repeat(filled_count.saturating_sub(1));
@@ -73,7 +66,13 @@ impl ActiveProgress {
                 .to_string()
                 .repeat(BAR_WIDTH.saturating_sub(filled_count));
             format!("{filled}{tip}{empty}")
+        } else {
+            let frame_idx =
+                (elapsed.as_millis() / SPINNER_FRAME_MS) as usize % SPINNER_FRAMES.len();
+            SPINNER_FRAMES[frame_idx].to_string()
         };
+
+        let bar_width = if self.total.is_some() { BAR_WIDTH } else { 1 };
 
         let bar_style = ContentStyle {
             foreground_color: Some(Color::Cyan),
@@ -100,7 +99,7 @@ impl ActiveProgress {
 
         line.push(Span::new_unstyled_lossy("|"));
 
-        let prefix_text = format!("{}: ", self.name);
+        let prefix_text = format!("{}: ", self.prefix);
         let prefix_span = Span::new_styled_lossy(crossterm::style::StyledContent::new(
             prefix_style,
             prefix_text,
@@ -108,7 +107,7 @@ impl ActiveProgress {
         line.push(prefix_span);
 
         // Truncate message to fit remaining width
-        let fixed_width = elapsed_str.len() + 1 + BAR_WIDTH + 1 + self.name.len() + 2;
+        let fixed_width = elapsed_str.len() + 1 + bar_width + 1 + self.name.len() + 2;
         let msg_max = max_width.saturating_sub(fixed_width);
         let message: String = self.message.chars().take(msg_max).collect();
         line.push(Span::new_unstyled_lossy(&message));
@@ -133,8 +132,17 @@ impl Component for UiComponent {
         _mode: DrawMode,
     ) -> Result<Lines, Self::Error> {
         let mut lines = Lines::default();
-        for process in &self.active_progress {
-            lines.0.push(process.render_bar(dimensions.width)?);
+        let now = std::time::Instant::now();
+        let last = self.active_progress.len().saturating_sub(1);
+        for (offset, progress) in self.active_progress.iter().enumerate().rev() {
+            if offset == last {
+                lines.0.push(progress.render_bar(dimensions.width)?);
+            } else {
+                let duration = (now - progress.start_time).as_secs();
+                if duration > 1 {
+                    lines.0.push(progress.render_bar(dimensions.width)?);
+                }
+            }
         }
         Ok(lines)
     }

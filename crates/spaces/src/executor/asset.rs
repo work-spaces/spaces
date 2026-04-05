@@ -50,12 +50,12 @@ fn format_value(format: AssetFormat, value: &serde_json::Value) -> anyhow::Resul
 impl UpdateAsset {
     pub fn execute(
         &self,
-        console: console::Console,
+        progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
         use json_value_merge::Merge;
-
+        let console = progress.console.clone();
         let logger = logger::Logger::new(console.clone(), name.into());
 
         // the workspace write lock needs to be held for the duration of the update

@@ -86,7 +86,7 @@ impl Manager {
         let gh_command =
             ws::get_spaces_tools_path_to_sysroot_bin(self.path_to_store.as_ref()).join("gh");
 
-        let progress_bar = console::Progress::new(console, "download", None, None);
+        let progress_bar = console::Progress::new(console, "download-version", None, None);
 
         if let Some(stdout) = progress_bar
             .execute_process(gh_command.to_string_lossy().as_ref(), options)

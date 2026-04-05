@@ -346,9 +346,9 @@ fn show_eval_progress(
         if count == 10 {
             progress_bar = Some(console::Progress::new(
                 console.clone(),
-                "evaluating",
+                format!("evaluating [{name}]"),
                 Some(200),
-                Some(format!("Complete ({name})")),
+                None,
             ));
             progress_bar.as_mut().unwrap().set_message(name);
         }
@@ -410,6 +410,8 @@ pub fn evaluate_starlark_modules(
         .map_err(|e| format_error!("Failed to evaluate module {:?}", e))?;
     }
 
+    let mut progress = None;
+
     // All modules are evaulated in this loop
     // During checkout additional modules may be added to the queue
     // For Run mode, the env module is processed first and available
@@ -439,6 +441,7 @@ pub fn evaluate_starlark_modules(
 
             if phase != task::Phase::Checkout {
                 // Drain any already-finished handles before checking the limit.
+
                 let mut i = 0;
                 while i < eval_handles.len() {
                     if eval_handles[i].1.is_finished() {
@@ -460,6 +463,22 @@ pub fn evaluate_starlark_modules(
             } else {
                 // During checkout phase, additional modules may be added to the queue
                 // if the repo contains more spaces.star files
+                //
+
+                if progress.is_none() {
+                    progress = Some(console::Progress::new(
+                        console.clone(),
+                        "Executing tasks",
+                        Some(0),
+                        None,
+                    ));
+                }
+
+                let progress = progress.as_mut().unwrap();
+                let module_name = utils::labels::get_path_label_from_rule_label(name.as_ref());
+                let _ = console.write(module_name);
+                let rule_name = utils::labels::get_rule_name_from_label(name.as_ref());
+                progress.set_prefix(format!("[{rule_name}]").as_str());
 
                 show_eval_progress(console.clone(), &name, handle)
                     .context(format_context!("Failed to show eval progress"))?;
@@ -476,7 +495,9 @@ pub fn evaluate_starlark_modules(
                 rules::debug_sorted_tasks(console.clone(), phase)
                     .context(format_context!("Failed to debug sorted tasks"))?;
 
-                let task_result = rules::execute(console.clone(), workspace.clone(), phase)
+                progress.set_message(format!("Executing {phase} rules").as_str());
+
+                let task_result = rules::execute(progress, workspace.clone(), phase)
                     .context(format_context!("Failed to execute tasks"))?;
 
                 update_secrets(console.clone(), workspace.clone())
@@ -527,6 +548,12 @@ pub fn evaluate_starlark_modules(
                         module_queue.push_front((module, content.into()));
                     }
                 }
+            }
+            if let Some(progress) = progress.as_mut() {
+                progress.set_finalize_lines(logger::make_finalize_line(
+                    logger::FinalType::Completed,
+                    "Checkout rules",
+                ));
             }
         }
     }
@@ -633,7 +660,10 @@ fn execute_tasks(
             rules::debug_sorted_tasks(console.clone(), phase)
                 .context(format_context!("Failed to debug sorted tasks"))?;
 
-            let execute_result = rules::execute(console.clone(), workspace.clone(), phase);
+            let mut progress =
+                console::Progress::new(console.clone(), "Executing tasks", Some(0), None);
+
+            let execute_result = rules::execute(&mut progress, workspace.clone(), phase);
 
             rules::export_log_status(workspace.clone())
                 .context(format_context!("Failed to export log status"))?;
