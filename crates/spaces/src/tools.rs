@@ -39,6 +39,7 @@ fn download_and_install(
     platform_archive: builtins::checkout::PlatformArchive,
     _is_force_link: bool,
 ) -> anyhow::Result<Option<String>> {
+    let logger = tools_logger(console.clone());
     let this_platform =
         platform::Platform::get_platform().context(format_context!("Failed to get platform"))?;
     let archive = match this_platform {
@@ -75,7 +76,7 @@ fn download_and_install(
                 .create_links(console.clone(), spaces_tools.as_ref(), "unused", &mut links)
                 .context(format_context!("Failed to create links"))?;
         } else {
-            tools_logger(console.clone()).debug(format!("Skipping download of {name}").as_str());
+            logger.debug(format!("Skipping download of {name}").as_str());
         };
 
         http_archive
@@ -84,8 +85,7 @@ fn download_and_install(
 
         return Ok(Some(relative_path));
     } else {
-        tools_logger(console.clone())
-            .debug(format!("{name} not available for {this_platform}").as_str());
+        logger.debug(format!("{name} not available for {this_platform}").as_str());
     }
 
     Ok(None)
@@ -113,27 +113,29 @@ pub fn handle_command(console: console::Console, command: Command) -> anyhow::Re
 }
 
 pub fn list_tools(console: console::Console) -> anyhow::Result<()> {
+    let logger = tools_logger(console.clone());
     let store_path = ws::get_checkout_store_path_as_path();
-    tools_logger(console.clone()).info(
+    logger.info(
         format!(
             "Path: {}",
             ws::get_spaces_tools_path_to_sysroot_bin(&store_path).display()
         )
         .as_str(),
     );
-    tools_logger(console.clone()).info("- builtin: info.get_path_to_spaces_tools()");
-    tools_logger(console.clone()).info("Tools:");
+    logger.info("- builtin: info.get_path_to_spaces_tools()");
+    logger.info("Tools:");
 
     for (name, _json) in TOOLS {
-        tools_logger(console.clone()).info(format!("- {name}").as_str());
+        logger.info(format!("- {name}").as_str());
     }
 
     Ok(())
 }
 
 fn cleanup_checkouts(console: console::Console, age: u16, is_dry_run: bool) -> anyhow::Result<()> {
+    let logger = tools_logger(console.clone());
     // get dirs in current dir
-    tools_logger(console.clone()).info("Scanning for workspaces");
+    logger.info("Scanning for workspaces");
     let read_dir =
         std::fs::read_dir(".").context(format_context!("Failed to read current directory"))?;
 
@@ -150,14 +152,12 @@ fn cleanup_checkouts(console: console::Console, age: u16, is_dry_run: bool) -> a
         if let Some(entry_age) = workspace::get_age(&entry.path()) {
             let current_age_in_days = entry_age.get_current_age();
             if current_age_in_days > age as u128 {
-                tools_logger(console.clone())
-                    .info(format!("{}:", entry.path().display(),).as_str());
-                tools_logger(console.clone())
-                    .info(format!("  - Age: {} days", entry_age.get_current_age()).as_str());
+                logger.info(format!("{}:", entry.path().display(),).as_str());
+                logger.info(format!("  - Age: {} days", entry_age.get_current_age()).as_str());
                 if is_dry_run {
-                    tools_logger(console.clone()).info("  - Ready to remove (dry-run)");
+                    logger.info("  - Ready to remove (dry-run)");
                 } else {
-                    tools_logger(console.clone()).info("  - Removing");
+                    logger.info("  - Removing");
                     std::fs::remove_dir_all(entry.path()).context(format_context!(
                         "Failed to delete {}",
                         entry.path().display()
@@ -171,6 +171,7 @@ fn cleanup_checkouts(console: console::Console, age: u16, is_dry_run: bool) -> a
 }
 
 pub fn install_tools(console: console::Console, is_force_link: bool) -> anyhow::Result<()> {
+    let logger = tools_logger(console.clone());
     // install gh in the store bin if it does not exist
     let store_path = ws::get_checkout_store_path();
     let store_sysroot_bin = ws::get_spaces_tools_path(store_path.as_ref());
@@ -185,7 +186,7 @@ pub fn install_tools(console: console::Console, is_force_link: bool) -> anyhow::
         )?;
 
     for (name, json) in TOOLS {
-        tools_logger(console.clone()).debug(format!("dowload and install {name}").as_str());
+        logger.debug(format!("dowload and install {name}").as_str());
         let tool: builtins::checkout::PlatformArchive =
             serde_json::from_str(json).context(format_context!("Failed to parse oras json"))?;
 

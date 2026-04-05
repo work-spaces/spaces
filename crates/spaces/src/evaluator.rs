@@ -374,11 +374,12 @@ pub fn evaluate_starlark_modules(
     modules: &[(Arc<str>, Arc<str>)],
     phase: task::Phase,
 ) -> anyhow::Result<()> {
-    star_logger(console.clone()).message("--Run Starlark Modules--");
+    let mut logger = star_logger(console.clone());
+    logger.message("--Run Starlark Modules--");
     let workspace_path = workspace.read().absolute_path.to_owned();
     let mut known_modules = HashSet::new();
 
-    star_logger(console.clone()).debug("Collect Known Modules");
+    logger.debug("Collect Known Modules");
     for (_, content) in modules.iter() {
         let hash = blake3::hash(content.as_bytes()).to_string();
         if !known_modules.contains(&hash) {
@@ -393,7 +394,7 @@ pub fn evaluate_starlark_modules(
     let mut module_queue = std::collections::VecDeque::new();
     module_queue.extend(modules.iter().cloned());
 
-    star_logger(console.clone()).trace(format!("Input module queue:{module_queue:?}").as_str());
+    logger.trace(format!("Input module queue:{module_queue:?}").as_str());
 
     // first module is the env module. It is always evaluated first.
     // It can't be evaluated in parallel with other modules.
@@ -420,8 +421,7 @@ pub fn evaluate_starlark_modules(
     let mut eval_handles: Vec<(Arc<str>, std::thread::JoinHandle<anyhow::Result<()>>)> = Vec::new();
     while !module_queue.is_empty() {
         if let Some((name, content)) = module_queue.pop_front() {
-            star_logger(console.clone())
-                .debug(format!("evaluating {name} from front of queue").as_str());
+            logger.debug(format!("evaluating {name} from front of queue").as_str());
 
             let eval_name = name.clone();
             let workspace_arc = workspace.clone();
@@ -483,7 +483,7 @@ pub fn evaluate_starlark_modules(
                 show_eval_progress(console.clone(), &name, handle)
                     .context(format_context!("Failed to show eval progress"))?;
 
-                star_logger(console.clone()).debug("--Checkout Phase--");
+                logger.debug("--Checkout Phase--");
 
                 rules::update_depedency_graph(console.clone(), None, phase)
                     .context(format_context!("Failed to evaluate dependency graph"))?;
@@ -504,8 +504,7 @@ pub fn evaluate_starlark_modules(
                     .context(format_context!("while running checkout tasks"))?;
 
                 if !task_result.new_modules.is_empty() {
-                    star_logger(console.clone())
-                        .trace(format!("New Modules:{:?}", task_result.new_modules).as_str());
+                    logger.trace(format!("New Modules:{:?}", task_result.new_modules).as_str());
                 }
 
                 {
@@ -528,7 +527,7 @@ pub fn evaluate_starlark_modules(
                 // sorts the modules lexicographically by the filename from back to front.
                 // push_front below will execute the modules in lexicographical order.
                 new_modules.sort_by(|first, second| second.0.cmp(&first.0));
-                star_logger(console.clone()).debug(
+                logger.debug(
                     format!(
                         "Adding new modules: {:?}",
                         new_modules
@@ -542,8 +541,7 @@ pub fn evaluate_starlark_modules(
                 for (module, content) in new_modules {
                     let hash = blake3::hash(content.as_bytes()).to_string();
                     if !known_modules.contains(&hash) {
-                        star_logger(console.clone())
-                            .debug(format!("Pushing: {module} on front of queue").as_str());
+                        logger.debug(format!("Pushing: {module} on front of queue").as_str());
                         known_modules.insert(hash);
                         module_queue.push_front((module, content.into()));
                     }
@@ -576,7 +574,7 @@ pub fn evaluate_starlark_modules(
     if phase == task::Phase::Checkout {
         // check if sysroot/bin/spaces exists
         if !std::path::Path::new("sysroot/bin/spaces").exists() {
-            star_logger(console.clone()).warning(
+            logger.warning(
                 "sysroot/bin/spaces not found. Add a rule to checkout a compatible version of spaces to the workspace.",
             );
         }
@@ -607,8 +605,9 @@ fn execute_tasks(
     run_target: Option<Arc<str>>,
     modules: &[(Arc<str>, Arc<str>)],
 ) -> anyhow::Result<IsSaveBin> {
+    let mut logger = star_logger(console.clone());
     if phase == task::Phase::Checkout || singleton::get_is_rescan() || workspace.read().is_dirty {
-        star_logger(console.clone()).debug("saving JSON workspace settings");
+        logger.debug("saving JSON workspace settings");
         workspace
             .read()
             .settings
@@ -639,7 +638,7 @@ fn execute_tasks(
                     .insert_assign_from_args(&args_env);
             }
 
-            star_logger(console.clone()).message("--Run Phase--");
+            logger.message("--Run Phase--");
 
             let is_reproducible = workspace.read().is_reproducible();
             let repro_message = format!(
@@ -653,9 +652,9 @@ fn execute_tasks(
                     .unwrap_or_default()
             );
             if is_reproducible {
-                star_logger(console.clone()).message(repro_message.as_str());
+                logger.message(repro_message.as_str());
             } else {
-                star_logger(console.clone()).info(repro_message.as_str());
+                logger.info(repro_message.as_str());
             }
 
             rules::debug_sorted_tasks(console.clone(), phase)
@@ -684,7 +683,7 @@ fn execute_tasks(
         task::Phase::Inspect => {
             update_secrets(console.clone(), workspace.clone())
                 .context(format_context!("while entering inspect phase"))?;
-            star_logger(console.clone()).message("--Inspect Phase--");
+            logger.message("--Inspect Phase--");
 
             rules::update_target_dependency_graph(console.clone(), target.clone()).context(
                 format_context!("Failed to update target dependency graph for {target:?}"),
@@ -780,7 +779,7 @@ fn execute_tasks(
         task::Phase::Checkout => {
             update_secrets(console.clone(), workspace.clone())
                 .context(format_context!("while entering post checkout phase"))?;
-            star_logger(console.clone()).message("--Post Checkout Phase--");
+            logger.message("--Post Checkout Phase--");
 
             rules::export_log_status(workspace.clone())
                 .context(format_context!("Failed to export log status"))?;
@@ -793,7 +792,7 @@ fn execute_tasks(
             let new_branches = singleton::get_new_branches();
             for item in new_branches {
                 if !rules::is_git_rule(item.as_ref()) {
-                    star_logger(console.clone()).warning(
+                    logger.warning(
                         format!("Did not create new branch for {item}. Not a git rule").as_str(),
                     );
                 }
@@ -811,13 +810,13 @@ fn execute_tasks(
                 .context(format_context!("Failed to save env file"))?;
 
             let read_workspace = workspace.read();
-            star_logger(console.clone()).debug("saving JSON workspace settings");
+            logger.debug("saving JSON workspace settings");
             read_workspace
                 .settings
                 .save_json()
                 .context(format_context!("Failed to save json settings"))?;
 
-            star_logger(console.clone()).debug("saving BIN workspace settings");
+            logger.debug("saving BIN workspace settings");
             read_workspace
                 .settings
                 .save_bin()
@@ -827,7 +826,7 @@ fn execute_tasks(
                 .finalize_store()
                 .context(format_context!("Failed to finalize store"))?;
 
-            star_logger(console.clone()).debug("saving checkout store");
+            logger.debug("saving checkout store");
             read_workspace
                 .settings
                 .save_checkout_store()
@@ -851,16 +850,16 @@ fn execute_tasks(
         for file in extraneous_files {
             let path = std::path::Path::new(file.as_ref());
             if path.exists() {
-                star_logger(console.clone()).warning(format!("Expired, removing: {file}").as_str());
+                logger.warning(format!("Expired, removing: {file}").as_str());
                 match std::fs::remove_file(path).context(format_context!("Failed to remove {file}"))
                 {
                     Ok(_) => {}
-                    Err(err) => star_logger(console.clone())
-                        .warning(format!("Failed to remove: {file} because {err}").as_str()),
+                    Err(err) => {
+                        logger.warning(format!("Failed to remove: {file} because {err}").as_str())
+                    }
                 }
             } else {
-                star_logger(console.clone())
-                    .warning(format!("Expired file already removed: {file}").as_str())
+                logger.warning(format!("Expired file already removed: {file}").as_str())
             }
         }
 
@@ -873,7 +872,7 @@ fn execute_tasks(
 
     let is_save_bin = if workspace.read().is_bin_dirty || is_clean_or_checkout {
         if is_clean_or_checkout {
-            star_logger(console.clone()).debug("cleaning workspace: forgetting inputs");
+            logger.debug("cleaning workspace: forgetting inputs");
             workspace.write().settings.bin = ws::BinSettings::default();
         }
         IsSaveBin::Yes
@@ -892,50 +891,49 @@ pub fn run_starlark_modules(
     target: Option<Arc<str>>,
     is_execute_tasks: IsExecuteTasks,
 ) -> anyhow::Result<()> {
+    let logger = star_logger(console.clone());
     let is_dirty = workspace.read().is_dirty;
     let is_always_evaluate = workspace.read().settings.bin.is_always_evaluate;
 
-    let (run_target, is_save_bin) = if is_dirty
-        || is_always_evaluate
-        || phase == task::Phase::Checkout
-    {
-        if is_always_evaluate {
-            star_logger(console.clone()).message("always evaluate modules enabled");
-        } else if is_dirty {
-            star_logger(console.clone()).message("workspace is dirty");
+    let (run_target, is_save_bin) =
+        if is_dirty || is_always_evaluate || phase == task::Phase::Checkout {
+            if is_always_evaluate {
+                logger.message("always evaluate modules enabled");
+            } else if is_dirty {
+                logger.message("workspace is dirty");
+            } else {
+                logger.message("always evaluate during checkout/sync");
+            }
+            evaluate_starlark_modules(console.clone(), workspace.clone(), &modules, phase)
+                .context(format_context!("evaluating modules"))?;
+
+            logger.message("Inserting //:setup, //:all, //:test, //:clean rules");
+            let run_target = insert_setup_and_all_rules(workspace.clone(), target.clone())
+                .context(format_context!("failed to insert run all"))?;
+
+            // after checkout, the dependencies need to be inserted for run rules
+            rules::update_depedency_graph(console.clone(), Some(workspace.clone()), phase)
+                .context(format_context!("Failed to update dependency graph"))?;
+
+            rules::update_tasks_digests(console.clone(), workspace.clone())
+                .context(format_context!("updating digests"))?;
+
+            (run_target, IsSaveBin::Yes)
         } else {
-            star_logger(console.clone()).message("always evaluate during checkout/sync");
-        }
-        evaluate_starlark_modules(console.clone(), workspace.clone(), &modules, phase)
-            .context(format_context!("evaluating modules"))?;
-
-        star_logger(console.clone()).message("Inserting //:setup, //:all, //:test, //:clean rules");
-        let run_target = insert_setup_and_all_rules(workspace.clone(), target.clone())
-            .context(format_context!("failed to insert run all"))?;
-
-        // after checkout, the dependencies need to be inserted for run rules
-        rules::update_depedency_graph(console.clone(), Some(workspace.clone()), phase)
-            .context(format_context!("Failed to update dependency graph"))?;
-
-        rules::update_tasks_digests(console.clone(), workspace.clone())
-            .context(format_context!("updating digests"))?;
-
-        (run_target, IsSaveBin::Yes)
-    } else {
-        star_logger(console.clone()).message("workspace is clean");
-        let needs_graph = match is_execute_tasks {
-            IsExecuteTasks::No => rules::NeedsGraph::No,
-            IsExecuteTasks::Yes => rules::NeedsGraph::Yes(phase),
+            logger.message("workspace is clean");
+            let needs_graph = match is_execute_tasks {
+                IsExecuteTasks::No => rules::NeedsGraph::No,
+                IsExecuteTasks::Yes => rules::NeedsGraph::Yes(phase),
+            };
+            rules::import_tasks_from_workspace_settings(
+                console.clone(),
+                workspace.clone(),
+                needs_graph,
+            )
+            .context(format_context!("importing tasks"))?;
+            logger.trace(format!("tasks {}", rules::get_pretty_tasks()).as_str());
+            (target.clone(), IsSaveBin::No)
         };
-        rules::import_tasks_from_workspace_settings(
-            console.clone(),
-            workspace.clone(),
-            needs_graph,
-        )
-        .context(format_context!("importing tasks"))?;
-        star_logger(console.clone()).trace(format!("tasks {}", rules::get_pretty_tasks()).as_str());
-        (target.clone(), IsSaveBin::No)
-    };
 
     let is_save_bin = if is_execute_tasks == IsExecuteTasks::Yes {
         execute_tasks(
@@ -952,7 +950,7 @@ pub fn run_starlark_modules(
     };
 
     if is_save_bin == IsSaveBin::Yes {
-        star_logger(console.clone()).debug("saving BIN workspace settings");
+        logger.debug("saving BIN workspace settings");
         workspace
             .read()
             .save_bin(console.clone())

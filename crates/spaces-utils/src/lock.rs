@@ -201,6 +201,7 @@ impl FileLock {
 
     fn wait(&self, progress: &mut console::Progress) -> anyhow::Result<()> {
         progress.set_message("already started, waiting for it to finish");
+        let logger = logger::Logger::new(progress.console.clone(), "lock".into());
         let lock_file_path = std::path::Path::new(self.path.as_ref());
         let mut log_count = 0;
         while lock_file_path.exists() {
@@ -227,7 +228,7 @@ impl FileLock {
             std::thread::sleep(std::time::Duration::from_millis(500));
             log_count += 1;
             if log_count == 10 {
-                logger::Logger::new(progress.console.clone(), "lock".into()).debug(
+                logger.debug(
                     format!("Still waiting for it to finish at {}", self.path.display()).as_str(),
                 );
                 log_count = 0;

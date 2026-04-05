@@ -128,16 +128,15 @@ impl Changes {
         progress: &mut console::Progress,
         inputs: &glob::Globs,
     ) -> anyhow::Result<Vec<String>> {
+        let logger = changes_logger(progress.console.clone());
         let mut set = HashSet::new();
         for input in inputs.includes.iter() {
-            changes_logger(progress.console.clone())
-                .message(format!("Inspecting input {input}").as_str());
+            logger.message(format!("Inspecting input {input}").as_str());
             if let Some(path) = input_includes_no_asterisk(input.as_ref()) {
                 set.insert(path.display().to_string());
             } else {
                 let input_path = glob::get_glob_path(input.clone());
-                changes_logger(progress.console.clone())
-                    .trace(format!("inspect include input path `{input_path}`").as_str());
+                logger.trace(format!("inspect include input path `{input_path}`").as_str());
                 let (walk_dir, has_any_entries) =
                     self.walk_glob_dir(progress, input_path, CheckIsModified::No, inputs);
 
@@ -164,20 +163,18 @@ impl Changes {
         progress: &mut console::Progress,
         globs: &glob::Globs,
     ) -> anyhow::Result<()> {
+        let logger = changes_logger(progress.console.clone());
         for input in globs.includes.iter() {
-            changes_logger(progress.console.clone())
-                .trace(format!("Update changes for {input}").as_str());
+            logger.trace(format!("Update changes for {input}").as_str());
 
             let mut count = 0usize;
             let input_path = glob::get_glob_path(input.clone());
-            changes_logger(progress.console.clone())
-                .trace(format!("include input path `{input_path}`").as_str());
+            logger.trace(format!("include input path `{input_path}`").as_str());
 
             let (walk_dir, has_any_entries) =
                 self.walk_glob_dir(progress, input_path, CheckIsModified::Yes, globs);
 
-            changes_logger(progress.console.clone())
-                .trace(format!("walked {} entries", walk_dir.len()).as_str());
+            logger.trace(format!("walked {} entries", walk_dir.len()).as_str());
 
             if has_any_entries == HasAnyEntries::No {
                 return Err(format_error!("glob includes `{input}` but has no entries"));
@@ -190,8 +187,7 @@ impl Changes {
 
                 let path = entry.path();
                 let path_string: Arc<str> = path.to_string_lossy().into();
-                changes_logger(progress.console.clone())
-                    .trace(format!("process {}", path.display()).as_str());
+                logger.trace(format!("process {}", path.display()).as_str());
 
                 let change_detail = process_entry(progress, path)
                     .context(format_context!("Failed to process entry"))?;
@@ -204,12 +200,10 @@ impl Changes {
             }
 
             if count > 0 {
-                changes_logger(progress.console.clone())
-                    .debug(format!("Updated {count} items from {input}").as_str());
+                logger.debug(format!("Updated {count} items from {input}").as_str());
             }
 
-            changes_logger(progress.console.clone())
-                .trace(format!("Done updating {input}").as_str());
+            logger.trace(format!("Done updating {input}").as_str());
         }
 
         Ok(())
@@ -225,6 +219,7 @@ impl Changes {
         seed: &str,
         globs: &glob::Globs,
     ) -> anyhow::Result<Arc<str>> {
+        let logger = changes_logger(progress.console.clone());
         let mut inputs = Vec::new();
 
         for path in self.entries.keys() {
@@ -244,16 +239,14 @@ impl Changes {
             if let Some(change_detail) = self.entries.get(*input)
                 && let ChangeDetailType::File(hash) = &change_detail.detail_type
             {
-                changes_logger(progress.console.clone())
-                    .trace(format!("Hashing {input}:{hash}").as_str());
+                logger.trace(format!("Hashing {input}:{hash}").as_str());
                 count += 1;
                 hasher.update(hash.as_bytes());
             }
         }
 
         if count > 0 {
-            changes_logger(progress.console.clone())
-                .debug(format!("Hashed {count} items").as_str());
+            logger.debug(format!("Hashed {count} items").as_str());
         }
 
         Ok(hasher.finalize().to_string().into())
