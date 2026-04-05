@@ -124,14 +124,14 @@ checkout.add_repo(
     )
     .into();
 
-    tools::install_tools(printer, args.force_install_tools)
+    tools::install_tools(console.clone(), args.force_install_tools)
         .context(format_context!("while installing tools"))?;
 
-    co_logger(printer).debug(format!("Adding branches {:?}", args.new_branch).as_str());
+    co_logger(console.clone()).debug(format!("Adding branches {:?}", args.new_branch).as_str());
     handle_new_branch(args.new_branch);
 
     runner::checkout(
-        printer,
+        console.clone(),
         name,
         vec![],
         Some(script),
@@ -228,11 +228,11 @@ pub fn checkout_workflow(
         }
     }
 
-    tools::install_tools(printer, args.force_install_tools)
+    tools::install_tools(console.clone(), args.force_install_tools)
         .context(format_context!("while installing tools"))?;
 
     runner::checkout(
-        printer,
+        console.clone(),
         name,
         script_inputs,
         None,
@@ -266,7 +266,7 @@ impl CheckoutWorkflow {
     ) -> anyhow::Result<()> {
         let is_ci: ci::IsCi = singleton::get_is_ci().into();
         let group = ci::GithubLogGroup::new_group(
-            printer,
+            console.clone(),
             is_ci,
             format!("Spaces Checkout Workflow {name}").as_str(),
         )?;
@@ -275,7 +275,7 @@ impl CheckoutWorkflow {
                 .context(format_context!("while setting toml store values"))?;
         }
         let result = checkout_workflow(
-            printer,
+            console.clone(),
             name,
             CheckoutWorkflowArgs {
                 script: self.script.unwrap_or_default(),
@@ -292,7 +292,7 @@ impl CheckoutWorkflow {
                 lock: vec![],
             },
         );
-        group.end_group(printer, is_ci)?;
+        group.end_group(console.clone(), is_ci)?;
         result.context(format_context!("in CheckoutWorkflow"))?;
         Ok(())
     }
@@ -323,7 +323,7 @@ impl CheckoutRepo {
     ) -> anyhow::Result<()> {
         let is_ci: ci::IsCi = singleton::get_is_ci().into();
         let group = ci::GithubLogGroup::new_group(
-            printer,
+            console.clone(),
             is_ci,
             format!("Spaces Checkout Repo {}", self.url).as_str(),
         )?;
@@ -332,7 +332,7 @@ impl CheckoutRepo {
                 .context(format_context!("while setting toml store values"))?;
         }
         let result = checkout_repo(
-            printer,
+            console.clone(),
             name,
             CheckoutRepoArgs {
                 rule_name: self.rule_name,
@@ -350,7 +350,7 @@ impl CheckoutRepo {
                 lock: vec![],
             },
         );
-        group.end_group(printer, is_ci)?;
+        group.end_group(console.clone(), is_ci)?;
         result.context(format_context!("in CheckoutRepo"))?;
         Ok(())
     }
@@ -397,9 +397,9 @@ impl Checkout {
     ) -> anyhow::Result<()> {
         let result = match self {
             Checkout::Workflow(workflow) => {
-                workflow.checkout(printer, name, keep_workspace_on_failure)
+                workflow.checkout(console.clone(), name, keep_workspace_on_failure)
             }
-            Checkout::Repo(repo) => repo.checkout(printer, name, keep_workspace_on_failure),
+            Checkout::Repo(repo) => repo.checkout(console.clone(), name, keep_workspace_on_failure),
         };
         result.context(format_context!("during repo checkout"))?;
         Ok(())

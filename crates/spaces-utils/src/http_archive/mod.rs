@@ -50,11 +50,8 @@ pub enum MakeReadOnly {
     Yes,
 }
 
-fn label_logger<'a>(
-    progress: &'a mut printer::MultiProgressBar,
-    label: &str,
-) -> logger::Logger<'a> {
-    logger::Logger::new_progress(progress, label.into())
+fn label_logger(console: console::Console, label: &str) -> logger::Logger {
+    logger::Logger::new(console, label.into())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -237,19 +234,21 @@ pub fn download(
     headers: Option<HashMap<Arc<str>, Arc<str>>>,
     retry_counter: Arc<AtomicU32>,
     runtime: &tokio::runtime::Runtime,
-) -> anyhow::Result<tokio::task::JoinHandle<anyhow::Result<printer::MultiProgressBar>>> {
-    label_logger(&mut progress, url)
+) -> anyhow::Result<tokio::task::JoinHandle<anyhow::Result<()>>> {
+    label_logger(console.clone(), url)
         .trace(format!("Downloading using reqwest {url} -> {destination}").as_str());
 
     let destination = destination.to_string();
     let url = url.to_string();
 
     let join_handle = runtime.spawn(async move {
+
+        let progress = console::Progress::new(console.clone(), url.as_str(), None, None);
         let client = build_http_client()?;
         let base_headers = build_headers(headers.as_ref())?;
 
         for (key, _) in base_headers.iter() {
-            label_logger(&mut progress, &url)
+            label_logger(console.clone(), &url)
                 .debug(format!("Header: {key:?}").as_str());
         }
 
@@ -259,7 +258,7 @@ pub fn download(
             if attempt > 0 {
                 retry_counter.fetch_add(1, Ordering::Relaxed);
                 let wait = backoff_duration(attempt - 1);
-                label_logger(&mut progress, &url).warning(
+                label_logger(console.clone(), &url).warning(
                     format!(
                         "Retry attempt {attempt}/{DEFAULT_MAX_RETRIES} for {url} after {wait:?}"
                     )
@@ -278,7 +277,7 @@ pub fn download(
 
             // If we have partial content, attempt a range request to resume
             if existing_bytes > 0 {
-                label_logger(&mut progress, &url).debug(
+                label_logger(console.clone(), &url).debug(
                     format!("Resuming download from byte {existing_bytes}").as_str(),
                 );
                 request_headers.insert(
@@ -294,14 +293,14 @@ pub fn download(
 
             let request = client.get(&url).headers(request_headers);
 
-            label_logger(&mut progress, &url)
+            label_logger(console.clone(), &url)
                 .debug(format!("Reqwest request: {request:?}").as_str());
 
             let response = match request.send().await {
                 Ok(resp) => resp,
                 Err(err) => {
                     if is_retryable_error(&err) && attempt < DEFAULT_MAX_RETRIES {
-                        label_logger(&mut progress, &url).warning(
+                        label_logger(console.clone(), &url).warning(
                             format!("Transient error connecting to {url}: {err}").as_str(),
                         );
                         last_error = Some(err.into());
@@ -325,7 +324,7 @@ pub fn download(
                     let wait_override = retry_after
                         .map(|d| format!(", server requested Retry-After: {d:?}"))
                         .unwrap_or_default();
-                    label_logger(&mut progress, &url).warning(
+                    label_logger(console.clone(), &url).warning(
                         format!(
                             "Retryable HTTP {status} from {url}{wait_override}"
                         )
@@ -349,7 +348,7 @@ pub fn download(
             // Check whether the server returned an HTML page instead of the expected archive
             check_response_content_type(&response, &url)?;
 
-            label_logger(&mut progress, &url)
+            label_logger(console.clone(), &url)
                 .debug(format!("Response: {response:?}").as_str());
 
             // Determine if this is a resumed download (206) or a fresh start (200)
@@ -358,13 +357,13 @@ pub fn download(
 
             let (mut output_file, mut bytes_written) = if is_resumed && existing_bytes > 0 {
                 // Server supports range requests — append to existing file
-                label_logger(&mut progress, &url).debug(
+                label_logger(console.clone(), &url).debug(
                     format!("Server returned 206 Partial Content, resuming from byte {existing_bytes}").as_str(),
                 );
                 let total_size = content_length
                     .map(|cl| cl + existing_bytes)
                     .unwrap_or(0);
-                progress.set_total(total_size);
+                progress.set_total(Some(total_size));
                 // Reset progress bar position and advance to the already-downloaded portion
                 progress.increment(existing_bytes);
 
@@ -382,7 +381,7 @@ pub fn download(
             } else {
                 // Fresh download — create/truncate the file
                 let total_size = content_length.unwrap_or(0);
-                progress.set_total(total_size);
+                progress.set_total(Some(total_size));
 
                 let file = tokio::fs::File::create(&destination).await.context(
                     format_context!("Failed to create {destination}"),
@@ -415,7 +414,7 @@ pub fn download(
                     }
                     Err(err) => {
                         // Network error during chunked read
-                        label_logger(&mut progress, &url).warning(
+                        label_logger(console.clone(), &url).warning(
                             format!(
                                 "Error reading chunk from {url} at byte {bytes_written}: {err}"
                             )
@@ -433,7 +432,7 @@ pub fn download(
 
             if let Some(err) = chunk_error {
                 if attempt < DEFAULT_MAX_RETRIES {
-                    label_logger(&mut progress, &url).warning(
+                    label_logger(console.clone(), &url).warning(
                         format!(
                             "Download interrupted for {url} at {bytes_written} bytes, will retry"
                         )
@@ -461,7 +460,7 @@ pub fn download(
                         "Size mismatch for {url}: expected {expected_bytes} bytes, got {received_bytes} bytes"
                     );
                     if attempt < DEFAULT_MAX_RETRIES {
-                        label_logger(&mut progress, &url).warning(msg.as_str());
+                        label_logger(console.clone(), &url).warning(msg.as_str());
                         last_error = Some(format_error!("{}", msg));
                         // Delete partial file so next attempt starts fresh for size mismatch
                         cleanup_partial_download(&destination);
@@ -479,21 +478,21 @@ pub fn download(
             // Download succeeded
             let total_retries = retry_counter.load(Ordering::Relaxed);
             if total_retries > 0 {
-                label_logger(&mut progress, &url).debug(
+                label_logger(console.clone(), &url).debug(
                     format!(
                         "Download complete after {total_retries} retries: {bytes_written} bytes written to {destination}"
                     )
                     .as_str(),
                 );
             } else {
-                label_logger(&mut progress, &url).debug(
+                label_logger(console.clone(), &url).debug(
                     format!(
                         "Download complete: {bytes_written} bytes written to {destination}"
                     )
                     .as_str(),
                 );
             }
-            return Ok(progress);
+            return Ok(());
         }
 
         // All retries exhausted
@@ -725,14 +724,19 @@ impl HttpArchive {
             format!("{workspace_directory}/{space_directory}").into()
         };
 
-        progress_bar.set_total(files.len() as u64);
+        let progress = console::Progress::new(
+            console.clone(),
+            space_directory,
+            Some(files.len() as u64),
+            None,
+        );
 
         let mut soft_links = Vec::new();
 
         for file in files {
             let source = format!("{}/{}", self.get_path_to_extracted_files(), file);
 
-            progress_bar.set_message(file.as_ref());
+            progress.set_message(file.as_ref());
             let relative_target_path =
                 if let Some(strip_prefix) = self.archive.strip_prefix.as_ref() {
                     file.strip_prefix(strip_prefix.as_ref())
@@ -745,7 +749,7 @@ impl HttpArchive {
 
                 match self.archive.link {
                     ArchiveLink::Hard | ArchiveLink::Copy => {
-                        label_logger(&mut progress_bar, "link").trace(
+                        label_logger(console.clone(), "link").trace(
                             format!(
                                 "Creating link: {} {full_target_path} -> {source}",
                                 self.archive.link
@@ -775,7 +779,7 @@ impl HttpArchive {
                     ArchiveLink::None => (),
                 }
             } else {
-                label_logger(&mut progress_bar, "hardlink").warning(
+                label_logger(console.clone(), "hardlink").warning(
                     format!(
                         "Failed to strip prefix {:?} from {file}",
                         self.archive.strip_prefix
@@ -783,7 +787,7 @@ impl HttpArchive {
                     .as_str(),
                 );
             }
-            progress_bar.increment(1);
+            progress.increment(1);
         }
 
         for (original, link) in soft_links {
@@ -874,17 +878,16 @@ impl HttpArchive {
         Ok(())
     }
 
-    pub fn sync(
-        &self,
-        console: console::Console,
-    ) -> anyhow::Result<printer::MultiProgressBar> {
+    pub fn sync(&self, console: console::Console) -> anyhow::Result<()> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .enable_all()
             .build()
             .context(format_context!("Failed to create runtime"))?;
 
-        let mut next_progress_bar = if self.is_download_required() {
+        if self.is_download_required() {
+            let mut progress_bar =
+                console::Progress::new(console.clone(), self.archive.url.as_ref(), None, None);
             if let Some(arguments) = gh::transform_url_to_arguments(
                 self.allow_gh_for_download,
                 self.archive.url.as_ref(),
@@ -893,46 +896,42 @@ impl HttpArchive {
                 let gh_command = format!("{}/gh", self.tools_path);
                 let gh_result =
                     gh::download(&gh_command, &self.archive.url, arguments, &mut progress_bar);
-                progress_bar = if gh_result.is_err() {
+                if gh_result.is_err() {
                     let join_handle =
-                        self.download(&runtime, progress_bar)
+                        self.download(&runtime, console.clone())
                             .context(format_context!(
                                 "Failed to download using https after trying gh. Use `gh auth login` to authenticate"
                             ))?;
-                    runtime.block_on(join_handle)??
-                } else {
-                    progress_bar
-                };
-                progress_bar
+                    runtime.block_on(join_handle)??;
+                }
             } else {
-                label_logger(&mut progress_bar, &self.archive.url)
+                label_logger(console.clone(), &self.archive.url)
                     .debug(format!("{} Downloading using reqwest", self.archive.url).as_str());
 
                 let join_handle = self
-                    .download(&runtime, progress_bar)
+                    .download(&runtime, console.clone())
                     .context(format_context!("Failed to download using reqwest"))?;
-                runtime.block_on(join_handle)??
+                runtime.block_on(join_handle)??;
             }
         } else {
-            label_logger(&mut progress_bar, &self.archive.url)
+            label_logger(console.clone(), &self.archive.url)
                 .debug(format!("{} download not required", self.archive.url).as_str());
-            progress_bar
         };
 
-        label_logger(&mut next_progress_bar, &self.archive.url).debug("Extracting archive");
+        label_logger(console.clone(), &self.archive.url).debug("Extracting archive");
 
-        let next_progress_bar = self.extract(next_progress_bar).context(format_context!(
+        self.extract(console.clone()).context(format_context!(
             "extract failed {}",
             self.full_path_to_archive
         ))?;
-        Ok(next_progress_bar)
+        Ok(())
     }
 
     pub fn download(
         &self,
         runtime: &tokio::runtime::Runtime,
-        progress: printer::MultiProgressBar,
-    ) -> anyhow::Result<tokio::task::JoinHandle<anyhow::Result<printer::MultiProgressBar>>> {
+        console: console::Console,
+    ) -> anyhow::Result<tokio::task::JoinHandle<anyhow::Result<()>>> {
         let full_path_to_archive = self.full_path_to_archive.clone();
         let full_path = std::path::Path::new(&full_path_to_archive);
         if let Some(parent) = full_path.parent() {
@@ -940,7 +939,7 @@ impl HttpArchive {
         }
 
         download(
-            progress,
+            console,
             self.archive.url.as_ref(),
             full_path_to_archive.as_str(),
             self.archive.headers.clone(),
@@ -965,13 +964,10 @@ impl HttpArchive {
         Ok(files.files)
     }
 
-    fn extract(
-        &self,
-        console: console::Console,
-    ) -> anyhow::Result<printer::MultiProgressBar> {
+    fn extract(&self, console: console::Console) -> anyhow::Result<()> {
         if !self.is_extract_required() {
-            label_logger(&mut progress_bar, &self.archive.url).debug("Extract not required");
-            return Ok(progress_bar);
+            label_logger(console.clone(), &self.archive.url).debug("Extract not required");
+            return Ok(());
         }
 
         std::fs::create_dir_all(self.get_path_to_extracted_files().as_str())
@@ -979,7 +975,10 @@ impl HttpArchive {
 
         let mut extracted_files = HashSet::new();
 
-        let next_progress_bar = if self.archive_driver.is_some() {
+        let progress_bar =
+            console::Progress::new(console.clone(), self.archive.url.as_ref(), None, None);
+
+        if self.archive_driver.is_some() {
             let decoder = archiver::Decoder::new(
                 &self.full_path_to_archive,
                 Some(self.archive.sha256.to_string()),
@@ -1052,7 +1051,7 @@ impl HttpArchive {
                 .collect(),
         })
         .context(format_context!("Failed to save json files manifest"))?;
-        Ok(next_progress_bar)
+        Ok(())
     }
 
     pub fn url_to_relative_path(url: &str, filename: &Option<Arc<str>>) -> anyhow::Result<String> {
@@ -1367,12 +1366,10 @@ mod tests {
         let dest = dir.path().join("output.bin");
         let dest_str = dest.to_str().unwrap().to_string();
 
-        let mut printer = printer::Printer::new_null_term();
-        let mut multi = printer::MultiProgress::new(&mut printer);
-        let progress = multi.add_progress("test", None, None);
+        let console = console::Console::new_null();
 
         let join_handle = download(
-            progress,
+            console.clone(),
             "https://the-internet.herokuapp.com/",
             &dest_str,
             None,
@@ -1411,12 +1408,10 @@ mod tests {
         let dest = dir.path().join("output.bin");
         let dest_str = dest.to_str().unwrap().to_string();
 
-        let mut printer = printer::Printer::new_null_term();
-        let mut multi = printer::MultiProgress::new(&mut printer);
-        let progress = multi.add_progress("test", None, None);
+        let console = console::Console::new_null();
 
         let join_handle = download(
-            progress,
+            console,
             "https://github.com/nickel-org/rust-mustache/this-does-not-exist.tar.gz",
             &dest_str,
             None,
@@ -1454,12 +1449,10 @@ mod tests {
         let dest = dir.path().join("spaces-linux-x86_64-v0.15.27.zip");
         let dest_str = dest.to_str().unwrap().to_string();
 
-        let mut printer = printer::Printer::new_null_term();
-        let mut multi = printer::MultiProgress::new(&mut printer);
-        let progress = multi.add_progress("test", None, None);
+        let console = console::Console::new_null();
 
         let join_handle = download(
-            progress,
+            console,
             url,
             &dest_str,
             None,
@@ -1496,10 +1489,8 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     /// Helper: create a no-op progress bar suitable for tests.
-    fn test_progress_bar() -> printer::MultiProgressBar {
-        let mut printer = printer::Printer::new_null_term();
-        let mut mp = printer::MultiProgress::new(&mut printer);
-        mp.add_progress("test", None, None)
+    fn test_progress_bar() -> console::Console {
+        console::Console::new_null()
     }
 
     const TEST_URLS: &[(&str, &str)] = &[

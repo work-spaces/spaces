@@ -191,7 +191,7 @@ fn get_state() -> &'static RwLock<State> {
     STATE.get()
 }
 
-fn url_logger(console: console::Console, url: &str) -> logger::Logger<'a> {
+fn url_logger(console: console::Console, url: &str) -> logger::Logger {
     logger::Logger::new(console, url.into())
 }
 
@@ -223,7 +223,7 @@ pub fn execute_git_command(
 
         let mut log_file_path = None;
 
-        url_logger(progress_bar, url).debug("Waiting for lock");
+        url_logger(progress.console.clone(), url).debug("Waiting for lock");
 
         while !is_ready {
             {
@@ -255,13 +255,13 @@ pub fn execute_git_command(
             .push(("GIT_TERMINAL_PROMPT".into(), "0".into()));
 
         if let Some(directory) = attempt_options.working_directory.as_ref() {
-            url_logger(progress_bar, url).debug(format!("cwd: {directory}").as_str());
+            url_logger(progress.console.clone(), url).debug(format!("cwd: {directory}").as_str());
         }
-        url_logger(progress_bar, url)
+        url_logger(progress.console.clone(), url)
             .debug(format!("git {}", attempt_options.arguments.join(" ")).as_str());
 
         let full_command = attempt_options.get_full_command_in_working_directory("git");
-        let result = progress_bar
+        let result = progress
             .execute_process("git", attempt_options)
             .context(format_context!("{full_command}"));
 
@@ -270,19 +270,19 @@ pub fn execute_git_command(
             let state = state_lock.deref_mut();
             state.active_repos.remove(url);
         }
-        url_logger(progress_bar, url).trace("Released");
+        url_logger(progress.console.clone(), url).trace("Released");
 
         match result {
             Ok(value) => {
                 if attempt > 0 {
-                    url_logger(progress_bar, url)
+                    url_logger(progress.console.clone(), url)
                         .info(format!("Succeeded after {attempt} retry(ies)").as_str());
                 }
                 return Ok(value);
             }
             Err(err) => {
                 if attempt < GIT_MAX_RETRIES && is_retryable_git_error(&err) {
-                    url_logger(progress_bar, url).debug(
+                    url_logger(progress.console.clone(), url).debug(
                         format!(
                             "Transient network error (attempt {}/{}): {err:#}",
                             attempt + 1,
@@ -840,7 +840,7 @@ impl Repository {
 
     pub fn execute(
         &self,
-        progress_bar: &mut console::Progress,
+        progress: &mut console::Progress,
         args: Vec<Arc<str>>,
     ) -> anyhow::Result<()> {
         let options = console::ExecuteOptions {
@@ -852,7 +852,7 @@ impl Repository {
         url_logger(progress.console.clone(), self.url.as_ref())
             .debug(format!("git {}", options.arguments.join(" ")).as_str());
 
-        execute_git_command(progress_bar, &self.url, options)
+        execute_git_command(progress, &self.url, options)
             .context(format_context!("while executing git command"))?;
         Ok(())
     }

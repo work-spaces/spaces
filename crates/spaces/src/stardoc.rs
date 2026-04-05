@@ -1,9 +1,9 @@
 use anyhow::Context;
 use anyhow_source_location::format_context;
-use printer::markdown;
 use starlark::docs::{DocItem, DocMember, DocString};
 use std::collections::HashMap;
 use std::sync::Arc;
+use utils::markdown;
 
 fn doc_string_to_markdown(label: Option<&str>, doc_string: Option<&DocString>) -> Arc<str> {
     let mut result = String::new();

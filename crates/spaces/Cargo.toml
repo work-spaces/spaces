@@ -25,7 +25,6 @@ utils.workspace = true
 archiver.workspace = true
 glob-match.workspace = true
 petgraph.workspace = true
-printer.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
 serde.workspace = true

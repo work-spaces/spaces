@@ -197,7 +197,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         #[derive(serde::Serialize, serde::Deserialize)]
         struct Log {
-            header: printer::LogHeader,
+            header: console::LogHeader,
             lines: Vec<Arc<str>>,
         }
 
@@ -208,7 +208,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let mut header = String::new();
         let mut lines = Vec::new();
-        let log_divider = printer::Printer::get_log_divider();
+        let log_divider = console::get_log_divider();
         let mut collect_header = true;
         for line in content.lines() {
             if line == log_divider.as_ref() {
@@ -223,7 +223,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             }
         }
 
-        let log_header: printer::LogHeader = serde_yaml::from_str(&header).context(
+        let log_header: console::LogHeader = serde_yaml::from_str(&header).context(
             format_context!("Failed to parse (yaml) Log Header file {}", path),
         )?;
 
@@ -286,7 +286,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `str`: The standard divider string used to separate log headers from the body.
     fn get_log_divider_string() -> anyhow::Result<String> {
-        Ok(printer::Printer::get_log_divider().to_string())
+        Ok(console::get_log_divider().to_string())
     }
 
     /// Sets the minimum version of spaces required to run the script.

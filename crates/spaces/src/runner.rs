@@ -58,11 +58,8 @@ fn get_workspace(
         RunWorkspace::Script(scripts) => Some(scripts.iter().map(|e| e.0.clone()).collect()),
     };
 
-    let mut multi_progress = printer::MultiProgress::new(printer);
-    let progress = multi_progress.add_progress("workspace", Some(100), Some("Complete"));
-
     workspace::Workspace::new(
-        progress,
+        console.clone(),
         absolute_path_to_workspace,
         is_clear_inputs,
         checkout_scripts,
@@ -90,7 +87,7 @@ fn evaluate_environment(
 
     // evaluate the modules to bring in env.spaces.star
     evaluator::evaluate_starlark_modules(
-        printer,
+        console.clone(),
         workspace_arc.clone(),
         modules.as_slice(),
         task::Phase::Inspect,
@@ -107,7 +104,7 @@ pub fn foreach_repo(
     command_arguments: &[Arc<str>],
 ) -> anyhow::Result<()> {
     let workspace = get_workspace(
-        printer,
+        console.clone(),
         run_workspace,
         None,
         workspace::IsClearInputs::No,
@@ -117,10 +114,9 @@ pub fn foreach_repo(
     .context(format_context!("while getting workspace"))?;
 
     let workspace_arc = workspace::WorkspaceArc::new(lock::StateLock::new(workspace));
-    evaluate_environment(printer, workspace_arc.clone())
+    evaluate_environment(console.clone(), workspace_arc.clone())
         .context(format_context!("while evaluating starlark env module"))?;
 
-    let mut multi_progress = printer::MultiProgress::new(printer);
     let workspace_members = workspace_arc.read().settings.json.members.clone();
     let dev_branch_rules = workspace_arc.read().settings.json.dev_branches.clone();
 
@@ -135,10 +131,11 @@ pub fn foreach_repo(
     for (url, member_list) in workspace_members.iter() {
         for member in member_list.iter() {
             if is_run_on_branches_only {
-                let mut repo_progress = multi_progress.add_progress(
-                    format!("//{}", member.path).as_str(),
+                let mut repo_progress = console::Progress::new(
+                    console.clone(),
+                    format!("//{}", member.path),
                     Some(100),
-                    Some("Queueing for execution"),
+                    Some("Queueing for execution".to_string()),
                 );
                 // use git to check if member is on a branch
                 let repo = git::Repository::new(url.clone(), member.path.clone());
@@ -149,16 +146,16 @@ pub fn foreach_repo(
                             if repo.is_dirty(&mut repo_progress) {
                                 repos.push(member.clone());
                             } else {
-                                repo_progress.set_ending_message("Skipping: branch is clean");
+                                repo_progress.set_finalize("Skipping: branch is clean");
                             }
                         } else {
                             repos.push(member.clone());
                         }
                     } else {
-                        repo_progress.set_ending_message("Skipping: not currently on a branch");
+                        repo_progress.set_finalize("Skipping: not currently on a branch");
                     }
                 } else {
-                    repo_progress.set_ending_message("Skipping: rev is not a branch");
+                    repo_progress.set_finalize("Skipping: rev is not a branch");
                 }
             } else if for_each_repo == ForEachRepo::DevBranch {
                 // get the dev-branches from the workspace settings
@@ -192,13 +189,17 @@ pub fn foreach_repo(
         }
         let working_directory: Arc<str> = format!("//{}", member.path).into();
 
-        let mut exec_progress =
-            multi_progress.add_progress(command.as_ref(), Some(100), Some("Complete"));
-
-        exec_progress.log(
-            printer::Level::Passthrough,
-            format!(">>> {working_directory} $ {command_string}").as_str(),
+        let mut exec_progress = console::Progress::new(
+            console.clone(),
+            command.as_ref(),
+            Some(100),
+            Some("Complete".to_string()),
         );
+
+        exec_progress.console.log(
+            console::Level::Passthrough,
+            format!(">>> {working_directory} $ {command_string}").as_str(),
+        )?;
 
         let name = format!("__foreach_{working_directory}_{command_label}");
 
@@ -209,7 +210,7 @@ pub fn foreach_repo(
             working_directory: Some(working_directory.clone()),
             redirect_stdout: None,
             expect: None,
-            log_level: Some(printer::Level::Passthrough),
+            log_level: Some(console::Level::Passthrough),
             timeout: None,
         };
 
@@ -229,7 +230,7 @@ pub fn run_shell_in_workspace(
     completions_command: Option<(clap::Command, rules::HasHelp)>,
 ) -> anyhow::Result<()> {
     let workspace = get_workspace(
-        printer,
+        console.clone(),
         RunWorkspace::Target(None, vec![]),
         None,
         workspace::IsClearInputs::No,
@@ -261,14 +262,17 @@ pub fn run_shell_in_workspace(
             .get_shell()
             .context(format_context!("Shell does not support completions"))?;
 
-        let run_targets =
-            run_starlark_with_workspace_get_targets(printer, workspace_arc.clone(), has_help)
-                .context(format_context!("Failed to get targets"))?;
+        let run_targets = run_starlark_with_workspace_get_targets(
+            console.clone(),
+            workspace_arc.clone(),
+            has_help,
+        )
+        .context(format_context!("Failed to get targets"))?;
 
         completions::generate_workspace_completions(&command, clap_shell, run_targets)
             .context(format_context!("Failed to generate workspace completions"))?
     } else {
-        evaluate_environment(printer, workspace_arc.clone())
+        evaluate_environment(console.clone(), workspace_arc.clone())
             .context(format_context!("while evaluating starlark env module"))?;
         Vec::new()
     };
@@ -306,7 +310,7 @@ pub fn run_store_command_in_workspace(
     store_command: store::StoreCommand,
 ) -> anyhow::Result<()> {
     let workspace_result = get_workspace(
-        printer,
+        console.clone(),
         RunWorkspace::Target(None, vec![]),
         None,
         workspace::IsClearInputs::No,
@@ -327,12 +331,12 @@ pub fn run_store_command_in_workspace(
     match store_command {
         store::StoreCommand::Info { sort_by } => {
             store
-                .show_info(printer, sort_by, is_ci)
+                .show_info(console.clone(), sort_by, is_ci)
                 .context(format_context!("While getting store info"))?;
         }
         store::StoreCommand::Fix { dry_run } => {
             store
-                .fix(printer, dry_run, is_ci)
+                .fix(console.clone(), dry_run, is_ci)
                 .context(format_context!("While fixing store"))?;
 
             store
@@ -341,7 +345,7 @@ pub fn run_store_command_in_workspace(
         }
         store::StoreCommand::Prune { age, dry_run } => {
             store
-                .prune(printer, age, dry_run, is_ci)
+                .prune(console.clone(), age, dry_run, is_ci)
                 .context(format_context!("While pruning store"))?;
 
             store
@@ -358,7 +362,7 @@ pub fn run_logs_command_in_workspace(
     logs_command: logs::LogsCommand,
 ) -> anyhow::Result<()> {
     let workspace = get_workspace(
-        printer,
+        console.clone(),
         RunWorkspace::Target(None, vec![]),
         None,
         workspace::IsClearInputs::No,
@@ -370,7 +374,7 @@ pub fn run_logs_command_in_workspace(
     ))?;
 
     let workspace_path = std::path::Path::new(workspace.absolute_path.as_ref());
-    logs::execute(printer, workspace_path, logs_command)
+    logs::execute(console, workspace_path, logs_command)
         .context(format_context!("Failed to run logs command"))
 }
 
@@ -379,7 +383,7 @@ pub fn run_version_command_in_workspace(
     command: version::Command,
 ) -> anyhow::Result<()> {
     let workspace_result = get_workspace(
-        printer,
+        console.clone(),
         RunWorkspace::Target(None, vec![]),
         None,
         workspace::IsClearInputs::No,
@@ -396,12 +400,12 @@ pub fn run_version_command_in_workspace(
     match command {
         version::Command::List {} => {
             version_manager
-                .list(printer)
+                .list(console)
                 .context(format_context!("Failed to list versions"))?;
         }
         version::Command::Fetch { tag } => {
             version_manager
-                .fetch(printer, tag.clone())
+                .fetch(console, tag.clone())
                 .context(format_context!(
                     "Failed to fetch {}",
                     tag.as_ref().map(|e| e.as_ref()).unwrap_or("latest")
@@ -418,7 +422,7 @@ fn run_starlark_with_workspace_get_targets(
     has_help: rules::HasHelp,
 ) -> anyhow::Result<Vec<Arc<str>>> {
     run_starlark_modules_with_workspace(
-        printer,
+        console,
         workspace,
         task::Phase::Inspect,
         RunWorkspace::Target(None, vec![]),
@@ -435,7 +439,7 @@ pub fn run_starlark_get_targets(
     has_help: rules::HasHelp,
 ) -> anyhow::Result<Vec<Arc<str>>> {
     run_starlark_modules_in_workspace(
-        printer,
+        console,
         task::Phase::Inspect,
         None,
         workspace::IsClearInputs::No,
@@ -463,7 +467,7 @@ fn run_starlark_modules_with_workspace(
             workspace.write().target = target.clone();
             let modules = workspace.read().modules.clone();
             evaluator::run_starlark_modules(
-                printer,
+                console.clone(),
                 workspace.clone(),
                 modules,
                 phase,
@@ -474,13 +478,13 @@ fn run_starlark_modules_with_workspace(
         }
         RunWorkspace::Script(scripts) => {
             for (name, _) in scripts.iter() {
-                logger::Logger::new_printer(printer, name.clone()).debug("Digesting");
+                logger::Logger::new(console.clone(), name.clone()).debug("Digesting");
             }
 
             workspace.write().is_create_lock_file = is_create_lock_file.into();
 
             evaluator::run_starlark_modules(
-                printer,
+                console.clone(),
                 workspace.clone(),
                 scripts,
                 phase,
@@ -522,7 +526,7 @@ pub fn run_starlark_modules_in_workspace(
         workspace::IsCreateLogFolder::No
     };
     let workspace = get_workspace(
-        printer,
+        console.clone(),
         run_workspace.clone(),
         absolute_path_to_workspace,
         is_clear_inputs,
@@ -533,7 +537,7 @@ pub fn run_starlark_modules_in_workspace(
 
     let workspace_arc = workspace::WorkspaceArc::new(lock::StateLock::new(workspace));
     run_starlark_modules_with_workspace(
-        printer,
+        console,
         workspace_arc,
         phase,
         run_workspace,
@@ -547,10 +551,8 @@ pub fn run_starlark_modules_in_workspace(
 
 pub fn run_lsp(console: console::Console) -> anyhow::Result<()> {
     let workspace = {
-        let mut multi_progress = printer::MultiProgress::new(printer);
-        let progress = multi_progress.add_progress("workspace", Some(100), Some("Complete"));
         workspace::Workspace::new(
-            progress,
+            console.clone(),
             None,
             workspace::IsClearInputs::No,
             None,
@@ -682,7 +684,7 @@ pub fn checkout(
     let absolute_path_to_workspace: Arc<str> = target_workspace_directory.to_string_lossy().into();
 
     let checkout_result = run_starlark_modules_in_workspace(
-        printer,
+        console.clone(),
         task::Phase::Checkout,
         Some(absolute_path_to_workspace.clone()),
         workspace::IsClearInputs::No,
@@ -697,8 +699,8 @@ pub fn checkout(
     if !keep_workspace_on_failure && checkout_result.is_err() {
         {
             if checkout_cleanup == CheckoutCleanup::WorkspaceContents {
-                printer.log(
-                    printer::Level::Debug,
+                console.log(
+                    console::Level::Debug,
                     format!(
                         "Removing contents from existing workspace {absolute_path_to_workspace}",
                     )
@@ -725,8 +727,8 @@ pub fn checkout(
                     }
                 }
             } else {
-                printer.log(
-                    printer::Level::Debug,
+                console.log(
+                    console::Level::Debug,
                     format!("Cleaning up workspace {absolute_path_to_workspace}").as_str(),
                 )?;
 

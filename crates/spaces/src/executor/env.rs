@@ -17,7 +17,7 @@ impl UpdateEnv {
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
-        logger::Logger::new_progress(&mut progress, name.into())
+        logger::Logger::new(console, name.into())
             .debug(format!("Update env {name}: {:?}", &self).as_str());
         workspace
             .write()

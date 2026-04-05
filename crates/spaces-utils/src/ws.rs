@@ -231,7 +231,7 @@ impl BinSettings {
             .debug(format!("Checking {:?} star files", self.star_files.len()).as_str());
         let mut remove_list = Vec::new();
         for (module_path, bin_detail) in self.star_files.iter_mut() {
-            progress.increment(1);
+            progress.increment_progress();
             let mod_path = std::path::Path::new(module_path.as_ref());
             logger(progress.console.clone())
                 .debug(format!("Checking {mod_path:?} for changes").as_str());

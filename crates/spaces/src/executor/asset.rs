@@ -56,7 +56,7 @@ impl UpdateAsset {
     ) -> anyhow::Result<()> {
         use json_value_merge::Merge;
 
-        let mut logger = logger::Logger::new_progress(&mut progress, name.into());
+        let logger = logger::Logger::new(console.clone(), name.into());
 
         // the workspace write lock needs to be held for the duration of the update
         // to prevent concurrent updates to the same asset
@@ -242,7 +242,7 @@ impl AddAsset {
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
-        let mut logger = logger::Logger::new_progress(progress, name.into());
+        let mut logger = logger::Logger::new(progress.console.clone(), name.into());
         let mut workspace_write_lock = workspace.write();
         workspace_write_lock.add_checkout_asset(self.destination.clone(), self.content.clone());
 

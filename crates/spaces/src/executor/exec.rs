@@ -15,8 +15,8 @@ struct State {
 
 static STATE: state::InitCell<lock::StateLock<State>> = state::InitCell::new();
 
-fn logger(console: console::Console, name: &str) -> logger::Logger<'_> {
-    logger::Logger::new_progress(progress, name.into())
+fn logger(console: console::Console, name: &str) -> logger::Logger {
+    logger::Logger::new(console, name.into())
 }
 
 fn get_state() -> &'static lock::StateLock<State> {
@@ -212,7 +212,7 @@ impl Exec {
     }
 
     pub fn to_markdown(&self) -> String {
-        use printer::markdown;
+        use utils::markdown;
         let mut result = String::new();
 
         let has_args = if let Some(args) = self.args.as_ref() {
@@ -340,7 +340,7 @@ impl Kill {
     }
 
     pub fn to_markdown(&self) -> String {
-        use printer::markdown;
+        use utils::markdown;
         let mut result = String::new();
         let invoke = format!("$ kill -s {} {}", self.signal.to_kill_arg(), self.target);
         result.push_str(&markdown::code_block("sh", invoke.as_str()));

@@ -1,7 +1,7 @@
 use crate::{evaluator, stardoc};
 
 pub fn show(console: console::Console) -> anyhow::Result<()> {
-    let markdown = printer::markdown::Markdown::new(printer);
+    let markdown = utils::markdown::Markdown::new(console);
 
     let globals = evaluator::get_globals(evaluator::WithRules::Yes).build();
 
@@ -16,9 +16,9 @@ pub fn show(console: console::Console) -> anyhow::Result<()> {
 
     for doc in &builtin_docs {
         let content = doc.to_markdown();
-        markdown.printer.raw(&content)?;
+        markdown.console.raw(&content)?;
     }
 
-    markdown.printer.newline()?;
+    markdown.console.write("\n")?;
     Ok(())
 }

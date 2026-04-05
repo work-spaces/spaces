@@ -73,7 +73,7 @@ impl Changes {
         change_detail: ChangeDetail,
     ) -> bool {
         let sane_path = Self::sanitize_path(&path);
-        let mut logger = logger::Logger::new(progress.console.clone(), "Changes".into());
+        let logger = logger::Logger::new(progress.console.clone(), "Changes".into());
         if let Some(previous_entry) = self.entries.insert(sane_path.into(), change_detail.clone())
             && let (ChangeDetailType::File(previous_hash), ChangeDetailType::File(new_hash))
             | (ChangeDetailType::Symlink(previous_hash), ChangeDetailType::Symlink(new_hash)) =

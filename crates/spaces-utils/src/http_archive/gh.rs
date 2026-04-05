@@ -60,7 +60,7 @@ pub fn download(
     gh_command: &str,
     url: &str,
     arguments: Vec<Arc<str>>,
-    progress_bar: &mut console::Progress,
+    progress: &mut console::Progress,
 ) -> anyhow::Result<()> {
     let options = console::ExecuteOptions {
         arguments,
@@ -70,7 +70,7 @@ pub fn download(
     gh_logger(progress.console.clone())
         .trace(format!("{url} Downloading using gh {options:?}").as_str());
 
-    progress_bar
+    progress
         .execute_process(gh_command, options)
         .context(format_context!("failed to download {url} using gh",))?;
 

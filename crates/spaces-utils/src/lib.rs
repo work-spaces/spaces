@@ -13,6 +13,7 @@ pub mod labels;
 pub mod lock;
 pub mod logger;
 pub mod logs;
+pub mod markdown;
 pub mod platform;
 pub mod rcache;
 pub mod rule;

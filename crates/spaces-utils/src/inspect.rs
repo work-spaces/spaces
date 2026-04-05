@@ -34,7 +34,7 @@ impl Options {
         console: console::Console,
         checkout_rules: &[GitTask],
     ) -> anyhow::Result<()> {
-        let mut progress = console::Progress::new(console, "inspect-checkout".into(), None);
+        let mut progress = console::Progress::new(console.clone(), "inspect-checkout", None, None);
         let mut locks = Vec::new();
         let mut checkout_repo = None;
         for git_task in checkout_rules {
@@ -45,7 +45,7 @@ impl Options {
             }
 
             let repo = git::Repository::new(git_task.url.clone(), dir_name.clone());
-            if repo.is_dirty(&mut progress_bar) {
+            if repo.is_dirty(&mut progress) {
                 if self.force {
                     logger(progress.console.clone()).warning(&format!(
                         "[{}] {} is dirty - checkout command may not be reproducible.",
@@ -61,11 +61,10 @@ impl Options {
             }
 
             let commit_hash = repo
-                .get_commit_hash(&mut progress_bar)
+                .get_commit_hash(&mut progress)
                 .context(format_context!("Failed to get commit for {rule_name}"))?;
 
-            if let Some(commit_description) = repo.get_commit_tag(&mut progress_bar).or(commit_hash)
-            {
+            if let Some(commit_description) = repo.get_commit_tag(&mut progress).or(commit_hash) {
                 locks.push((dir_name, commit_description))
             }
         }
@@ -90,9 +89,9 @@ impl Options {
             let workspace_name = workspace_name.replace("/", "-");
             command.push_str(&format!("  --name={workspace_name}\n"));
 
-            printer.raw("\n")?;
-            printer.raw(&command)?;
-            printer.raw("\n")?;
+            console.raw("\n")?;
+            console.raw(&command)?;
+            console.raw("\n")?;
             Ok(())
         } else {
             Err(format_error!(

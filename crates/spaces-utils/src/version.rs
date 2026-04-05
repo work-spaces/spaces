@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 
 const VERSION_FILE_NAME: &str = "spaces.version.json";
 
-pub fn logger(console: console::Console) -> logger::Logger<'_> {
-    logger::Logger::new_printer(printer, "version".into())
+pub fn logger(console: console::Console) -> logger::Logger {
+    logger::Logger::new(console, "version".into())
 }
 
 #[derive(Debug, clap::Subcommand, Clone)]
@@ -62,10 +62,7 @@ impl Manager {
         }
     }
 
-    fn load_from_store(
-        &self,
-        console: console::Console,
-    ) -> anyhow::Result<Vec<GithubRelease>> {
+    fn load_from_store(&self, console: console::Console) -> anyhow::Result<Vec<GithubRelease>> {
         let save_path = self.path_to_store.join(VERSION_FILE_NAME);
         if save_path.exists() {
             let json = std::fs::read_to_string(save_path)
@@ -74,7 +71,7 @@ impl Manager {
                 .context(format_context!("Failed to parse JSON from store"))?;
             Ok(releases)
         } else {
-            self.fetch_latest(printer)
+            self.fetch_latest(console)
         }
     }
 
@@ -89,8 +86,7 @@ impl Manager {
         let gh_command =
             ws::get_spaces_tools_path_to_sysroot_bin(self.path_to_store.as_ref()).join("gh");
 
-        let mut multi_progress = printer::MultiProgress::new(printer);
-        let mut progress_bar = multi_progress.add_progress("download", None, None);
+        let progress_bar = console::Progress::new(console, "download", None, None);
 
         if let Some(stdout) = progress_bar
             .execute_process(gh_command.to_string_lossy().as_ref(), options)
@@ -126,7 +122,7 @@ impl Manager {
                 Some(path_in_store.into())
             }
             Err(err) => {
-                logger(printer)
+                logger(console.clone())
                     .error(format!("Failed to convert URL to relative path: {err}").as_str());
                 None
             }
@@ -138,7 +134,7 @@ impl Manager {
         console: console::Console,
         asset: &GithubAsset,
     ) -> Option<Arc<std::path::Path>> {
-        let store_path_to_release = self.get_store_path_to_release(printer, asset);
+        let store_path_to_release = self.get_store_path_to_release(console, asset);
 
         if let (Some(store_path), Some(digest)) = (store_path_to_release, asset.get_digest()) {
             Some(
@@ -172,17 +168,17 @@ impl Manager {
                     {
                         let binary_path = self.get_tools_path_to_binary(&release.tag_name);
                         if binary_path.exists() {
-                            logger(printer).trace(
+                            logger(console.clone()).trace(
                                 format!("Not linking {} already exists", binary_path.display())
                                     .as_str(),
                             );
                             continue;
                         }
                         if let Some(source_path) =
-                            self.get_store_path_to_store_binary(printer, asset)
+                            self.get_store_path_to_store_binary(console.clone(), asset)
                         {
                             if source_path.exists() {
-                                logger(printer).debug(
+                                logger(console.clone()).debug(
                                     format!(
                                         "Creating hard link from {} to {}",
                                         source_path.display(),
@@ -198,20 +194,20 @@ impl Manager {
                                     ),
                                 )?;
                             } else {
-                                logger(printer).debug(
+                                logger(console.clone()).debug(
                                     format!("Not linking {} does not exist", source_path.display())
                                         .as_str(),
                                 );
                             }
                         }
                     } else {
-                        logger(printer).debug(
+                        logger(console.clone()).debug(
                             format!("Not linking. No binary for platform {current_platform}",)
                                 .as_str(),
                         );
                     }
                 } else {
-                    logger(printer).debug("Internal error: unknown platform");
+                    logger(console.clone()).debug("Internal error: unknown platform");
                 }
             }
         }
@@ -220,31 +216,32 @@ impl Manager {
 
     pub fn list(&self, console: console::Console) -> anyhow::Result<()> {
         let releases = self
-            .load_from_store(printer)
+            .load_from_store(console.clone())
             .context(format_context!("Failed to load/fetch available releases"))?;
 
-        self.create_hard_links_to_tools(printer, &releases)
+        self.create_hard_links_to_tools(console.clone(), &releases)
             .context(format_context!("Failed to create hard links to tools"))?;
 
         for release in releases {
-            logger(printer).info(format!("{}", release.tag_name).as_str());
+            logger(console.clone()).info(format!("{}", release.tag_name).as_str());
             for asset in release.assets {
-                logger(printer).info(format!("  {}", asset.name).as_str());
-                logger(printer).info(format!("    {}", asset.browser_download_url).as_str());
+                logger(console.clone()).info(format!("  {}", asset.name).as_str());
+                logger(console.clone())
+                    .info(format!("    {}", asset.browser_download_url).as_str());
                 if let Some(digest) = asset.digest.as_ref() {
-                    logger(printer).info(format!("    {digest}").as_str());
+                    logger(console.clone()).info(format!("    {digest}").as_str());
                 }
-                if let Some(path) = self.get_store_path_to_release(printer, &asset) {
+                if let Some(path) = self.get_store_path_to_release(console.clone(), &asset) {
                     if path.exists() {
-                        logger(printer).info("    Is Available in the store");
+                        logger(console.clone()).info("    Is Available in the store");
                     } else {
-                        logger(printer).info("    Is NOT Available in the store");
+                        logger(console.clone()).info("    Is NOT Available in the store");
                     }
                 }
             }
             let binary_path = self.get_tools_path_to_binary(release.tag_name.as_ref());
             if binary_path.exists() {
-                logger(printer).info(
+                logger(console.clone()).info(
                     format!(
                         "    tools path: {}",
                         self.get_tools_path_to_binary(release.tag_name.as_ref())
@@ -253,7 +250,7 @@ impl Manager {
                     .as_str(),
                 );
             } else {
-                logger(printer).info("    Is NOT Available in the store tools path");
+                logger(console.clone()).info("    Is NOT Available in the store tools path");
             }
         }
 
@@ -266,7 +263,7 @@ impl Manager {
         tag: Option<Arc<str>>,
     ) -> Result<(), anyhow::Error> {
         let releases = self
-            .fetch_latest(printer)
+            .fetch_latest(console.clone())
             .context(format_context!("Failed to fetch latest releases"))?;
 
         let release = if let Some(tag) = tag.clone() {
@@ -276,7 +273,7 @@ impl Manager {
         };
 
         if let Some(release) = release {
-            logger(printer).debug("analyzing {tag:?} (None = latest)");
+            logger(console.clone()).debug("analyzing {tag:?} (None = latest)");
             let current_platform = platform::Platform::get_platform()
                 .context(format_context!("Internal Error: Unknown Platform"))?;
 
@@ -289,9 +286,10 @@ impl Manager {
                     release.tag_name
                 ))?;
 
-            if let Some(path) = self.get_store_path_to_release(printer, asset) {
+            if let Some(path) = self.get_store_path_to_release(console.clone(), asset) {
                 if path.exists() {
-                    logger(printer).info(format!("store path: {}", path.display()).as_str());
+                    logger(console.clone())
+                        .info(format!("store path: {}", path.display()).as_str());
                 } else {
                     let digest = asset
                         .get_digest()
@@ -316,29 +314,26 @@ impl Manager {
                         release.tag_name
                     ))?;
 
-                    let mut multiprogress = printer::MultiProgress::new(printer);
-                    let multiprogress_bar = multiprogress.add_progress("download", None, None);
-                    http_archive
-                        .sync(multiprogress_bar)
-                        .context(format_context!(
-                            "Failed to download spaces {}",
-                            release.tag_name
-                        ))?;
+                    http_archive.sync(console.clone()).context(format_context!(
+                        "Failed to download spaces {}",
+                        release.tag_name
+                    ))?;
                 }
                 let binary_path = self.get_tools_path_to_binary(release.tag_name.as_ref());
 
                 if !binary_path.exists() {
-                    self.create_hard_links_to_tools(printer, &releases)
+                    self.create_hard_links_to_tools(console.clone(), &releases)
                         .context(format_context!("Failed to update tools to store links"))?;
                 }
 
                 if binary_path.exists() {
-                    logger(printer).info(format!("tools path: {}", binary_path.display()).as_str());
+                    logger(console.clone())
+                        .info(format!("tools path: {}", binary_path.display()).as_str());
                     let exec_path = std::env::current_exe()
                         .context(format_context!("Failed to get current executable path"))?;
                     let command =
                         format!("cp -lf {} {}", binary_path.display(), exec_path.display());
-                    logger(printer).info(
+                    logger(console.clone()).info(
                         format!(
                             "You need to execute the following command to install the fetched tag:\n\n{command}\n",
                         )
@@ -350,10 +345,10 @@ impl Manager {
                             .context(format_context!("Failed to copy command to clipboard"))
                             .is_ok()
                     {
-                        logger(printer).info("Command above was copied to the clipboard");
+                        logger(console.clone()).info("Command above was copied to the clipboard");
                     }
                 } else {
-                    logger(printer).error(
+                    logger(console.clone()).error(
                         format!(
                             "Internal error: tools binary is not found: {}",
                             binary_path.display()
@@ -363,7 +358,7 @@ impl Manager {
                 }
             }
         } else {
-            logger(printer).error(
+            logger(console.clone()).error(
                 format!(
                     "Release for {} is not available",
                     tag.unwrap_or("latest".into())

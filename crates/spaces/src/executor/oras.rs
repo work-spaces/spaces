@@ -51,8 +51,10 @@ impl OrasArchive {
             ..Default::default()
         };
 
-        let mut logger =
-            logger::Logger::new_progress(progress_bar, self.get_artifact_label().clone());
+        let logger = logger::Logger::new(
+            progress_bar.console.clone(),
+            self.get_artifact_label().clone(),
+        );
         logger.debug(format!("Downloading using oras {}", options.arguments.join(" ")).as_str());
 
         progress_bar
@@ -123,7 +125,7 @@ impl OrasArchive {
 
     pub fn execute(
         &self,
-        progress: console::ProgressBar,
+        mut progress: console::Progress,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
@@ -150,10 +152,12 @@ impl OrasArchive {
         let full_path = std::path::Path::new(&http_archive.full_path_to_archive);
 
         let mut lock_file = http_archive.get_file_lock();
-        lock_file.lock(&mut progress).context(format_context!(
-            "{name} - Failed to lock the spaces store for {}",
-            http_archive.archive.url
-        ))?;
+        lock_file
+            .lock(progress.console.clone())
+            .context(format_context!(
+                "{name} - Failed to lock the spaces store for {}",
+                http_archive.archive.url
+            ))?;
 
         if !full_path.exists() {
             let parent = full_path
@@ -174,7 +178,7 @@ impl OrasArchive {
         }
 
         // sync will skip the download because the file is already there
-        let next_progress_bar = http_archive
+        let _next_progress_bar = http_archive
             .sync(progress.console.clone())
             .context(format_context!("Failed to sync http_archive {}", name))?;
 
@@ -183,7 +187,7 @@ impl OrasArchive {
 
         http_archive
             .create_links(
-                next_progress_bar,
+                progress.console.clone(),
                 workspace_directory.as_ref(),
                 name,
                 &mut workspace_write_lock.settings.checkout.links,

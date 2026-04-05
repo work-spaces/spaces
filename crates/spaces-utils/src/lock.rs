@@ -168,13 +168,15 @@ impl FileLock {
         Ok(LockStatus::Locked)
     }
 
-    pub fn lock(&mut self, progress: &mut console::Progress) -> anyhow::Result<()> {
+    pub fn lock(&mut self, console: console::Console) -> anyhow::Result<()> {
         while self
             .try_lock()
             .context(format_context!("Failed to try lock"))?
             == LockStatus::Busy
         {
-            self.wait(progress)
+            let mut progress =
+                console::Progress::new(console.clone(), self.path.display(), None, None);
+            self.wait(&mut progress)
                 .context(format_context!("failed to wait for lock"))?;
         }
         Ok(())
@@ -221,11 +223,11 @@ impl FileLock {
                 }
             }
 
-            progress.increment(1);
+            progress.increment_progress();
             std::thread::sleep(std::time::Duration::from_millis(500));
             log_count += 1;
             if log_count == 10 {
-                logger::Logger::new_progress(progress, "lock".into()).debug(
+                logger::Logger::new(progress.console.clone(), "lock".into()).debug(
                     format!("Still waiting for it to finish at {}", self.path.display()).as_str(),
                 );
                 log_count = 0;

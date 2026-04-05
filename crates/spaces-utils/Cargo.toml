@@ -28,7 +28,6 @@ arboard = "3"
 anyhow.workspace = true
 archiver.workspace = true
 console.workspace = true
-printer.workspace = true
 petgraph.workspace = true
 postcard.workspace = true
 

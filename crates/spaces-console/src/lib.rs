@@ -2,24 +2,18 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use std::sync::{Arc, Mutex, RwLock};
 
+mod file;
+mod null;
 mod process;
 mod secrets;
 pub mod ui;
 mod verbosity;
+mod writer;
 
-pub use process::ExecuteOptions;
+pub use process::{ExecuteOptions, LogHeader, get_log_divider};
 pub use secrets::Secrets;
 pub use verbosity::{Level, Verbosity};
-
-trait ConsoleWriter: Send {
-    fn write_str(&mut self, s: &dyn std::fmt::Display) -> anyhow::Result<()>;
-    fn emit_line(&mut self, line: superconsole::Line);
-    fn add_progress(&mut self, label: &str, total: Option<u64>);
-    fn set_progress_status(&mut self, label: &str, message: &str);
-    fn update_progress(&mut self, label: &str, current: u64, total: u64);
-    fn increment_progress(&mut self, label: &str);
-    fn remove_progress(&mut self, label: &str);
-}
+use writer::ConsoleWriter;
 
 struct SuperConsoleWriter {
     console: Option<superconsole::SuperConsole>,
@@ -88,14 +82,28 @@ impl ConsoleWriter for SuperConsoleWriter {
         }
     }
 
-    fn increment_progress(&mut self, label: &str) {
+    fn increment_progress(&mut self, label: &str, increment: u64) {
         if let Some(entry) = self
             .component
             .active_progress
             .iter_mut()
             .find(|p| p.name == label)
         {
-            entry.position += 1;
+            entry.position += increment;
+        }
+        if let Some(console) = self.console.as_mut() {
+            let _ = console.render(&self.component);
+        }
+    }
+
+    fn set_progress_total(&mut self, label: &str, total: Option<u64>) {
+        if let Some(entry) = self
+            .component
+            .active_progress
+            .iter_mut()
+            .find(|p| p.name == label)
+        {
+            entry.total = total;
         }
         if let Some(console) = self.console.as_mut() {
             let _ = console.render(&self.component);
@@ -108,6 +116,20 @@ impl ConsoleWriter for SuperConsoleWriter {
             let _ = console.render(&self.component);
         }
     }
+
+    fn reset_progress_elapsed(&mut self, label: &str) {
+        if let Some(entry) = self
+            .component
+            .active_progress
+            .iter_mut()
+            .find(|p| p.name == label)
+        {
+            entry.start_time = std::time::Instant::now();
+        }
+        if let Some(console) = self.console.as_mut() {
+            let _ = console.render(&self.component);
+        }
+    }
 }
 
 impl Drop for SuperConsoleWriter {
@@ -116,26 +138,6 @@ impl Drop for SuperConsoleWriter {
             let _ = console.finalize(&self.component);
         }
     }
-}
-
-struct NullWriter;
-
-impl ConsoleWriter for NullWriter {
-    fn write_str(&mut self, _s: &dyn std::fmt::Display) -> anyhow::Result<()> {
-        Ok(())
-    }
-
-    fn emit_line(&mut self, _line: superconsole::Line) {}
-
-    fn add_progress(&mut self, _label: &str, _total: Option<u64>) {}
-
-    fn set_progress_status(&mut self, _label: &str, _message: &str) {}
-
-    fn update_progress(&mut self, _label: &str, _current: u64, _total: u64) {}
-
-    fn increment_progress(&mut self, _label: &str) {}
-
-    fn remove_progress(&mut self, _label: &str) {}
 }
 
 mod sealed {
@@ -162,15 +164,28 @@ impl Clone for Console {
 }
 
 impl Console {
-    pub fn new_null(verbosity: Verbosity) -> Self {
+    pub fn new_null() -> Self {
         Self {
-            writer: Arc::new(Mutex::new(Box::new(NullWriter))),
+            writer: Arc::new(Mutex::new(Box::new(null::Writer))),
             state: Arc::new(RwLock::new(sealed::State {
                 secrets: Secrets::default(),
-                verbosity,
+                verbosity: Verbosity::default(),
                 start_time: std::time::Instant::now(),
             })),
         }
+    }
+
+    pub fn new_file(path: &str) -> anyhow::Result<Self> {
+        let file = std::fs::File::create(path)
+            .context(format_context!("Failed to create file {path}"))?;
+        Ok(Self {
+            writer: Arc::new(Mutex::new(Box::new(file::Writer::new(file)))),
+            state: Arc::new(RwLock::new(sealed::State {
+                secrets: Secrets::default(),
+                verbosity: Verbosity::default(),
+                start_time: std::time::Instant::now(),
+            })),
+        })
     }
 
     pub fn new_stdout(verbosity: Verbosity) -> anyhow::Result<Self> {
@@ -196,7 +211,7 @@ impl Console {
         self.writer.lock().unwrap().write_str(&message)
     }
 
-    pub(crate) fn write(&self, message: &str) -> anyhow::Result<()> {
+    pub fn write(&self, message: &str) -> anyhow::Result<()> {
         let redacted = self.state.read().unwrap().secrets.redact(message.into());
         self.writer.lock().unwrap().write_str(&redacted.as_ref())
     }
@@ -208,6 +223,12 @@ impl Console {
     fn add_progress(&self, label: &str, total: Option<u64>) {
         if self.state.read().unwrap().verbosity.is_show_progress_bars {
             self.writer.lock().unwrap().add_progress(label, total);
+        }
+    }
+
+    fn set_progress_total(&self, label: &str, total: Option<u64>) {
+        if self.state.read().unwrap().verbosity.is_show_progress_bars {
+            self.writer.lock().unwrap().set_progress_total(label, total);
         }
     }
 
@@ -229,14 +250,21 @@ impl Console {
         }
     }
 
-    fn increment_progress(&self, label: &str) {
+    fn increment_progress(&self, label: &str, increment: u64) {
         if self.state.read().unwrap().verbosity.is_show_progress_bars {
-            self.writer.lock().unwrap().increment_progress(label);
+            self.writer
+                .lock()
+                .unwrap()
+                .increment_progress(label, increment);
         }
     }
 
     fn remove_progress(&self, label: &str) {
         self.writer.lock().unwrap().remove_progress(label);
+    }
+
+    fn reset_progress_elapsed(&self, label: &str) {
+        self.writer.lock().unwrap().reset_progress_elapsed(label);
     }
 
     pub fn trace<Type: std::fmt::Display>(&self, name: &str, value: Type) -> anyhow::Result<()> {
@@ -282,6 +310,10 @@ impl Console {
 
     pub fn set_level(&self, level: Level) {
         self.state.write().unwrap().verbosity.level = level;
+    }
+
+    pub fn set_secrets(&self, secrets: Vec<Arc<str>>) {
+        self.state.write().unwrap().secrets.secrets = secrets;
     }
 
     pub fn is_show_progress_bars(&self) -> bool {
@@ -372,25 +404,44 @@ impl Console {
 
 pub struct Progress {
     pub console: Console,
-    label: Arc<str>,
-    finalize: Option<Arc<str>>,
+    label: String,
+    final_message: Option<String>,
 }
 
 impl Progress {
-    pub fn new(console: Console, label: Arc<str>, total: Option<u64>) -> Self {
-        console.add_progress(label.as_ref(), total);
+    pub fn new<LabelType: std::fmt::Display>(
+        console: Console,
+        label: LabelType,
+        total: Option<u64>,
+        final_message: Option<String>,
+    ) -> Self {
+        let label = label.to_string();
+        console.add_progress(label.as_str(), total);
         Self {
             console,
             label,
-            finalize: None,
+            final_message,
         }
     }
 
-    pub fn set_finalize(&mut self, finalize: Arc<str>) {
-        self.finalize = Some(finalize);
+    pub fn set_finalize_none(&mut self) {
+        self.final_message = None;
     }
 
-    pub fn set_progress_status(&self, message: &str) {
+    pub fn set_finalize<FinalType: std::fmt::Display>(&mut self, final_message: FinalType) {
+        self.final_message = Some(final_message.to_string());
+    }
+
+    pub fn set_total(&self, total: Option<u64>) {
+        self.console.set_progress_total(self.label.as_ref(), total);
+    }
+
+    pub fn set_prefix(&self, message: &str) {
+        self.console
+            .set_progress_status(self.label.as_ref(), message);
+    }
+
+    pub fn set_message(&self, message: &str) {
         self.console
             .set_progress_status(self.label.as_ref(), message);
     }
@@ -401,7 +452,21 @@ impl Progress {
     }
 
     pub fn increment_progress(&self) {
-        self.console.increment_progress(self.label.as_ref());
+        self.console.increment_progress(self.label.as_ref(), 1);
+    }
+
+    pub fn increment(&self, increment: u64) {
+        self.console
+            .increment_progress(self.label.as_ref(), increment);
+    }
+
+    pub fn increment_with_overflow(&self, increment: u64) {
+        self.console
+            .increment_progress(self.label.as_ref(), increment);
+    }
+
+    pub fn reset_elapsed(&self) {
+        self.console.reset_progress_elapsed(self.label.as_ref());
     }
 
     pub fn execute_process(
@@ -417,7 +482,7 @@ impl Progress {
 impl Drop for Progress {
     fn drop(&mut self) {
         self.console.remove_progress(self.label.as_ref());
-        if let Some(finalize) = self.finalize.as_ref() {
+        if let Some(finalize) = self.final_message.as_ref() {
             let _ = self.console.write(finalize);
         }
     }

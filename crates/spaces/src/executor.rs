@@ -54,17 +54,20 @@ impl Task {
         name: &str,
     ) -> anyhow::Result<TaskResult> {
         let mut check_new_modules = false;
+        let mut progress = console::Progress::new(console.clone(), name, None, None);
         match self {
-            Task::HttpArchive(archive) => archive.execute(console, workspace.clone(), name),
-            Task::OrasArchive(archive) => archive.execute(console, workspace.clone(), name),
-            Task::Exec(exec) => exec.execute(&mut console, workspace.clone(), name),
-            Task::Kill(kill) => kill.execute(name, &mut console),
+            Task::HttpArchive(archive) => archive.execute(console.clone(), workspace.clone(), name),
+            Task::OrasArchive(archive) => archive.execute(progress, workspace.clone(), name),
+            Task::Exec(exec) => exec.execute(&mut progress, workspace.clone(), name),
+            Task::Kill(kill) => kill.execute(name, &mut progress),
             Task::CreateArchive(archive) => archive.execute(console, workspace.clone(), name),
             Task::UpdateAsset(asset) => asset.execute(console, workspace.clone(), name),
-            Task::AddWhichAsset(asset) => asset.execute(&mut console, workspace.clone(), name),
+            Task::AddWhichAsset(asset) => asset.execute(&mut progress, workspace.clone(), name),
             Task::AddHardLink(asset) => asset.execute(&mut progress, workspace.clone(), name),
             Task::AddSoftLink(asset) => asset.execute(&mut progress, workspace.clone(), name),
-            Task::UpdateEnv(update_env) => update_env.execute(progress, workspace.clone(), name),
+            Task::UpdateEnv(update_env) => {
+                update_env.execute(console.clone(), workspace.clone(), name)
+            }
             Task::AddAsset(asset) => asset.execute(&mut progress, workspace.clone(), name),
             Task::AddAnyAssets(any_assets) => {
                 any_assets.execute(&mut progress, workspace.clone(), name)
@@ -116,7 +119,7 @@ impl Task {
 
     fn target_to_markdown() -> String {
         let mut result = String::new();
-        use printer::markdown;
+        use utils::markdown;
         result.push_str(&markdown::paragraph(
             "This target executes its dependencies.",
         ));
@@ -125,7 +128,7 @@ impl Task {
     }
 
     fn details_to_json_markdown<Input: serde::Serialize>(input: Input) -> String {
-        use printer::markdown;
+        use utils::markdown;
         let mut result = String::new();
         let code_block = markdown::code_block(
             "json",

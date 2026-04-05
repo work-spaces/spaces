@@ -14,6 +14,10 @@ pub struct LogHeader {
     pub(crate) shell: Arc<str>,
 }
 
+pub fn get_log_divider() -> Arc<str> {
+    "=".repeat(80).into()
+}
+
 #[derive(Clone, Debug)]
 pub struct ExecuteOptions {
     pub label: Arc<str>,
