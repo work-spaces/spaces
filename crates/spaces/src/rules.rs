@@ -834,6 +834,7 @@ impl State {
         }
         let mut scored_tasks: Vec<ScoredTask> = Vec::new();
         let mut task_info_list: HashMap<Arc<str>, _> = std::collections::HashMap::new();
+        let console_level = console.get_level();
 
         let glob_logger = logger::Logger::new(console.clone(), "glob".into());
         for node_index in self.sorted.iter() {
@@ -856,7 +857,6 @@ impl State {
             }
 
             if task.phase == phase {
-                let console_level = console.get_level();
                 if console_level == console::Level::Debug {
                     let task_yaml = serde_yaml::to_string(&task).unwrap_or_default();
                     console.debug(task_name, &task_yaml)?;
@@ -959,11 +959,14 @@ impl State {
             }
         }
 
-        if task_info_list.is_empty() {
-            console.error("No Results", "No matching rules available")?;
-        } else {
-            let task_info_list_yaml = serde_yaml::to_string(&task_info_list).unwrap_or_default();
-            console.write(&task_info_list_yaml)?;
+        if console_level != console::Level::Debug {
+            if task_info_list.is_empty() {
+                console.error("No Results", "No matching rules available")?;
+            } else {
+                let task_info_list_yaml =
+                    serde_yaml::to_string(&task_info_list).unwrap_or_default();
+                console.write(&task_info_list_yaml)?;
+            }
         }
 
         Ok(())
