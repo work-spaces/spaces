@@ -15,6 +15,7 @@ pub use crossterm::style;
 pub use process::{ExecuteOptions, LogHeader, get_log_divider};
 pub use secrets::Secrets;
 pub use superconsole::{Line, Span};
+pub use ui::format_duration;
 pub use verbosity::{Level, Verbosity};
 use writer::ConsoleWriter;
 

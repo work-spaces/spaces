@@ -277,8 +277,10 @@ pub fn execute_rule(
             }
             (false, Ok(executor::TaskResult::new()))
         } else {
-            let store_path = ws::get_checkout_store_path_as_path();
-            let cache_path = ws::get_rcache_path(&store_path);
+            let cache_path = {
+                let store_path = workspace.read().get_store_path();
+                ws::get_rcache_path(std::path::Path::new(store_path.as_ref()))
+            };
             if task.rule.uses_rule_cache()
                 && let Some(targets) = task.rule.targets.as_ref()
             {
@@ -1173,6 +1175,12 @@ impl State {
 
         if let Some(err) = first_error {
             return Err(err);
+        } else {
+            progress.set_finalize_lines(logger::make_finalize_line(
+                logger::FinalType::Finished,
+                progress.elapsed(),
+                format!("{task_count} rules completed").as_str(),
+            ));
         }
 
         Ok(task_result)

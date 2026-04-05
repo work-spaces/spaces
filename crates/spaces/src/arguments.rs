@@ -179,6 +179,18 @@ pub fn execute() -> anyhow::Result<()> {
         }
     }
 
+    let result = if let Err(error) = result {
+        if let Some(logs) = singleton::get_logs_for_failed_rules() {
+            let _ = effective_console.error("see also", format!("\n  {}", logs.join("\n  ")));
+        } else {
+            singleton::process_anyhow_error(error);
+            singleton::show_error_chain();
+        }
+        Err(anyhow::anyhow!("execution failed"))
+    } else {
+        Ok(())
+    };
+
     effective_console.shutdown_refresh_thread();
     let _ = refresh_handle.join();
     result

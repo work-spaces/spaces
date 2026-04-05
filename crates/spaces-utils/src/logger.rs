@@ -9,9 +9,10 @@ pub enum FinalType {
     NoChanges,
     NotPlatform,
     Cancelled,
+    Finished,
 }
 
-const FINALIZE_PREFIX_WIDTH: usize = 14;
+const FINALIZE_PREFIX_WIDTH: usize = 12;
 
 pub fn make_finalize_line(
     prefix: FinalType,
@@ -20,11 +21,12 @@ pub fn make_finalize_line(
 ) -> Vec<console::Line> {
     let color = match prefix {
         FinalType::Completed => console::style::Color::Green,
-        FinalType::Failed => console::style::Color::Red,
+        FinalType::Failed => console::style::Color::DarkRed,
         FinalType::NotRequired => console::style::Color::Cyan,
         FinalType::NoChanges => console::style::Color::Cyan,
         FinalType::NotPlatform => console::style::Color::Cyan,
         FinalType::Cancelled => console::style::Color::Yellow,
+        FinalType::Finished => console::style::Color::DarkCyan,
     };
     let bold_style = console::style::ContentStyle {
         foreground_color: Some(color),
@@ -42,11 +44,7 @@ pub fn make_finalize_line(
     line.push(console::Span::new_styled_lossy(styled_prefix));
     if let Some(duration) = duration {
         let secs = duration.as_secs_f64();
-        let duration_str = if secs > 10.0 {
-            format!("[{:>4}s] ", secs as u64)
-        } else {
-            format!("[{secs:.2}s] ")
-        };
+        let duration_str = format!("[{}] ", console::format_duration(secs));
         line.push(console::Span::new_unstyled_lossy(&duration_str));
     }
     line.push(console::Span::new_unstyled_lossy(message));

@@ -22,6 +22,19 @@ pub struct ActiveProgress {
     pub start_time: std::time::Instant,
 }
 
+/// Formats a duration in seconds into a fixed-width bracketed string,
+/// e.g. `[1.23s] `, `[12.3s] `, or `[ 123s] `.
+pub fn format_duration(secs: f64) -> String {
+    if secs > 100.0 {
+        let secs_str = format!("{}s", secs as u64);
+        format!("{:>5}", secs_str)
+    } else if secs > 10.0 {
+        format!("{secs:.1}s")
+    } else {
+        format!("{secs:.2}s")
+    }
+}
+
 /// Width of the bar fill section in characters.
 const BAR_WIDTH: usize = 20;
 
@@ -38,12 +51,7 @@ impl ActiveProgress {
     fn render_bar(&self, max_width: usize) -> anyhow::Result<Line> {
         let elapsed = self.start_time.elapsed();
         let secs = elapsed.as_secs_f64();
-        let secs = if secs < 10.0 {
-            format!("{secs:.2}s")
-        } else {
-            format!("{}s", secs as u64)
-        };
-        let elapsed_str = format!("{:^5}", secs);
+        let elapsed_str = format!("  {}", format_duration(secs));
 
         let bar_str: String = if let Some(total) = self.total {
             let (filled_char, tip_char, empty_char) = BAR_CHARS_BOUNDED;
@@ -107,7 +115,7 @@ impl ActiveProgress {
         line.push(prefix_span);
 
         // Truncate message to fit remaining width
-        let fixed_width = elapsed_str.len() + 1 + bar_width + 1 + self.name.len();
+        let fixed_width = elapsed_str.len() + 1 + bar_width + 1 + self.name.len() + 2;
         let msg_max = max_width.saturating_sub(fixed_width);
         let message: String = if self.message.chars().count() > msg_max {
             let truncated: String = self
@@ -115,7 +123,7 @@ impl ActiveProgress {
                 .chars()
                 .take(msg_max.saturating_sub(4))
                 .collect();
-            format!("{}…   ", truncated)
+            format!("{}...  ", truncated)
         } else {
             self.message.chars().take(msg_max).collect()
         };

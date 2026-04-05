@@ -51,7 +51,7 @@ pub fn sanitize_rule_for_display(rule_name: Arc<str>) -> Arc<str> {
         if i < INTRO_LENGTH {
             result.push(c);
         } else if i == INTRO_LENGTH {
-            result.push('…');
+            result.push_str("...");
         } else if i > rule_name.len() - RULE_NAME_REST {
             result.push(c);
         }

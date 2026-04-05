@@ -61,8 +61,9 @@ pub(crate) fn format_log(
         )));
     } else if verbosity.is_tty {
         let foreground_color = match level {
-            Level::Error => Some(Color::Red),
+            Level::Error => Some(Color::DarkRed),
             Level::Warning => Some(Color::Yellow),
+            Level::Message => Some(Color::Grey),
             Level::Trace => Some(Color::Blue),
             Level::Debug => Some(Color::Cyan),
             _ => None,
