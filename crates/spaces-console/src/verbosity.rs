@@ -85,7 +85,7 @@ pub(crate) fn format_log(
             ));
         }
         first.push(superconsole::Span::new_unstyled_lossy(&format!(
-            "|{first_line}"
+            ":{first_line}"
         )));
     } else {
         let level_label = level.to_string().to_lowercase();

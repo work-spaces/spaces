@@ -552,6 +552,7 @@ pub fn evaluate_starlark_modules(
             if let Some(progress) = progress.as_mut() {
                 progress.set_finalize_lines(logger::make_finalize_line(
                     logger::FinalType::Completed,
+                    progress.elapsed(),
                     "Checkout rules",
                 ));
             }

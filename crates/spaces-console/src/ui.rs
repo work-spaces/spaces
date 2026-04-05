@@ -107,9 +107,18 @@ impl ActiveProgress {
         line.push(prefix_span);
 
         // Truncate message to fit remaining width
-        let fixed_width = elapsed_str.len() + 1 + bar_width + 1 + self.name.len() + 2;
+        let fixed_width = elapsed_str.len() + 1 + bar_width + 1 + self.name.len();
         let msg_max = max_width.saturating_sub(fixed_width);
-        let message: String = self.message.chars().take(msg_max).collect();
+        let message: String = if self.message.chars().count() > msg_max {
+            let truncated: String = self
+                .message
+                .chars()
+                .take(msg_max.saturating_sub(4))
+                .collect();
+            format!("{}…   ", truncated)
+        } else {
+            self.message.chars().take(msg_max).collect()
+        };
         line.push(Span::new_unstyled_lossy(&message));
 
         Ok(line)

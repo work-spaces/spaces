@@ -13,7 +13,11 @@ pub enum FinalType {
 
 const FINALIZE_PREFIX_WIDTH: usize = 14;
 
-pub fn make_finalize_line(prefix: FinalType, message: &str) -> Vec<console::Line> {
+pub fn make_finalize_line(
+    prefix: FinalType,
+    duration: Option<std::time::Duration>,
+    message: &str,
+) -> Vec<console::Line> {
     let color = match prefix {
         FinalType::Completed => console::style::Color::Green,
         FinalType::Failed => console::style::Color::Red,
@@ -36,6 +40,15 @@ pub fn make_finalize_line(prefix: FinalType, message: &str) -> Vec<console::Line
     let styled_prefix = console::style::StyledContent::new(bold_style, padded_prefix);
     let mut line = console::Line::default();
     line.push(console::Span::new_styled_lossy(styled_prefix));
+    if let Some(duration) = duration {
+        let secs = duration.as_secs_f64();
+        let duration_str = if secs > 10.0 {
+            format!("[{:>4}s] ", secs as u64)
+        } else {
+            format!("[{secs:.2}s] ")
+        };
+        line.push(console::Span::new_unstyled_lossy(&duration_str));
+    }
     line.push(console::Span::new_unstyled_lossy(message));
     vec![line]
 }

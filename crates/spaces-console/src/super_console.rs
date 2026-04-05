@@ -55,22 +55,6 @@ impl ConsoleWriter for Writer {
     }
 
     fn add_progress(&mut self, label: &str, prefix: &str, total: Option<u64>) {
-        if self
-            .component
-            .active_progress
-            .iter()
-            .find(|e| e.name == label)
-            .is_some()
-        {
-            let names: Vec<_> = self
-                .component
-                .active_progress
-                .iter()
-                .map(|e| e.name.clone())
-                .collect();
-            panic!("Progress bar {label} already exists {}", names.join(","));
-        }
-
         self.component.active_progress.push(ui::ActiveProgress {
             name: label.to_string(),
             prefix: prefix.to_string(),
@@ -81,14 +65,14 @@ impl ConsoleWriter for Writer {
         });
     }
 
-    fn set_progress_status(&mut self, label: &str, message: &str) {
+    fn set_progress_message(&mut self, label: &str, message: &str) {
         if let Some(entry) = self
             .component
             .active_progress
             .iter_mut()
             .find(|p| p.name == label)
         {
-            entry.message = message.to_string();
+            entry.message = message.trim().to_string();
         }
     }
 
@@ -150,6 +134,14 @@ impl ConsoleWriter for Writer {
         {
             entry.start_time = std::time::Instant::now();
         }
+    }
+
+    fn get_progress_elapsed(&self, label: &str) -> Option<std::time::Duration> {
+        self.component
+            .active_progress
+            .iter()
+            .find(|p| p.name == label)
+            .map(|entry| entry.start_time.elapsed())
     }
 
     fn refresh(&mut self) {

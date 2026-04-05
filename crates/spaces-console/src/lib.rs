@@ -52,7 +52,9 @@ impl Console {
                 verbosity: Verbosity::default(),
                 start_time: std::time::Instant::now(),
                 shutdown_flag: None,
-                is_refresh_thread_ready_to_join: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                is_refresh_thread_ready_to_join: Arc::new(std::sync::atomic::AtomicBool::new(
+                    false,
+                )),
             })),
         }
     }
@@ -67,7 +69,9 @@ impl Console {
                 verbosity: Verbosity::default(),
                 start_time: std::time::Instant::now(),
                 shutdown_flag: None,
-                is_refresh_thread_ready_to_join: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                is_refresh_thread_ready_to_join: Arc::new(std::sync::atomic::AtomicBool::new(
+                    false,
+                )),
             })),
         })
     }
@@ -83,7 +87,9 @@ impl Console {
                 verbosity,
                 start_time: std::time::Instant::now(),
                 shutdown_flag: None,
-                is_refresh_thread_ready_to_join: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                is_refresh_thread_ready_to_join: Arc::new(std::sync::atomic::AtomicBool::new(
+                    false,
+                )),
             })),
         })
     }
@@ -91,9 +97,8 @@ impl Console {
     pub fn start_refresh_thread(&self) -> std::thread::JoinHandle<()> {
         let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let shutdown_flag = Arc::clone(&shutdown);
-        let is_ready_to_join = Arc::clone(
-            &self.state.read().unwrap().is_refresh_thread_ready_to_join,
-        );
+        let is_ready_to_join =
+            Arc::clone(&self.state.read().unwrap().is_refresh_thread_ready_to_join);
         is_ready_to_join.store(false, std::sync::atomic::Ordering::Relaxed);
         self.state.write().unwrap().shutdown_flag = Some(shutdown_flag.clone());
         let refresh_handle = {
@@ -163,7 +168,7 @@ impl Console {
             self.writer
                 .lock()
                 .unwrap()
-                .set_progress_status(label, message);
+                .set_progress_message(label, message);
         }
     }
 
@@ -200,6 +205,10 @@ impl Console {
 
     fn reset_progress_elapsed(&self, label: &str) {
         self.writer.lock().unwrap().reset_progress_elapsed(label);
+    }
+
+    fn get_progress_elapsed(&self, label: &str) -> Option<std::time::Duration> {
+        self.writer.lock().unwrap().get_progress_elapsed(label)
     }
 
     pub fn refresh(&self) {
@@ -307,7 +316,7 @@ impl Console {
             let is_passhrough = log_level.is_some_and(|level| level == Level::Passthrough);
             while let Ok(message) = rx.recv() {
                 let mut writer = console.writer.lock().unwrap();
-                writer.set_progress_status(&label_clone, &message);
+                writer.set_progress_message(&label_clone, &message);
                 if (is_passhrough || is_app)
                     && let Some(level) = log_level.as_ref()
                 {
@@ -412,6 +421,10 @@ impl Progress {
 
     pub fn reset_elapsed(&self) {
         self.console.reset_progress_elapsed(self.label.as_ref());
+    }
+
+    pub fn elapsed(&self) -> Option<std::time::Duration> {
+        self.console.get_progress_elapsed(self.label.as_ref())
     }
 
     pub fn execute_process(

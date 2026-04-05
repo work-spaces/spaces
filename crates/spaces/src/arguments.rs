@@ -153,6 +153,8 @@ pub fn execute() -> anyhow::Result<()> {
         signal_hook::flag::register_conditional_shutdown(SIGINT, 1, Arc::clone(&term_now))?;
         signal_hook::flag::register(SIGINT, Arc::clone(&term_now))?;
 
+        stdout_console.set_is_tty(std::io::stdout().is_terminal());
+
         &stdout_console
     };
 

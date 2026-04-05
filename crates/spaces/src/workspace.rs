@@ -687,9 +687,11 @@ impl Workspace {
                 }
             }
         } else {
-            progress.set_finalize(
+            progress.set_finalize_lines(logger::make_finalize_line(
+                logger::FinalType::Completed,
+                None,
                 "Loaded modules from settings. Use `--rescan` to check for new modules.",
-            );
+            ));
 
             if is_checkout_phase == IsCheckoutPhase::Yes {
                 settings.json.is_scanned = None;

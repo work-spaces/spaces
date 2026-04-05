@@ -122,18 +122,18 @@ pub fn execute_rule(
             signal: task.signal.clone(),
         };
 
-        let bracketed_rule = format!(
-            "[{}]",
-            utils::labels::sanitize_rule_for_display(name.clone())
-        );
+        let displayed_rule = utils::labels::sanitize_rule_for_display(name.clone());
         let mut skip_execute_message: Vec<console::Line> = Vec::new();
         if let (Some(platforms), Some(current_platform)) = (
             task.rule.platforms.as_ref(),
             platform::Platform::get_platform(),
         ) && !platforms.contains(&current_platform)
         {
-            skip_execute_message =
-                logger::make_finalize_line(logger::FinalType::NotPlatform, bracketed_rule.as_str());
+            skip_execute_message = logger::make_finalize_line(
+                logger::FinalType::NotPlatform,
+                None,
+                displayed_rule.as_ref(),
+            );
         }
 
         task_logger(console.clone(), name.clone()).debug(
@@ -178,14 +178,16 @@ pub fn execute_rule(
                     .debug(format!("Skipping {name}: cancelled").as_str());
                 skip_execute_message = logger::make_finalize_line(
                     logger::FinalType::Cancelled,
-                    bracketed_rule.as_str(),
+                    None,
+                    displayed_rule.as_ref(),
                 );
             } else if task.rule.type_ == Some(rule::RuleType::Optional) {
                 task_logger(progress.console.clone(), name.clone())
                     .debug("Skipping because it is optional");
                 skip_execute_message = logger::make_finalize_line(
                     logger::FinalType::NotRequired,
-                    bracketed_rule.as_str(),
+                    None,
+                    displayed_rule.as_ref(),
                 );
             }
             task_logger(progress.console.clone(), name.clone())
@@ -233,7 +235,8 @@ pub fn execute_rule(
                 } else {
                     skip_execute_message = logger::make_finalize_line(
                         logger::FinalType::NoChanges,
-                        bracketed_rule.as_str(),
+                        None,
+                        displayed_rule.as_ref(),
                     );
                     None
                 }
@@ -273,7 +276,8 @@ pub fn execute_rule(
             } else {
                 progress.set_finalize_lines(logger::make_finalize_line(
                     logger::FinalType::NoChanges,
-                    bracketed_rule.as_str(),
+                    None,
+                    displayed_rule.as_ref(),
                 ));
             }
             Ok(executor::TaskResult::new())
@@ -329,10 +333,16 @@ pub fn execute_rule(
             .write()
             .update_rule_metrics(&rule_name, elapsed_time, cache_status.clone());
 
-        if task_result.is_ok()
-            && let Some(digest) = updated_digest
-        {
-            workspace.write().update_rule_digest(&rule_name, digest);
+        if task_result.is_ok() {
+            progress.set_finalize_lines(logger::make_finalize_line(
+                logger::FinalType::Completed,
+                Some(elapsed_time),
+                displayed_rule.as_ref(),
+            ));
+
+            if let Some(digest) = updated_digest {
+                workspace.write().update_rule_digest(&rule_name, digest);
+            }
         }
 
         {
@@ -360,7 +370,8 @@ pub fn execute_rule(
                 log_status.status = logs::Expect::Failure;
                 progress.set_finalize_lines(logger::make_finalize_line(
                     logger::FinalType::Failed,
-                    bracketed_rule.as_str(),
+                    None,
+                    displayed_rule.as_ref(),
                 ));
 
                 // Cancel all pending tasks - exit gracefully
@@ -1048,19 +1059,13 @@ impl State {
                 let mut progress_bar =
                     console::Progress::new(console.clone(), task.rule.name.clone(), None, None);
 
-                let bracketed_rule = format!(
-                    "[{}]",
-                    utils::labels::sanitize_rule_for_display(task.rule.name.clone())
-                );
+                let displayed_rule =
+                    utils::labels::sanitize_rule_for_display(task.rule.name.clone());
                 if task.rule.type_ == Some(rule::RuleType::Optional) {
                     progress_bar.set_finalize_lines(logger::make_finalize_line(
                         logger::FinalType::NotRequired,
-                        bracketed_rule.as_str(),
-                    ));
-                } else {
-                    progress_bar.set_finalize_lines(logger::make_finalize_line(
-                        logger::FinalType::Completed,
-                        bracketed_rule.as_str(),
+                        None,
+                        displayed_rule.as_ref(),
                     ));
                 }
 

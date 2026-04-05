@@ -30,7 +30,7 @@ impl ConsoleWriter for Writer {
 
     fn add_progress(&mut self, _label: &str, _prefix: &str, _total: Option<u64>) {}
 
-    fn set_progress_status(&mut self, _label: &str, _message: &str) {}
+    fn set_progress_message(&mut self, _label: &str, _message: &str) {}
     fn set_progress_prefix(&mut self, _label: &str, _prefix: &str) {}
 
     fn update_progress(&mut self, _label: &str, _current: u64, _total: u64) {}
@@ -42,4 +42,8 @@ impl ConsoleWriter for Writer {
     fn remove_progress(&mut self, _label: &str) {}
 
     fn reset_progress_elapsed(&mut self, _label: &str) {}
+
+    fn get_progress_elapsed(&self, _label: &str) -> Option<std::time::Duration> {
+        None
+    }
 }
