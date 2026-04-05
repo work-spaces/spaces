@@ -37,13 +37,13 @@ const SPINNER_FRAME_MS: u128 = 100;
 impl ActiveProgress {
     fn render_bar(&self, max_width: usize) -> anyhow::Result<Line> {
         let elapsed = self.start_time.elapsed();
-        let secs = elapsed.as_secs();
-        let elapsed_str = format!(
-            "{:02}:{:02}:{:02}",
-            secs / 3600,
-            (secs % 3600) / 60,
-            secs % 60
-        );
+        let secs = elapsed.as_secs_f64();
+        let secs = if secs < 10.0 {
+            format!("{secs:.2}s")
+        } else {
+            format!("{}s", secs as u64)
+        };
+        let elapsed_str = format!("{:^5}", secs);
 
         let bar_str: String = if let Some(total) = self.total {
             let (filled_char, tip_char, empty_char) = BAR_CHARS_BOUNDED;
@@ -142,16 +142,35 @@ impl Component for UiComponent {
     ) -> Result<Lines, Self::Error> {
         let mut lines = Lines::default();
         let now = std::time::Instant::now();
-        let last = self.active_progress.len().saturating_sub(1);
-        for (offset, progress) in self.active_progress.iter().enumerate().rev() {
-            if offset == last {
+        let total = self.active_progress.len();
+
+        let mut progress_iter = self.active_progress.iter();
+        let first = progress_iter.next();
+
+        let mut hidden = 0;
+        for progress in progress_iter {
+            let duration = (now - progress.start_time).as_secs();
+            if duration > 1 {
                 lines.0.push(progress.render_bar(dimensions.width)?);
             } else {
-                let duration = (now - progress.start_time).as_secs();
-                if duration > 1 {
-                    lines.0.push(progress.render_bar(dimensions.width)?);
-                }
+                hidden += 1;
             }
+        }
+
+        if let Some(first) = first {
+            lines.0.push(first.render_bar(dimensions.width)?);
+        }
+
+        if total > 0 {
+            let hidden_str = if hidden > 0 {
+                format!("plus {hidden} more")
+            } else {
+                String::new()
+            };
+            let header_text = format!("Progress:{hidden_str}");
+            let mut header_line = Line::default();
+            header_line.push(Span::new_unstyled_lossy(&header_text));
+            lines.0.insert(0, header_line);
         }
         Ok(lines)
     }

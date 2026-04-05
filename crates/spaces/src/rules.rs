@@ -259,7 +259,7 @@ pub fn execute_rule(
 
         let mut cache_status = workspace::CacheStatus::None;
         progress.reset_elapsed();
-        let task_result = if !skip_execute_message.is_empty() {
+        let (did_complete, task_result) = if !skip_execute_message.is_empty() {
             if task.rule.uses_rule_cache()
                 && let Some(digest) = updated_digest.clone()
             {
@@ -275,7 +275,7 @@ pub fn execute_rule(
                     displayed_rule.as_ref(),
                 ));
             }
-            Ok(executor::TaskResult::new())
+            (false, Ok(executor::TaskResult::new()))
         } else {
             let store_path = ws::get_checkout_store_path_as_path();
             let cache_path = ws::get_rcache_path(&store_path);
@@ -302,23 +302,30 @@ pub fn execute_rule(
                     Some(Ok(result)) => {
                         cache_status =
                             workspace::CacheStatus::Executed(effective_rule_digest.clone());
-                        Ok(result)
+                        (true, Ok(result))
                     }
                     Some(Err(err)) => {
                         cache_status =
                             workspace::CacheStatus::Executed(effective_rule_digest.clone());
-                        Err(err).context(format_context!("[{rule_name}] while executing/caching"))
+                        (
+                            false,
+                            Err(err)
+                                .context(format_context!("[{rule_name}] while executing/caching")),
+                        )
                     }
                     None => {
                         cache_status =
                             workspace::CacheStatus::Restored(effective_rule_digest.clone());
-                        Ok(executor::TaskResult::new())
+                        (false, Ok(executor::TaskResult::new()))
                     }
                 }
             } else {
-                task.executor
-                    .execute(&mut progress, workspace.clone(), &rule_name)
-                    .context(format_context!("[{rule_name}] Failed to exec"))
+                (
+                    true,
+                    task.executor
+                        .execute(&mut progress, workspace.clone(), &rule_name)
+                        .context(format_context!("[{rule_name}] Failed to exec")),
+                )
             }
         };
 
@@ -328,11 +335,13 @@ pub fn execute_rule(
             .update_rule_metrics(&rule_name, elapsed_time, cache_status.clone());
 
         if task_result.is_ok() {
-            progress.set_finalize_lines(logger::make_finalize_line(
-                logger::FinalType::Completed,
-                Some(elapsed_time),
-                displayed_rule.as_ref(),
-            ));
+            if did_complete {
+                progress.set_finalize_lines(logger::make_finalize_line(
+                    logger::FinalType::Completed,
+                    Some(elapsed_time),
+                    displayed_rule.as_ref(),
+                ));
+            }
 
             if let Some(digest) = updated_digest {
                 workspace.write().update_rule_digest(&rule_name, digest);

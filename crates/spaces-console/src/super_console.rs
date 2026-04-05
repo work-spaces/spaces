@@ -1,7 +1,5 @@
 use crate::ui;
 use crate::writer::ConsoleWriter;
-use anyhow::Context;
-use anyhow_source_location::format_context;
 
 pub(crate) fn string_to_lines(message: Option<&str>) -> Vec<superconsole::Line> {
     match message {
@@ -20,11 +18,8 @@ pub(crate) struct Writer {
 
 impl Writer {
     pub(crate) fn new() -> anyhow::Result<Self> {
-        let console = superconsole::SuperConsole::new().context(format_context!(
-            "Internal Error: failed to create super console",
-        ))?;
         Ok(Self {
-            console: Some(console),
+            console: superconsole::SuperConsole::new(),
             component: ui::UiComponent {
                 active_progress: Vec::new(),
             },

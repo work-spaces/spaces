@@ -104,9 +104,11 @@ run_add_exec(
     visibility = visibility_private(),
 )
 
-shell(
+run_add_exec(
     "install_dev",
-    script = "cargo install --force --path=spaces/crates/spaces --profile=dev --root={}".format(root),
+    command = "bash",
+    args = ["-c", "cargo install --force --path=spaces/crates/spaces --profile=dev --root={}".format(root)],
+    log_level = "App",
     deps = [":rustup_update"],
     visibility = visibility_private(),
     help = "Install dev build on local system",
