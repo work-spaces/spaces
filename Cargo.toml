@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/spaces",
     "crates/starstd",
+    "crates/spaces-archiver",
     "crates/spaces-utils",
     "crates/spaces-console",
 ]
@@ -10,7 +11,6 @@ members = [
 [workspace.dependencies]
 anyhow-source-location = "0.2.1"
 anyhow = "1"
-archiver = { package = "spaces-archiver", version = "0.3" }
 starlark = { git = "https://github.com/facebook/starlark-rust", rev = "100f29bc1a57d344171a405e4e06bccc6b8b8e23"}
 serde = { version = "1", features = ["derive"] }
 postcard = { version = "1", features = ["use-std"] }
@@ -23,6 +23,7 @@ toml = "0.9"
 serde_yaml = "0.9"
 strum = { version = "0.26", features = ["derive"] }
 
+archiver = { path = "crates/spaces-archiver", package = "spaces-archiver"  }
 utils = { path = "crates/spaces-utils", package = "spaces-utils" }
 console = { path = "crates/spaces-console", package = "spaces-console" }
 starstd.path = "crates/starstd"

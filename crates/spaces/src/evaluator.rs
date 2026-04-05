@@ -374,7 +374,7 @@ pub fn evaluate_starlark_modules(
     modules: &[(Arc<str>, Arc<str>)],
     phase: task::Phase,
 ) -> anyhow::Result<()> {
-    let mut logger = star_logger(console.clone());
+    let logger = star_logger(console.clone());
     logger.message("--Run Starlark Modules--");
     let workspace_path = workspace.read().absolute_path.to_owned();
     let mut known_modules = HashSet::new();
@@ -605,7 +605,7 @@ fn execute_tasks(
     run_target: Option<Arc<str>>,
     modules: &[(Arc<str>, Arc<str>)],
 ) -> anyhow::Result<IsSaveBin> {
-    let mut logger = star_logger(console.clone());
+    let logger = star_logger(console.clone());
     if phase == task::Phase::Checkout || singleton::get_is_rescan() || workspace.read().is_dirty {
         logger.debug("saving JSON workspace settings");
         workspace
@@ -707,73 +707,71 @@ fn execute_tasks(
             if let Some(markdown_path) = inspect_options.markdown {
                 rules::export_tasks_as_mardown(&markdown_path)
                     .context(format_context!("Failed to export tasks as markdown"))?;
-            } else {
-                if inspect_options.details {
-                    if let Some(target) = inspect_options.target {
-                        let task = rules::get_task(target.as_ref())
-                            .context(format_context!("Failed to get task {target}"))?;
-                        let output = if inspect_options.json {
-                            let mut json = serde_json::to_string_pretty(&task)
-                                .context(format_context!("Failed to serialize task as JSON"))?;
-                            json.push('\n');
-                            json
-                        } else {
-                            serde_yaml::to_string(&task)
-                                .context(format_context!("Failed to serialize task as YAML"))?
-                        };
-                        console.clone().raw(output.as_str())?;
+            } else if inspect_options.details {
+                if let Some(target) = inspect_options.target {
+                    let task = rules::get_task(target.as_ref())
+                        .context(format_context!("Failed to get task {target}"))?;
+                    let output = if inspect_options.json {
+                        let mut json = serde_json::to_string_pretty(&task)
+                            .context(format_context!("Failed to serialize task as JSON"))?;
+                        json.push('\n');
+                        json
                     } else {
-                        return Err(format_error!(
-                            "Internal Error: details requires a rule to be specified"
-                        ));
-                    }
-                } else if inspect_options.checkout {
-                    let checkout_rules = rules::get_checkout_rules();
-                    let inspect_checkout_git_rules: Vec<_> = checkout_rules
-                        .into_iter()
-                        .filter_map(|e| {
-                            if let executor::Task::Git(git_task) = e.executor {
-                                Some(inspect::GitTask {
-                                    url: git_task.url.clone(),
-                                    rule_name: e.rule.name.clone(),
-                                    spaces_key: git_task.spaces_key.clone(),
-                                })
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
-
-                    inspect_options
-                        .execute_inspect_checkout(
-                            console.clone(),
-                            inspect_checkout_git_rules.as_slice(),
-                        )
-                        .context(format_context!("while inspecting checkout rules"))?;
+                        serde_yaml::to_string(&task)
+                            .context(format_context!("Failed to serialize task as YAML"))?
+                    };
+                    console.clone().raw(output.as_str())?;
                 } else {
-                    //only show checkout if log level is message or higher
-                    let fuzzy_query_ref = inspect_options.fuzzy.as_deref();
-                    if console.get_level() <= console::Level::Message {
-                        rules::show_tasks(
-                            console.clone(),
-                            workspace.clone(),
-                            task::Phase::Checkout,
-                            &globs,
-                            strip_prefix.clone(),
-                            fuzzy_query_ref,
-                        )
-                        .context(format_context!("Failed to show tasks"))?;
-                    }
+                    return Err(format_error!(
+                        "Internal Error: details requires a rule to be specified"
+                    ));
+                }
+            } else if inspect_options.checkout {
+                let checkout_rules = rules::get_checkout_rules();
+                let inspect_checkout_git_rules: Vec<_> = checkout_rules
+                    .into_iter()
+                    .filter_map(|e| {
+                        if let executor::Task::Git(git_task) = e.executor {
+                            Some(inspect::GitTask {
+                                url: git_task.url.clone(),
+                                rule_name: e.rule.name.clone(),
+                                spaces_key: git_task.spaces_key.clone(),
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                inspect_options
+                    .execute_inspect_checkout(
+                        console.clone(),
+                        inspect_checkout_git_rules.as_slice(),
+                    )
+                    .context(format_context!("while inspecting checkout rules"))?;
+            } else {
+                //only show checkout if log level is message or higher
+                let fuzzy_query_ref = inspect_options.fuzzy.as_deref();
+                if console.get_level() <= console::Level::Message {
                     rules::show_tasks(
                         console.clone(),
                         workspace.clone(),
-                        task::Phase::Run,
+                        task::Phase::Checkout,
                         &globs,
-                        strip_prefix,
+                        strip_prefix.clone(),
                         fuzzy_query_ref,
                     )
                     .context(format_context!("Failed to show tasks"))?;
                 }
+                rules::show_tasks(
+                    console.clone(),
+                    workspace.clone(),
+                    task::Phase::Run,
+                    &globs,
+                    strip_prefix,
+                    fuzzy_query_ref,
+                )
+                .context(format_context!("Failed to show tasks"))?;
             }
         }
         task::Phase::Checkout => {

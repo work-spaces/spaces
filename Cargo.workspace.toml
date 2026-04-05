@@ -6,6 +6,7 @@ exclude = ["zed-starlark"]
 members = [
     "spaces/crates/spaces",
     "spaces/crates/starstd",
+    "spaces/crates/spaces-archiver",
     "spaces/crates/spaces-utils",
 ]
 
@@ -24,7 +25,7 @@ toml = "0.9"
 serde_yaml = "0.9"
 strum = { version = "0.26", features = ["derive"] }
 
-archiver = { package = "spaces-archiver", path = "./archiver" }
+archiver = { path = "spaces/crates/spaces-archiver", package = "spaces-archiver" }
 console = { path = "spaces/crates/spaces-console", package = "spaces-console" }
 utils = { path = "spaces/crates/spaces-utils", package = "spaces-utils" }
 starstd.path = "spaces/crates/starstd"

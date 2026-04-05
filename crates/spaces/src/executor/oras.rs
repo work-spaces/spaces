@@ -177,7 +177,7 @@ impl OrasArchive {
         }
 
         // sync will skip the download because the file is already there
-        let _next_progress_bar = http_archive
+        http_archive
             .sync(console.clone())
             .context(format_context!("Failed to sync http_archive {}", name))?;
 

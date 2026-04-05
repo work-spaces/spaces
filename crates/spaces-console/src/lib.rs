@@ -101,7 +101,7 @@ impl Console {
             Arc::clone(&self.state.read().unwrap().is_refresh_thread_ready_to_join);
         is_ready_to_join.store(false, std::sync::atomic::Ordering::Relaxed);
         self.state.write().unwrap().shutdown_flag = Some(shutdown_flag.clone());
-        let refresh_handle = {
+        {
             let refresh_console = self.clone();
             std::thread::spawn(move || {
                 while !shutdown_flag.load(std::sync::atomic::Ordering::Relaxed) {
@@ -110,8 +110,7 @@ impl Console {
                 }
                 is_ready_to_join.store(true, std::sync::atomic::Ordering::Relaxed);
             })
-        };
-        refresh_handle
+        }
     }
 
     pub fn is_refresh_thread_ready_to_join(&self) -> bool {
@@ -305,8 +304,8 @@ impl Console {
 
         let label_clone = label.to_string();
         let command_clone = command.to_string();
-        let log_level = options.log_level.clone();
-        let verbosity = self.state.read().unwrap().verbosity.clone();
+        let log_level = options.log_level;
+        let verbosity = self.state.read().unwrap().verbosity;
 
         let console = self.clone();
         let status_thread = std::thread::spawn(move || {

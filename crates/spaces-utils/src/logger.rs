@@ -116,16 +116,16 @@ impl Logger {
         self.log(console::Level::App, message);
     }
 
-    pub fn raw(&mut self, message: &str) {
+    pub fn raw(&self, message: &str) {
         let _ = self.console.raw(message);
     }
 
-    pub fn warning(&mut self, message: &str) {
+    pub fn warning(&self, message: &str) {
         let deferred = format!("[{}] {message}", self.label);
         push_deferred_warning(deferred.into());
     }
 
-    pub fn error(&mut self, message: &str) {
+    pub fn error(&self, message: &str) {
         self.log(console::Level::Error, message);
     }
 

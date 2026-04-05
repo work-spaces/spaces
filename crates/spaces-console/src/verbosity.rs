@@ -56,7 +56,7 @@ pub(crate) fn format_log(
     let mut first = superconsole::Line::default();
 
     if level == Level::Passthrough {
-        first.push(superconsole::Span::new_unstyled_lossy(&format!(
+        first.push(superconsole::Span::new_unstyled_lossy(format!(
             "{timestamp}{first_line}"
         )));
     } else if verbosity.is_tty {
@@ -84,12 +84,12 @@ pub(crate) fn format_log(
                 crossterm::style::StyledContent::new(bold_style, level_label),
             ));
         }
-        first.push(superconsole::Span::new_unstyled_lossy(&format!(
+        first.push(superconsole::Span::new_unstyled_lossy(format!(
             ":{first_line}"
         )));
     } else {
         let level_label = level.to_string().to_lowercase();
-        first.push(superconsole::Span::new_unstyled_lossy(&format!(
+        first.push(superconsole::Span::new_unstyled_lossy(format!(
             "::{level_label}::{timestamp}{first_line}"
         )));
     }

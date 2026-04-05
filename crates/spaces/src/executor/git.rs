@@ -401,7 +401,7 @@ impl Git {
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
-        let mut url_logger = logger(progress.console.clone(), self.url.clone());
+        let url_logger = logger(progress.console.clone(), self.url.clone());
         url_logger.message("execute shallow clone");
 
         let branch = match &self.checkout {

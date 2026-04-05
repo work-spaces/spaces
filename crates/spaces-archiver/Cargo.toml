@@ -1,0 +1,24 @@
+[package]
+name = "spaces-archiver"
+version = "0.3.0"
+edition = "2021"
+license = "MIT"
+description = "A tool for easily compressing and decompressing files built for spaces"
+repository = "https://github.com/work-spaces/spaces-archiver"
+
+[dependencies]
+flate2 = "1"
+zip = "8"
+tar = "0.4"
+sevenz-rust = "0.6"
+# zip requires bzip2 be on 0.4
+bzip2 = "0.4"
+xz2 = "0.1"
+walkdir = "2"
+sha256 = "1"
+glob-match = "0.2"
+serde = "1"
+
+anyhow.workspace = true
+anyhow-source-location.workspace = true
+console.workspace = true

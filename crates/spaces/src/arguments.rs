@@ -586,12 +586,10 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                         "checkout mode does not support specifying `--markdown`"
                     ));
                 }
-            } else {
-                if force {
-                    return Err(format_error!(
-                        "`--force` is only supported with `--checkout`"
-                    ));
-                }
+            } else if force {
+                return Err(format_error!(
+                    "`--force` is only supported with `--checkout`"
+                ));
             }
 
             if effective_console.get_level() > console::Level::Info {

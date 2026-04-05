@@ -1027,7 +1027,7 @@ impl State {
         let mut handle_list = Vec::new();
         let console = progress.console.clone();
         let task_count = self.sorted.len() as u64;
-        let mut started = 0 as u64;
+        let mut started = 0_u64;
 
         progress.set_message(format!("Executing {task_count} {phase} rules").as_str());
         progress.update_progress(0, task_count);

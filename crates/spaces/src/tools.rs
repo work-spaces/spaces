@@ -68,7 +68,7 @@ fn download_and_install(
         let mut links = std::collections::HashSet::new();
 
         if http_archive.is_download_required() {
-            let _progress_bar = http_archive
+            http_archive
                 .sync(console.clone())
                 .context(format_context!("Failed to sync http archive"))?;
 
