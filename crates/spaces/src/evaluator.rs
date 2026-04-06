@@ -379,6 +379,11 @@ pub fn evaluate_starlark_modules(
     let workspace_path = workspace.read().absolute_path.to_owned();
     let mut known_modules = HashSet::new();
 
+    let mut eval_progress =
+        console::Progress::new(console.clone(), "top-level-eval-progress", None, None);
+
+    eval_progress.set_prefix("evaluate-starlark");
+
     logger.debug("Collect Known Modules");
     for (_, content) in modules.iter() {
         let hash = blake3::hash(content.as_bytes()).to_string();
@@ -393,6 +398,7 @@ pub fn evaluate_starlark_modules(
 
     let mut module_queue = std::collections::VecDeque::new();
     module_queue.extend(modules.iter().cloned());
+    let mut total_modules = module_queue.len();
 
     logger.trace(format!("Input module queue:{module_queue:?}").as_str());
 
@@ -401,6 +407,7 @@ pub fn evaluate_starlark_modules(
     if phase != task::Phase::Checkout
         && let Some((name, content)) = module_queue.pop_front()
     {
+        eval_progress.set_message("env.spaces.star (first module)");
         let _ = evaluate_module(
             Some(workspace.clone()),
             workspace_path.clone(),
@@ -422,7 +429,7 @@ pub fn evaluate_starlark_modules(
     while !module_queue.is_empty() {
         if let Some((name, content)) = module_queue.pop_front() {
             logger.debug(format!("evaluating {name} from front of queue").as_str());
-
+            eval_progress.set_message(name.as_ref());
             let eval_name = name.clone();
             let workspace_arc = workspace.clone();
             let eval_workspace_path = workspace_path.clone();
@@ -463,7 +470,6 @@ pub fn evaluate_starlark_modules(
             } else {
                 // During checkout phase, additional modules may be added to the queue
                 // if the repo contains more spaces.star files
-                //
 
                 if progress.is_none() {
                     progress = Some(console::Progress::new(
@@ -516,6 +522,7 @@ pub fn evaluate_starlark_modules(
                 }
 
                 let mut new_modules = Vec::new();
+                total_modules += task_result.new_modules.len();
                 for module in task_result.new_modules {
                     let path_to_module = format!("{workspace_path}/{module}");
                     let content = std::fs::read_to_string(path_to_module.as_str())
@@ -579,6 +586,12 @@ pub fn evaluate_starlark_modules(
             );
         }
     }
+
+    eval_progress.set_finalize_lines(logger::make_finalize_line(
+        logger::FinalType::Completed,
+        eval_progress.elapsed(),
+        format!("evaluated {total_modules} modules").as_str(),
+    ));
 
     Ok(())
 }
