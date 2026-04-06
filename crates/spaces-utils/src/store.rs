@@ -383,6 +383,7 @@ impl Store {
         let mut progress = console::Progress::new(console.clone(), "scanning", Some(total), None);
 
         for (key, value) in self.entries.iter_mut() {
+            log.info(format!("Checking {key}").as_str());
             progress.set_message(key.as_ref());
             let path = path_to_store.join(key.as_ref());
             if !path.exists() {
@@ -445,6 +446,7 @@ impl Store {
         if !unmanaged_candidates.is_empty() {
             for entry in unmanaged_candidates {
                 let name = entry.file_name().to_string_lossy().to_string();
+                log.info(format!("Checking {name} (unmanaged)").as_str());
                 progress.set_message(name.as_str());
                 let size = get_size_of_path(&entry.path()).unwrap_or(0);
                 let dir_modified = get_dir_modified_system_time(&entry.path());
