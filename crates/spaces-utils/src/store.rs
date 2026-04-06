@@ -3,6 +3,7 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use bytesize::ByteSize;
 use serde::{Deserialize, Serialize};
+use serde_with::{TimestampSeconds, serde_as};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -61,9 +62,28 @@ impl Entry {
     }
 }
 
+#[serde_as]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnmanagedDirectory {
+    #[serde_as(as = "TimestampSeconds<i64>")]
+    modified_system_time: std::time::SystemTime,
+    size: usize,
+}
+
+impl Default for UnmanagedDirectory {
+    fn default() -> Self {
+        Self {
+            modified_system_time: std::time::SystemTime::UNIX_EPOCH,
+            size: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Store {
     entries: HashMap<Arc<str>, Entry>,
+    #[serde(default)]
+    unmanaged: HashMap<Arc<str>, UnmanagedDirectory>,
     #[serde(skip)]
     path_to_store: std::path::PathBuf,
 }
@@ -72,6 +92,7 @@ impl Store {
     pub fn new(path_to_store: &std::path::Path) -> Self {
         Self {
             entries: HashMap::new(),
+            unmanaged: HashMap::new(),
             path_to_store: path_to_store.into(),
         }
     }
@@ -90,6 +111,7 @@ impl Store {
         } else {
             Ok(Store {
                 entries: HashMap::new(),
+                unmanaged: HashMap::new(),
                 path_to_store: path_to_store.into(),
             })
         }
@@ -144,11 +166,70 @@ impl Store {
     }
 
     pub fn show_info(
-        &self,
+        &mut self,
         console: console::Console,
         sort_by: SortBy,
         is_ci: ci::IsCi,
     ) -> anyhow::Result<()> {
+        // Collect unmanaged directory sizes before printing anything, with progress indicator.
+        let managed_top_level_dirs: std::collections::HashSet<String> = self
+            .entries
+            .keys()
+            .filter_map(|key| {
+                std::path::Path::new(key.as_ref())
+                    .components()
+                    .next()
+                    .and_then(|c| c.as_os_str().to_str().map(String::from))
+            })
+            .collect();
+
+        let mut unmanaged: Vec<(String, u64)> = Vec::new();
+        if let Ok(read_dir) = std::fs::read_dir(&self.path_to_store) {
+            let candidates: Vec<_> = read_dir
+                .filter_map(|e| e.ok())
+                .filter(|e| e.path().is_dir())
+                .filter(|e| {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    name != MANIFEST_FILE_NAME && !managed_top_level_dirs.contains(&name)
+                })
+                .collect();
+
+            if !candidates.is_empty() {
+                let mut progress = console::Progress::new(
+                    console.clone(),
+                    "Scanning unmanaged store directories",
+                    None,
+                    None,
+                );
+                for entry in candidates {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    progress.set_message(name.as_str());
+                    let dir_modified = get_dir_modified_system_time(&entry.path());
+                    let size = match self.unmanaged.get(name.as_str()) {
+                        Some(cached)
+                            if system_time_as_secs(cached.modified_system_time)
+                                == system_time_as_secs(dir_modified) =>
+                        {
+                            cached.size as u64
+                        }
+                        _ => {
+                            let size = get_size_of_path(&entry.path()).unwrap_or(0);
+                            self.unmanaged.insert(
+                                name.clone().into(),
+                                UnmanagedDirectory {
+                                    modified_system_time: dir_modified,
+                                    size: size as usize,
+                                },
+                            );
+                            size
+                        }
+                    };
+                    unmanaged.push((name, size));
+                }
+                progress.set_finalize_none();
+            }
+        }
+
         let group = ci::GithubLogGroup::new_group(console.clone(), is_ci, "Spaces Store Info")?;
 
         let mut is_fix_needed = false;
@@ -188,6 +269,20 @@ impl Store {
         if is_fix_needed {
             logger(console.clone()).info("run `spaces store fix` to fix the issues");
         }
+
+        match sort_by {
+            SortBy::Name => unmanaged.sort_by(|a, b| a.0.cmp(&b.0)),
+            SortBy::Size => unmanaged.sort_by(|a, b| b.1.cmp(&a.1)),
+            SortBy::Age => unmanaged.sort_by(|a, b| a.0.cmp(&b.0)),
+        }
+
+        for (name, size) in &unmanaged {
+            logger(console.clone()).info(format!("Path: {name} (unmanaged)").as_str());
+            let bytesize = bytesize::ByteSize(*size);
+            logger(console.clone()).info(format!("  Size: {}", bytesize.display()).as_str());
+            total_size += size;
+        }
+
         let total_bytesize = bytesize::ByteSize(total_size);
         logger(console.clone()).info(format!("Total Size: {}", total_bytesize.display()).as_str());
 
@@ -415,6 +510,25 @@ fn make_path_dirs_user_writable(path: &std::path::Path) {
             let _ = std::fs::set_permissions(entry.path(), perms);
         }
     }
+}
+
+fn system_time_as_secs(t: std::time::SystemTime) -> u64 {
+    t.duration_since(std::time::UNIX_EPOCH)
+        .map(|d| {
+            let secs = d.as_secs();
+            if d.subsec_nanos() >= 500_000_000 {
+                secs + 1
+            } else {
+                secs
+            }
+        })
+        .unwrap_or(0)
+}
+
+fn get_dir_modified_system_time(path: &std::path::Path) -> std::time::SystemTime {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
 }
 
 fn get_size_of_path(path: &std::path::Path) -> anyhow::Result<u64> {

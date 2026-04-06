@@ -339,6 +339,9 @@ pub fn run_store_command_in_workspace(
             store
                 .show_info(console.clone(), sort_by, is_ci)
                 .context(format_context!("While getting store info"))?;
+            store
+                .save(store_path)
+                .context(format_context!("Failed to save store at {store_path_str}"))?;
         }
         store::StoreCommand::Fix { dry_run } => {
             store
