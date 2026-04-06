@@ -379,6 +379,11 @@ pub fn evaluate_starlark_modules(
     let workspace_path = workspace.read().absolute_path.to_owned();
     let mut known_modules = HashSet::new();
 
+    let mut eval_progress =
+        console::Progress::new(console.clone(), "top-level-eval-progress", None, None);
+
+    eval_progress.set_prefix("evaluate-starlark");
+
     logger.debug("Collect Known Modules");
     for (_, content) in modules.iter() {
         let hash = blake3::hash(content.as_bytes()).to_string();
@@ -393,6 +398,7 @@ pub fn evaluate_starlark_modules(
 
     let mut module_queue = std::collections::VecDeque::new();
     module_queue.extend(modules.iter().cloned());
+    let total_modules = module_queue.len();
 
     logger.trace(format!("Input module queue:{module_queue:?}").as_str());
 
@@ -579,6 +585,12 @@ pub fn evaluate_starlark_modules(
             );
         }
     }
+
+    eval_progress.set_finalize_lines(logger::make_finalize_line(
+        logger::FinalType::Completed,
+        eval_progress.elapsed(),
+        format!("evaluated {total_modules} modules").as_str(),
+    ));
 
     Ok(())
 }
