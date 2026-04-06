@@ -407,6 +407,7 @@ pub fn evaluate_starlark_modules(
     if phase != task::Phase::Checkout
         && let Some((name, content)) = module_queue.pop_front()
     {
+        eval_progress.set_message("env.spaces.star (first module)");
         let _ = evaluate_module(
             Some(workspace.clone()),
             workspace_path.clone(),
@@ -428,7 +429,7 @@ pub fn evaluate_starlark_modules(
     while !module_queue.is_empty() {
         if let Some((name, content)) = module_queue.pop_front() {
             logger.debug(format!("evaluating {name} from front of queue").as_str());
-
+            eval_progress.set_message(name.as_ref());
             let eval_name = name.clone();
             let workspace_arc = workspace.clone();
             let eval_workspace_path = workspace_path.clone();
@@ -469,7 +470,6 @@ pub fn evaluate_starlark_modules(
             } else {
                 // During checkout phase, additional modules may be added to the queue
                 // if the repo contains more spaces.star files
-                //
 
                 if progress.is_none() {
                     progress = Some(console::Progress::new(
