@@ -398,7 +398,7 @@ pub fn evaluate_starlark_modules(
 
     let mut module_queue = std::collections::VecDeque::new();
     module_queue.extend(modules.iter().cloned());
-    let total_modules = module_queue.len();
+    let mut total_modules = module_queue.len();
 
     logger.trace(format!("Input module queue:{module_queue:?}").as_str());
 
@@ -522,6 +522,7 @@ pub fn evaluate_starlark_modules(
                 }
 
                 let mut new_modules = Vec::new();
+                total_modules += task_result.new_modules.len();
                 for module in task_result.new_modules {
                     let path_to_module = format!("{workspace_path}/{module}");
                     let content = std::fs::read_to_string(path_to_module.as_str())
