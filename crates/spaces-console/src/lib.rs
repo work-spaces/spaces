@@ -385,13 +385,13 @@ impl Progress {
 
     pub fn new_insert<LabelType: std::fmt::Display>(
         console: Console,
-        offset: usize,
+        index: usize,
         label: LabelType,
         total: Option<u64>,
         final_message: Option<String>,
     ) -> Self {
         let label = label.to_string();
-        console.insert_progress(offset, label.as_str(), label.as_str(), total);
+        console.insert_progress(index, label.as_str(), label.as_str(), total);
         Self {
             console,
             label,
