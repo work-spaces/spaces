@@ -1079,7 +1079,7 @@ impl State {
                     .debug(format!("Staging task {}", task.rule.name).as_str());
 
                 started += 1;
-                progress.set_prefix(format!("Queued {started}/{task_count}").as_str());
+                progress.set_prefix(format!("Queued {started}/{task_count}, Running").as_str());
                 handle_list.push((
                     task.rule.name.clone(),
                     execute_rule(progress_bar, workspace.clone(), &task),
@@ -1090,6 +1090,7 @@ impl State {
                     for (name, handle) in handle_list.iter() {
                         if !handle.is_finished() {
                             number_running += 1;
+                        } else {
                             if task_pending_set.remove(name.as_ref()) {
                                 progress.increment(1);
                             }
@@ -1133,6 +1134,9 @@ impl State {
         let mut first_error = None;
         for (name, handle) in handle_list {
             let handle_join_result = handle.join();
+            if task_pending_set.remove(name.as_ref()) {
+                progress.increment(1);
+            }
 
             if let Some(offset) = active_tasks.iter().position(|e| *e == name) {
                 active_tasks.remove(offset);
@@ -1141,7 +1145,6 @@ impl State {
                     .map(|e| utils::labels::get_rule_name_from_label(e.as_ref()))
                     .collect();
                 progress.set_message(active_rule_names.join(",").as_str());
-                progress.increment(1);
             }
 
             match handle_join_result {

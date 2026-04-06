@@ -36,7 +36,7 @@ pub fn format_duration(secs: f64) -> String {
 }
 
 /// Width of the bar fill section in characters.
-const BAR_WIDTH: usize = 20;
+const BAR_WIDTH: usize = 16;
 
 /// Characters used for a bounded bar: filled, tip, empty.
 const BAR_CHARS_BOUNDED: (char, char, char) = ('#', '>', '-');
