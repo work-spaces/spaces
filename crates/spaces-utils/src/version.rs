@@ -62,20 +62,27 @@ impl Manager {
         }
     }
 
-    fn load_from_store(&self, console: console::Console) -> anyhow::Result<Vec<GithubRelease>> {
+    fn load_from_store(
+        &self,
+        progress_bar: &mut console::Progress,
+    ) -> anyhow::Result<Vec<GithubRelease>> {
         let save_path = self.path_to_store.join(VERSION_FILE_NAME);
         if save_path.exists() {
+            progress_bar.set_message("loading manifest");
             let json = std::fs::read_to_string(save_path)
                 .context(format_context!("Failed to load from store"))?;
             let releases: Vec<GithubRelease> = serde_json::from_str(&json)
                 .context(format_context!("Failed to parse JSON from store"))?;
             Ok(releases)
         } else {
-            self.fetch_latest(console)
+            self.fetch_latest(progress_bar)
         }
     }
 
-    fn fetch_latest(&self, console: console::Console) -> anyhow::Result<Vec<GithubRelease>> {
+    fn fetch_latest(
+        &self,
+        progress_bar: &mut console::Progress,
+    ) -> anyhow::Result<Vec<GithubRelease>> {
         let options = console::ExecuteOptions {
             arguments: vec!["api".into(), "repos/work-spaces/spaces/releases".into()],
             is_return_stdout: true,
@@ -83,10 +90,10 @@ impl Manager {
             ..Default::default()
         };
 
+        progress_bar.set_message("getting latest version using gh");
+
         let gh_command =
             ws::get_spaces_tools_path_to_sysroot_bin(self.path_to_store.as_ref()).join("gh");
-
-        let progress_bar = console::Progress::new(console, "download-version", None, None);
 
         if let Some(stdout) = progress_bar
             .execute_process(gh_command.to_string_lossy().as_ref(), options)
@@ -215,8 +222,10 @@ impl Manager {
     }
 
     pub fn list(&self, console: console::Console) -> anyhow::Result<()> {
+        let mut progress_bar = console::Progress::new(console.clone(), "version-list", None, None);
+
         let releases = self
-            .load_from_store(console.clone())
+            .load_from_store(&mut progress_bar)
             .context(format_context!("Failed to load/fetch available releases"))?;
 
         self.create_hard_links_to_tools(console.clone(), &releases)
@@ -253,6 +262,11 @@ impl Manager {
                 logger(console.clone()).info("    Is NOT Available in the store tools path");
             }
         }
+        progress_bar.set_finalize_lines(logger::make_finalize_line(
+            logger::FinalType::Finished,
+            None,
+            "fetch latest version",
+        ));
 
         Ok(())
     }
@@ -262,8 +276,10 @@ impl Manager {
         console: console::Console,
         tag: Option<Arc<str>>,
     ) -> Result<(), anyhow::Error> {
+        let mut progress_bar = console::Progress::new(console.clone(), "fetch", None, None);
+
         let releases = self
-            .fetch_latest(console.clone())
+            .fetch_latest(&mut progress_bar)
             .context(format_context!("Failed to fetch latest releases"))?;
 
         let release = if let Some(tag) = tag.clone() {
@@ -314,6 +330,7 @@ impl Manager {
                         release.tag_name
                     ))?;
 
+                    progress_bar.set_message(&format!("downloading {}", release.tag_name));
                     http_archive.sync(console.clone()).context(format_context!(
                         "Failed to download spaces {}",
                         release.tag_name
@@ -357,6 +374,11 @@ impl Manager {
                     );
                 }
             }
+            progress_bar.set_finalize_lines(logger::make_finalize_line(
+                logger::FinalType::Finished,
+                None,
+                format!("downloaded release {}", release.tag_name).as_str(),
+            ));
         } else {
             logger(console.clone()).error(
                 format!(
@@ -365,6 +387,11 @@ impl Manager {
                 )
                 .as_str(),
             );
+            progress_bar.set_finalize_lines(logger::make_finalize_line(
+                logger::FinalType::Failed,
+                None,
+                "release is not available",
+            ));
         }
 
         Ok(())
