@@ -13,11 +13,12 @@ pub struct UpdateEnv {
 impl UpdateEnv {
     pub fn execute(
         &self,
-        mut progress: printer::MultiProgressBar,
+        progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
-        logger::Logger::new_progress(&mut progress, name.into())
+        let console = progress.console.clone();
+        logger::Logger::new(console, name.into())
             .debug(format!("Update env {name}: {:?}", &self).as_str());
         workspace
             .write()

@@ -5,7 +5,7 @@ use anyhow_source_location::format_context;
 pub type FilterCallback = Box<dyn Fn(&std::path::Path) -> bool>;
 
 pub fn copy_with_cow_semantics(
-    progress: &mut printer::MultiProgressBar,
+    progress: &mut console::Progress,
     source: &str,
     destination: &str,
     filter: Option<FilterCallback>,
@@ -15,7 +15,7 @@ pub fn copy_with_cow_semantics(
         .filter_map(|e| e.ok())
         .filter(|entry| filter.as_ref().is_none_or(|f| f(entry.path())))
         .collect::<Vec<_>>();
-    progress.set_total(all_files.len() as u64);
+    progress.update_progress(0, all_files.len() as u64);
 
     let mut items_copied = 0;
     for entry in all_files {
@@ -40,11 +40,11 @@ pub fn copy_with_cow_semantics(
             }
         }
 
-        progress.increment(1);
+        progress.increment_progress();
     }
 
     if items_copied > 0 {
-        logger::Logger::new_progress(progress, "copy".into()).info(
+        logger::Logger::new(progress.console.clone(), "copy".into()).info(
             format!(
             "{items_copied} items were copied rather than ref-linked using copy-on-write semantics"
         )
@@ -52,7 +52,7 @@ pub fn copy_with_cow_semantics(
         );
     }
 
-    progress.set_total(200);
+    progress.update_progress(0, 200);
 
     Ok(())
 }

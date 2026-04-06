@@ -4,8 +4,8 @@ use anyhow_source_location::{format_context, format_error};
 use std::collections::HashSet;
 use std::sync::Arc;
 
-pub fn logger(progress: &mut printer::MultiProgressBar) -> logger::Logger<'_> {
-    logger::Logger::new_progress(progress, "inspect".into())
+pub fn logger(console: console::Console) -> logger::Logger {
+    logger::Logger::new(console, "inspect".into())
 }
 
 pub struct GitTask {
@@ -31,10 +31,10 @@ pub struct Options {
 impl Options {
     pub fn execute_inspect_checkout(
         &self,
-        printer: &mut printer::Printer,
+        console: console::Console,
         checkout_rules: &[GitTask],
     ) -> anyhow::Result<()> {
-        let mut progress = printer::MultiProgress::new(printer);
+        let mut progress = console::Progress::new(console.clone(), "inspect-checkout", None, None);
         let mut locks = Vec::new();
         let mut checkout_repo = None;
         for git_task in checkout_rules {
@@ -43,13 +43,11 @@ impl Options {
             if rule_name.starts_with("//checkout:") {
                 checkout_repo = Some((dir_name.clone(), git_task.url.clone()));
             }
-            let mut progress_bar = progress.add_progress(&git_task.url, None, None);
-            progress_bar.set_message("checking if repo is dirty");
 
             let repo = git::Repository::new(git_task.url.clone(), dir_name.clone());
-            if repo.is_dirty(&mut progress_bar) {
+            if repo.is_dirty(&mut progress) {
                 if self.force {
-                    logger(&mut progress_bar).warning(&format!(
+                    logger(progress.console.clone()).warning(&format!(
                         "[{}] {} is dirty - checkout command may not be reproducible.",
                         git_task.url, rule_name
                     ));
@@ -63,11 +61,10 @@ impl Options {
             }
 
             let commit_hash = repo
-                .get_commit_hash(&mut progress_bar)
+                .get_commit_hash(&mut progress)
                 .context(format_context!("Failed to get commit for {rule_name}"))?;
 
-            if let Some(commit_description) = repo.get_commit_tag(&mut progress_bar).or(commit_hash)
-            {
+            if let Some(commit_description) = repo.get_commit_tag(&mut progress).or(commit_hash) {
                 locks.push((dir_name, commit_description))
             }
         }
@@ -92,9 +89,9 @@ impl Options {
             let workspace_name = workspace_name.replace("/", "-");
             command.push_str(&format!("  --name={workspace_name}\n"));
 
-            printer.raw("\n")?;
-            printer.raw(&command)?;
-            printer.raw("\n")?;
+            console.raw("\n")?;
+            console.raw(&command)?;
+            console.raw("\n")?;
             Ok(())
         } else {
             Err(format_error!(

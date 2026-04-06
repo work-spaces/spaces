@@ -35,13 +35,13 @@ impl OrasArchive {
 
     pub fn download(
         &self,
-        progress_bar: &mut printer::MultiProgressBar,
+        progress_bar: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         output_folder: &str,
     ) -> anyhow::Result<()> {
         let artifact_label = self.get_artifact_label();
 
-        let options = printer::ExecuteOptions {
+        let options = console::ExecuteOptions {
             arguments: vec![
                 "pull".into(),
                 "--no-tty".into(),
@@ -51,8 +51,10 @@ impl OrasArchive {
             ..Default::default()
         };
 
-        let mut logger =
-            logger::Logger::new_progress(progress_bar, self.get_artifact_label().clone());
+        let logger = logger::Logger::new(
+            progress_bar.console.clone(),
+            self.get_artifact_label().clone(),
+        );
         logger.debug(format!("Downloading using oras {}", options.arguments.join(" ")).as_str());
 
         progress_bar
@@ -69,11 +71,11 @@ impl OrasArchive {
 
     fn get_manifest_details(
         &self,
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
     ) -> anyhow::Result<ManifestDetails> {
         let artifact_label = self.get_artifact_label();
-        let options = printer::ExecuteOptions {
+        let options = console::ExecuteOptions {
             arguments: vec!["manifest".into(), "fetch".into(), artifact_label.clone()],
             is_return_stdout: true,
             ..Default::default()
@@ -123,14 +125,15 @@ impl OrasArchive {
 
     pub fn execute(
         &self,
-        mut progress: printer::MultiProgressBar,
+        progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
         // download the manifest and get the digest
+        let console = progress.console.clone();
 
         let manifest_details = self
-            .get_manifest_details(&mut progress, workspace.clone())
+            .get_manifest_details(progress, workspace.clone())
             .context(format_context!("Failed to fetch manifest"))?;
 
         let archive = http_archive::Archive {
@@ -150,7 +153,7 @@ impl OrasArchive {
         let full_path = std::path::Path::new(&http_archive.full_path_to_archive);
 
         let mut lock_file = http_archive.get_file_lock();
-        lock_file.lock(&mut progress).context(format_context!(
+        lock_file.lock(console.clone()).context(format_context!(
             "{name} - Failed to lock the spaces store for {}",
             http_archive.archive.url
         ))?;
@@ -162,7 +165,7 @@ impl OrasArchive {
                 .to_string_lossy()
                 .to_string();
             // need to ensure the archive is downloaded before using http_archive which doesn't know how to download
-            self.download(&mut progress, workspace.clone(), &parent)
+            self.download(progress, workspace.clone(), &parent)
                 .context(format_context!("Failed to download using oras"))?;
 
             let full_path_to_download =
@@ -174,8 +177,8 @@ impl OrasArchive {
         }
 
         // sync will skip the download because the file is already there
-        let next_progress_bar = http_archive
-            .sync(progress)
+        http_archive
+            .sync(console.clone())
             .context(format_context!("Failed to sync http_archive {}", name))?;
 
         let mut workspace_write_lock = workspace.write();
@@ -183,7 +186,7 @@ impl OrasArchive {
 
         http_archive
             .create_links(
-                next_progress_bar,
+                console.clone(),
                 workspace_directory.as_ref(),
                 name,
                 &mut workspace_write_lock.settings.checkout.links,

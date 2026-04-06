@@ -62,12 +62,12 @@ pub enum IsCreateLogFolder {
 
 pub type WorkspaceArc = std::sync::Arc<lock::StateLock<Workspace>>;
 
-fn logger_printer(printer: &mut printer::Printer) -> logger::Logger<'_> {
-    logger::Logger::new_printer(printer, "workspace".into())
+fn logger_printer(console: console::Console) -> logger::Logger {
+    logger::Logger::new(console, "workspace".into())
 }
 
-fn logger(progress: &mut printer::MultiProgressBar) -> logger::Logger<'_> {
-    logger::Logger::new_progress(progress, "workspace".into())
+fn logger(console: console::Console) -> logger::Logger {
+    logger::Logger::new(console, "workspace".into())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -390,7 +390,7 @@ impl Workspace {
     }
 
     fn get_relative_invoked_path(
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
         current_working_directory: &str,
         absolute_path_to_workspace: &str,
     ) -> Arc<str> {
@@ -407,7 +407,8 @@ impl Workspace {
             relative_invoked_path = relative_invoked_path.strip_prefix('/').unwrap().into();
         }
 
-        logger(progress).info(format!("Invoked at: //{relative_invoked_path}").as_str());
+        logger(progress.console.clone())
+            .info(format!("Invoked at: //{relative_invoked_path}").as_str());
 
         relative_invoked_path
     }
@@ -447,7 +448,7 @@ impl Workspace {
     }
 
     pub fn new(
-        mut progress: printer::MultiProgressBar,
+        console: console::Console,
         absolute_path_to_workspace: Option<Arc<str>>,
         is_clear_inputs: IsClearInputs,
         input_script_names: Option<Vec<Arc<str>>>,
@@ -468,7 +469,11 @@ impl Workspace {
                 .context(format_context!("While searching for workspace root"))?
         };
 
-        logger(&mut progress).message(absolute_path.as_ref());
+        logger(console.clone()).message(absolute_path.as_ref());
+
+        let mut progress =
+            console::Progress::new(console.clone(), "Finding workspace root", None, None);
+
         let relative_invoked_path = Self::get_relative_invoked_path(
             &mut progress,
             current_working_directory.as_ref(),
@@ -503,7 +508,7 @@ impl Workspace {
         let (mut settings, is_json_available) = ws::Settings::load();
 
         if let Some(required_version) = settings.json.minimum_version.as_ref() {
-            logger(&mut progress)
+            logger(progress.console.clone())
                 .info(format!("Minimum Required version: {required_version}",).as_str());
             let current_semver = singleton::get_spaces_version()
                 .context(format_context!("While checking minimum version"))?;
@@ -550,7 +555,7 @@ impl Workspace {
             .extend(singleton::get_new_branches());
 
         if is_json_available == ws::IsJsonAvailable::Yes {
-            logger(&mut progress).debug("Loading modules from sync order");
+            logger(progress.console.clone()).debug("Loading modules from sync order");
             for module in settings.json.order.iter() {
                 if is_rules_module(module.as_ref()) {
                     progress.increment(1);
@@ -559,7 +564,7 @@ impl Workspace {
                         let content = std::fs::read_to_string(path.as_str())
                             .context(format_context!("Failed to read file {}", path))?;
 
-                        logger(&mut progress)
+                        logger(progress.console.clone())
                             .debug(format!("Loading module from sync order: {module}").as_str());
                         loaded_modules.insert(module.clone());
                         modules.push((module.clone(), content.into()));
@@ -567,7 +572,8 @@ impl Workspace {
                 }
             }
         } else {
-            logger(&mut progress).debug(format!("No sync order found at {absolute_path}").as_str());
+            logger(progress.console.clone())
+                .debug(format!("No sync order found at {absolute_path}").as_str());
             is_run_or_inspect = false;
             if let Some(scripts) = input_script_names {
                 settings.json.order = scripts;
@@ -578,7 +584,7 @@ impl Workspace {
         // command line. If any repos are on tip of branch, the workspace
         // is marked as not-reproducible
         for (name, _) in modules.iter() {
-            logger(&mut progress).debug(format!("Digesting {name}").as_str());
+            logger(progress.console.clone()).debug(format!("Digesting {name}").as_str());
         }
 
         let log_folder_name = format!("logs_{}", date.format("%Y%m%d-%H-%M-%S"));
@@ -604,7 +610,7 @@ impl Workspace {
         for module_path in settings.json.scanned_modules.iter() {
             let module_path_as_path = std::path::Path::new(module_path.as_ref());
             if !module_path_as_path.exists() {
-                logger(&mut progress).warning(
+                logger(progress.console.clone()).warning(
                     format!("Module {module_path} does not exist - rescanning workspace").as_str(),
                 );
                 singleton::set_rescan(true);
@@ -625,7 +631,7 @@ impl Workspace {
             // if this is a checkout, we need to scan on first run/inspect
             settings.json.is_scanned = Some(is_run_or_inspect);
 
-            logger(&mut progress).debug(format!("Scanning {absolute_path}").as_str());
+            logger(progress.console.clone()).debug(format!("Scanning {absolute_path}").as_str());
 
             // walkdir and find all .star files in the workspace
             // skip sysroot/build/logs directories
@@ -636,7 +642,7 @@ impl Workspace {
                 })
                 .collect();
 
-            progress.set_total(walkdir.len() as u64);
+            progress.set_total(Some(walkdir.len() as u64));
             settings.bin.star_files.clear();
             settings.json.scanned_modules.clear();
             for entry in walkdir {
@@ -655,7 +661,8 @@ impl Workspace {
                     if let Some(stripped_path) =
                         path.strip_prefix(format!("{absolute_path}/").as_str())
                     {
-                        logger(&mut progress).debug(format!("star file {stripped_path}").as_str());
+                        logger(progress.console.clone())
+                            .debug(format!("star file {stripped_path}").as_str());
 
                         // all star files are hashed and tracked when modified
                         settings.bin.star_files.insert(
@@ -672,7 +679,7 @@ impl Workspace {
                         if is_rules_module(entry_name.as_str())
                             && !loaded_modules.contains(stripped_path)
                         {
-                            logger(&mut progress)
+                            logger(progress.console.clone())
                                 .debug(format!("Loading module: {stripped_path}").as_str());
                             settings.json.scanned_modules.insert(stripped_path.into());
                         }
@@ -680,9 +687,11 @@ impl Workspace {
                 }
             }
         } else {
-            progress.set_ending_message(
+            progress.set_finalize_lines(logger::make_finalize_line(
+                logger::FinalType::Completed,
+                None,
                 "Loaded modules from settings. Use `--rescan` to check for new modules.",
-            );
+            ));
 
             if is_checkout_phase == IsCheckoutPhase::Yes {
                 settings.json.is_scanned = None;
@@ -701,12 +710,12 @@ impl Workspace {
         // if any star files have changed, workspace is dirty - need to re-run starlark
         let is_dirty = settings_is_dirty != ws::IsDirty::No;
         if is_dirty {
-            logger(&mut progress).info(format!("is dirty {settings_is_dirty}").as_str());
+            logger(progress.console.clone()).info(format!("is dirty {settings_is_dirty}").as_str());
         }
 
         // message the user of changed modules
         for updated in updated_modules {
-            logger(&mut progress).debug(format!("dirty {updated}").as_str());
+            logger(progress.console.clone()).debug(format!("dirty {updated}").as_str());
         }
 
         // load the modules scanned from the workspace
@@ -989,7 +998,7 @@ impl Workspace {
 
     pub fn update_changes(
         &mut self,
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
         rule_globs: &[rule::Globs],
     ) -> anyhow::Result<()> {
         self.is_bin_dirty = true;
@@ -1005,7 +1014,7 @@ impl Workspace {
 
     pub fn inspect_inputs(
         &self,
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
         globs: &[rule::Globs],
     ) -> anyhow::Result<Vec<String>> {
         let changes_globs = rule::Globs::to_changes_globs(globs);
@@ -1048,7 +1057,7 @@ impl Workspace {
 
     pub fn is_rule_deps_changed(
         &self,
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
         rule_name: &str,
         seed: &str,
         globs: &[rule::Globs],
@@ -1063,27 +1072,27 @@ impl Workspace {
 
         let is_changed = self.settings.bin.inputs.is_changed(rule_name, digest);
 
-        logger(progress)
+        logger(progress.console.clone())
             .debug(format!("Rule {rule_name} inputs changed: {is_changed:?}",).as_str());
 
         Ok(is_changed)
     }
 
-    pub fn save_bin(&self, printer: &mut printer::Printer) -> anyhow::Result<()> {
+    pub fn save_bin(&self, console: console::Console) -> anyhow::Result<()> {
         if !self.settings.bin.changes.entries.is_empty() {
             for (key, _) in self.settings.bin.changes.entries.iter() {
-                logger_printer(printer).trace(format!("Changes: {key}").as_str());
+                logger_printer(console.clone()).trace(format!("Changes: {key}").as_str());
             }
         } else {
-            logger_printer(printer).debug("No changes");
+            logger_printer(console.clone()).debug("No changes");
         }
 
         if !self.settings.bin.inputs.entries.is_empty() {
             for (key, value) in self.settings.bin.inputs.entries.iter() {
-                logger_printer(printer).trace(format!("Inputs: {key}:{value}").as_str());
+                logger_printer(console.clone()).trace(format!("Inputs: {key}:{value}").as_str());
             }
         } else {
-            logger_printer(printer).debug("No changes");
+            logger_printer(console.clone()).debug("No changes");
         }
         self.settings.save_bin()
     }

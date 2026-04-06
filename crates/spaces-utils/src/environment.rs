@@ -1,6 +1,6 @@
+use crate::markdown;
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
-use printer::markdown;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;

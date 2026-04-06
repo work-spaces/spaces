@@ -9,11 +9,12 @@ load("//@star/packages/star/spaces-cli.star", "spaces_add_devutils", "spaces_add
 load("//@star/packages/star/starship.star", "starship_add_bash")
 load(
     "//@star/sdk/star/checkout.star",
+    "checkout_add_any_assets",
     "checkout_add_env_vars",
-    "checkout_add_hard_link_asset",
     "checkout_add_repo",
     "checkout_update_asset",
 )
+load("//@star/sdk/star/asset.star", "asset_hard_link")
 load("//@star/sdk/star/env.star", "env_assign")
 load(
     "//@star/sdk/star/info.star",
@@ -63,57 +64,23 @@ rust_add(
     rust_toolchain_toml_dir = "//spaces",
 )
 
-# Add spaces, printer, and archiver source repositories to the workspace
-printer_url = "https://github.com/work-spaces/spaces-printer"
-archiver_url = "https://github.com/work-spaces/spaces-archiver"
-
-# This is needed for spaces-archiver to pickup the local version of printer
-checkout_update_asset(
-    "cargo_config",
-    destination = ".cargo/config.toml",
-    value = {
-        "patch": {
-            "crates-io": {
-                "printer": {
-                    "package": "spaces-printer",
-                    "path": "./printer",
-                },
-                "archiver": {
-                    "package": "spaces-archiver",
-                    "path": "./archiver",
-                },
-            },
-        },
-    },
-)
-
-checkout_add_hard_link_asset(
-    "rust_toolchain_toml",
-    source = "{}/rust-toolchain.toml".format(SPACES_CHECKOUT_PATH),
-    destination = "rust-toolchain.toml",
-)
-
-checkout_add_hard_link_asset(
-    "cargo_workspace_toml",
-    source = "{}/Cargo.workspace.toml".format(SPACES_CHECKOUT_PATH),
-    destination = "Cargo.toml",
-)
-
-checkout_add_repo(
-    "printer",
-    url = printer_url,
-    rev = "main",
-)
-
-checkout_add_repo(
-    "archiver",
-    url = archiver_url,
-    rev = "main",
+checkout_add_any_assets(
+    "cargo_workspace_assets",
+    assets = [
+        asset_hard_link(
+            source = "{}/rust-toolchain.toml".format(SPACES_CHECKOUT_PATH),
+            destination = "rust-toolchain.toml",
+        ),
+        asset_hard_link(
+            source = "{}/Cargo.workspace.toml".format(SPACES_CHECKOUT_PATH),
+            destination = "Cargo.toml",
+        ),
+    ],
 )
 
 sccache_add(
     "sccache",
-    version = "0.8",
+    version = "0.14",
 )
 
 cargo_vscode_task = {
@@ -131,31 +98,6 @@ task_options = {
         "RUSTFLAGS": "--remap-path-prefix={}/=".format(workspace_get_absolute_path()),
     },
 }
-
-checkout_update_asset(
-    "vscode_tasks",
-    destination = ".vscode/tasks.json",
-    value = {
-        "options": task_options,
-        "tasks": [
-            cargo_vscode_task | {
-                "command": "build",
-                "args": ["--manifest-path=spaces/Cargo.toml"],
-                "label": "build:spaces",
-            },
-            cargo_vscode_task | {
-                "command": "install",
-                "args": ["--path=spaces/crates/spaces", "--root=${userHome}/.local", "--profile=dev"],
-                "label": "install_dev:spaces",
-            },
-            cargo_vscode_task | {
-                "command": "install",
-                "args": ["--path=spaces/crates/spaces", "--root=${userHome}/.local", "--profile=release"],
-                "label": "install:spaces",
-            },
-        ],
-    },
-)
 
 checkout_add_env_vars(
     "spaces_env",

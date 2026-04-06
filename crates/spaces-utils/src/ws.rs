@@ -17,8 +17,8 @@ const SPACES_HOME_ENV_VAR: &str = "SPACES_ENV_HOME";
 const SPACES_HOME_LEGACY_ENV_VAR: &str = "SPACES_HOME";
 const SPACES_RCACHE_PATH_ENV_VAR: &str = "SPACES_ENV_RCACHE_PATH";
 
-fn logger(progress: &mut printer::MultiProgressBar) -> logger::Logger<'_> {
-    logger::Logger::new_progress(progress, "ws".into())
+fn logger(console: console::Console) -> logger::Logger {
+    logger::Logger::new(console, "ws".into())
 }
 
 pub fn get_checkout_store_path() -> Arc<str> {
@@ -223,16 +223,18 @@ impl BinSettings {
 
     pub fn update_hashes(
         &mut self,
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
     ) -> anyhow::Result<(Vec<Arc<str>>, IsDirty)> {
         let mut result = IsDirty::No;
         let mut updated_modules = Vec::new();
-        logger(progress).debug(format!("Checking {:?} star files", self.star_files.len()).as_str());
+        logger(progress.console.clone())
+            .debug(format!("Checking {:?} star files", self.star_files.len()).as_str());
         let mut remove_list = Vec::new();
         for (module_path, bin_detail) in self.star_files.iter_mut() {
-            progress.increment(1);
+            progress.increment_progress();
             let mod_path = std::path::Path::new(module_path.as_ref());
-            logger(progress).debug(format!("Checking {mod_path:?} for changes").as_str());
+            logger(progress.console.clone())
+                .debug(format!("Checking {mod_path:?} for changes").as_str());
             let modified = changes::get_modified_time(mod_path.metadata());
             if changes::is_modified(modified, bin_detail.modified) {
                 if mod_path.exists() {
@@ -244,14 +246,16 @@ impl BinSettings {
                         bin_detail.hash = content_hash.into();
                         bin_detail.modified = modified;
                         if result == IsDirty::No {
-                            logger(progress).debug(format!("`{module_path}` is dirty").as_str());
+                            logger(progress.console.clone())
+                                .debug(format!("`{module_path}` is dirty").as_str());
                         }
                         result = IsDirty::YesModuleChange;
                         updated_modules.push(module_path.clone());
                     }
                 } else {
                     remove_list.push(module_path.clone());
-                    logger(progress).warning(format!("{mod_path:?} has been removed").as_str());
+                    logger(progress.console.clone())
+                        .warning(format!("{mod_path:?} has been removed").as_str());
                 }
             }
         }

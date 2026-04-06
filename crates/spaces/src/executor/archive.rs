@@ -13,23 +13,31 @@ pub struct Archive {
 impl Archive {
     pub fn execute(
         &self,
-        mut progress: printer::MultiProgressBar,
+        progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
         let workspace_directory = workspace.read().get_absolute_path();
         let output_directory = format!("{workspace_directory}/build/{name}");
+        let console = progress.console.clone();
 
         std::fs::create_dir_all(output_directory.as_str()).context(format_context!(
             "failed to create output directory {output_directory}"
         ))?;
 
-        logger::Logger::new_progress(&mut progress, name.into())
+        logger::Logger::new(console.clone(), name.into())
             .debug(format!("Creating archive {output_directory}").as_str());
+
+        let archive_progress = console::Progress::new(
+            console.clone(),
+            self.create_archive.get_output_file(),
+            None,
+            None,
+        );
 
         let (output_file_path, digest) = self
             .create_archive
-            .create(output_directory.as_str(), progress)
+            .create(output_directory.as_str(), archive_progress)
             .context(format_context!(
                 "failed to create archive {output_directory}"
             ))?;

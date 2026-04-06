@@ -15,8 +15,8 @@ struct State {
 
 static STATE: state::InitCell<lock::StateLock<State>> = state::InitCell::new();
 
-fn logger<'a>(progress: &'a mut printer::MultiProgressBar, name: &str) -> logger::Logger<'a> {
-    logger::Logger::new_progress(progress, name.into())
+fn logger(console: console::Console, name: &str) -> logger::Logger {
+    logger::Logger::new(console, name.into())
 }
 
 fn get_state() -> &'static lock::StateLock<State> {
@@ -51,14 +51,14 @@ pub struct Exec {
     pub working_directory: Option<Arc<str>>,
     pub redirect_stdout: Option<Arc<str>>,
     pub expect: Option<Expect>,
-    pub log_level: Option<printer::Level>,
+    pub log_level: Option<console::Level>,
     pub timeout: Option<f64>,
 }
 
 impl Exec {
     pub fn execute(
         &self,
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
@@ -99,7 +99,7 @@ impl Exec {
             let is_trailing_args_empty = trailing_args.is_empty();
             arguments.extend(trailing_args);
             if log_level.is_none() && !is_trailing_args_empty {
-                log_level = Some(printer::Level::Passthrough);
+                log_level = Some(console::Level::Passthrough);
             }
         }
 
@@ -111,10 +111,11 @@ impl Exec {
             Some(workspace.read().get_log_file(name))
         };
 
-        logger(progress, name).debug(format!("log file: {log_file_path:?}",).as_str());
-        logger(progress, name).debug(format!("Env: {environment:?}",).as_str());
+        logger(progress.console.clone(), name)
+            .debug(format!("log file: {log_file_path:?}",).as_str());
+        logger(progress.console.clone(), name).debug(format!("Env: {environment:?}",).as_str());
 
-        let options = printer::ExecuteOptions {
+        let options = console::ExecuteOptions {
             label: name.into(),
             arguments,
             environment,
@@ -127,7 +128,7 @@ impl Exec {
             timeout: self.timeout.map(std::time::Duration::from_secs_f64),
         };
 
-        logger(progress, name).info(
+        logger(progress.console.clone(), name).info(
             format!(
                 "Executing: {} {}",
                 self.command,
@@ -140,11 +141,12 @@ impl Exec {
 
         handle_process_ended(name);
 
-        logger(progress, name).debug(format!("log file: {log_file_path:?}").as_str());
+        logger(progress.console.clone(), name)
+            .debug(format!("log file: {log_file_path:?}").as_str());
 
         let stdout_content = match result {
             Ok(content) => {
-                logger(progress, name).info("succeeded");
+                logger(progress.console.clone(), name).info("succeeded");
 
                 if let Some(Expect::Failure) = self.expect.as_ref() {
                     return Err(format_error!("Expected failure but task succeeded"));
@@ -153,7 +155,7 @@ impl Exec {
                 }
             }
             Err(exec_error) => {
-                logger(progress, name).info("Failed");
+                logger(progress.console.clone(), name).info("Failed");
                 if let Some(Expect::Failure) = self.expect.as_ref() {
                     None
                 } else if let Some(Expect::Any) = self.expect.as_ref() {
@@ -167,15 +169,15 @@ impl Exec {
                                     format_context!("Failed to read log file {}", log_file_path),
                                 )?;
                             if log_contents.len() > 10 * 1024 * 1024 {
-                                logger(progress, name).error(
+                                logger(progress.console.clone(), name).error(
                                     format!("See log file {log_file_path} for details").as_str(),
                                 );
                             } else {
-                                logger(progress, name).error(log_contents.as_str());
+                                logger(progress.console.clone(), name).error(log_contents.as_str());
                             }
                         }
                     } else {
-                        logger(progress, name).error(
+                        logger(progress.console.clone(), name).error(
                             "No log file is available (log files disabled with the --ci option)",
                         );
                     }
@@ -210,7 +212,7 @@ impl Exec {
     }
 
     pub fn to_markdown(&self) -> String {
-        use printer::markdown;
+        use utils::markdown;
         let mut result = String::new();
 
         let has_args = if let Some(args) = self.args.as_ref() {
@@ -302,13 +304,9 @@ pub struct Kill {
 }
 
 impl Kill {
-    pub fn execute(
-        &self,
-        name: &str,
-        progress: &mut printer::MultiProgressBar,
-    ) -> anyhow::Result<()> {
+    pub fn execute(&self, name: &str, progress: &mut console::Progress) -> anyhow::Result<()> {
         if let Some(process_id) = get_process_id(self.target.as_ref()) {
-            let options = printer::ExecuteOptions {
+            let options = console::ExecuteOptions {
                 label: name.into(),
                 arguments: vec![
                     "-s".into(),
@@ -342,7 +340,7 @@ impl Kill {
     }
 
     pub fn to_markdown(&self) -> String {
-        use printer::markdown;
+        use utils::markdown;
         let mut result = String::new();
         let invoke = format!("$ kill -s {} {}", self.signal.to_kill_arg(), self.target);
         result.push_str(&markdown::code_block("sh", invoke.as_str()));

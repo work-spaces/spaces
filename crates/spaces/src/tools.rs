@@ -29,16 +29,16 @@ const TOOLS: &[(&str, &str)] = &[
     ("oras", ORAS_JSON),
 ];
 
-fn tools_logger(printer: &mut printer::Printer) -> logger::Logger<'_> {
-    logger::Logger::new_printer(printer, "tools".into())
+fn tools_logger(console: console::Console) -> logger::Logger {
+    logger::Logger::new(console, "tools".into())
 }
 
 fn download_and_install(
-    multi_progress: &mut printer::MultiProgress,
+    console: console::Console,
     name: &str,
     platform_archive: builtins::checkout::PlatformArchive,
-    is_force_link: bool,
 ) -> anyhow::Result<Option<String>> {
+    let logger = tools_logger(console.clone());
     let this_platform =
         platform::Platform::get_platform().context(format_context!("Failed to get platform"))?;
     let archive = match this_platform {
@@ -66,83 +66,71 @@ fn download_and_install(
         http_archive.allow_gh_for_download(false);
         let mut links = std::collections::HashSet::new();
 
-        let progress_bar = if http_archive.is_download_required() {
-            let progress_bar = multi_progress.add_progress(name, Some(200), Some("Complete"));
-            let progress_bar = http_archive
-                .sync(progress_bar)
-                .context(format_context!("Failed to sync http archive"))?;
-
+        if http_archive.is_download_required() {
             http_archive
-                .create_links(progress_bar, spaces_tools.as_ref(), "unused", &mut links)
-                .context(format_context!("Failed to create links"))?;
-            None
+                .sync(console.clone())
+                .context(format_context!("Failed to sync http archive"))?;
         } else {
-            tools_logger(multi_progress.printer)
-                .debug(format!("Skipping download of {name}").as_str());
-            if is_force_link {
-                Some(multi_progress.add_progress(name, Some(200), Some("Complete")))
-            } else {
-                None
-            }
+            logger.debug(format!("Skipping download of {name}").as_str());
         };
 
-        if let Some(progress_bar) = progress_bar {
-            http_archive
-                .create_links(progress_bar, spaces_tools.as_ref(), "unused", &mut links)
-                .context(format_context!("Failed to create links"))?;
-        }
+        http_archive
+            .create_links(console.clone(), spaces_tools.as_ref(), "unused", &mut links)
+            .context(format_context!("Failed to create links"))?;
 
         return Ok(Some(relative_path));
     } else {
-        tools_logger(multi_progress.printer)
-            .debug(format!("{name} not available for {this_platform}").as_str());
+        logger.debug(format!("{name} not available for {this_platform}").as_str());
     }
 
     Ok(None)
 }
 
-pub fn handle_command(printer: &mut printer::Printer, command: Command) -> anyhow::Result<()> {
+pub fn handle_command(console: console::Console, command: Command) -> anyhow::Result<()> {
     let is_ci = singleton::get_is_ci().into();
 
-    let group =
-        ci::GithubLogGroup::new_group(printer, is_ci, format!("Spaces Tools {command}").as_str())?;
+    let group = ci::GithubLogGroup::new_group(
+        console.clone(),
+        is_ci,
+        format!("Spaces Tools {command}").as_str(),
+    )?;
     let result = match command {
-        Command::List {} => list_tools(printer),
-        Command::Install {} => install_tools(printer, true),
-        Command::CleanupCheckouts { age, dry_run } => cleanup_checkouts(printer, age, dry_run),
+        Command::List {} => list_tools(console.clone()),
+        Command::Install {} => install_tools(console.clone(), true),
+        Command::CleanupCheckouts { age, dry_run } => {
+            cleanup_checkouts(console.clone(), age, dry_run)
+        }
     };
 
-    group.end_group(printer, is_ci)?;
+    group.end_group(console, is_ci)?;
 
     result
 }
 
-pub fn list_tools(printer: &mut printer::Printer) -> anyhow::Result<()> {
+pub fn list_tools(console: console::Console) -> anyhow::Result<()> {
+    let logger = tools_logger(console.clone());
     let store_path = ws::get_checkout_store_path_as_path();
-    tools_logger(printer).info(
+    logger.info(
         format!(
             "Path: {}",
             ws::get_spaces_tools_path_to_sysroot_bin(&store_path).display()
         )
         .as_str(),
     );
-    tools_logger(printer).info("- builtin: info.get_path_to_spaces_tools()");
-    tools_logger(printer).info("Tools:");
+    logger.info("- builtin: info.get_path_to_spaces_tools()");
+    logger.info("Tools:");
 
     for (name, _json) in TOOLS {
-        tools_logger(printer).info(format!("- {name}").as_str());
+        logger.info(format!("- {name}").as_str());
     }
 
     Ok(())
 }
 
-fn cleanup_checkouts(
-    printer: &mut printer::Printer,
-    age: u16,
-    is_dry_run: bool,
-) -> anyhow::Result<()> {
+fn cleanup_checkouts(console: console::Console, age: u16, is_dry_run: bool) -> anyhow::Result<()> {
+    let logger = tools_logger(console.clone());
     // get dirs in current dir
-    tools_logger(printer).info("Scanning for workspaces");
+    logger.info("Scanning for workspaces");
     let read_dir =
         std::fs::read_dir(".").context(format_context!("Failed to read current directory"))?;
 
@@ -159,13 +147,12 @@ fn cleanup_checkouts(
         if let Some(entry_age) = workspace::get_age(&entry.path()) {
             let current_age_in_days = entry_age.get_current_age();
             if current_age_in_days > age as u128 {
-                tools_logger(printer).info(format!("{}:", entry.path().display(),).as_str());
-                tools_logger(printer)
-                    .info(format!("  - Age: {} days", entry_age.get_current_age()).as_str());
+                logger.info(format!("{}:", entry.path().display(),).as_str());
+                logger.info(format!("  - Age: {} days", entry_age.get_current_age()).as_str());
                 if is_dry_run {
-                    tools_logger(printer).info("  - Ready to remove (dry-run)");
+                    logger.info("  - Ready to remove (dry-run)");
                 } else {
-                    tools_logger(printer).info("  - Removing");
+                    logger.info("  - Removing");
                     std::fs::remove_dir_all(entry.path()).context(format_context!(
                         "Failed to delete {}",
                         entry.path().display()
@@ -178,7 +165,8 @@ fn cleanup_checkouts(
     Ok(())
 }
 
-pub fn install_tools(printer: &mut printer::Printer, is_force_link: bool) -> anyhow::Result<()> {
+pub fn install_tools(console: console::Console, _is_force_link: bool) -> anyhow::Result<()> {
+    let logger = tools_logger(console.clone());
     // install gh in the store bin if it does not exist
     let store_path = ws::get_checkout_store_path();
     let store_sysroot_bin = ws::get_spaces_tools_path(store_path.as_ref());
@@ -192,16 +180,13 @@ pub fn install_tools(printer: &mut printer::Printer, is_force_link: bool) -> any
             format_context!("Failed to load store manifest from {}", store_path),
         )?;
 
-    let mut multi_progress = printer::MultiProgress::new(printer);
-
     for (name, json) in TOOLS {
-        tools_logger(multi_progress.printer).debug(format!("dowload and install {name}").as_str());
+        logger.info(format!("dowload and install {name}").as_str());
         let tool: builtins::checkout::PlatformArchive =
-            serde_json::from_str(json).context(format_context!("Failed to parse oras json"))?;
+            serde_json::from_str(json).context(format_context!("Failed to parse {name} json"))?;
 
-        if let Some(relative_path) =
-            download_and_install(&mut multi_progress, name, tool, is_force_link)
-                .context(format_context!("Failed to download and install tools"))?
+        if let Some(relative_path) = download_and_install(console.clone(), name, tool)
+            .context(format_context!("Failed to download and install tools"))?
         {
             manifest_store
                 .add_entry(std::path::Path::new(&relative_path))

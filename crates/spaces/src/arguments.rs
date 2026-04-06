@@ -17,17 +17,17 @@ pub enum Level {
     Error,
 }
 
-impl From<Level> for printer::Level {
+impl From<Level> for console::Level {
     fn from(level: Level) -> Self {
         match level {
-            Level::Trace => printer::Level::Trace,
-            Level::Debug => printer::Level::Debug,
-            Level::Message => printer::Level::Message,
-            Level::Info => printer::Level::Info,
-            Level::App => printer::Level::App,
-            Level::Passthrough => printer::Level::Passthrough,
-            Level::Warning => printer::Level::Warning,
-            Level::Error => printer::Level::Error,
+            Level::Trace => console::Level::Trace,
+            Level::Debug => console::Level::Debug,
+            Level::Message => console::Level::Message,
+            Level::Info => console::Level::Info,
+            Level::App => console::Level::App,
+            Level::Passthrough => console::Level::Passthrough,
+            Level::Warning => console::Level::Warning,
+            Level::Error => console::Level::Error,
         }
     }
 }
@@ -57,8 +57,8 @@ pub struct Arguments {
 }
 
 fn handle_verbosity(
-    printer: &mut printer::Printer,
-    verbosity: printer::Level,
+    console: console::Console,
+    level: console::Level,
     is_ci: bool,
     disable_logs: bool,
     rescan: bool,
@@ -67,17 +67,18 @@ fn handle_verbosity(
 ) {
     singleton::set_rescan(rescan);
     singleton::set_logging_disabled(disable_logs);
-    printer.verbosity.level = verbosity;
+    console.set_level(level);
     if is_ci {
         singleton::set_ci(true);
-        if verbosity == printer::Level::App {
-            printer.verbosity.level = printer::Level::Message;
+        if level == console::Level::App {
+            console.set_level(console::Level::Message);
         }
-        printer.verbosity.is_show_progress_bars = false;
-        printer.verbosity.is_show_elapsed_time = true;
+        console.set_is_show_progress_bars(false);
+        console.set_is_show_elapsed_time(true);
+        console.set_is_tty(false);
     } else {
-        printer.verbosity.is_show_progress_bars = !is_hide_progress_bars;
-        printer.verbosity.is_show_elapsed_time = show_elapsed_time;
+        console.set_is_show_progress_bars(!is_hide_progress_bars);
+        console.set_is_show_elapsed_time(show_elapsed_time);
     }
 }
 
@@ -137,11 +138,14 @@ pub fn execute() -> anyhow::Result<()> {
         hide_progress_bars
     };
 
-    let mut stdout_printer = printer::Printer::new_stdout();
-    let mut null_printer = printer::Printer::new_null_term();
+    let stdout_console = console::Console::new_stdout(console::Verbosity {
+        level: verbosity.into(),
+        ..Default::default()
+    })?;
+    let null_console = console::Console::new_null();
 
-    let effective_printer = if matches!(commands, Commands::RunLsp { .. }) {
-        &mut null_printer
+    let effective_console = if matches!(commands, Commands::RunLsp { .. }) {
+        &null_console
     } else {
         // terminate immediately if ctrl+c is received twice
         use signal_hook::consts::SIGINT;
@@ -149,11 +153,13 @@ pub fn execute() -> anyhow::Result<()> {
         signal_hook::flag::register_conditional_shutdown(SIGINT, 1, Arc::clone(&term_now))?;
         signal_hook::flag::register(SIGINT, Arc::clone(&term_now))?;
 
-        &mut stdout_printer
+        stdout_console.set_is_tty(std::io::stdout().is_terminal());
+
+        &stdout_console
     };
 
     handle_verbosity(
-        effective_printer,
+        effective_console.clone(),
         verbosity.into(),
         ci,
         disable_logs,
@@ -162,22 +168,35 @@ pub fn execute() -> anyhow::Result<()> {
         show_elapsed_time,
     );
 
-    let result = execute_command(commands, effective_printer);
+    let refresh_handle = effective_console.start_refresh_thread();
+    let result = execute_command(commands, effective_console.clone());
     {
         let deferred_warnings = utils::logger::get_deferred_warnings();
         if !deferred_warnings.is_empty() {
             for warning in deferred_warnings {
-                let _ = effective_printer.log(printer::Level::Warning, warning.as_ref());
+                let _ = effective_console.log(console::Level::Warning, warning.as_ref());
             }
         }
     }
+
+    let result = if let Err(error) = result {
+        if let Some(logs) = singleton::get_logs_for_failed_rules() {
+            let _ = effective_console.error("see also", format!("\n  {}", logs.join("\n  ")));
+        } else {
+            singleton::process_anyhow_error(error);
+            singleton::show_error_chain();
+        }
+        Err(anyhow::anyhow!("execution failed"))
+    } else {
+        Ok(())
+    };
+
+    effective_console.shutdown_refresh_thread();
+    let _ = refresh_handle.join();
     result
 }
 
-fn execute_command(
-    command: Commands,
-    effective_printer: &mut printer::Printer,
-) -> anyhow::Result<()> {
+fn execute_command(command: Commands, effective_console: console::Console) -> anyhow::Result<()> {
     match command {
         Commands::Checkout {
             name,
@@ -194,7 +213,7 @@ fn execute_command(
         } => {
             singleton::set_is_checkout();
             co::checkout_workflow(
-                effective_printer,
+                effective_console,
                 name,
                 co::CheckoutWorkflowArgs {
                     script,
@@ -236,13 +255,13 @@ fn execute_command(
 
             let is_ci = singleton::get_is_ci().into();
             let group = ci::GithubLogGroup::new_group(
-                effective_printer,
+                effective_console.clone(),
                 is_ci,
                 format!("Spaces Checkout Repo {url}").as_str(),
             )?;
 
             let result = co::checkout_repo(
-                effective_printer,
+                effective_console.clone(),
                 name,
                 co::CheckoutRepoArgs {
                     rule_name,
@@ -262,7 +281,7 @@ fn execute_command(
             )
             .context(format_context!("while checking out repo"));
 
-            group.end_group(effective_printer, is_ci)?;
+            group.end_group(effective_console, is_ci)?;
             result?;
         }
         Commands::Co {
@@ -359,7 +378,7 @@ fn execute_command(
 
             checkout
                 .clone()
-                .checkout(effective_printer, name, keep_workspace_on_failure)
+                .checkout(effective_console, name, keep_workspace_on_failure)
                 .context(format_context!("while checking out repo"))?;
         }
         Commands::Sync {
@@ -392,7 +411,7 @@ fn execute_command(
             singleton::set_is_sync();
 
             runner::run_starlark_modules_in_workspace(
-                effective_printer,
+                effective_console,
                 task::Phase::Checkout,
                 None,
                 workspace::IsClearInputs::Yes,
@@ -424,7 +443,7 @@ fn execute_command(
             }
 
             runner::foreach_repo(
-                effective_printer,
+                effective_console,
                 runner::RunWorkspace::Target(None, vec![]),
                 for_each_repo,
                 command_args,
@@ -440,7 +459,6 @@ fn execute_command(
             if shell::is_spaces_shell() {
                 return Err(format_error!("Already running in a `spaces shell`"));
             }
-
             let completions_command = if completions {
                 let has_help = if all_targets {
                     rules::HasHelp::No
@@ -453,7 +471,7 @@ fn execute_command(
                 None
             };
 
-            runner::run_shell_in_workspace(effective_printer, path, completions_command)
+            runner::run_shell_in_workspace(effective_console, path, completions_command)
                 .context(format_context!("while running user shell"))?;
         }
 
@@ -476,7 +494,7 @@ fn execute_command(
 
             singleton::enable_lsp_mode();
 
-            runner::run_lsp(effective_printer).context(format_context!("during runner sync"))?;
+            runner::run_lsp(effective_console).context(format_context!("during runner sync"))?;
         }
 
         Commands::Run {
@@ -514,12 +532,12 @@ fn execute_command(
                 .map(|target| format!(" {target}"))
                 .unwrap_or_default();
             let group = ci::GithubLogGroup::new_group(
-                effective_printer,
+                effective_console.clone(),
                 is_ci,
                 format!("Spaces Run{target_message}").as_str(),
             )?;
             let result = runner::run_starlark_modules_in_workspace(
-                effective_printer,
+                effective_console.clone(),
                 task::Phase::Run,
                 None,
                 forget_inputs.into(),
@@ -527,7 +545,7 @@ fn execute_command(
                 runner::IsCreateLockFile::No,
                 runner::IsExecuteTasks::Yes,
             );
-            group.end_group(effective_printer, is_ci)?;
+            group.end_group(effective_console, is_ci)?;
             result.context(format_context!("while executing run rules"))?;
         }
 
@@ -580,16 +598,14 @@ fn execute_command(
                         "checkout mode does not support specifying `--markdown`"
                     ));
                 }
-            } else {
-                if force {
-                    return Err(format_error!(
-                        "`--force` is only supported with `--checkout`"
-                    ));
-                }
+            } else if force {
+                return Err(format_error!(
+                    "`--force` is only supported with `--checkout`"
+                ));
             }
 
-            if effective_printer.verbosity.level > printer::Level::Info {
-                effective_printer.verbosity.level = printer::Level::Info;
+            if effective_console.get_level() > console::Level::Info {
+                effective_console.set_level(console::Level::Info);
             }
 
             if details && target.is_none() {
@@ -601,8 +617,8 @@ fn execute_command(
             }
 
             if details {
-                effective_printer.verbosity.is_show_progress_bars = false;
-                effective_printer.verbosity.level = printer::Level::Warning;
+                effective_console.set_is_show_progress_bars(false);
+                effective_console.set_level(console::Level::Warning);
             }
 
             let mut filter_globs = std::collections::HashSet::new();
@@ -645,7 +661,7 @@ fn execute_command(
             });
 
             runner::run_starlark_modules_in_workspace(
-                effective_printer,
+                effective_console,
                 task::Phase::Inspect,
                 None,
                 workspace::IsClearInputs::No,
@@ -668,7 +684,7 @@ fn execute_command(
             };
 
             // rules are now available
-            let run_targets = runner::run_starlark_get_targets(effective_printer, has_help)
+            let run_targets = runner::run_starlark_get_targets(effective_console, has_help)
                 .context(format_context!("Failed to get targets"))?;
 
             let completion_content = completions::generate_workspace_completions(
@@ -684,30 +700,30 @@ fn execute_command(
             )?;
         }
         Commands::Docs {} => {
-            docs::show(effective_printer)?;
+            docs::show(effective_console)?;
         }
         Commands::Tools { command } => {
-            effective_printer.verbosity.level = printer::Level::Info;
-            tools::handle_command(effective_printer, command)
+            effective_console.set_level(console::Level::Info);
+            tools::handle_command(effective_console, command)
                 .context(format_context!("Failed to handle tool command"))?;
         }
         Commands::Logs { command } => {
-            effective_printer.verbosity.is_show_progress_bars = false;
-            runner::run_logs_command_in_workspace(effective_printer, command)
+            effective_console.set_is_show_progress_bars(false);
+            runner::run_logs_command_in_workspace(effective_console, command)
                 .context(format_context!("Failed to run logs command"))?
         }
         Commands::Store { command } => {
-            if effective_printer.verbosity.level > printer::Level::Info {
-                effective_printer.verbosity.level = printer::Level::Info;
+            if effective_console.get_level() > console::Level::Info {
+                effective_console.set_level(console::Level::Info);
             }
-            runner::run_store_command_in_workspace(effective_printer, command)
+            runner::run_store_command_in_workspace(effective_console, command)
                 .context(format_context!("Failed to run store command"))?
         }
         Commands::Version { command } => {
-            if effective_printer.verbosity.level > printer::Level::Info {
-                effective_printer.verbosity.level = printer::Level::Info;
+            if effective_console.get_level() > console::Level::Info {
+                effective_console.set_level(console::Level::Info);
             }
-            runner::run_version_command_in_workspace(effective_printer, command)
+            runner::run_version_command_in_workspace(effective_console, command)
                 .context(format_context!("Failed to run version command"))?
         }
     }

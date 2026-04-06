@@ -49,7 +49,7 @@ pub enum Task {
 impl Task {
     pub fn execute(
         &self,
-        mut progress: printer::MultiProgressBar,
+        progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<TaskResult> {
@@ -57,22 +57,20 @@ impl Task {
         match self {
             Task::HttpArchive(archive) => archive.execute(progress, workspace.clone(), name),
             Task::OrasArchive(archive) => archive.execute(progress, workspace.clone(), name),
-            Task::Exec(exec) => exec.execute(&mut progress, workspace.clone(), name),
-            Task::Kill(kill) => kill.execute(name, &mut progress),
+            Task::Exec(exec) => exec.execute(progress, workspace.clone(), name),
+            Task::Kill(kill) => kill.execute(name, progress),
             Task::CreateArchive(archive) => archive.execute(progress, workspace.clone(), name),
             Task::UpdateAsset(asset) => asset.execute(progress, workspace.clone(), name),
-            Task::AddWhichAsset(asset) => asset.execute(&mut progress, workspace.clone(), name),
-            Task::AddHardLink(asset) => asset.execute(&mut progress, workspace.clone(), name),
-            Task::AddSoftLink(asset) => asset.execute(&mut progress, workspace.clone(), name),
+            Task::AddWhichAsset(asset) => asset.execute(progress, workspace.clone(), name),
+            Task::AddHardLink(asset) => asset.execute(progress, workspace.clone(), name),
+            Task::AddSoftLink(asset) => asset.execute(progress, workspace.clone(), name),
             Task::UpdateEnv(update_env) => update_env.execute(progress, workspace.clone(), name),
-            Task::AddAsset(asset) => asset.execute(&mut progress, workspace.clone(), name),
-            Task::AddAnyAssets(any_assets) => {
-                any_assets.execute(&mut progress, workspace.clone(), name)
-            }
+            Task::AddAsset(asset) => asset.execute(progress, workspace.clone(), name),
+            Task::AddAnyAssets(any_assets) => any_assets.execute(progress, workspace.clone(), name),
             Task::Git(git) => {
                 check_new_modules =
                     git.is_evaluate_spaces_modules && git.working_directory.is_none();
-                git.execute(&mut progress, workspace.clone(), name)
+                git.execute(progress, workspace.clone(), name)
             }
             Task::Target => Ok(()),
         }
@@ -116,7 +114,7 @@ impl Task {
 
     fn target_to_markdown() -> String {
         let mut result = String::new();
-        use printer::markdown;
+        use utils::markdown;
         result.push_str(&markdown::paragraph(
             "This target executes its dependencies.",
         ));
@@ -125,7 +123,7 @@ impl Task {
     }
 
     fn details_to_json_markdown<Input: serde::Serialize>(input: Input) -> String {
-        use printer::markdown;
+        use utils::markdown;
         let mut result = String::new();
         let code_block = markdown::code_block(
             "json",

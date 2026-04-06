@@ -1,13 +1,58 @@
 use crate::lock;
 use std::sync::Arc;
 
-enum Printer<'a> {
-    Printer(&'a mut printer::Printer),
-    Progress(&'a mut printer::MultiProgressBar),
+#[derive(strum::Display)]
+pub enum FinalType {
+    Completed,
+    Failed,
+    NotRequired,
+    NoChanges,
+    NotPlatform,
+    Cancelled,
+    Finished,
 }
 
-pub struct Logger<'a> {
-    printer: Printer<'a>,
+const FINALIZE_PREFIX_WIDTH: usize = 12;
+
+pub fn make_finalize_line(
+    prefix: FinalType,
+    duration: Option<std::time::Duration>,
+    message: &str,
+) -> Vec<console::Line> {
+    let color = match prefix {
+        FinalType::Completed => console::style::Color::Green,
+        FinalType::Failed => console::style::Color::DarkRed,
+        FinalType::NotRequired => console::style::Color::Cyan,
+        FinalType::NoChanges => console::style::Color::Cyan,
+        FinalType::NotPlatform => console::style::Color::Cyan,
+        FinalType::Cancelled => console::style::Color::Yellow,
+        FinalType::Finished => console::style::Color::DarkCyan,
+    };
+    let bold_style = console::style::ContentStyle {
+        foreground_color: Some(color),
+        background_color: None,
+        underline_color: None,
+        attributes: console::style::Attributes::from(console::style::Attribute::Bold),
+    };
+    let padded_prefix = format!(
+        "{prefix:>width$}: ",
+        width = FINALIZE_PREFIX_WIDTH,
+        prefix = prefix.to_string()
+    );
+    let styled_prefix = console::style::StyledContent::new(bold_style, padded_prefix);
+    let mut line = console::Line::default();
+    line.push(console::Span::new_styled_lossy(styled_prefix));
+    if let Some(duration) = duration {
+        let secs = duration.as_secs_f64();
+        let duration_str = format!("[{}] ", console::format_duration(secs));
+        line.push(console::Span::new_unstyled_lossy(&duration_str));
+    }
+    line.push(console::Span::new_unstyled_lossy(message));
+    vec![line]
+}
+
+pub struct Logger {
+    console: console::Console,
     label: Arc<str>,
 }
 
@@ -44,68 +89,46 @@ pub fn get_deferred_warnings() -> Vec<Arc<str>> {
     state.clone()
 }
 
-impl Logger<'_> {
-    pub fn new_printer(printer: &mut printer::Printer, label: Arc<str>) -> Logger<'_> {
-        Logger {
-            printer: Printer::Printer(printer),
-            label,
-        }
+impl Logger {
+    pub fn new(console: console::Console, label: Arc<str>) -> Logger {
+        Logger { console, label }
     }
 
-    pub fn new_progress(progress: &mut printer::MultiProgressBar, label: Arc<str>) -> Logger<'_> {
-        Logger {
-            printer: Printer::Progress(progress),
-            label,
-        }
+    pub fn trace(&self, message: &str) {
+        self.log(console::Level::Trace, message);
     }
 
-    pub fn trace(&mut self, message: &str) {
-        self.log(printer::Level::Trace, message);
+    pub fn debug(&self, message: &str) {
+        self.log(console::Level::Debug, message);
     }
 
-    pub fn debug(&mut self, message: &str) {
-        self.log(printer::Level::Debug, message);
+    pub fn message(&self, message: &str) {
+        self.log(console::Level::Message, message);
     }
 
-    pub fn message(&mut self, message: &str) {
-        self.log(printer::Level::Message, message);
+    pub fn info(&self, message: &str) {
+        self.log(console::Level::Info, message);
     }
 
-    pub fn info(&mut self, message: &str) {
-        self.log(printer::Level::Info, message);
+    pub fn app(&self, message: &str) {
+        self.log(console::Level::App, message);
     }
 
-    pub fn app(&mut self, message: &str) {
-        self.log(printer::Level::App, message);
+    pub fn raw(&self, message: &str) {
+        let _ = self.console.raw(message);
     }
 
-    pub fn raw(&mut self, message: &str) {
-        let _ = match &mut self.printer {
-            Printer::Printer(printer) => printer.raw(message),
-            Printer::Progress(progress) => {
-                progress.log(printer::Level::App, message);
-                Ok(())
-            }
-        };
-    }
-
-    pub fn warning(&mut self, message: &str) {
+    pub fn warning(&self, message: &str) {
         let deferred = format!("[{}] {message}", self.label);
         push_deferred_warning(deferred.into());
     }
 
-    pub fn error(&mut self, message: &str) {
-        self.log(printer::Level::Error, message);
+    pub fn error(&self, message: &str) {
+        self.log(console::Level::Error, message);
     }
 
-    fn log(&mut self, level: printer::Level, message: &str) {
+    fn log(&self, level: console::Level, message: &str) {
         let output = format!("[{}] {message}", self.label);
-        let _ = match &mut self.printer {
-            Printer::Printer(printer) => printer.log(level, output.as_str()),
-            Printer::Progress(progress) => {
-                progress.log(level, output.as_str());
-                Ok(())
-            }
-        };
+        let _ = self.console.log(level, &output);
     }
 }

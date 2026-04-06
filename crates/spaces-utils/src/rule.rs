@@ -1,6 +1,5 @@
-use crate::{deps, labels, logger, platform, targets};
+use crate::{deps, labels, logger, markdown, platform, targets};
 use anyhow_source_location::format_error;
-use printer::markdown;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -267,7 +266,7 @@ impl Rule {
                 }
             }
         }
-        md.printer.newline()?;
+        md.console.write("\n")?;
         Ok(())
     }
 
@@ -281,33 +280,30 @@ impl Rule {
         if is_run_rule {
             let spaces_run_example = format!("spaces run {}", self.name);
             md.code_block("sh", spaces_run_example.as_str())?;
-            md.printer.newline()?;
+            md.console.write("\n")?;
         }
         if let Some(help) = &self.help {
             md.bold("Description")?;
-            md.printer.newline()?;
-            md.printer.newline()?;
+            md.console.write("\n\n")?;
             md.paragraph(help)?;
-            md.printer.newline()?;
+            md.console.write("\n")?;
         } else if is_run_rule {
             md.paragraph("No help text provided")?;
-            md.printer.newline()?;
+            md.console.write("\n")?;
         }
 
         if let Some(details) = details {
             md.bold("Details")?;
-            md.printer.newline()?;
-            md.printer.newline()?;
+            md.console.write("\n\n")?;
             md.paragraph(details.as_str())?;
-            md.printer.newline()?;
+            md.console.write("\n")?;
         }
 
         if let Some(deps) = self.deps.as_ref()
             && !deps.is_empty()
         {
             md.bold("Dependencies")?;
-            md.printer.newline()?;
-            md.printer.newline()?;
+            md.console.write("\n\n")?;
             match deps {
                 Deps::Rules(rules) => {
                     for dep in rules {
@@ -337,7 +333,7 @@ impl Rule {
                     }
                 }
             }
-            md.printer.newline()?;
+            md.console.write("\n")?;
         }
 
         Ok(())

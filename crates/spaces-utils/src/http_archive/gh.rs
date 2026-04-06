@@ -3,8 +3,8 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use std::sync::Arc;
 
-fn gh_logger(progress: &mut printer::MultiProgressBar) -> logger::Logger<'_> {
-    logger::Logger::new_progress(progress, "gh".into())
+fn gh_logger(console: console::Console) -> logger::Logger {
+    logger::Logger::new(console, "gh".into())
 }
 
 pub fn transform_url_to_arguments(
@@ -60,16 +60,17 @@ pub fn download(
     gh_command: &str,
     url: &str,
     arguments: Vec<Arc<str>>,
-    progress_bar: &mut printer::MultiProgressBar,
+    progress: &mut console::Progress,
 ) -> anyhow::Result<()> {
-    let options = printer::ExecuteOptions {
+    let options = console::ExecuteOptions {
         arguments,
         ..Default::default()
     };
 
-    gh_logger(progress_bar).trace(format!("{url} Downloading using gh {options:?}").as_str());
+    gh_logger(progress.console.clone())
+        .trace(format!("{url} Downloading using gh {options:?}").as_str());
 
-    progress_bar
+    progress
         .execute_process(gh_command, options)
         .context(format_context!("failed to download {url} using gh",))?;
 

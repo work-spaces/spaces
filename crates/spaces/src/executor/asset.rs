@@ -50,13 +50,13 @@ fn format_value(format: AssetFormat, value: &serde_json::Value) -> anyhow::Resul
 impl UpdateAsset {
     pub fn execute(
         &self,
-        mut progress: printer::MultiProgressBar,
+        progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
         use json_value_merge::Merge;
-
-        let mut logger = logger::Logger::new_progress(&mut progress, name.into());
+        let console = progress.console.clone();
+        let logger = logger::Logger::new(console.clone(), name.into());
 
         // the workspace write lock needs to be held for the duration of the update
         // to prevent concurrent updates to the same asset
@@ -142,7 +142,7 @@ pub struct AddWhichAsset {
 impl AddWhichAsset {
     pub fn execute(
         &self,
-        _progress: &mut printer::MultiProgressBar,
+        _progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         _name: &str,
     ) -> anyhow::Result<()> {
@@ -191,7 +191,7 @@ pub struct AddHardLink {
 impl AddHardLink {
     pub fn execute(
         &self,
-        _progress: &mut printer::MultiProgressBar,
+        _progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         _name: &str,
     ) -> anyhow::Result<()> {
@@ -238,11 +238,11 @@ pub struct AddAsset {
 impl AddAsset {
     pub fn execute(
         &self,
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
-        let mut logger = logger::Logger::new_progress(progress, name.into());
+        let logger = logger::Logger::new(progress.console.clone(), name.into());
         let mut workspace_write_lock = workspace.write();
         workspace_write_lock.add_checkout_asset(self.destination.clone(), self.content.clone());
 
@@ -288,7 +288,7 @@ pub struct AddSoftLink {
 impl AddSoftLink {
     pub fn execute(
         &self,
-        _progress: &mut printer::MultiProgressBar,
+        _progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         _name: &str,
     ) -> anyhow::Result<()> {
@@ -364,7 +364,7 @@ pub struct AddAnyAssets {
 impl AddAnyAssets {
     pub fn execute(
         &self,
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {

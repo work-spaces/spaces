@@ -113,7 +113,7 @@ impl Config {
     }
 
     pub fn to_markdown(&self) -> String {
-        use printer::markdown;
+        use crate::markdown;
 
         let mut md = String::new();
 

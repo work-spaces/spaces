@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use utils::{ci, git, logger, workflows};
 
-fn co_logger(printer: &mut printer::Printer) -> logger::Logger<'_> {
-    logger::Logger::new_printer(printer, "co".into())
+fn co_logger(console: console::Console) -> logger::Logger {
+    logger::Logger::new(console, "co".into())
 }
 
 pub const CO_FILE_NAME: &str = "co.spaces.toml";
@@ -78,7 +78,7 @@ pub struct CheckoutArgs {
 }
 
 pub fn checkout_repo(
-    printer: &mut printer::Printer,
+    console: console::Console,
     name: Arc<str>,
     repo_args: CheckoutRepoArgs,
     args: CheckoutArgs,
@@ -124,14 +124,14 @@ checkout.add_repo(
     )
     .into();
 
-    tools::install_tools(printer, args.force_install_tools)
+    tools::install_tools(console.clone(), args.force_install_tools)
         .context(format_context!("while installing tools"))?;
 
-    co_logger(printer).debug(format!("Adding branches {:?}", args.new_branch).as_str());
+    co_logger(console.clone()).debug(format!("Adding branches {:?}", args.new_branch).as_str());
     handle_new_branch(args.new_branch);
 
     runner::checkout(
-        printer,
+        console.clone(),
         name,
         vec![],
         Some(script),
@@ -144,7 +144,7 @@ checkout.add_repo(
 }
 
 pub fn checkout_workflow(
-    printer: &mut printer::Printer,
+    console: console::Console,
     name: Arc<str>,
     workflow_args: CheckoutWorkflowArgs,
     args: CheckoutArgs,
@@ -228,11 +228,11 @@ pub fn checkout_workflow(
         }
     }
 
-    tools::install_tools(printer, args.force_install_tools)
+    tools::install_tools(console.clone(), args.force_install_tools)
         .context(format_context!("while installing tools"))?;
 
     runner::checkout(
-        printer,
+        console.clone(),
         name,
         script_inputs,
         None,
@@ -260,13 +260,13 @@ pub struct CheckoutWorkflow {
 impl CheckoutWorkflow {
     fn checkout(
         self,
-        printer: &mut printer::Printer,
+        console: console::Console,
         name: Arc<str>,
         keep_workspace_on_failure: bool,
     ) -> anyhow::Result<()> {
         let is_ci: ci::IsCi = singleton::get_is_ci().into();
         let group = ci::GithubLogGroup::new_group(
-            printer,
+            console.clone(),
             is_ci,
             format!("Spaces Checkout Workflow {name}").as_str(),
         )?;
@@ -275,7 +275,7 @@ impl CheckoutWorkflow {
                 .context(format_context!("while setting toml store values"))?;
         }
         let result = checkout_workflow(
-            printer,
+            console.clone(),
             name,
             CheckoutWorkflowArgs {
                 script: self.script.unwrap_or_default(),
@@ -292,7 +292,7 @@ impl CheckoutWorkflow {
                 lock: vec![],
             },
         );
-        group.end_group(printer, is_ci)?;
+        group.end_group(console.clone(), is_ci)?;
         result.context(format_context!("in CheckoutWorkflow"))?;
         Ok(())
     }
@@ -317,13 +317,13 @@ pub struct CheckoutRepo {
 impl CheckoutRepo {
     fn checkout(
         self,
-        printer: &mut printer::Printer,
+        console: console::Console,
         name: Arc<str>,
         keep_workspace_on_failure: bool,
     ) -> anyhow::Result<()> {
         let is_ci: ci::IsCi = singleton::get_is_ci().into();
         let group = ci::GithubLogGroup::new_group(
-            printer,
+            console.clone(),
             is_ci,
             format!("Spaces Checkout Repo {}", self.url).as_str(),
         )?;
@@ -332,7 +332,7 @@ impl CheckoutRepo {
                 .context(format_context!("while setting toml store values"))?;
         }
         let result = checkout_repo(
-            printer,
+            console.clone(),
             name,
             CheckoutRepoArgs {
                 rule_name: self.rule_name,
@@ -350,7 +350,7 @@ impl CheckoutRepo {
                 lock: vec![],
             },
         );
-        group.end_group(printer, is_ci)?;
+        group.end_group(console.clone(), is_ci)?;
         result.context(format_context!("in CheckoutRepo"))?;
         Ok(())
     }
@@ -391,15 +391,15 @@ impl Checkout {
 
     pub fn checkout(
         self,
-        printer: &mut printer::Printer,
+        console: console::Console,
         name: Arc<str>,
         keep_workspace_on_failure: bool,
     ) -> anyhow::Result<()> {
         let result = match self {
             Checkout::Workflow(workflow) => {
-                workflow.checkout(printer, name, keep_workspace_on_failure)
+                workflow.checkout(console.clone(), name, keep_workspace_on_failure)
             }
-            Checkout::Repo(repo) => repo.checkout(printer, name, keep_workspace_on_failure),
+            Checkout::Repo(repo) => repo.checkout(console.clone(), name, keep_workspace_on_failure),
         };
         result.context(format_context!("during repo checkout"))?;
         Ok(())

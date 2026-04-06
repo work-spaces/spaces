@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use utils::{copy, git, lock, logger, ws};
 
-fn logger(progress: &mut printer::MultiProgressBar, url: Arc<str>) -> logger::Logger<'_> {
-    logger::Logger::new_progress(progress, url)
+fn logger(console: console::Console, url: Arc<str>) -> logger::Logger {
+    logger::Logger::new(console, url)
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -83,12 +83,12 @@ impl Git {
 
     fn execute_worktree_clone(
         &self,
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
         logger::push_deprecation_warning(None, "Support for worktrees will be removed in v0.16");
-        logger(progress, self.url.clone()).message("execute worktree clone");
+        logger(progress.console.clone(), self.url.clone()).message("execute worktree clone");
 
         let (relative_bare_store_path, name_dot_git) =
             git::BareRepository::url_to_relative_path_and_name(&self.url)
@@ -100,10 +100,12 @@ impl Git {
         );
         let mut lock_file = lock::FileLock::new(std::path::Path::new(&lock_file_path).into());
 
-        lock_file.lock(progress).context(format_context!(
-            "{name} - Failed to lock the repository {}",
-            self.spaces_key
-        ))?;
+        lock_file
+            .lock(progress.console.clone())
+            .context(format_context!(
+                "{name} - Failed to lock the repository {}",
+                self.spaces_key
+            ))?;
 
         let bare_repo =
             git::BareRepository::new(progress, store_path.as_ref(), &self.spaces_key, &self.url)
@@ -141,13 +143,13 @@ impl Git {
 
     fn execute_default_clone(
         &self,
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         name: &str,
         filter: Option<String>,
         is_new_branch: IsNewBranch,
     ) -> anyhow::Result<()> {
-        logger(progress, self.url.clone()).message(
+        logger(progress.console.clone(), self.url.clone()).message(
             format!(
                 "execute default clone with filter {:?}",
                 filter.clone().unwrap_or("None".to_string())
@@ -156,7 +158,7 @@ impl Git {
         );
 
         if is_new_branch == IsNewBranch::Yes && singleton::get_is_sync() {
-            logger(progress, self.url.clone())
+            logger(progress.console.clone(), self.url.clone())
                 .warning("Skipping update for dev branch during sync operation.");
             return Ok(());
         }
@@ -172,7 +174,7 @@ impl Git {
             ))?;
 
             if entries.count() > 0 {
-                logger(progress, self.url.clone()).debug(
+                logger(progress.console.clone(), self.url.clone()).debug(
                     format!(
                         "{} already exists and is populated - try to update",
                         spaces_name_path.display()
@@ -183,7 +185,7 @@ impl Git {
                 let existing_repo = git::Repository::new(self.url.clone(), self.spaces_key.clone());
 
                 if existing_repo.is_dirty(progress) {
-                    logger(progress, self.url.clone()).warning(
+                    logger(progress.console.clone(), self.url.clone()).warning(
                         format!(
                             "{} already exists and is dirty - not updating",
                             self.spaces_key
@@ -202,7 +204,7 @@ impl Git {
                             self.spaces_key
                         ))?;
                     } else {
-                        logger(progress, self.url.clone())
+                        logger(progress.console.clone(), self.url.clone())
                             .warning("Remote not tracked - not updating");
                     }
                 } else {
@@ -233,7 +235,7 @@ impl Git {
                 return Ok(());
             }
 
-            logger(progress, self.url.clone()).debug(
+            logger(progress.console.clone(), self.url.clone()).debug(
                 format!(
                     "{} already exists, but is not populated, try to clone",
                     spaces_name_path.display()
@@ -250,7 +252,7 @@ impl Git {
             // do a blake3 hash of sparse_string for the suffix
             let hash = blake3::hash(sparse_string.as_bytes());
 
-            logger(progress, self.url.clone())
+            logger(progress.console.clone(), self.url.clone())
                 .debug(format!("Sparse checkout mode will use {hash}",).as_str());
             hash.to_string().into()
         } else {
@@ -265,7 +267,7 @@ impl Git {
         let working_directory: Arc<str> =
             format!("{store_path}/cow/{relative_bare_store_path}").into();
 
-        logger(progress, self.url.clone())
+        logger(progress.console.clone(), self.url.clone())
             .debug(format!("cow copy in store at {working_directory}").as_str());
 
         std::fs::create_dir_all(working_directory.as_ref()).context(format_context!(
@@ -276,14 +278,16 @@ impl Git {
         let lock_file_path = format!("{working_directory}/{store_repo_name}.spaces.lock");
         let mut lock_file = lock::FileLock::new(std::path::Path::new(&lock_file_path).into());
 
-        lock_file.lock(progress).context(format_context!(
-            "{name} - Failed to lock the repository {}",
-            self.spaces_key
-        ))?;
+        lock_file
+            .lock(progress.console.clone())
+            .context(format_context!(
+                "{name} - Failed to lock the repository {}",
+                self.spaces_key
+            ))?;
 
         let repo_path: Arc<str> = format!("{working_directory}/{store_repo_name}").into();
         let store_repository = if !std::path::Path::new(repo_path.as_ref()).exists() {
-            logger(progress, self.url.clone())
+            logger(progress.console.clone(), self.url.clone())
                 .debug(format!("{repo_path} does not exist, cloning for the first time").as_str());
 
             let mut clone_arguments: Vec<Arc<str>> = vec!["clone".into()];
@@ -322,14 +326,14 @@ impl Git {
             git::Repository::new(self.url.clone(), repo_path.clone())
         };
 
-        logger(progress, self.url.clone())
+        logger(progress.console.clone(), self.url.clone())
             .debug(format!("{repo_path} is cloned, fetching latest changes").as_str());
 
         store_repository.fetch(progress).context(format_context!(
             "{name} - Failed to fetch repository {working_directory}/{store_repo_name}",
         ))?;
 
-        logger(progress, self.url.clone())
+        logger(progress.console.clone(), self.url.clone())
             .debug(format!("{repo_path} is fetched, checking out {:?}", self.checkout).as_str());
 
         store_repository
@@ -342,7 +346,7 @@ impl Git {
         if let git::Checkout::Revision(rev) = &self.checkout
             && store_repository.is_branch(progress, rev)
         {
-            logger(progress, self.url.clone()).debug(
+            logger(progress.console.clone(), self.url.clone()).debug(
                 format!("{repo_path} is on a branch, doing a hard reset to origin/{rev}").as_str(),
             );
             store_repository
@@ -393,11 +397,12 @@ impl Git {
 
     fn execute_shallow_clone(
         &self,
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
-        logger(progress, self.url.clone()).message("execute shallow clone");
+        let url_logger = logger(progress.console.clone(), self.url.clone());
+        url_logger.message("execute shallow clone");
 
         let branch = match &self.checkout {
             git::Checkout::NewBranch(branch_name) => {
@@ -410,7 +415,7 @@ impl Git {
 
         let workspace_directory = self.get_clone_working_directory(workspace.clone());
 
-        let clone_options = printer::ExecuteOptions {
+        let clone_options = console::ExecuteOptions {
             arguments: vec![
                 "clone".into(),
                 "--depth".into(),
@@ -427,11 +432,9 @@ impl Git {
 
         let clone_path = std::path::Path::new(self.spaces_key.as_ref());
         if clone_path.exists() {
-            logger(progress, self.url.clone())
-                .warning(format!("{} already exists", self.spaces_key).as_str());
+            url_logger.warning(format!("{} already exists", self.spaces_key).as_str());
         } else {
-            logger(progress, self.url.clone())
-                .trace(format!("git clone {clone_options:?}").as_str());
+            url_logger.trace(format!("git clone {clone_options:?}").as_str());
 
             progress
                 .execute_process("git", clone_options)
@@ -446,7 +449,7 @@ impl Git {
 
     pub fn execute(
         &self,
-        progress: &mut printer::MultiProgressBar,
+        progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
@@ -484,7 +487,8 @@ impl Git {
             git::Checkout::NewBranch(branch_name) => branch_name.clone(),
             git::Checkout::Revision(branch_name) => branch_name.clone(),
         };
-        logger(progress, self.url.clone()).debug(format!("using ref {ref_name}").as_str());
+        logger(progress.console.clone(), self.url.clone())
+            .debug(format!("using ref {ref_name}").as_str());
 
         let mut is_locked = false;
         let working_directory = self.get_working_directory_in_repo(workspace.clone());
@@ -501,7 +505,7 @@ impl Git {
                 Some(member)
             }
             Err(_) => {
-                logger(progress, self.url.clone())
+                logger(progress.console.clone(), self.url.clone())
                     .warning(format!("Failed to member to settings for: {}", self.url).as_str());
                 None
             }
@@ -515,12 +519,13 @@ impl Git {
 
         let is_create_lock_file = workspace.read().is_create_lock_file;
 
-        logger(progress, self.url.clone())
+        logger(progress.console.clone(), self.url.clone())
             .debug(format!("Is Create lock file: {is_create_lock_file}").as_str());
-        logger(progress, self.url.clone()).debug(format!("Is use lock: {is_use_lock}").as_str());
+        logger(progress.console.clone(), self.url.clone())
+            .debug(format!("Is use lock: {is_use_lock}").as_str());
 
         if workspace.read().is_create_lock_file {
-            logger(progress, self.url.clone()).debug("creating lock file");
+            logger(progress.console.clone(), self.url.clone()).debug("creating lock file");
             if let Some(commit_hash) =
                 git::get_commit_hash(progress, &self.url, working_directory.as_ref()).context(
                     format_context!("Failed to get commit hash for {working_directory}"),
@@ -546,14 +551,14 @@ impl Git {
                     .cloned()
             };
 
-            logger(progress, self.url.clone())
+            logger(progress.console.clone(), self.url.clone())
                 .debug(format!("Is lock for {name}: {commit_hash_lock:?}").as_str());
 
             if let Some(commit_hash) = commit_hash_lock {
-                logger(progress, self.url.clone())
+                logger(progress.console.clone(), self.url.clone())
                     .info(format!("applying {commit_hash} from lock file at {name}").as_str());
 
-                let options = printer::ExecuteOptions {
+                let options = console::ExecuteOptions {
                     working_directory: Some(working_directory.clone()),
                     arguments: vec!["checkout".into(), "--detach".into(), commit_hash.clone()],
                     ..Default::default()
@@ -564,7 +569,7 @@ impl Git {
                     member.version = Self::rev_to_version(Some(commit_hash.clone()));
                 }
 
-                logger(progress, self.url.clone())
+                logger(progress.console.clone(), self.url.clone())
                     .debug(format!("{}: git {options:?}", self.spaces_key).as_str());
 
                 git::execute_git_command(progress, &self.url, options).context(format_context!(
@@ -577,15 +582,15 @@ impl Git {
         }
 
         if is_new_branch == IsNewBranch::Yes && !singleton::get_is_sync() {
-            logger(progress, self.url.clone()).message("creating new branch");
+            logger(progress.console.clone(), self.url.clone()).message("creating new branch");
             let new_branch = workspace.read().get_new_branch_name();
-            let options = printer::ExecuteOptions {
+            let options = console::ExecuteOptions {
                 working_directory: Some(working_directory.clone()),
                 arguments: vec!["switch".into(), "-c".into(), new_branch],
                 ..Default::default()
             };
 
-            logger(progress, self.url.clone())
+            logger(progress.console.clone(), self.url.clone())
                 .debug(format!("{}: git {options:?}", self.spaces_key).as_str());
 
             git::execute_git_command(progress, &self.url, options).context(format_context!(
@@ -602,7 +607,7 @@ impl Git {
             let is_branch =
                 git::is_branch(progress, &self.url, working_directory.as_ref(), &ref_name);
             if is_branch {
-                logger(progress, self.url.clone()).info(
+                logger(progress.console.clone(), self.url.clone()).info(
                     format!(
                         "{} is a branch - workspace is not reproducible",
                         self.spaces_key
@@ -614,7 +619,7 @@ impl Git {
         }
 
         if let Some(member) = member {
-            logger(progress, self.url.clone()).debug("Adding member to workspace");
+            logger(progress.console.clone(), self.url.clone()).debug("Adding member to workspace");
             workspace.write().add_member(member);
         }
 

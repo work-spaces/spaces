@@ -22,8 +22,8 @@ pub use crate::rcache::CacheStatus;
 pub use crate::rule::Expect;
 use crate::{logger, ws};
 
-fn logs_logger(printer: &mut printer::Printer) -> logger::Logger<'_> {
-    logger::Logger::new_printer(printer, "logs".into())
+fn logs_logger(console: console::Console) -> logger::Logger {
+    logger::Logger::new(console, "logs".into())
 }
 
 pub const LOG_STATUS_FILE_NAME: &str = "log_status.json";
@@ -137,7 +137,7 @@ pub enum LogsCommand {
 }
 
 pub fn execute(
-    printer: &mut printer::Printer,
+    console: console::Console,
     workspace_path: &std::path::Path,
     command: LogsCommand,
 ) -> anyhow::Result<()> {
@@ -176,13 +176,13 @@ pub fn execute(
                 if json {
                     let output = serde_json::to_string(&names)
                         .context(format_context!("Failed to serialize rule names"))?;
-                    logs_logger(printer).raw(&output);
-                    logs_logger(printer).raw("\n");
+                    logs_logger(console.clone()).raw(&output);
+                    logs_logger(console.clone()).raw("\n");
                 } else {
                     let as_yaml = serde_yaml::to_string(&names).context(format_context!(
                         "Failed to serialize log folder names as YAML"
                     ))?;
-                    logs_logger(printer).raw(&as_yaml);
+                    logs_logger(console.clone()).raw(&as_yaml);
                 }
             } else {
                 let mut dirs: Vec<_> = std::fs::read_dir(&logs_path)
@@ -210,8 +210,8 @@ pub fn execute(
                         .collect();
                     let output = serde_json::to_string(&names)
                         .context(format_context!("Failed to serialize log folder names"))?;
-                    logs_logger(printer).raw(&output);
-                    logs_logger(printer).raw("\n");
+                    logs_logger(console.clone()).raw(&output);
+                    logs_logger(console.clone()).raw("\n");
                 } else {
                     let entries: Vec<_> = dirs
                         .iter()
@@ -223,7 +223,7 @@ pub fn execute(
                     let as_yaml = serde_yaml::to_string(&entries).context(format_context!(
                         "Failed to serialize log folder names as YAML"
                     ))?;
-                    logs_logger(printer).raw(&as_yaml);
+                    logs_logger(console.clone()).raw(&as_yaml);
                 }
             }
 
@@ -264,9 +264,9 @@ pub fn execute(
                 let value = rules_status
                     .query_member(&rule_name, &member, is_json)
                     .context(format_context!("Failed to query member"))?;
-                logs_logger(printer).raw(&value);
+                logs_logger(console.clone()).raw(&value);
                 if is_json == IsJson::Yes {
-                    logs_logger(printer).raw("\n");
+                    logs_logger(console.clone()).raw("\n");
                 }
             } else {
                 let status = rules_status
@@ -280,14 +280,14 @@ pub fn execute(
                         "Failed to serialize status for rule '{}'",
                         rule_name
                     ))?;
-                    logs_logger(printer).raw(&output);
-                    logs_logger(printer).raw("\n");
+                    logs_logger(console.clone()).raw(&output);
+                    logs_logger(console.clone()).raw("\n");
                 } else {
                     let output = serde_yaml::to_string(status).context(format_context!(
                         "Failed to serialize status for rule '{}'",
                         rule_name
                     ))?;
-                    logs_logger(printer).raw(&output);
+                    logs_logger(console.clone()).raw(&output);
                 };
             }
 

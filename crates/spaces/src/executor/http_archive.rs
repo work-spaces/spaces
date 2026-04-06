@@ -12,19 +12,19 @@ pub struct HttpArchive {
 impl HttpArchive {
     pub fn execute(
         &self,
-        mut progress: printer::MultiProgressBar,
+        progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
         let mut lock_file = self.http_archive.get_file_lock();
-        lock_file.lock(&mut progress).context(format_context!(
+        let console = progress.console.clone();
+        lock_file.lock(console.clone()).context(format_context!(
             "{name} - Failed to lock the spaces store for {}",
             self.http_archive.archive.url
         ))?;
 
-        let next_progress_bar = self
-            .http_archive
-            .sync(progress)
+        self.http_archive
+            .sync(console.clone())
             .context(format_context!("Failed to sync http_archive {}", name))?;
 
         let mut workspace_write_lock = workspace.write();
@@ -32,7 +32,7 @@ impl HttpArchive {
         let workspace_directory = workspace_write_lock.get_absolute_path();
         self.http_archive
             .create_links(
-                next_progress_bar,
+                console.clone(),
                 workspace_directory.as_ref(),
                 name,
                 &mut workspace_write_lock.settings.checkout.links,

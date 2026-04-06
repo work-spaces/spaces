@@ -10,8 +10,8 @@ const MANIFEST_FILE_NAME: &str = "store.spaces.json";
 pub const SPACES_STORE: &str = ".spaces/store";
 pub const SPACES_STORE_RCACHE: &str = "rcache";
 
-pub fn logger(printer: &mut printer::Printer) -> logger::Logger<'_> {
-    logger::Logger::new_printer(printer, "store".into())
+pub fn logger(console: console::Console) -> logger::Logger {
+    logger::Logger::new(console, "store".into())
 }
 
 #[derive(Debug, Clone, PartialEq, clap::ValueEnum)]
@@ -145,11 +145,11 @@ impl Store {
 
     pub fn show_info(
         &self,
-        printer: &mut printer::Printer,
+        console: console::Console,
         sort_by: SortBy,
         is_ci: ci::IsCi,
     ) -> anyhow::Result<()> {
-        let group = ci::GithubLogGroup::new_group(printer, is_ci, "Spaces Store Info")?;
+        let group = ci::GithubLogGroup::new_group(console.clone(), is_ci, "Spaces Store Info")?;
 
         let mut is_fix_needed = false;
 
@@ -166,38 +166,38 @@ impl Store {
 
         let mut total_size = 0;
         for (key, value) in entries.iter() {
-            logger(printer).info(format!("Path: {key}").as_str());
+            logger(console.clone()).info(format!("Path: {key}").as_str());
             let path = self.get_path_in_store(std::path::Path::new(key.as_ref()));
             if !path.exists() {
                 is_fix_needed = true;
-                logger(printer)
+                logger(console.clone())
                     .info(format!(" !!Path does not exist!! -- {}", path.display()).as_str());
             }
             if value.size == 0 {
                 is_fix_needed = true;
-                logger(printer).info(" !!Size is zero!!");
+                logger(console.clone()).info(" !!Size is zero!!");
             } else {
                 let bytesize = bytesize::ByteSize(value.size);
-                logger(printer).info(format!("  Size: {}", bytesize.display()).as_str());
+                logger(console.clone()).info(format!("  Size: {}", bytesize.display()).as_str());
             }
             total_size += value.size;
 
             let age = value.get_age(age::get_now());
-            logger(printer).info(format!("  Age: {age} days").as_str());
+            logger(console.clone()).info(format!("  Age: {age} days").as_str());
         }
         if is_fix_needed {
-            logger(printer).info("run `spaces store fix` to fix the issues");
+            logger(console.clone()).info("run `spaces store fix` to fix the issues");
         }
         let total_bytesize = bytesize::ByteSize(total_size);
-        logger(printer).info(format!("Total Size: {}", total_bytesize.display()).as_str());
+        logger(console.clone()).info(format!("Total Size: {}", total_bytesize.display()).as_str());
 
-        group.end_group(printer, is_ci)?;
+        group.end_group(console.clone(), is_ci)?;
         Ok(())
     }
 
     fn remove_unlisted_entries(
         &self,
-        printer: &mut printer::Printer,
+        console: console::Console,
         is_dry_run: bool,
     ) -> anyhow::Result<()> {
         let path_to_store = self.path_to_store.clone();
@@ -239,24 +239,25 @@ impl Store {
             {
                 let display = relative_path.display();
                 if is_dry_run {
-                    logger(printer).info(
+                    logger(console.clone()).info(
                         format!("Unlisted Entry (not removing, dry run): {display}",).as_str(),
                     );
                 } else {
-                    logger(printer).info(format!("Unlisted Entry (removing): {display}").as_str());
+                    logger(console.clone())
+                        .info(format!("Unlisted Entry (removing): {display}").as_str());
 
                     if entry_path.starts_with(&path_to_store) {
                         match std::fs::remove_dir_all(entry_path) {
                             Ok(()) => {}
                             Err(e) => {
-                                logger(printer).error(
+                                logger(console.clone()).error(
                                     format!("Failed to remove {display}: {e} - remove manually")
                                         .as_str(),
                                 );
                             }
                         }
                     } else {
-                        logger(printer).error(
+                        logger(console.clone()).error(
                             format!("Internal Error: can't remove {display} - not in store")
                                 .as_str(),
                         );
@@ -270,17 +271,17 @@ impl Store {
 
     pub fn fix(
         &mut self,
-        printer: &mut printer::Printer,
+        console: console::Console,
         is_dry_run: bool,
         is_ci: ci::IsCi,
     ) -> anyhow::Result<()> {
-        let group = ci::GithubLogGroup::new_group(printer, is_ci, "Spaces Store Fix")?;
+        let group = ci::GithubLogGroup::new_group(console.clone(), is_ci, "Spaces Store Fix")?;
 
         let mut remove_entries = Vec::new();
         let mut delete_directories = Vec::new();
         let path_to_store = self.path_to_store.clone();
         for (key, value) in self.entries.iter_mut() {
-            logger(printer).info(format!("Path: {key}").as_str());
+            logger(console.clone()).info(format!("Path: {key}").as_str());
             let path = path_to_store.join(key.as_ref());
             if !path.exists() {
                 remove_entries.push(key.clone());
@@ -290,18 +291,20 @@ impl Store {
             if updated_size != value.size {
                 if !is_dry_run {
                     let bytesize = bytesize::ByteSize(updated_size);
-                    logger(printer).info(format!(" Updated size {}", bytesize.display()).as_str());
+                    logger(console.clone())
+                        .info(format!(" Updated size {}", bytesize.display()).as_str());
                     value.size = updated_size;
                 } else {
                     let bytesize = bytesize::ByteSize(updated_size);
-                    logger(printer).info(format!(" Updating size {}", bytesize.display()).as_str());
+                    logger(console.clone())
+                        .info(format!(" Updating size {}", bytesize.display()).as_str());
                 }
             }
 
             if !key.ends_with(".git") {
                 let result = http_archive::check_downloaded_archive(&path);
                 if let Err(err) = result {
-                    logger(printer).warning(format!("{key} is corrupted. {err}").as_str());
+                    logger(console.clone()).warning(format!("{key} is corrupted. {err}").as_str());
                     remove_entries.push(key.clone());
                     delete_directories.push(path);
                 }
@@ -312,22 +315,22 @@ impl Store {
             make_path_dirs_user_writable(path_to_store.as_path());
 
             for key in remove_entries {
-                logger(printer).info(format!("Removing entry: {key}").as_str());
+                logger(console.clone()).info(format!("Removing entry: {key}").as_str());
                 self.entries.remove(&key);
             }
 
             for path in delete_directories {
                 if path.starts_with(path_to_store.as_path()) {
-                    logger(printer)
+                    logger(console.clone())
                         .info(format!("Deleting directory: {}", path.display()).as_str());
                     std::fs::remove_dir_all(path.as_path()).unwrap_or_else(|err| {
-                        logger(printer).warning(
+                        logger(console.clone()).warning(
                             format!("Failed to delete directory {}: {err}", path.display())
                                 .as_str(),
                         );
                     });
                 } else {
-                    logger(printer).error(
+                    logger(console.clone()).error(
                         format!("Cannot delete out of store directory: {}", path.display())
                             .as_str(),
                     );
@@ -335,21 +338,21 @@ impl Store {
             }
         }
 
-        self.remove_unlisted_entries(printer, is_dry_run)
+        self.remove_unlisted_entries(console.clone(), is_dry_run)
             .context(format_context!("While checking for unlisted entries"))?;
 
-        group.end_group(printer, is_ci)?;
+        group.end_group(console.clone(), is_ci)?;
         Ok(())
     }
 
     pub fn prune(
         &mut self,
-        printer: &mut printer::Printer,
+        console: console::Console,
         age: u16,
         is_dry_run: bool,
         is_ci: ci::IsCi,
     ) -> anyhow::Result<()> {
-        let group = ci::GithubLogGroup::new_group(printer, is_ci, "Spaces Store Prune")?;
+        let group = ci::GithubLogGroup::new_group(console.clone(), is_ci, "Spaces Store Prune")?;
         let mut remove_entries = Vec::new();
         let path_to_store = self.path_to_store.clone();
         if !is_dry_run {
@@ -368,25 +371,25 @@ impl Store {
         }
 
         for (key, age, size, path) in remove_entries {
-            logger(printer).info(format!("Pruning {key}: {size}").as_str());
-            logger(printer).info(format!("- Age: {age} days").as_str());
-            logger(printer).info(format!("- Size: {size}").as_str());
+            logger(console.clone()).info(format!("Pruning {key}: {size}").as_str());
+            logger(console.clone()).info(format!("- Age: {age} days").as_str());
+            logger(console.clone()).info(format!("- Size: {size}").as_str());
             if !is_dry_run {
                 self.entries.remove(&key);
                 if let Err(e) = std::fs::remove_dir_all(&path) {
-                    logger(printer)
+                    logger(console.clone())
                         .error(format!("Failed to remove entry: {key}, error: {e}").as_str());
                 } else {
-                    logger(printer).info("- Removed.");
+                    logger(console.clone()).info("- Removed.");
                 }
             } else {
-                logger(printer).info("- Dry run. Not removed.");
+                logger(console.clone()).info("- Dry run. Not removed.");
             }
         }
 
-        logger(printer).info(format!("Total removed: {total_size_removed}").as_str());
+        logger(console.clone()).info(format!("Total removed: {total_size_removed}").as_str());
 
-        group.end_group(printer, is_ci)?;
+        group.end_group(console.clone(), is_ci)?;
 
         Ok(())
     }

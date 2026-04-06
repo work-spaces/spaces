@@ -3,6 +3,8 @@ Spaces starlark checkout/run script to make changes to spaces, printer, and arch
 With VSCode/Zed integration
 """
 
+load("//@star/sdk/star/deps.star", "deps")
+load("//@star/sdk/star/glob.star", "glob")
 load(
     "//@star/sdk/star/run.star",
     "run_add_exec",
@@ -20,32 +22,32 @@ load(
     "workspace_is_env_var_set",
 )
 
-ANNOTATED_INPUTS = [
-    "+//spaces/Cargo.toml",
-    "+//spaces/Cargo.workspace.toml",
-    "+//spaces/**/*.rs",
-    "-//spaces/target/**",
-    "+//printer/**/*.rs",
-    "+//archiver/**/*.rs",
-    "+//spaces/rust-toolchain.toml",
-]
+GLOB_DEPS = glob(includes = [
+    "//Cargo.toml",
+    "//spaces/Cargo.toml",
+    "//spaces/Cargo.workspace.toml",
+    "//spaces/**/*.rs",
+    "//printer/**/*.rs",
+    "//archiver/**/*.rs",
+    "//spaces/rust-toolchain.toml",
+], excludes = [
+    "//spaces/target/**",
+])
 
 run_add_exec(
     "check",
     command = "cargo",
     args = ["check"],
     help = "Run cargo check on workspace",
-    inputs = ANNOTATED_INPUTS,
-    deps = [":rustup_update"],
+    deps = deps(rules = [":rustup_update"], globs = [GLOB_DEPS]),
     visibility = visibility_private(),
 )
 
 run_add_exec(
     "build",
     command = "cargo",
-    inputs = ANNOTATED_INPUTS,
     args = ["build"],
-    deps = [":check", ":rustup_update"],
+    deps = deps(rules = [":rustup_update", ":check"], globs = [GLOB_DEPS]),
     visibility = visibility_private(),
     help = "Run cargo build on workspace",
 )
@@ -55,8 +57,7 @@ run_add_exec(
     command = "cargo",
     args = ["clippy"],
     log_level = "Passthrough",
-    inputs = ANNOTATED_INPUTS,
-    deps = [":rustup_update"],
+    deps = deps(rules = [":rustup_update"], globs = [GLOB_DEPS]),
     help = "Run cargo clippy on workspace",
     visibility = visibility_private(),
 )
@@ -66,7 +67,7 @@ run_add_exec(
     command = "cargo",
     args = ["fmt"],
     log_level = "Passthrough",
-    deps = [":rustup_update"],
+    deps = deps(rules = [":rustup_update"], globs = [GLOB_DEPS]),
     help = "Run cargo fmt on workspace",
     visibility = visibility_private(),
 )
@@ -83,8 +84,7 @@ run_add_exec_test(
         "RUST_BACKTRACE": "1",
         "RUST_LOG": "trace",
     },
-    inputs = ANNOTATED_INPUTS,
-    deps = [":rustup_update"],
+    deps = deps(rules = [":rustup_update"], globs = [GLOB_DEPS]),
     visibility = visibility_rules(["//:test"]),
 )
 
@@ -99,14 +99,15 @@ run_add_exec(
     "rustup_update",
     command = "rustup",
     args = ["update"],
-    inputs = ["+//spaces/rust-toolchain.toml"],
+    deps = deps(files = ["//spaces/rust-toolchain.toml"]),
     help = "Update the Rust toolchain via rustup",
     visibility = visibility_private(),
 )
 
-shell(
+run_add_exec(
     "install_dev",
-    script = "cargo install --force --path=spaces/crates/spaces --profile=dev --root={}".format(root),
+    command = "bash",
+    args = ["-c", "cargo install --force --path=spaces/crates/spaces --profile=dev --root={}".format(root)],
     deps = [":rustup_update"],
     visibility = visibility_private(),
     help = "Install dev build on local system",
