@@ -11,6 +11,9 @@ impl ConsoleWriter for Writer {
 
     fn add_progress(&mut self, _label: &str, _prefix: &str, _total: Option<u64>) {}
 
+    fn insert_progress(&mut self, _index: usize, _label: &str, _prefix: &str, _total: Option<u64>) {
+    }
+
     fn set_progress_message(&mut self, _label: &str, _message: &str) {}
     fn set_progress_prefix(&mut self, _label: &str, _prefix: &str) {}
 

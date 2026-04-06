@@ -60,6 +60,21 @@ impl ConsoleWriter for Writer {
         });
     }
 
+    fn insert_progress(&mut self, index: usize, label: &str, prefix: &str, total: Option<u64>) {
+        let index = index.min(self.component.active_progress.len());
+        self.component.active_progress.insert(
+            index,
+            ui::ActiveProgress {
+                name: label.to_string(),
+                prefix: prefix.to_string(),
+                message: String::new(),
+                position: 0,
+                total,
+                start_time: std::time::Instant::now(),
+            },
+        );
+    }
+
     fn set_progress_message(&mut self, label: &str, message: &str) {
         if let Some(entry) = self
             .component

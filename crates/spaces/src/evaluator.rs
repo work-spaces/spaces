@@ -472,8 +472,9 @@ pub fn evaluate_starlark_modules(
                 // if the repo contains more spaces.star files
 
                 if progress.is_none() {
-                    progress = Some(console::Progress::new(
+                    progress = Some(console::Progress::new_insert(
                         console.clone(),
+                        0,
                         "Executing tasks",
                         Some(0),
                         None,

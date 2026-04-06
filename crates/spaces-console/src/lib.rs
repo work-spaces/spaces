@@ -157,6 +157,15 @@ impl Console {
         }
     }
 
+    fn insert_progress(&self, index: usize, label: &str, prefix: &str, total: Option<u64>) {
+        if self.state.read().unwrap().verbosity.is_show_progress_bars {
+            self.writer
+                .lock()
+                .unwrap()
+                .insert_progress(index, label, prefix, total);
+        }
+    }
+
     fn set_progress_total(&self, label: &str, total: Option<u64>) {
         if self.state.read().unwrap().verbosity.is_show_progress_bars {
             self.writer.lock().unwrap().set_progress_total(label, total);
@@ -367,6 +376,22 @@ impl Progress {
     ) -> Self {
         let label = label.to_string();
         console.add_progress(label.as_str(), label.as_str(), total);
+        Self {
+            console,
+            label,
+            final_message: super_console::string_to_lines(final_message.as_deref()),
+        }
+    }
+
+    pub fn new_insert<LabelType: std::fmt::Display>(
+        console: Console,
+        index: usize,
+        label: LabelType,
+        total: Option<u64>,
+        final_message: Option<String>,
+    ) -> Self {
+        let label = label.to_string();
+        console.insert_progress(index, label.as_str(), label.as_str(), total);
         Self {
             console,
             label,
