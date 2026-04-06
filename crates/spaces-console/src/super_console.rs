@@ -150,7 +150,6 @@ impl Drop for Writer {
     fn drop(&mut self) {
         self.component.active_progress.clear();
         if let Some(console) = self.console.take() {
-            self.refresh();
             let _ = console.finalize(&self.component);
         }
     }

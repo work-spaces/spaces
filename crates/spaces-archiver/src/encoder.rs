@@ -197,7 +197,8 @@ impl Encoder {
             .into_inner()
             .context(format_context!("{driver:?}"))?;
 
-        let total_chunks = contents.len() / 4096;
+        const CHUNK_SIZE: usize = 4096;
+        let total_steps = contents.len().div_ceil(CHUNK_SIZE) as u64;
 
         driver::update_status(
             progress,
@@ -207,23 +208,19 @@ impl Encoder {
             },
         );
 
-        for chunk in contents.as_slice().chunks(total_chunks) {
+        for chunk in contents.as_slice().chunks(CHUNK_SIZE) {
             driver::update_status(
                 progress,
                 UpdateStatus {
                     increment: Some(1),
-                    total: Some((contents.len() / total_chunks) as u64),
+                    total: Some(total_steps),
                     ..Default::default()
                 },
             );
 
-            if !chunk.is_empty() {
-                encoder
-                    .write_all(chunk)
-                    .context(format_context!("encoder with driver {driver:?} failed"))?;
-            } else {
-                break;
-            }
+            encoder
+                .write_all(chunk)
+                .context(format_context!("encoder with driver {driver:?} failed"))?;
         }
         Ok(())
     }

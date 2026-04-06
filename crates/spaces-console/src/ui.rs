@@ -58,7 +58,7 @@ impl ActiveProgress {
             let filled_count = if total == 0 {
                 0
             } else {
-                (self.position as usize * BAR_WIDTH / total as usize) % BAR_WIDTH
+                (self.position as usize * BAR_WIDTH / total as usize).min(BAR_WIDTH)
             };
             let filled = filled_char
                 .to_string()
@@ -115,7 +115,7 @@ impl ActiveProgress {
         line.push(prefix_span);
 
         // Truncate message to fit remaining width
-        let fixed_width = elapsed_str.len() + 1 + bar_width + 1 + self.name.len() + 2;
+        let fixed_width = elapsed_str.len() + 1 + bar_width + 1 + self.prefix.len() + 2;
         let msg_max = max_width.saturating_sub(fixed_width);
         let message: String = if self.message.chars().count() > msg_max {
             let truncated: String = self

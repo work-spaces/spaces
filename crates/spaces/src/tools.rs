@@ -37,7 +37,6 @@ fn download_and_install(
     console: console::Console,
     name: &str,
     platform_archive: builtins::checkout::PlatformArchive,
-    _is_force_link: bool,
 ) -> anyhow::Result<Option<String>> {
     let logger = tools_logger(console.clone());
     let this_platform =
@@ -71,10 +70,6 @@ fn download_and_install(
             http_archive
                 .sync(console.clone())
                 .context(format_context!("Failed to sync http archive"))?;
-
-            http_archive
-                .create_links(console.clone(), spaces_tools.as_ref(), "unused", &mut links)
-                .context(format_context!("Failed to create links"))?;
         } else {
             logger.debug(format!("Skipping download of {name}").as_str());
         };
@@ -170,7 +165,7 @@ fn cleanup_checkouts(console: console::Console, age: u16, is_dry_run: bool) -> a
     Ok(())
 }
 
-pub fn install_tools(console: console::Console, is_force_link: bool) -> anyhow::Result<()> {
+pub fn install_tools(console: console::Console, _is_force_link: bool) -> anyhow::Result<()> {
     let logger = tools_logger(console.clone());
     // install gh in the store bin if it does not exist
     let store_path = ws::get_checkout_store_path();
@@ -188,11 +183,10 @@ pub fn install_tools(console: console::Console, is_force_link: bool) -> anyhow::
     for (name, json) in TOOLS {
         logger.debug(format!("dowload and install {name}").as_str());
         let tool: builtins::checkout::PlatformArchive =
-            serde_json::from_str(json).context(format_context!("Failed to parse oras json"))?;
+            serde_json::from_str(json).context(format_context!("Failed to parse {name} json"))?;
 
-        if let Some(relative_path) =
-            download_and_install(console.clone(), name, tool, is_force_link)
-                .context(format_context!("Failed to download and install tools"))?
+        if let Some(relative_path) = download_and_install(console.clone(), name, tool)
+            .context(format_context!("Failed to download and install tools"))?
         {
             manifest_store
                 .add_entry(std::path::Path::new(&relative_path))
