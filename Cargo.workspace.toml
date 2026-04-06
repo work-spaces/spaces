@@ -30,7 +30,6 @@ console = { path = "spaces/crates/spaces-console", package = "spaces-console" }
 utils = { path = "spaces/crates/spaces-utils", package = "spaces-utils" }
 starstd.path = "spaces/crates/starstd"
 
-
 [profile.dev]
 opt-level = 3
 lto = false
