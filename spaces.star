@@ -93,7 +93,7 @@ SPACES_INSTALL_ROOT = "SPACES_INSTALL_ROOT"
 if workspace_is_env_var_set(SPACES_INSTALL_ROOT):
     root = workspace_get_env_var(SPACES_INSTALL_ROOT)
 else:
-    root = "~/.local"
+    root = "{}/.local".format(workspace_get_env_var("HOME"))
 
 run_add_exec(
     "rustup_update",
