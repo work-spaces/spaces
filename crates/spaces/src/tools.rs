@@ -181,7 +181,7 @@ pub fn install_tools(console: console::Console, _is_force_link: bool) -> anyhow:
         )?;
 
     for (name, json) in TOOLS {
-        logger.debug(format!("dowload and install {name}").as_str());
+        logger.info(format!("dowload and install {name}").as_str());
         let tool: builtins::checkout::PlatformArchive =
             serde_json::from_str(json).context(format_context!("Failed to parse {name} json"))?;
 
