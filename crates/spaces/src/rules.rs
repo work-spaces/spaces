@@ -179,7 +179,9 @@ pub fn execute_rule(
                     None,
                     displayed_rule.as_ref(),
                 );
-            } else if task.rule.type_ == Some(rule::RuleType::Optional) {
+            } else if skip_execute_message.is_empty()
+                && task.rule.type_ == Some(rule::RuleType::Optional)
+            {
                 logger.debug("Skipping because it is optional");
                 skip_execute_message = logger::make_finalize_line(
                     logger::FinalType::NotRequired,
@@ -229,11 +231,13 @@ pub fn execute_rule(
                     // if the user has manually deleted them
                     Some(check_changes.digest)
                 } else {
-                    skip_execute_message = logger::make_finalize_line(
-                        logger::FinalType::NoChanges,
-                        None,
-                        displayed_rule.as_ref(),
-                    );
+                    if skip_execute_message.is_empty() {
+                        skip_execute_message = logger::make_finalize_line(
+                            logger::FinalType::NoChanges,
+                            None,
+                            displayed_rule.as_ref(),
+                        );
+                    }
                     None
                 }
             } else {
@@ -269,11 +273,7 @@ pub fn execute_rule(
             if task.rule.type_ == Some(rule::RuleType::Setup) {
                 progress.set_finalize_none();
             } else {
-                progress.set_finalize_lines(logger::make_finalize_line(
-                    logger::FinalType::NoChanges,
-                    None,
-                    displayed_rule.as_ref(),
-                ));
+                progress.set_finalize_lines(skip_execute_message.clone());
             }
             (false, Ok(executor::TaskResult::new()))
         } else {
