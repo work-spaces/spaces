@@ -171,7 +171,7 @@ impl Component for UiComponent {
 
         if total > 0 {
             let hidden_str = if hidden > 0 {
-                format!("plus {hidden} more")
+                format!(" plus {hidden} more")
             } else {
                 String::new()
             };
