@@ -40,6 +40,18 @@ pub struct SparseCheckout {
     pub list: Vec<Arc<str>>,
 }
 
+impl SparseCheckout {
+    pub fn get_hash_string(&self) -> Arc<str> {
+        let mut sparse_string = self.mode.to_string();
+        for item in self.list.iter() {
+            sparse_string.push_str(item);
+        }
+        // do a blake3 hash of sparse_string for the suffix
+        let hash = blake3::hash(sparse_string.as_bytes());
+        hash.to_string().into()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Repo {
