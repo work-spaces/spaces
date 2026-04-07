@@ -245,16 +245,7 @@ impl Git {
         }
 
         let suffix: Arc<str> = if let Some(sparse_checkout) = self.sparse_checkout.as_ref() {
-            let mut sparse_string = sparse_checkout.mode.to_string();
-            for item in sparse_checkout.list.iter() {
-                sparse_string.push_str(item);
-            }
-            // do a blake3 hash of sparse_string for the suffix
-            let hash = blake3::hash(sparse_string.as_bytes());
-
-            logger(progress.console.clone(), self.url.clone())
-                .debug(format!("Sparse checkout mode will use {hash}",).as_str());
-            hash.to_string().into()
+            sparse_checkout.get_hash_string()
         } else {
             "".into()
         };

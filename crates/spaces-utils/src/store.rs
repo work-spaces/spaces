@@ -300,22 +300,23 @@ impl Store {
             .map(std::ffi::OsStr::new)
             .collect();
 
-        let http_path = path_to_store.join("http");
-        let https_path = path_to_store.join("https");
+        let managed_top_level_dirs = self.get_managed_top_level_dirs();
 
-        let http_entries = walkdir::WalkDir::new(&http_path)
-            .into_iter()
-            .filter_map(|e| e.ok());
+        let all_entries: Vec<_> = managed_top_level_dirs
+            .iter()
+            .flat_map(|dir| {
+                walkdir::WalkDir::new(path_to_store.join(dir))
+                    .into_iter()
+                    .filter_map(|e| e.ok())
+                    .collect::<Vec<_>>()
+            })
+            .collect();
 
-        let https_entries = walkdir::WalkDir::new(&https_path)
-            .into_iter()
-            .filter_map(|e| e.ok());
-
-        let entries = http_entries.chain(https_entries).filter(|e| {
+        let entries = all_entries.into_iter().filter(|e| {
             let path = e.path();
             if path.is_dir() {
                 let extension = path.extension().unwrap_or_default();
-                suffixes.contains(&extension)
+                suffixes.contains(&extension) || path.join(".git").exists()
             } else {
                 false
             }
@@ -402,7 +403,13 @@ impl Store {
                 }
             }
 
-            if !key.ends_with(".git") {
+            let key_path = std::path::Path::new(key.as_ref());
+            let is_git_suffix = key_path
+                .extension()
+                .map(|e| e.to_string_lossy().starts_with("git"))
+                .unwrap_or(false);
+
+            if !is_git_suffix {
                 let result = http_archive::check_downloaded_archive(&path);
                 if let Err(err) = result {
                     log.warning(format!("{key} is corrupted. {err}").as_str());
