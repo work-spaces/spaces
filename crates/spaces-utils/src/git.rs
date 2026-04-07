@@ -42,8 +42,7 @@ pub struct SparseCheckout {
 
 impl SparseCheckout {
     pub fn get_hash_string(&self) -> Arc<str> {
-        let mut sparse_string = String::new();
-        self.mode.to_string();
+        let mut sparse_string = self.mode.to_string();
         for item in self.list.iter() {
             sparse_string.push_str(item);
         }

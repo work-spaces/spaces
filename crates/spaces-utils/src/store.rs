@@ -316,7 +316,12 @@ impl Store {
             let path = e.path();
             if path.is_dir() {
                 let extension = path.extension().unwrap_or_default();
-                suffixes.contains(&extension) || path.join(".git").exists()
+                if suffixes.contains(&extension) {
+                    true
+                } else {
+                    let extension = extension.to_string_lossy();
+                    extension.starts_with("git") && path.join(".git").exists()
+                }
             } else {
                 false
             }
