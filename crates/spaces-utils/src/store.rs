@@ -530,12 +530,21 @@ impl Store {
             progress.increment(1);
         }
 
-        logger(console.clone()).info(format!("Total removed: {total_size_removed}").as_str());
-
+        let total_removed_message = if is_dry_run {
+            format!("Total to remove in dry run: {total_size_removed}")
+        } else {
+            format!("Total removed: {total_size_removed}")
+        };
+        logger(console.clone()).info(total_removed_message.as_str());
+        let finalize_message = if is_dry_run {
+            format!("dry run: would prune {total_size_removed}")
+        } else {
+            format!("pruned {total_size_removed}")
+        };
         progress.set_finalize_lines(logger::make_finalize_line(
             logger::FinalType::Finished,
             progress.elapsed(),
-            &format!("pruned {total_size_removed}"),
+            finalize_message.as_str(),
         ));
 
         group.end_group(console.clone(), is_ci)?;
