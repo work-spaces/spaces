@@ -501,9 +501,7 @@ impl Store {
                 let bytesize = bytesize::ByteSize(entry.size);
                 total_size_removed += bytesize.as_u64();
                 remove_entries.push((key.clone(), entry_age, bytesize, path.clone()));
-                progress.set_message(&format!("preparing to prune {key} with {bytesize}"));
             }
-            progress.increment(1);
         }
 
         let mut progress = console::Progress::new(
