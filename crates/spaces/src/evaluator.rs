@@ -213,7 +213,7 @@ fn star_logger(console: console::Console) -> logger::Logger {
 fn insert_setup_and_all_rules(
     workspace: workspace::WorkspaceArc,
     target: Option<Arc<str>>,
-) -> anyhow::Result<Option<Arc<str>>> {
+) -> anyhow::Result<Arc<str>> {
     // insert the //:setup rule
 
     rules::add_setup_dep_to_run_rules()
@@ -322,11 +322,7 @@ fn insert_setup_and_all_rules(
     ))
     .context(format_context!("Failed to insert task `//:clean`"))?;
 
-    if target.is_none() {
-        Ok(Some(rule::ALL_RULE_NAME.into()))
-    } else {
-        Ok(target)
-    }
+    Ok(target.unwrap_or(rule::ALL_RULE_NAME.into()))
 }
 
 fn show_eval_progress(
@@ -616,7 +612,7 @@ fn execute_tasks(
     workspace: workspace::WorkspaceArc,
     phase: task::Phase,
     target: Option<Arc<str>>,
-    run_target: Option<Arc<str>>,
+    run_target: Arc<str>,
     modules: &[(Arc<str>, Arc<str>)],
 ) -> anyhow::Result<IsSaveBin> {
     let logger = star_logger(console.clone());
@@ -639,9 +635,10 @@ fn execute_tasks(
         task::Phase::Run => {
             update_secrets(console.clone(), workspace.clone())
                 .context(format_context!("while entering run phase"))?;
-            rules::update_target_dependency_graph(console.clone(), run_target.clone()).context(
-                format_context!("Failed to update run target dependency graph for {target:?}"),
-            )?;
+            rules::update_target_dependency_graph(console.clone(), Some(run_target.clone()))
+                .context(format_context!(
+                    "Failed to update run target dependency graph for {run_target}"
+                ))?;
 
             {
                 // apply args_env to workspace
@@ -944,7 +941,10 @@ pub fn run_starlark_modules(
             )
             .context(format_context!("importing tasks"))?;
             logger.trace(format!("tasks {}", rules::get_pretty_tasks()).as_str());
-            (target.clone(), IsSaveBin::No)
+            (
+                target.clone().unwrap_or(rule::ALL_RULE_NAME.into()),
+                IsSaveBin::No,
+            )
         };
 
     let is_save_bin = if is_execute_tasks == IsExecuteTasks::Yes {
