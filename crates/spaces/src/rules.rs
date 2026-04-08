@@ -161,6 +161,7 @@ pub fn execute_rule(
 
             deps_rule_signal.wait_is_ready(std::time::Duration::from_millis(100));
             count += 1;
+            progress.reset_elapsed();
         }
 
         logger.debug(format!("{name} All dependencies are done").as_str());
