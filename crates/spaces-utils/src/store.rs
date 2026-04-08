@@ -488,14 +488,6 @@ impl Store {
         let group = ci::GithubLogGroup::new_group(console.clone(), is_ci, "Spaces Store Prune")?;
         let mut remove_entries = Vec::new();
 
-        let total_count = self.entries.len();
-        let mut progress = console::Progress::new(
-            console.clone(),
-            "store-prune",
-            Some(total_count as u64),
-            None,
-        );
-
         let path_to_store = self.path_to_store.clone();
         if !is_dry_run {
             make_path_dirs_user_writable(path_to_store.as_path());
@@ -509,12 +501,15 @@ impl Store {
                 let bytesize = bytesize::ByteSize(entry.size);
                 total_size_removed += bytesize.as_u64();
                 remove_entries.push((key.clone(), entry_age, bytesize, path.clone()));
-                progress.set_message(&format!("preparing to prune {key} with {bytesize}"));
             }
-            progress.increment(1);
         }
 
-        progress.update_progress(0, remove_entries.len() as u64);
+        let mut progress = console::Progress::new(
+            console.clone(),
+            "store-prune",
+            Some(remove_entries.len() as u64),
+            None,
+        );
 
         for (key, age, size, path) in remove_entries {
             logger(console.clone()).info(format!("Pruning {key}: {size}").as_str());
