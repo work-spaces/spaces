@@ -32,12 +32,16 @@ impl ConsoleWriter for Writer {
         let s = s.to_string();
         let message = s.trim_end_matches('\n');
         if !message.is_empty() {
-            let lines: Vec<superconsole::Line> = message
-                .split('\n')
-                .map(|l| superconsole::Line::from_iter([superconsole::Span::new_unstyled_lossy(l)]))
-                .collect();
             if let Some(console) = self.console.as_mut() {
+                let lines: Vec<superconsole::Line> = message
+                    .split('\n')
+                    .map(|l| {
+                        superconsole::Line::from_iter([superconsole::Span::new_unstyled_lossy(l)])
+                    })
+                    .collect();
                 console.emit(superconsole::Lines(lines));
+            } else {
+                println!("{}", message);
             }
         }
         Ok(())
