@@ -487,6 +487,15 @@ impl Store {
     ) -> anyhow::Result<()> {
         let group = ci::GithubLogGroup::new_group(console.clone(), is_ci, "Spaces Store Prune")?;
         let mut remove_entries = Vec::new();
+
+        let total_count = self.entries.len();
+        let mut progress = console::Progress::new(
+            console.clone(),
+            "store-prune",
+            Some(total_count as u64),
+            None,
+        );
+
         let path_to_store = self.path_to_store.clone();
         if !is_dry_run {
             make_path_dirs_user_writable(path_to_store.as_path());
@@ -500,13 +509,18 @@ impl Store {
                 let bytesize = bytesize::ByteSize(entry.size);
                 total_size_removed += bytesize.as_u64();
                 remove_entries.push((key.clone(), entry_age, bytesize, path.clone()));
+                progress.set_message(&format!("preparing to prune {key} with {bytesize}"));
             }
+            progress.increment(1);
         }
+
+        progress.update_progress(0, remove_entries.len() as u64);
 
         for (key, age, size, path) in remove_entries {
             logger(console.clone()).info(format!("Pruning {key}: {size}").as_str());
             logger(console.clone()).info(format!("- Age: {age} days").as_str());
             logger(console.clone()).info(format!("- Size: {size}").as_str());
+            progress.set_message(&format!("pruning {key} with {size}"));
             if !is_dry_run {
                 self.entries.remove(&key);
                 if let Err(e) = std::fs::remove_dir_all(&path) {
@@ -518,9 +532,16 @@ impl Store {
             } else {
                 logger(console.clone()).info("- Dry run. Not removed.");
             }
+            progress.increment(1);
         }
 
         logger(console.clone()).info(format!("Total removed: {total_size_removed}").as_str());
+
+        progress.set_finalize_lines(logger::make_finalize_line(
+            logger::FinalType::Finished,
+            progress.elapsed(),
+            &format!("pruned {total_size_removed}"),
+        ));
 
         group.end_group(console.clone(), is_ci)?;
 
