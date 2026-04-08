@@ -27,8 +27,6 @@ GLOB_DEPS = glob(includes = [
     "//spaces/Cargo.toml",
     "//spaces/Cargo.workspace.toml",
     "//spaces/**/*.rs",
-    "//printer/**/*.rs",
-    "//archiver/**/*.rs",
     "//spaces/rust-toolchain.toml",
 ], excludes = [
     "//spaces/target/**",
