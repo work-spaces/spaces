@@ -50,6 +50,8 @@ impl ConsoleWriter for Writer {
     fn emit_line(&mut self, line: superconsole::Line) {
         if let Some(console) = self.console.as_mut() {
             console.emit(superconsole::Lines(vec![line]));
+        } else {
+            println!("{}", line.to_unstyled());
         }
     }
 
