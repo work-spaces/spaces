@@ -311,6 +311,63 @@ pub fn run_shell_in_workspace(
     Ok(())
 }
 
+pub fn run_exec_in_workspace(
+    printer: &mut printer::Printer,
+    command: Vec<Arc<str>>,
+) -> anyhow::Result<()> {
+    if command.is_empty() {
+        return Err(format_error!("No command specified"));
+    }
+
+    let workspace = get_workspace(
+        printer,
+        RunWorkspace::Target(None, vec![]),
+        None,
+        workspace::IsClearInputs::No,
+        workspace::IsCheckoutPhase::No,
+        workspace::IsCreateLogFolder::No,
+    )
+    .context(format_context!("while getting workspace"))?;
+
+    let workspace_arc = workspace::WorkspaceArc::new(lock::StateLock::new(workspace));
+
+    // Evaluate the environment to get the workspace environment variables
+    evaluate_environment(printer, workspace_arc.clone())
+        .context(format_context!("while evaluating starlark env module"))?;
+
+    let run_environment = workspace_arc
+        .read()
+        .get_env_vars()
+        .context(format_context!("while getting env vars"))?;
+
+    let relative_directory = workspace_arc.read().relative_invoked_path.clone();
+    let working_directory =
+        std::path::Path::new(workspace_arc.read().absolute_path.clone().as_ref())
+            .join(relative_directory.as_ref());
+
+    // Load shell config to check for shortcuts
+    let shell_config_path = std::path::Path::new(workspace::SHELL_TOML_NAME);
+    let shell_config_path_option = if shell_config_path.exists() {
+        Some(workspace::SHELL_TOML_NAME.into())
+    } else {
+        None
+    };
+
+    let shell_config = shell::Config::load(shell_config_path_option, None)
+        .context(format_context!("while loading shell config"))?;
+
+    shell::exec(
+        printer,
+        command,
+        &shell_config,
+        &run_environment,
+        &working_directory,
+    )
+    .context(format_context!("while running exec"))?;
+
+    Ok(())
+}
+
 pub fn run_store_command_in_workspace(
     console: console::Console,
     store_command: store::StoreCommand,
