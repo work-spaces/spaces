@@ -553,7 +553,7 @@ pub fn evaluate_starlark_modules(
             }
             if let Some(progress) = progress.as_mut() {
                 progress.set_finalize_lines(logger::make_finalize_line(
-                    logger::FinalType::Finished,
+                    logger::FinalType::Completed,
                     progress.elapsed(),
                     "Checkout rules",
                 ));
@@ -575,19 +575,26 @@ pub fn evaluate_starlark_modules(
             .context(format_context!("Failed to generate stardoc"))?;
     }
 
-    if phase == task::Phase::Checkout {
+    let final_message = if phase == task::Phase::Checkout {
         // check if sysroot/bin/spaces exists
         if !std::path::Path::new("sysroot/bin/spaces").exists() {
             logger.warning(
                 "sysroot/bin/spaces not found. Add a rule to checkout a compatible version of spaces to the workspace.",
             );
         }
-    }
+        let workspace_folder = std::path::Path::new(workspace_path.as_ref())
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(workspace_path.as_ref());
+        format!("created {workspace_folder}")
+    } else {
+        format!("evaluated {total_modules} modules")
+    };
 
     eval_progress.set_finalize_lines(logger::make_finalize_line(
-        logger::FinalType::Completed,
+        logger::FinalType::Finished,
         eval_progress.elapsed(),
-        format!("evaluated {total_modules} modules").as_str(),
+        final_message.as_str(),
     ));
 
     Ok(())
