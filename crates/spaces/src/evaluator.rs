@@ -923,16 +923,21 @@ fn build_query_rule(
     dep_strings.extend(files.into_iter().map(|e| format!("//{e}").into()));
 
     let serialized_json = {
-        let mut s = serde_json::to_string_pretty(task).unwrap_or_default();
+        let mut s = serde_json::to_string_pretty(task).context(format_context!(
+            "Internal Error: failed to serialize task for query"
+        ))?;
         s.push('\n');
         s
     };
     // Derive YAML from the JSON value to avoid silent serialization failures
-    // that serde_yaml can produce for certain types (unwrap_or_default → "").
     let serialized_yaml = {
         let json_val: serde_json::Value =
-            serde_json::from_str(serialized_json.trim()).unwrap_or_default();
-        serde_yaml::to_string(&json_val).unwrap_or_default()
+            serde_json::from_str(serialized_json.trim()).context(format_context!(
+                "Internal Error: failed to deserialize task for query (to json from str)"
+            ))?;
+        serde_yaml::to_string(&json_val).context(format_context!(
+            "Internal Error: failed to serialize task for query (str to yaml)"
+        ))?
     };
 
     Ok(query::QueryRule {
