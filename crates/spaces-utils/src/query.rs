@@ -286,18 +286,22 @@ fn collect_rule_infos(
 }
 
 /// Serialise a `HashMap<Arc<str>, RuleInfo>` to JSON.
-fn serialise_rule_map_json(map: &HashMap<Arc<str>, RuleInfo>) -> String {
-    let mut s = serde_json::to_string_pretty(map).unwrap_or_default();
+fn serialise_rule_map_json(map: &HashMap<Arc<str>, RuleInfo>) -> anyhow::Result<String> {
+    let mut s = serde_json::to_string_pretty(map).context(format_context!(
+        "Internal Error: failed to serialize rule map for JSON"
+    ))?;
     s.push('\n');
-    s
+    Ok(s)
 }
 
 /// Serialise a sorted `HashMap<Arc<str>, RuleInfo>` to YAML.
-fn serialise_rule_map_yaml(map: &HashMap<Arc<str>, RuleInfo>) -> String {
+fn serialise_rule_map_yaml(map: &HashMap<Arc<str>, RuleInfo>) -> anyhow::Result<String> {
     // Use an IndexMap to preserve sorted order in the YAML output.
     let mut sorted: IndexMap<&Arc<str>, &RuleInfo> = map.iter().collect();
     sorted.sort_keys();
-    serde_yaml::to_string(&sorted).unwrap_or_default()
+    serde_yaml::to_string(&sorted).context(format_context!(
+        "Internal Error: failed to serialize rule map for YAML"
+    ))
 }
 
 fn name_style() -> ContentStyle {
@@ -446,10 +450,18 @@ impl QueryCommand {
                             }
                         }
                         Format::Yaml => {
-                            console.write(&serialise_rule_map_yaml(&map))?;
+                            console.write(&serialise_rule_map_yaml(&map).context(
+                                format_context!(
+                                    "Internal Error: while serialising rule map for YAML"
+                                ),
+                            )?)?;
                         }
                         Format::Json => {
-                            console.write(&serialise_rule_map_json(&map))?;
+                            console.write(&serialise_rule_map_json(&map).context(
+                                format_context!(
+                                    "Internal Error: while serialising rule map for JSON"
+                                ),
+                            )?)?;
                         }
                     }
                 }
