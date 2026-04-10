@@ -401,10 +401,17 @@ impl QueryCommand {
                 for qr in ctx.checkout_rules.iter().chain(ctx.run_rules.iter()) {
                     let raw_name = qr.rule.name.as_ref();
                     // Score the rule against every term; keep the best match.
+                    // Help-text matches are penalised (halved) so name matches rank higher.
                     let best_score = query
                         .iter()
-                        .filter_map(|q| sublime_fuzzy::best_match(q.as_ref(), raw_name))
-                        .map(|m| m.score())
+                        .filter_map(|q| {
+                            let name_score = sublime_fuzzy::best_match(q.as_ref(), raw_name)
+                                .map(|m| m.score());
+                            let help_score = qr.rule.help.as_deref()
+                                .and_then(|h| sublime_fuzzy::best_match(q.as_ref(), h))
+                                .map(|m| m.score() / 2);
+                            name_score.max(help_score).or(name_score).or(help_score)
+                        })
                         .max();
 
                     if let Some(score) = best_score {
