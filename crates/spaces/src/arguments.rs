@@ -672,6 +672,33 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             .context(format_context!("while executing run rules"))?;
         }
 
+        Commands::Query { command } => {
+            singleton::set_execution_phase(task::Phase::Inspect);
+            singleton::set_query_command(command.clone());
+
+            if effective_console.get_level() > console::Level::Info {
+                effective_console.set_level(console::Level::Info);
+            }
+
+            runner::run_starlark_modules_in_workspace(
+                effective_console.clone(),
+                task::Phase::Inspect,
+                None,
+                workspace::IsClearInputs::No,
+                runner::RunWorkspace::Target(None, vec![]),
+                runner::IsCreateLockFile::No,
+                runner::IsExecuteTasks::Yes,
+            )
+            .context(format_context!("while loading workspace for query"))?;
+
+            let ctx = singleton::take_query_context()
+                .ok_or_else(|| format_error!("Internal error: query context was not built"))?;
+
+            command
+                .execute(effective_console, &ctx)
+                .context(format_context!("while executing query command"))?;
+        }
+
         Commands::Completions {
             shell,
             output,
@@ -1044,6 +1071,11 @@ create-lock-file = false # optionally create a lock file
         /// Show the rule details in JSON format (works with details)
         #[arg(long)]
         json: bool,
+    },
+    /// Query workspace rules without running any of them.
+    Query {
+        #[command(subcommand)]
+        command: utils::query::QueryCommand,
     },
     /// Generates shell completions for the spaces command.
     Completions {

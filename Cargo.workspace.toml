@@ -24,6 +24,7 @@ url = "2.5.2"
 toml = "0.9"
 serde_yaml = "0.9"
 strum = { version = "0.26", features = ["derive"] }
+indexmap = { version = "2", features = ["serde"] }
 
 archiver = { path = "spaces/crates/spaces-archiver", package = "spaces-archiver" }
 console = { path = "spaces/crates/spaces-console", package = "spaces-console" }

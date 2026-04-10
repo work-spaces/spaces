@@ -8,7 +8,7 @@ use starlark::eval::{Evaluator, ReturnFileLoader};
 use starlark::syntax::{AstModule, Dialect};
 use std::collections::HashSet;
 use std::sync::Arc;
-use utils::{inspect, logger, rule, ws};
+use utils::{inspect, labels, logger, query, rule, ws};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WithRules {
@@ -712,6 +712,14 @@ fn execute_tasks(
             rules::debug_sorted_tasks(console.clone(), task::Phase::Run)
                 .context(format_context!("Failed to debug sorted tasks"))?;
 
+            if let Some(query_command) = singleton::get_query_command() {
+                let config = query_command.required_config();
+                let ctx = build_query_context(console.clone(), workspace.clone(), &config)
+                    .context(format_context!("Failed to build query context"))?;
+                singleton::set_query_context(ctx);
+                return Ok(IsSaveBin::No);
+            }
+
             // if not filters and called from a relative path, filter on the relative path
             let inspect_options = singleton::get_inspect_options();
             let mut globs = inspect_options.filter_globs.clone();
@@ -897,6 +905,106 @@ fn execute_tasks(
     };
 
     Ok(is_save_bin)
+}
+
+fn build_query_rule(
+    console: console::Console,
+    workspace: &WorkspaceArc,
+    task: &task::Task,
+    config: &query::QueryContextConfig,
+) -> anyhow::Result<query::QueryRule> {
+    // Only compute expanded_deps if the config requires it
+    let expanded_deps = if config.compute_expanded_deps {
+        let mut progress = console::Progress::new(console.clone(), "query-deps", None, None);
+        let mut dep_strings: Vec<Arc<str>> = task.collect_rule_deps();
+        let glob_deps = rules::collect_task_glob_deps(task);
+        let files = workspace
+            .read()
+            .inspect_inputs(&mut progress, &glob_deps)
+            .context(format_context!("Failed to inspect deps globs for query"))?;
+        dep_strings.extend(files.into_iter().map(|e| format!("//{e}").into()));
+        Some(dep_strings)
+    } else {
+        None
+    };
+
+    // Only compute serialization if the config requires it
+    let (serialized_yaml, serialized_json) = if config.compute_serialization {
+        let json = {
+            let mut s = serde_json::to_string_pretty(task).context(format_context!(
+                "Internal Error: failed to serialize task for query"
+            ))?;
+            s.push('\n');
+            s
+        };
+        // Derive YAML from the JSON value to avoid silent serialization failures
+        let yaml = {
+            let json_val: serde_json::Value =
+                serde_json::from_str(json.trim()).context(format_context!(
+                    "Internal Error: failed to deserialize task for query (to json from str)"
+                ))?;
+            serde_yaml::to_string(&json_val).context(format_context!(
+                "Internal Error: failed to serialize task for query (str to yaml)"
+            ))?
+        };
+        (Some(yaml), Some(json))
+    } else {
+        (None, None)
+    };
+
+    Ok(query::QueryRule {
+        rule: task.rule.clone(),
+        source: labels::get_source_from_label(task.rule.name.as_ref()),
+        expanded_deps,
+        executor_markdown: task.executor.to_markdown(),
+        serialized_yaml,
+        serialized_json,
+    })
+}
+
+fn build_query_context(
+    console: console::Console,
+    workspace: WorkspaceArc,
+    config: &query::QueryContextConfig,
+) -> anyhow::Result<query::QueryContext> {
+    let checkout_tasks = rules::get_checkout_rules();
+    let run_tasks = rules::get_run_rules();
+
+    let mut checkout_rules = Vec::new();
+    let mut checkout_git_tasks = Vec::new();
+
+    for task in &checkout_tasks {
+        checkout_rules.push(
+            build_query_rule(console.clone(), &workspace, task, config).context(
+                format_context!("Failed to build QueryRule for {}", task.rule.name),
+            )?,
+        );
+        if let executor::Task::Git(git_task) = &task.executor {
+            checkout_git_tasks.push(inspect::GitTask {
+                url: git_task.url.clone(),
+                rule_name: task.rule.name.clone(),
+                spaces_key: git_task.spaces_key.clone(),
+            });
+        }
+    }
+
+    let mut run_rules = Vec::new();
+    for task in &run_tasks {
+        run_rules.push(
+            build_query_rule(console.clone(), &workspace, task, config).context(
+                format_context!("Failed to build QueryRule for {}", task.rule.name),
+            )?,
+        );
+    }
+
+    let relative_invoked_path = workspace.read().relative_invoked_path.clone();
+
+    Ok(query::QueryContext {
+        checkout_rules,
+        run_rules,
+        checkout_git_tasks,
+        relative_invoked_path,
+    })
 }
 
 pub fn run_starlark_modules(

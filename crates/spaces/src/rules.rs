@@ -1386,6 +1386,16 @@ pub fn get_checkout_rules() -> Vec<task::Task> {
     get_rules_by_phase(task::Phase::Checkout)
 }
 
+pub fn get_run_rules() -> Vec<task::Task> {
+    get_rules_by_phase(task::Phase::Run)
+}
+
+pub fn collect_task_glob_deps(task: &task::Task) -> Vec<rule::Globs> {
+    let state = get_state().read();
+    let tasks = state.tasks.read();
+    task.collects_glob_deps(&tasks)
+}
+
 pub fn get_setup_rules() -> rule::Deps {
     get_rules_by_type(rule::RuleType::Setup)
 }

@@ -138,7 +138,7 @@ impl Console {
         self.writer.lock().unwrap().write_str(&redacted.as_ref())
     }
 
-    pub(crate) fn emit_line(&self, line: superconsole::Line) {
+    pub fn emit_line(&self, line: superconsole::Line) {
         self.writer.lock().unwrap().emit_line(line);
     }
 

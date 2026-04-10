@@ -15,6 +15,7 @@ pub mod logger;
 pub mod logs;
 pub mod markdown;
 pub mod platform;
+pub mod query;
 pub mod rcache;
 pub mod rule;
 pub mod shell;
