@@ -414,7 +414,20 @@ fn emit_styled_rule(
 ) {
     console.emit_line(make_name_line(name));
     console.emit_line(make_kv_line("source", source));
-    console.emit_line(make_kv_line("help", help));
+    let help_lines: Vec<&str> = help.lines().collect();
+    if let Some((first, rest)) = help_lines.split_first() {
+        console.emit_line(make_kv_line("help", first));
+        for continuation in rest {
+            let mut line = console::Line::default();
+            let continuation = continuation.trim_start();
+            line.push(console::Span::new_unstyled_lossy(format!(
+                "          {continuation}"
+            )));
+            console.emit_line(line);
+        }
+    } else {
+        console.emit_line(make_kv_line("help", ""));
+    }
     if let Some(deps) = deps {
         for dep in deps {
             console.emit_line(make_kv_line("dep", dep.as_ref()));
