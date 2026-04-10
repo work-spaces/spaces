@@ -15,6 +15,7 @@ use std::sync::Arc;
 #[derive(clap::ValueEnum, Debug, Clone, Default)]
 pub enum Format {
     #[default]
+    Pretty,
     Yaml,
     Json,
 }
@@ -39,7 +40,7 @@ impl ExportFormat {
 pub enum QueryCommand {
     #[command(about = r"List rules in the workspace.
   - `spaces query rules`: show run rules
-  - `spaces query rules --filter=**/my-pkg:*`: filter by glob pattern
+  - `spaces query rules --filter='**/my-pkg:*'`: filter by glob pattern
   - `spaces query rules --has-help`: show only rules with help populated
   - `spaces query rules --checkout`: include checkout-phase rules
   - `spaces query rules --deps`: include expanded deps and targets in output
@@ -61,7 +62,7 @@ pub enum QueryCommand {
         #[arg(long, conflicts_with = "format")]
         raw: bool,
         /// Output format
-        #[arg(long, value_enum, default_value_t = Format::Yaml)]
+        #[arg(long, value_enum, default_value_t = Format::Pretty)]
         format: Format,
     },
     #[command(about = r"Show details for a specific rule.
@@ -284,11 +285,19 @@ fn collect_rule_infos(
     map
 }
 
-/// Serialise a `HashMap<Arc<str>, RuleInfo>` to the requested format string (JSON only).
+/// Serialise a `HashMap<Arc<str>, RuleInfo>` to JSON.
 fn serialise_rule_map_json(map: &HashMap<Arc<str>, RuleInfo>) -> String {
     let mut s = serde_json::to_string_pretty(map).unwrap_or_default();
     s.push('\n');
     s
+}
+
+/// Serialise a sorted `HashMap<Arc<str>, RuleInfo>` to YAML.
+fn serialise_rule_map_yaml(map: &HashMap<Arc<str>, RuleInfo>) -> String {
+    // Use an IndexMap to preserve sorted order in the YAML output.
+    let mut sorted: IndexMap<&Arc<str>, &RuleInfo> = map.iter().collect();
+    sorted.sort_keys();
+    serde_yaml::to_string(&sorted).unwrap_or_default()
 }
 
 fn name_style() -> ContentStyle {
@@ -421,7 +430,7 @@ impl QueryCommand {
                     console.error("No Results", "No matching rules available")?;
                 } else {
                     match format {
-                        Format::Yaml => {
+                        Format::Pretty => {
                             let mut names: Vec<&Arc<str>> = map.keys().collect();
                             names.sort();
                             for name in names {
@@ -435,6 +444,9 @@ impl QueryCommand {
                                     info.targets.as_ref(),
                                 );
                             }
+                        }
+                        Format::Yaml => {
+                            console.write(&serialise_rule_map_yaml(&map))?;
                         }
                         Format::Json => {
                             console.write(&serialise_rule_map_json(&map))?;
@@ -453,8 +465,24 @@ impl QueryCommand {
                     .find(|qr| qr.rule.name.as_ref() == name.as_ref())
                     .ok_or_else(|| format_error!("Rule not found: {name}"))?;
 
+                if matches!(format, Format::Pretty) {
+                    let rule_deps = if *deps { Some(&qr.expanded_deps) } else { None };
+                    let targets = extract_targets(&qr.rule);
+                    let rule_targets = if *deps { Some(&targets) } else { None };
+                    emit_styled_rule(
+                        &console,
+                        qr.rule.name.as_ref(),
+                        &qr.source,
+                        qr.rule.help.as_deref().unwrap_or("<Not Provided>"),
+                        rule_deps,
+                        rule_targets,
+                    );
+                    return Ok(());
+                }
+
                 let output = if *deps {
                     match format {
+                        Format::Pretty => unreachable!(),
                         Format::Yaml => {
                             let mut value: serde_yaml::Value =
                                 serde_yaml::from_str(&qr.serialized_yaml)
@@ -490,6 +518,7 @@ impl QueryCommand {
                     }
                 } else {
                     match format {
+                        Format::Pretty => unreachable!(),
                         Format::Yaml => qr.serialized_yaml.clone(),
                         Format::Json => qr.serialized_json.clone(),
                     }
@@ -639,7 +668,7 @@ impl QueryCommand {
                         Ok(())
                     }
                     ExportFormat::Stardoc => {
-                        todo!("stardoc export")
+                        Err(format_error!("Stardoc export is not yet implemented"))
                     }
                 }
             }
