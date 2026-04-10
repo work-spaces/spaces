@@ -122,6 +122,34 @@ pub enum QueryCommand {
 // Data types passed in from the evaluator
 // ---------------------------------------------------------------------------
 
+/// Configuration for what expensive fields to compute when building QueryContext.
+/// This allows lazy computation based on what the specific QueryCommand needs.
+#[derive(Debug, Clone, Default)]
+pub struct QueryContextConfig {
+    /// Whether to compute expanded_deps (glob expansion via workspace.inspect_inputs).
+    pub compute_expanded_deps: bool,
+    /// Whether to compute serialized_yaml/serialized_json for tasks.
+    pub compute_serialization: bool,
+}
+
+impl QueryContextConfig {
+    /// Create a config that computes everything (legacy behavior).
+    pub fn all() -> Self {
+        Self {
+            compute_expanded_deps: true,
+            compute_serialization: true,
+        }
+    }
+
+    /// Create a minimal config that computes nothing expensive.
+    pub fn minimal() -> Self {
+        Self {
+            compute_expanded_deps: false,
+            compute_serialization: false,
+        }
+    }
+}
+
 /// Pre-computed display data for a single rule. Built by the evaluator from
 /// `task::Task` so that `query.rs` has no dependency on the `spaces` crate.
 #[derive(Debug)]
@@ -131,13 +159,16 @@ pub struct QueryRule {
     /// Pre-computed source path (from `labels::get_source_from_label`).
     pub source: String,
     /// Rule-name deps plus workspace-expanded glob file paths.
-    pub expanded_deps: Vec<Arc<str>>,
+    /// Only populated if `QueryContextConfig::compute_expanded_deps` is true.
+    pub expanded_deps: Option<Vec<Arc<str>>>,
     /// Pre-computed executor markdown fragment, used by `Export`.
     pub executor_markdown: Option<String>,
     /// Full task serialised as YAML, used by `Rule --format=yaml`.
-    pub serialized_yaml: String,
+    /// Only populated if `QueryContextConfig::compute_serialization` is true.
+    pub serialized_yaml: Option<String>,
     /// Full task serialised as JSON, used by `Rule --format=json`.
-    pub serialized_json: String,
+    /// Only populated if `QueryContextConfig::compute_serialization` is true.
+    pub serialized_json: Option<String>,
 }
 
 /// Everything `execute()` needs, assembled by the evaluator.
@@ -152,6 +183,41 @@ pub struct QueryContext {
     /// Workspace-relative path where `spaces` was invoked; used to compute a
     /// default filter when none is supplied.
     pub relative_invoked_path: Arc<str>,
+}
+
+impl QueryCommand {
+    /// Returns the configuration specifying which expensive fields are needed
+    /// for this particular command variant.
+    pub fn required_config(&self) -> QueryContextConfig {
+        match self {
+            QueryCommand::Rules { deps, raw, .. } => QueryContextConfig {
+                // Need expanded_deps if --deps flag is set
+                compute_expanded_deps: *deps,
+                // Need serialization if --raw flag is set
+                compute_serialization: *raw,
+            },
+            QueryCommand::Rule { deps, .. } => QueryContextConfig {
+                // Need expanded_deps if --deps flag is set
+                compute_expanded_deps: *deps,
+                // Always need serialization for single rule view
+                compute_serialization: true,
+            },
+            QueryCommand::Search { deps, .. } => QueryContextConfig {
+                // Need expanded_deps if --deps flag is set
+                compute_expanded_deps: *deps,
+                // Search doesn't need serialization
+                compute_serialization: false,
+            },
+            QueryCommand::Checkout { .. } => {
+                // Checkout only needs git tasks, no expensive rule data
+                QueryContextConfig::minimal()
+            }
+            QueryCommand::Export { .. } => {
+                // Export needs executor_markdown (always computed) but not deps/serialization
+                QueryContextConfig::minimal()
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -263,10 +329,7 @@ fn collect_rule_infos(
             .to_string();
 
         let (rule_deps, rule_targets) = if deps {
-            (
-                Some(qr.expanded_deps.clone()),
-                Some(extract_targets(&qr.rule)),
-            )
+            (qr.expanded_deps.clone(), Some(extract_targets(&qr.rule)))
         } else {
             (None, None)
         };
@@ -407,7 +470,9 @@ impl QueryCommand {
                         if *has_help && qr.rule.help.is_none() {
                             continue;
                         }
-                        console.write(&format!("# {raw_name}\n{}", qr.serialized_yaml))?;
+                        if let Some(yaml) = &qr.serialized_yaml {
+                            console.write(&format!("# {raw_name}\n{yaml}"))?;
+                        }
                     }
                     return Ok(());
                 }
@@ -478,7 +543,11 @@ impl QueryCommand {
                     .ok_or_else(|| format_error!("Rule not found: {name}"))?;
 
                 if matches!(format, Format::Pretty) {
-                    let rule_deps = if *deps { Some(&qr.expanded_deps) } else { None };
+                    let rule_deps = if *deps {
+                        qr.expanded_deps.as_ref()
+                    } else {
+                        None
+                    };
                     let targets = extract_targets(&qr.rule);
                     let rule_targets = if *deps { Some(&targets) } else { None };
                     emit_styled_rule(
@@ -492,17 +561,27 @@ impl QueryCommand {
                     return Ok(());
                 }
 
+                let serialized_yaml = qr.serialized_yaml.as_ref().ok_or_else(|| {
+                    format_error!("Internal error: serialized_yaml not computed for rule {name}")
+                })?;
+                let serialized_json = qr.serialized_json.as_ref().ok_or_else(|| {
+                    format_error!("Internal error: serialized_json not computed for rule {name}")
+                })?;
+
                 let output = if *deps {
+                    let expanded_deps = qr.expanded_deps.as_ref().ok_or_else(|| {
+                        format_error!("Internal error: expanded_deps not computed for rule {name}")
+                    })?;
                     match format {
                         Format::Pretty => unreachable!(),
                         Format::Yaml => {
                             let mut value: serde_yaml::Value =
-                                serde_yaml::from_str(&qr.serialized_yaml)
+                                serde_yaml::from_str(serialized_yaml)
                                     .context(format_context!("Failed to parse task YAML"))?;
                             if let Some(map) = value.as_mapping_mut() {
                                 map.insert(
                                     serde_yaml::Value::String("expanded_deps".into()),
-                                    serde_yaml::to_value(&qr.expanded_deps).context(
+                                    serde_yaml::to_value(expanded_deps).context(
                                         format_context!("Failed to serialize expanded_deps"),
                                     )?,
                                 );
@@ -512,12 +591,12 @@ impl QueryCommand {
                         }
                         Format::Json => {
                             let mut value: serde_json::Value =
-                                serde_json::from_str(&qr.serialized_json)
+                                serde_json::from_str(serialized_json)
                                     .context(format_context!("Failed to parse task JSON"))?;
                             if let Some(map) = value.as_object_mut() {
                                 map.insert(
                                     "expanded_deps".into(),
-                                    serde_json::to_value(&qr.expanded_deps).context(
+                                    serde_json::to_value(expanded_deps).context(
                                         format_context!("Failed to serialize expanded_deps"),
                                     )?,
                                 );
@@ -531,8 +610,8 @@ impl QueryCommand {
                 } else {
                     match format {
                         Format::Pretty => unreachable!(),
-                        Format::Yaml => qr.serialized_yaml.clone(),
-                        Format::Json => qr.serialized_json.clone(),
+                        Format::Yaml => serialized_yaml.clone(),
+                        Format::Json => serialized_json.clone(),
                     }
                 };
                 console.raw(&output)?;
@@ -580,10 +659,7 @@ impl QueryCommand {
 
                     if let Some(score) = best_score {
                         let (rule_deps, rule_targets) = if *deps {
-                            (
-                                Some(qr.expanded_deps.clone()),
-                                Some(extract_targets(&qr.rule)),
-                            )
+                            (qr.expanded_deps.clone(), Some(extract_targets(&qr.rule)))
                         } else {
                             (None, None)
                         };
