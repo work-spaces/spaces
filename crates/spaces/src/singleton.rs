@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use utils::inspect;
 use utils::lock;
+use utils::query;
 
 #[derive(Debug)]
 struct State {
@@ -25,6 +26,8 @@ struct State {
     new_branches: Vec<Arc<str>>,
     inspect: inspect::Options,
     execution_phase: task::Phase,
+    query_command: Option<query::QueryCommand>,
+    query_context: Option<query::QueryContext>,
 }
 
 static STATE: state::InitCell<lock::StateLock<State>> = state::InitCell::new();
@@ -56,6 +59,8 @@ fn get_state() -> &'static lock::StateLock<State> {
         error_chain: Vec::new(),
         new_branches: Vec::new(),
         inspect: inspect::Options::default(),
+        query_command: None,
+        query_context: None,
         args_env: HashMap::new(),
         args_store: HashMap::new(),
         args_locks: HashMap::new(),
@@ -307,4 +312,24 @@ pub fn get_is_checkout() -> bool {
 pub fn set_is_checkout() {
     let mut state = get_state().write();
     state.is_checkout = true;
+}
+
+pub fn set_query_command(command: query::QueryCommand) {
+    let mut state = get_state().write();
+    state.query_command = Some(command);
+}
+
+pub fn get_query_command() -> Option<query::QueryCommand> {
+    let state = get_state().read();
+    state.query_command.clone()
+}
+
+pub fn set_query_context(ctx: query::QueryContext) {
+    let mut state = get_state().write();
+    state.query_context = Some(ctx);
+}
+
+pub fn take_query_context() -> Option<query::QueryContext> {
+    let mut state = get_state().write();
+    state.query_context.take()
 }

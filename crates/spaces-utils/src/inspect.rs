@@ -8,6 +8,7 @@ pub fn logger(console: console::Console) -> logger::Logger {
     logger::Logger::new(console, "inspect".into())
 }
 
+#[derive(Debug)]
 pub struct GitTask {
     pub url: Arc<str>,
     pub rule_name: Arc<str>,
