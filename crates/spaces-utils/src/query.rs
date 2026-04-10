@@ -37,10 +37,12 @@ impl ExportFormat {
 #[derive(Subcommand, Debug, Clone)]
 pub enum QueryCommand {
     #[command(about = r"List rules in the workspace.
-  - `spaces query rules`: show rules that have `help` entries
+  - `spaces query rules`: show run rules
   - `spaces query rules --filter=**/my-pkg:*`: filter by glob pattern
   - `spaces query rules --has-help`: show only rules with help populated
-  - `spaces --verbosity=message query rules`: show all rules")]
+  - `spaces query rules --checkout`: include checkout-phase rules
+  - `spaces query rules --deps`: include expanded deps and targets in output
+  - `spaces query rules --raw`: emit full task YAML per rule")]
     Rules {
         /// Filter rules with a glob pattern (e.g. `--filter=**/my-target`)
         #[arg(long)]
@@ -48,6 +50,15 @@ pub enum QueryCommand {
         /// Only show rules with the help entry populated
         #[arg(long)]
         has_help: bool,
+        /// Include checkout-phase rules in output
+        #[arg(long)]
+        checkout: bool,
+        /// Include expanded deps and targets in output
+        #[arg(long)]
+        deps: bool,
+        /// Emit full task YAML per rule instead of the summary map (cannot be combined with --format)
+        #[arg(long, conflicts_with = "format")]
+        raw: bool,
         /// Output format
         #[arg(long, value_enum, default_value_t = Format::Yaml)]
         format: Format,
@@ -64,11 +75,15 @@ pub enum QueryCommand {
     },
     #[command(about = r"Search for rules using fuzzy matching.
   - `spaces query search build`: return top 10 matches for 'build'
-  - `spaces query search build test`: return top 10 matches across all terms")]
+  - `spaces query search build test`: return top 10 matches across all terms
+  - `spaces query search build --deps`: include expanded deps and targets in results")]
     Search {
         /// One or more search terms; a rule matches if any term matches
         #[arg(required = true, num_args = 1..)]
         query: Vec<Arc<str>>,
+        /// Include expanded deps and targets in results
+        #[arg(long)]
+        deps: bool,
     },
     #[command(
         about = r"Print the command to reproduce the current workspace checkout.
@@ -202,7 +217,7 @@ fn collect_rule_infos(
     globs: &HashSet<Arc<str>>,
     strip_prefix: Option<&Arc<str>>,
     has_help: bool,
-    show_expanded: bool,
+    deps: bool,
 ) -> HashMap<Arc<str>, RuleInfo> {
     let glob_filter = glob::Globs::new_with_includes(globs);
     let mut map: HashMap<Arc<str>, RuleInfo> = HashMap::new();
@@ -238,7 +253,7 @@ fn collect_rule_infos(
             .unwrap_or("<Not Provided>")
             .to_string();
 
-        let (deps, targets) = if show_expanded {
+        let (rule_deps, rule_targets) = if deps {
             (
                 Some(qr.expanded_deps.clone()),
                 Some(extract_targets(&qr.rule)),
@@ -252,8 +267,8 @@ fn collect_rule_infos(
             RuleInfo {
                 source: qr.source.clone(),
                 help,
-                deps,
-                targets,
+                deps: rule_deps,
+                targets: rule_targets,
             },
         );
     }
@@ -284,6 +299,9 @@ impl QueryCommand {
             QueryCommand::Rules {
                 filter,
                 has_help,
+                checkout,
+                deps,
+                raw,
                 format,
             } => {
                 let (globs, strip_prefix) = match filter {
@@ -291,17 +309,17 @@ impl QueryCommand {
                     None => default_globs(ctx.relative_invoked_path.as_ref()),
                 };
 
-                let console_level = console.get_level();
-                let show_expanded = console_level <= console::Level::Message;
-
-                // Debug mode: emit full task YAML per rule directly.
-                if console_level == console::Level::Debug {
+                if *raw {
                     let glob_filter = glob::Globs::new_with_includes(&globs);
-                    for qr in ctx
-                        .checkout_rules
-                        .iter()
-                        .chain(ctx.run_rules.iter())
-                    {
+                    let rules = if *checkout {
+                        ctx.checkout_rules
+                            .iter()
+                            .chain(ctx.run_rules.iter())
+                            .collect::<Vec<_>>()
+                    } else {
+                        ctx.run_rules.iter().collect::<Vec<_>>()
+                    };
+                    for qr in rules {
                         let raw_name = qr.rule.name.as_ref();
                         if !globs.is_empty()
                             && !glob_filter
@@ -312,20 +330,19 @@ impl QueryCommand {
                         if *has_help && qr.rule.help.is_none() {
                             continue;
                         }
-                        console.debug(raw_name, &qr.serialized_yaml)?;
+                        console.message(raw_name, &qr.serialized_yaml)?;
                     }
                     return Ok(());
                 }
 
-                // Only include checkout rules at message verbosity or below.
                 let mut map: HashMap<Arc<str>, RuleInfo> = HashMap::new();
-                if console_level <= console::Level::Message {
+                if *checkout {
                     map.extend(collect_rule_infos(
                         &ctx.checkout_rules,
                         &globs,
                         strip_prefix.as_ref(),
                         *has_help,
-                        show_expanded,
+                        *deps,
                     ));
                 }
                 map.extend(collect_rule_infos(
@@ -333,7 +350,7 @@ impl QueryCommand {
                     &globs,
                     strip_prefix.as_ref(),
                     *has_help,
-                    show_expanded,
+                    *deps,
                 ));
 
                 if map.is_empty() {
@@ -362,7 +379,7 @@ impl QueryCommand {
             }
 
             // ------------------------------------------------------------------
-            QueryCommand::Search { query } => {
+            QueryCommand::Search { query, deps } => {
                 #[derive(Serialize)]
                 struct ScoredInfo {
                     source: String,
@@ -379,8 +396,6 @@ impl QueryCommand {
                     info: ScoredInfo,
                 }
 
-                let console_level = console.get_level();
-                let show_expanded = console_level <= console::Level::Message;
                 let mut scored: Vec<Scored> = Vec::new();
 
                 for qr in ctx.checkout_rules.iter().chain(ctx.run_rules.iter()) {
@@ -393,7 +408,7 @@ impl QueryCommand {
                         .max();
 
                     if let Some(score) = best_score {
-                        let (deps, targets) = if show_expanded {
+                        let (rule_deps, rule_targets) = if *deps {
                             (
                                 Some(qr.expanded_deps.clone()),
                                 Some(extract_targets(&qr.rule)),
@@ -412,8 +427,8 @@ impl QueryCommand {
                                     .as_deref()
                                     .unwrap_or("<Not Provided>")
                                     .to_string(),
-                                deps,
-                                targets,
+                                deps: rule_deps,
+                                targets: rule_targets,
                             },
                         });
                     }
