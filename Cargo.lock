@@ -3619,6 +3619,7 @@ dependencies = [
  "clap_complete",
  "glob-match",
  "homedir",
+ "indexmap 2.13.1",
  "levenshtein",
  "petgraph 0.8.3",
  "postcard",

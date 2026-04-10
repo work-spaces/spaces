@@ -1,7 +1,8 @@
-use crate::{changes::glob, inspect, labels, markdown, rule, targets};
+use crate::{changes::glob, inspect, markdown, rule, targets};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::Subcommand;
+use indexmap::IndexMap;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -202,7 +203,6 @@ fn collect_rule_infos(
     strip_prefix: Option<&Arc<str>>,
     has_help: bool,
     show_expanded: bool,
-    console_level: console::Level,
 ) -> HashMap<Arc<str>, RuleInfo> {
     let glob_filter = glob::Globs::new_with_includes(globs);
     let mut map: HashMap<Arc<str>, RuleInfo> = HashMap::new();
@@ -217,12 +217,6 @@ fn collect_rule_infos(
         }
 
         if has_help && qr.rule.help.is_none() {
-            continue;
-        }
-
-        if console_level == console::Level::Debug {
-            // In debug mode the full per-task YAML is emitted separately by
-            // the caller; we skip building a RuleInfo for this rule.
             continue;
         }
 
@@ -332,7 +326,6 @@ impl QueryCommand {
                         strip_prefix.as_ref(),
                         *has_help,
                         show_expanded,
-                        console_level,
                     ));
                 }
                 map.extend(collect_rule_infos(
@@ -341,7 +334,6 @@ impl QueryCommand {
                     strip_prefix.as_ref(),
                     *has_help,
                     show_expanded,
-                    console_level,
                 ));
 
                 if map.is_empty() {
@@ -428,7 +420,7 @@ impl QueryCommand {
                 }
 
                 scored.sort_by(|a, b| b.score.cmp(&a.score));
-                let top: HashMap<Arc<str>, ScoredInfo> = scored
+                let top: IndexMap<Arc<str>, ScoredInfo> = scored
                     .into_iter()
                     .take(10)
                     .map(|s| (s.name, s.info))

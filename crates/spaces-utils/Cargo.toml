@@ -27,6 +27,8 @@ homedir = "0.3"
 arboard = "3"
 serde_with = "3"
 
+indexmap.workspace = true
+
 anyhow.workspace = true
 archiver.workspace = true
 console.workspace = true
