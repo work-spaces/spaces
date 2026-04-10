@@ -911,8 +911,7 @@ fn build_query_rule(
     workspace: &WorkspaceArc,
     task: &task::Task,
 ) -> anyhow::Result<query::QueryRule> {
-    let mut progress =
-        console::Progress::new(console.clone(), "query-deps", None, None);
+    let mut progress = console::Progress::new(console.clone(), "query-deps", None, None);
 
     let mut dep_strings: Vec<Arc<str>> = task.collect_rule_deps();
 
@@ -923,11 +922,17 @@ fn build_query_rule(
         .context(format_context!("Failed to inspect deps globs for query"))?;
     dep_strings.extend(files.into_iter().map(|e| format!("//{e}").into()));
 
-    let serialized_yaml = serde_yaml::to_string(task).unwrap_or_default();
     let serialized_json = {
         let mut s = serde_json::to_string_pretty(task).unwrap_or_default();
         s.push('\n');
         s
+    };
+    // Derive YAML from the JSON value to avoid silent serialization failures
+    // that serde_yaml can produce for certain types (unwrap_or_default → "").
+    let serialized_yaml = {
+        let json_val: serde_json::Value =
+            serde_json::from_str(serialized_json.trim()).unwrap_or_default();
+        serde_yaml::to_string(&json_val).unwrap_or_default()
     };
 
     Ok(query::QueryRule {
@@ -951,10 +956,9 @@ fn build_query_context(
     let mut checkout_git_tasks = Vec::new();
 
     for task in &checkout_tasks {
-        checkout_rules.push(
-            build_query_rule(console.clone(), &workspace, task)
-                .context(format_context!("Failed to build QueryRule for {}", task.rule.name))?,
-        );
+        checkout_rules.push(build_query_rule(console.clone(), &workspace, task).context(
+            format_context!("Failed to build QueryRule for {}", task.rule.name),
+        )?);
         if let executor::Task::Git(git_task) = &task.executor {
             checkout_git_tasks.push(inspect::GitTask {
                 url: git_task.url.clone(),
@@ -966,10 +970,9 @@ fn build_query_context(
 
     let mut run_rules = Vec::new();
     for task in &run_tasks {
-        run_rules.push(
-            build_query_rule(console.clone(), &workspace, task)
-                .context(format_context!("Failed to build QueryRule for {}", task.rule.name))?,
-        );
+        run_rules.push(build_query_rule(console.clone(), &workspace, task).context(
+            format_context!("Failed to build QueryRule for {}", task.rule.name),
+        )?);
     }
 
     let relative_invoked_path = workspace.read().relative_invoked_path.clone();

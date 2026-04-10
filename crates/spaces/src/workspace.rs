@@ -408,7 +408,7 @@ impl Workspace {
         }
 
         logger(progress.console.clone())
-            .info(format!("Invoked at: //{relative_invoked_path}").as_str());
+            .message(format!("Invoked at: //{relative_invoked_path}").as_str());
 
         relative_invoked_path
     }
@@ -509,7 +509,7 @@ impl Workspace {
 
         if let Some(required_version) = settings.json.minimum_version.as_ref() {
             logger(progress.console.clone())
-                .info(format!("Minimum Required version: {required_version}",).as_str());
+                .message(format!("Minimum Required version: {required_version}",).as_str());
             let current_semver = singleton::get_spaces_version()
                 .context(format_context!("While checking minimum version"))?;
 
