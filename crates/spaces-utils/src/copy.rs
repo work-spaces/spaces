@@ -60,7 +60,6 @@ pub fn create_links_from_directory(
     for entry in walkdir::WalkDir::new(source_dir)
         .into_iter()
         .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
     {
         let relative = entry
             .path()
@@ -68,6 +67,15 @@ pub fn create_links_from_directory(
             .context(format_context!(
                 "internal error: path not prefixed by source dir"
             ))?;
+
+        if entry.file_type().is_dir() {
+            let target_dir = dest_dir.join(relative);
+            std::fs::create_dir_all(&target_dir).context(format_context!(
+                "failed to create directory {target_dir:?}"
+            ))?;
+            continue;
+        }
+
         let target = dest_dir.join(relative).to_string_lossy().to_string();
         let source = entry.path().to_string_lossy().to_string();
         create_link(
