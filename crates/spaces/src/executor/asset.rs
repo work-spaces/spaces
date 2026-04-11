@@ -357,14 +357,24 @@ impl AddHomeAsset {
         &self,
         progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
-        _name: &str,
+        name: &str,
     ) -> anyhow::Result<()> {
+        let logger = logger::Logger::new(progress.console.clone(), name.into());
+
         let home = std::env::var("HOME")
             .context(format_context!("HOME environment variable is not set"))?;
         let user = std::env::var("USER")
             .context(format_context!("USER environment variable is not set"))?;
 
         let source_path = std::path::Path::new(&home).join(&self.source);
+
+        if !source_path.exists() {
+            logger.info(&format!(
+                "Source path {} does not exist - not importing to store home",
+                source_path.display()
+            ));
+            return Ok(());
+        }
 
         // store_relative: home/$USER/<source>
         let store_relative = format!("{}/{}/{}", store::SPACES_STORE_HOME, user, self.source);
@@ -386,16 +396,12 @@ impl AddHomeAsset {
             ))?;
         }
 
-        // When the source is a directory, remove the existing store entry first so
-        // that files deleted from the source are not left behind (stale files would
-        // otherwise persist in the store and propagate back into the workspace links
-        // on subsequent runs).
-        if source_path.is_dir() && store_full.exists() {
-            std::fs::remove_dir_all(&store_full).context(format_context!(
-                "Failed to remove stale store directory {}",
+        normalize_home_asset_store_entry(&store_full, source_path.is_dir()).context(
+            format_context!(
+                "Failed to normalize home asset store entry for {}",
                 store_full.display()
-            ))?;
-        }
+            ),
+        )?;
 
         if source_path.is_dir() {
             copy::copy_with_cow_semantics(
@@ -465,6 +471,34 @@ impl AddHomeAsset {
     }
 }
 
+fn normalize_home_asset_store_entry(
+    store_full: &std::path::Path,
+    source_is_dir: bool,
+) -> anyhow::Result<()> {
+    if !store_full.exists() {
+        return Ok(());
+    }
+
+    let store_is_dir = store_full.is_dir();
+    if !source_is_dir && !store_is_dir {
+        return Ok(());
+    }
+
+    if store_is_dir {
+        std::fs::remove_dir_all(store_full).context(format_context!(
+            "Failed to remove stale store directory {}",
+            store_full.display()
+        ))?;
+    } else {
+        std::fs::remove_file(store_full).context(format_context!(
+            "Failed to remove stale store file {}",
+            store_full.display()
+        ))?;
+    }
+
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, tag = "type")]
 pub enum AnyAsset {
@@ -523,4 +557,60 @@ fn save_asset(workspace_path: Arc<str>, destination: &str, content: &str) -> any
     ))?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_home_asset_store_entry;
+
+    #[test]
+    fn keeps_existing_file_for_file_source() -> anyhow::Result<()> {
+        let tempdir = tempfile::tempdir()?;
+        let store_full = tempdir.path().join("asset");
+        std::fs::write(&store_full, "existing")?;
+
+        normalize_home_asset_store_entry(&store_full, false)?;
+
+        assert!(store_full.is_file());
+        assert_eq!(std::fs::read_to_string(store_full)?, "existing");
+        Ok(())
+    }
+
+    #[test]
+    fn removes_existing_directory_for_file_source() -> anyhow::Result<()> {
+        let tempdir = tempfile::tempdir()?;
+        let store_full = tempdir.path().join("asset");
+        std::fs::create_dir(&store_full)?;
+        std::fs::write(store_full.join("stale"), "stale")?;
+
+        normalize_home_asset_store_entry(&store_full, false)?;
+
+        assert!(!store_full.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn removes_existing_file_for_directory_source() -> anyhow::Result<()> {
+        let tempdir = tempfile::tempdir()?;
+        let store_full = tempdir.path().join("asset");
+        std::fs::write(&store_full, "stale")?;
+
+        normalize_home_asset_store_entry(&store_full, true)?;
+
+        assert!(!store_full.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn removes_existing_directory_for_directory_source() -> anyhow::Result<()> {
+        let tempdir = tempfile::tempdir()?;
+        let store_full = tempdir.path().join("asset");
+        std::fs::create_dir(&store_full)?;
+        std::fs::write(store_full.join("stale"), "stale")?;
+
+        normalize_home_asset_store_entry(&store_full, true)?;
+
+        assert!(!store_full.exists());
+        Ok(())
+    }
 }
