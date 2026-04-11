@@ -110,7 +110,7 @@ impl Encoder {
 
     pub fn add_entries(&mut self, entries: &[Entry]) -> anyhow::Result<()> {
         self.update_status(UpdateStatus {
-            detail: Some(format!("Archiving... ({})", self.driver.extension())),
+            detail: Some("Archiving...".to_string()),
             ..Default::default()
         });
 
@@ -203,7 +203,7 @@ impl Encoder {
         driver::update_status(
             progress,
             UpdateStatus {
-                detail: Some(format!("Compressing ({})", driver.extension())),
+                detail: Some("Compressing...".to_string()),
                 ..Default::default()
             },
         );
@@ -262,7 +262,7 @@ impl Encoder {
                 driver::update_status(
                     &mut progress_bar,
                     UpdateStatus {
-                        detail: Some(format!("Compressing ({})", driver.extension())),
+                        detail: Some("Compressing...".to_string()),
                         total: Some(200),
                         ..Default::default()
                     },

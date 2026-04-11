@@ -54,6 +54,21 @@ fn label_logger(console: console::Console, label: &str) -> logger::Logger {
     logger::Logger::new(console, label.into())
 }
 
+/// Extracts the filename from a URL for use as a progress bar prefix.
+fn url_to_filename(url: &str) -> &str {
+    let trimmed = url.trim_end_matches('/');
+    trimmed.rsplit('/').next().unwrap_or(trimmed)
+}
+
+/// Extracts the host from a URL for display in download messages.
+fn url_to_host(url: &str) -> String {
+    url::Url::parse(url)
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(|s| s.trim().to_string()))
+        .filter(|host| !host.is_empty())
+        .unwrap_or_else(|| "<unknown-host>".to_string())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct Archive {
@@ -244,6 +259,8 @@ pub fn download(
     let join_handle = runtime.spawn(async move {
 
         let progress = console::Progress::new(console.clone(), url.as_str(), None, None);
+        progress.set_prefix(url_to_filename(&url));
+        progress.set_message(&format!("Downloading from {}", url_to_host(&url)));
         let client = build_http_client()?;
         let base_headers = build_headers(headers.as_ref())?;
 
@@ -388,8 +405,6 @@ pub fn download(
                 )?;
                 (file, 0u64)
             };
-
-            progress.set_message(url.as_str());
 
             // Stream chunks to disk
             let mut response = response;
@@ -886,17 +901,25 @@ impl HttpArchive {
             .context(format_context!("Failed to create runtime"))?;
 
         if self.is_download_required() {
-            let mut progress_bar =
-                console::Progress::new(console.clone(), self.archive.url.as_ref(), None, None);
             if let Some(arguments) = gh::transform_url_to_arguments(
                 self.allow_gh_for_download,
                 self.archive.url.as_ref(),
                 &self.full_path_to_archive,
             ) {
+                // Create progress bar only for gh download
+                let mut progress_bar =
+                    console::Progress::new(console.clone(), self.archive.url.as_ref(), None, None);
+                progress_bar.set_prefix(url_to_filename(&self.archive.url));
+                progress_bar.set_message(&format!(
+                    "Downloading from {}",
+                    url_to_host(&self.archive.url)
+                ));
                 let gh_command = format!("{}/gh", self.tools_path);
                 let gh_result =
                     gh::download(&gh_command, &self.archive.url, arguments, &mut progress_bar);
                 if gh_result.is_err() {
+                    // gh failed, fall back to HTTP download (which creates its own progress bar)
+                    drop(progress_bar);
                     let join_handle =
                         self.download(&runtime, console.clone())
                             .context(format_context!(
@@ -905,6 +928,7 @@ impl HttpArchive {
                     runtime.block_on(join_handle)??;
                 }
             } else {
+                // HTTP download creates its own progress bar
                 label_logger(console.clone(), &self.archive.url)
                     .debug(format!("{} Downloading using reqwest", self.archive.url).as_str());
 
@@ -977,6 +1001,8 @@ impl HttpArchive {
 
         let progress_bar =
             console::Progress::new(console.clone(), self.archive.url.as_ref(), None, None);
+        progress_bar.set_prefix(url_to_filename(&self.archive.url));
+        progress_bar.set_message("Extracting...");
 
         if self.archive_driver.is_some() {
             let decoder = archiver::Decoder::new(
@@ -998,7 +1024,13 @@ impl HttpArchive {
             ))?;
 
             extracted_files = extracted.files;
-            extracted.progress_bar
+            let mut progress = extracted.progress_bar;
+            progress.set_finalize_lines(console::make_finalize_line(
+                console::FinalType::Completed,
+                progress.elapsed(),
+                url_to_filename(&self.archive.url),
+            ));
+            progress
         } else {
             let path_to_artifact = std::path::Path::new(self.full_path_to_archive.as_str());
             let file_name = path_to_artifact.file_name().ok_or(format_error!(
@@ -1027,7 +1059,13 @@ impl HttpArchive {
                 .context(format_context!("copy {path_to_artifact:?} -> {target:?}"))?;
 
             extracted_files.insert(file_name.to_string_lossy().to_string());
-            progress_bar
+            let mut progress = progress_bar;
+            progress.set_finalize_lines(console::make_finalize_line(
+                console::FinalType::Completed,
+                progress.elapsed(),
+                url_to_filename(&self.archive.url),
+            ));
+            progress
         };
 
         for file in extracted_files.iter() {

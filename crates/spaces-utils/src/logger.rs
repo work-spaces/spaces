@@ -1,55 +1,7 @@
 use crate::lock;
 use std::sync::Arc;
 
-#[derive(strum::Display)]
-pub enum FinalType {
-    Completed,
-    Failed,
-    NotRequired,
-    NoChanges,
-    NotPlatform,
-    Cancelled,
-    Finished,
-}
-
-const FINALIZE_PREFIX_WIDTH: usize = 12;
-
-pub fn make_finalize_line(
-    prefix: FinalType,
-    duration: Option<std::time::Duration>,
-    message: &str,
-) -> Vec<console::Line> {
-    let color = match prefix {
-        FinalType::Completed => console::style::Color::Green,
-        FinalType::Failed => console::style::Color::DarkRed,
-        FinalType::NotRequired => console::style::Color::Cyan,
-        FinalType::NoChanges => console::style::Color::Cyan,
-        FinalType::NotPlatform => console::style::Color::Cyan,
-        FinalType::Cancelled => console::style::Color::Yellow,
-        FinalType::Finished => console::style::Color::DarkCyan,
-    };
-    let bold_style = console::style::ContentStyle {
-        foreground_color: Some(color),
-        background_color: None,
-        underline_color: None,
-        attributes: console::style::Attributes::from(console::style::Attribute::Bold),
-    };
-    let padded_prefix = format!(
-        "{prefix:>width$}: ",
-        width = FINALIZE_PREFIX_WIDTH,
-        prefix = prefix.to_string()
-    );
-    let styled_prefix = console::style::StyledContent::new(bold_style, padded_prefix);
-    let mut line = console::Line::default();
-    line.push(console::Span::new_styled_lossy(styled_prefix));
-    if let Some(duration) = duration {
-        let secs = duration.as_secs_f64();
-        let duration_str = format!("[{}] ", console::format_duration(secs));
-        line.push(console::Span::new_unstyled_lossy(&duration_str));
-    }
-    line.push(console::Span::new_unstyled_lossy(message));
-    vec![line]
-}
+pub use console::{FinalType, make_finalize_line};
 
 pub struct Logger {
     console: console::Console,

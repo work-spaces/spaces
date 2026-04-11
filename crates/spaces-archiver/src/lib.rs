@@ -122,9 +122,17 @@ impl CreateArchive {
             .compress()
             .context(format_context!("{output_directory}"))?;
 
-        let digest = digestable
+        let mut digest = digestable
             .digest()
             .context(format_context!("{output_directory}"))?;
+
+        digest
+            .progress_bar
+            .set_finalize_lines(console::make_finalize_line(
+                console::FinalType::Completed,
+                digest.progress_bar.elapsed(),
+                &output_file_name,
+            ));
 
         Ok((output_file_path, digest.sha256))
     }

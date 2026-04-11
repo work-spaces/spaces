@@ -74,7 +74,7 @@ impl Decoder {
     fn extract_to_tar_bytes<Decoder: std::io::Read>(
         mut decoder: Decoder,
         reader_size: u64,
-        driver: Driver,
+        _driver: Driver,
         progress_bar: &mut console::Progress,
     ) -> anyhow::Result<Vec<u8>> {
         let mut result = Vec::with_capacity(reader_size as usize);
@@ -83,7 +83,7 @@ impl Decoder {
         driver::update_status(
             progress_bar,
             UpdateStatus {
-                detail: Some(format!("creating {} as binary blob", driver.extension())),
+                detail: Some("Decompressing...".to_string()),
                 total: Some(200),
                 ..Default::default()
             },
@@ -139,7 +139,7 @@ impl Decoder {
                 driver::update_status(
                     &mut progress_bar,
                     UpdateStatus {
-                        detail: Some("Extracting (zip)".to_string()),
+                        detail: Some("Extracting...".to_string()),
                         total: Some(file_names.len() as u64),
                         ..Default::default()
                     },
@@ -202,7 +202,7 @@ impl Decoder {
                 driver::update_status(
                     &mut progress_bar,
                     UpdateStatus {
-                        detail: Some("creating tar as binary blob".to_string()),
+                        detail: Some("Decompressing (7z)...".to_string()),
                         total: Some(200),
                         ..Default::default()
                     },
@@ -246,7 +246,7 @@ impl Decoder {
             driver::update_status(
                 &mut progress_bar,
                 UpdateStatus {
-                    detail: Some("Unpacking (tar)".to_string()),
+                    detail: Some("Unpacking...".to_string()),
                     ..Default::default()
                 },
             );
