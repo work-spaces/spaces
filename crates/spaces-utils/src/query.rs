@@ -472,28 +472,29 @@ impl QueryCommand {
 
                 if *raw {
                     let glob_filter = glob::Globs::new_with_includes(&globs);
-                    let rules = if *checkout {
-                        ctx.checkout_rules
-                            .iter()
-                            .chain(ctx.run_rules.iter())
-                            .collect::<Vec<_>>()
-                    } else {
-                        ctx.run_rules.iter().collect::<Vec<_>>()
-                    };
-                    for qr in rules {
+                    let emit = |qr: &QueryRule| -> anyhow::Result<()> {
                         let raw_name = qr.rule.name.as_ref();
                         if !globs.is_empty()
                             && !glob_filter
                                 .is_match(raw_name.strip_prefix("//").unwrap_or(raw_name))
                         {
-                            continue;
+                            return Ok(());
                         }
                         if *has_help && qr.rule.help.is_none() {
-                            continue;
+                            return Ok(());
                         }
                         if let Some(yaml) = &qr.serialized_yaml {
                             console.write(&format!("# {raw_name}\n{yaml}"))?;
                         }
+                        Ok(())
+                    };
+                    if *checkout {
+                        for qr in &ctx.checkout_rules {
+                            emit(qr)?;
+                        }
+                    }
+                    for qr in &ctx.run_rules {
+                        emit(qr)?;
                     }
                     return Ok(());
                 }
@@ -674,13 +675,7 @@ impl QueryCommand {
 
                 let mut scored: Vec<Scored> = Vec::new();
 
-                let search_rules: Box<dyn Iterator<Item = &QueryRule>> = if *checkout {
-                    Box::new(ctx.checkout_rules.iter().chain(ctx.run_rules.iter()))
-                } else {
-                    Box::new(ctx.run_rules.iter())
-                };
-
-                for qr in search_rules {
+                let mut score_rule = |qr: &QueryRule| {
                     let raw_name = qr.rule.name.as_ref();
                     // Score the rule against every term; keep the best match.
                     // Help-text matches are penalised (halved) so name matches rank higher.
@@ -721,6 +716,15 @@ impl QueryCommand {
                             },
                         });
                     }
+                };
+
+                if *checkout {
+                    for qr in &ctx.checkout_rules {
+                        score_rule(qr);
+                    }
+                }
+                for qr in &ctx.run_rules {
+                    score_rule(qr);
                 }
 
                 scored.sort_by(|a, b| b.score.cmp(&a.score));
