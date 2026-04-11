@@ -1020,6 +1020,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         Ok(NoneType)
     }
+
 }
 
 fn add_git_url_to_workspace_store_queue(

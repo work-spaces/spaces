@@ -22,9 +22,18 @@ load(
     "info_is_ci",
 )
 load(
+    "//@star/sdk/star/sandbox.star",
+    "sandbox_allow_exec",
+    "sandbox_allow_read",
+    "sandbox_allow_write",
+    "sandbox_configure_for_os",
+    "sandbox_new",
+)
+load(
     "//@star/sdk/star/ws.star",
     "workspace_get_absolute_path",
     "workspace_get_path_to_checkout",
+    "workspace_set_sandbox",
 )
 
 # Configure the top level workspace
@@ -132,3 +141,7 @@ checkout_add_env_vars(
         ),
     ],
 )
+
+sandbox = sandbox_new("workspace-sandbox")
+sandbox_configure_for_os(sandbox)
+workspace_set_sandbox(sandbox)

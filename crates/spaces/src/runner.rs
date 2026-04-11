@@ -306,8 +306,10 @@ pub fn run_shell_in_workspace(
             .cloned()
             .unwrap_or_else(|| "".into());
         let store_path = workspace_arc.read().get_store_path();
-        shell::create_sandbox(env_path, store_path)
-            .context(format_context!("while creating sandbox"))?
+        let mut default_sandbox = shell::create_sandbox(env_path, store_path)
+            .context(format_context!("while creating sandbox"))?;
+        default_sandbox.extend(&workspace_arc.read().settings.json.sandbox);
+        default_sandbox
             .apply()
             .context(format_context!("while applying sandbox"))?;
     }

@@ -1,4 +1,5 @@
 use anyhow::Context;
+use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -96,27 +97,6 @@ impl Sandbox {
         self
     }
 
-    /// Grant read-only access to common system pseudo-devices and read-write
-    /// access to shared temp directories.
-    ///
-    /// Intentionally excludes `/bin`, `/usr`, and other executable trees.
-    pub fn with_system_defaults(self) -> Self {
-        let s = self.allow_write("/dev").allow_write("/tmp");
-
-        #[cfg(target_os = "macos")]
-        let s = s
-            .allow_write("/private/tmp")
-            .allow_read("/private/etc/ssl")
-            .allow_read("/var/select")
-            .allow_read("/var/db")
-            .allow_write("/var/folders");
-
-        #[cfg(target_os = "linux")]
-        let s = s.allow_read("/etc/ssl").allow_read("/etc/pki/tls");
-
-        s
-    }
-
     /// Merge all paths from `other` into `self`. `other`'s `system` and
     /// `network` fields are OR'd / take precedence when more permissive.
     pub fn extend(&mut self, other: &Sandbox) {
@@ -142,7 +122,7 @@ impl Sandbox {
                     *path = base
                         .join(p)
                         .to_str()
-                        .context("path is not valid UTF-8")?
+                        .context(format_context!("path is not valid UTF-8"))?
                         .into();
                 }
             }
@@ -159,7 +139,7 @@ impl Sandbox {
                 *s = base
                     .join(p)
                     .to_str()
-                    .context("scratch path is not valid UTF-8")?
+                    .context(format_context!("scratch path is not valid UTF-8"))?
                     .into();
             }
         }
@@ -178,25 +158,25 @@ impl Sandbox {
         for path in &self.read {
             caps = caps
                 .allow_path(&**path, nono::AccessMode::Read)
-                .with_context(|| format!("failed to allow read for: {path}"))?;
+                .with_context(|| format_context!("failed to allow read for: {path}"))?;
         }
 
         for path in &self.write {
             caps = caps
                 .allow_path(&**path, nono::AccessMode::ReadWrite)
-                .with_context(|| format!("failed to allow write for: {path}"))?;
+                .with_context(|| format_context!("failed to allow write for: {path}"))?;
         }
 
         for path in &self.exec {
             caps = caps
                 .allow_path(&**path, nono::AccessMode::Read)
-                .with_context(|| format!("failed to allow exec for: {path}"))?;
+                .with_context(|| format_context!("failed to allow exec for: {path}"))?;
         }
 
         if let Some(ref s) = self.scratch {
             caps = caps
                 .allow_path(&**s, nono::AccessMode::ReadWrite)
-                .with_context(|| format!("failed to allow scratch for: {s}"))?;
+                .with_context(|| format_context!("failed to allow scratch for: {s}"))?;
         }
 
         caps = match self.network {
@@ -214,18 +194,14 @@ impl Sandbox {
     pub fn apply(&self) -> anyhow::Result<()> {
         let support = nono::Sandbox::support_info();
         if !support.is_supported {
-            return Err(anyhow::anyhow!(
+            return Err(format_error!(
                 "sandboxing is not supported on this platform: {}",
                 support.details
             ));
         }
         let caps = self.to_capability_set()?;
-        nono::Sandbox::apply(&caps).with_context(|| {
-            format!(
-                "failed to apply sandbox{}",
-                format!(" for rule '{}'", self.name)
-            )
-        })?;
+        nono::Sandbox::apply(&caps)
+            .with_context(|| format_context!("failed to apply sandbox `{}`", self.name))?;
         Ok(())
     }
 
@@ -238,10 +214,10 @@ impl Sandbox {
             for grant in self.read.iter().chain(self.write.iter()) {
                 let grant_path = PathBuf::from(&**grant);
                 if deny_path.starts_with(&grant_path) {
-                    anyhow::bail!(
+                    return Err(format_error!(
                         "deny path '{deny}' is covered by grant '{grant}'; \
                          use narrower grants to exclude it"
-                    );
+                    ));
                 }
             }
         }

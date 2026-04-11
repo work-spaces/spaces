@@ -1,4 +1,4 @@
-use crate::{changes, graph, inputs, logger, store};
+use crate::{changes, graph, inputs, logger, sandbox, store};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 
@@ -301,6 +301,8 @@ pub struct JsonSettings {
     pub dev_branches: Vec<Arc<str>>,
     #[serde(skip)]
     pub bin_settings: BinSettings,
+    #[serde(default)]
+    pub sandbox: sandbox::Sandbox,
 }
 
 impl Default for JsonSettings {
@@ -325,6 +327,7 @@ impl JsonSettings {
             minimum_version: None,
             dev_branches: Vec::new(),
             bin_settings: Default::default(),
+            sandbox: Default::default(),
         }
     }
 

@@ -252,7 +252,6 @@ pub fn create_sandbox(
 
     let mut manifest = sandbox::Sandbox::new()
         .with_name("spaces-shell")
-        .with_system_defaults()
         .allow_write(cwd_str.clone())
         .allow_exec(cwd_str)
         .allow_read(store_path.clone())
