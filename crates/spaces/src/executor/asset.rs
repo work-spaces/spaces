@@ -2,7 +2,7 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use utils::{http_archive, labels, logger, ws};
+use utils::{http_archive, labels, logger, store, ws};
 
 use crate::workspace;
 
@@ -347,12 +347,86 @@ impl AddSoftLink {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AddHomeAsset {
+    pub source: String,
+}
+
+impl AddHomeAsset {
+    pub fn execute(
+        &self,
+        _progress: &mut console::Progress,
+        workspace: workspace::WorkspaceArc,
+        _name: &str,
+    ) -> anyhow::Result<()> {
+        let home = std::env::var("HOME")
+            .context(format_context!("HOME environment variable is not set"))?;
+        let user = std::env::var("USER")
+            .context(format_context!("USER environment variable is not set"))?;
+
+        let source_path = std::path::Path::new(&home).join(&self.source);
+
+        // store_relative: home/$USER/<source>
+        let store_relative = format!("{}/{}/{}", store::SPACES_STORE_HOME, user, self.source);
+
+        let mut workspace_write_lock = workspace.write();
+        let _ = workspace_write_lock
+            .settings
+            .checkout
+            .links
+            .insert(self.source.clone().into());
+
+        let store_path = workspace_write_lock.get_store_path();
+        let store_full = std::path::Path::new(store_path.as_ref()).join(&store_relative);
+
+        if let Some(parent) = store_full.parent() {
+            std::fs::create_dir_all(parent).context(format_context!(
+                "Failed to create store directories for home asset {}",
+                store_full.display()
+            ))?;
+        }
+
+        std::fs::copy(&source_path, &store_full).context(format_context!(
+            "Failed to copy home asset {} to store {}",
+            source_path.display(),
+            store_full.display()
+        ))?;
+
+        workspace_write_lock
+            .add_store_entry(store_relative.clone().into())
+            .context(format_context!(
+                "Failed to add home asset {} to store manifest",
+                store_relative
+            ))?;
+
+        let workspace_path = workspace_write_lock.get_absolute_path();
+        let destination = format!("{}/{}", workspace_path, self.source);
+
+        http_archive::HttpArchive::create_link(
+            destination.clone(),
+            store_full.to_string_lossy().to_string(),
+            http_archive::MakeReadOnly::No,
+            None,
+            http_archive::ArchiveLink::Hard,
+        )
+        .context(format_context!(
+            "Failed to create hard link from {} to {}",
+            store_full.display(),
+            destination
+        ))?;
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, tag = "type")]
 pub enum AnyAsset {
     SoftLink(AddSoftLink),
     Asset(AddAsset),
     HardLink(AddHardLink),
     Which(AddWhichAsset),
+    Home(AddHomeAsset),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -374,6 +448,7 @@ impl AddAnyAssets {
                 AnyAsset::Asset(asset) => asset.execute(progress, workspace.clone(), name)?,
                 AnyAsset::HardLink(asset) => asset.execute(progress, workspace.clone(), name)?,
                 AnyAsset::Which(asset) => asset.execute(progress, workspace.clone(), name)?,
+                AnyAsset::Home(asset) => asset.execute(progress, workspace.clone(), name)?,
             }
         }
         Ok(())

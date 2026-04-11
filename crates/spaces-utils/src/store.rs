@@ -10,6 +10,7 @@ use std::sync::Arc;
 const MANIFEST_FILE_NAME: &str = "store.spaces.json";
 pub const SPACES_STORE: &str = ".spaces/store";
 pub const SPACES_STORE_RCACHE: &str = "rcache";
+pub const SPACES_STORE_HOME: &str = "home";
 
 pub fn logger(console: console::Console) -> logger::Logger {
     logger::Logger::new(console, "store".into())
@@ -365,6 +366,54 @@ impl Store {
             }
         }
 
+        // Remove unlisted files under the home subdirectory
+        let home_dir = path_to_store.join(SPACES_STORE_HOME);
+        if home_dir.exists() {
+            for entry in walkdir::WalkDir::new(&home_dir)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_type().is_file())
+            {
+                let entry_path = entry.path();
+                if let Ok(relative_path) = entry_path.strip_prefix(&path_to_store)
+                    && !self
+                        .entries
+                        .keys()
+                        .map(|e| std::path::Path::new(e.as_ref()))
+                        .any(|e| e == relative_path)
+                {
+                    let display = relative_path.display();
+                    if is_dry_run {
+                        logger(console.clone()).info(
+                            format!("Unlisted Home Entry (not removing, dry run): {display}")
+                                .as_str(),
+                        );
+                    } else {
+                        logger(console.clone())
+                            .info(format!("Unlisted Home Entry (removing): {display}").as_str());
+                        if entry_path.starts_with(&path_to_store) {
+                            match std::fs::remove_file(entry_path) {
+                                Ok(()) => {}
+                                Err(e) => {
+                                    logger(console.clone()).error(
+                                        format!(
+                                            "Failed to remove {display}: {e} - remove manually"
+                                        )
+                                        .as_str(),
+                                    );
+                                }
+                            }
+                        } else {
+                            logger(console.clone()).error(
+                                format!("Internal Error: can't remove {display} - not in store")
+                                    .as_str(),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -518,7 +567,12 @@ impl Store {
             progress.set_message(&format!("pruning {key} with {size}"));
             if !is_dry_run {
                 self.entries.remove(&key);
-                if let Err(e) = std::fs::remove_dir_all(&path) {
+                let remove_result = if path.is_file() {
+                    std::fs::remove_file(&path)
+                } else {
+                    std::fs::remove_dir_all(&path)
+                };
+                if let Err(e) = remove_result {
                     logger(console.clone())
                         .error(format!("Failed to remove entry: {key}, error: {e}").as_str());
                 } else {

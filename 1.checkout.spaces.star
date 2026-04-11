@@ -7,14 +7,12 @@ load("//@star/packages/star/rust.star", "rust_add")
 load("//@star/packages/star/sccache.star", "sccache_add")
 load("//@star/packages/star/spaces-cli.star", "spaces_add_devutils", "spaces_add_star_formatter")
 load("//@star/packages/star/starship.star", "starship_add_bash")
+load("//@star/sdk/star/asset.star", "asset_hard_link")
 load(
     "//@star/sdk/star/checkout.star",
     "checkout_add_any_assets",
     "checkout_add_env_vars",
-    "checkout_add_repo",
-    "checkout_update_asset",
 )
-load("//@star/sdk/star/asset.star", "asset_hard_link")
 load("//@star/sdk/star/env.star", "env_assign")
 load(
     "//@star/sdk/star/info.star",
