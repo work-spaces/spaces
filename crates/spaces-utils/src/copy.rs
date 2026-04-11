@@ -4,10 +4,17 @@ use anyhow_source_location::format_context;
 
 pub type FilterCallback = Box<dyn Fn(&std::path::Path) -> bool>;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum UseCowSemantics {
+    No,
+    Yes,
+}
+
 pub fn copy_with_cow_semantics(
     progress: &mut console::Progress,
     source: &str,
     destination: &str,
+    use_cow_semantics: UseCowSemantics,
     filter: Option<FilterCallback>,
 ) -> anyhow::Result<()> {
     let all_files = walkdir::WalkDir::new(source)
@@ -29,14 +36,22 @@ pub fn copy_with_cow_semantics(
                 std::fs::create_dir_all(parent)
                     .context(format_context!("Failed to create parent {parent:?}"))?;
             }
-            let copied = reflink_copy::reflink_or_copy(entry.path(), destination_path.clone())
-                .context(format_context!(
-                    "Failed to reflink {} to {}",
+            if use_cow_semantics == UseCowSemantics::Yes {
+                let copied = reflink_copy::reflink_or_copy(entry.path(), destination_path.clone())
+                    .context(format_context!(
+                        "Failed to reflink {} to {}",
+                        entry.path().display(),
+                        destination_path.display()
+                    ))?;
+                if copied.is_some() {
+                    items_copied += 1;
+                }
+            } else {
+                std::fs::copy(entry.path(), &destination_path).context(format_context!(
+                    "Failed to copy {} to {}",
                     entry.path().display(),
                     destination_path.display()
                 ))?;
-            if copied.is_some() {
-                items_copied += 1;
             }
         }
 

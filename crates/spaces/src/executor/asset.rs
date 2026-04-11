@@ -2,7 +2,7 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use utils::{http_archive, labels, logger, store, ws};
+use utils::{copy, http_archive, labels, logger, store, ws};
 
 use crate::workspace;
 
@@ -355,7 +355,7 @@ pub struct AddHomeAsset {
 impl AddHomeAsset {
     pub fn execute(
         &self,
-        _progress: &mut console::Progress,
+        progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         _name: &str,
     ) -> anyhow::Result<()> {
@@ -386,7 +386,20 @@ impl AddHomeAsset {
             ))?;
         }
 
-        std::fs::copy(&source_path, &store_full).context(format_context!(
+        copy::copy_with_cow_semantics(
+            progress,
+            source_path.to_str().context(format_context!(
+                "Failed to convert source path to string {}",
+                source_path.display()
+            ))?,
+            store_full.to_str().context(format_context!(
+                "Failed to convert store path to string {}",
+                store_full.display()
+            ))?,
+            copy::UseCowSemantics::No,
+            None,
+        )
+        .context(format_context!(
             "Failed to copy home asset {} to store {}",
             source_path.display(),
             store_full.display()
@@ -402,18 +415,32 @@ impl AddHomeAsset {
         let workspace_path = workspace_write_lock.get_absolute_path();
         let destination = format!("{}/{}", workspace_path, self.source);
 
-        http_archive::HttpArchive::create_link(
-            destination.clone(),
-            store_full.to_string_lossy().to_string(),
-            http_archive::MakeReadOnly::No,
-            None,
-            http_archive::ArchiveLink::Hard,
-        )
-        .context(format_context!(
-            "Failed to create hard link from {} to {}",
-            store_full.display(),
-            destination
-        ))?;
+        if store_full.is_dir() {
+            http_archive::HttpArchive::create_links_from_directory(
+                &store_full,
+                std::path::Path::new(&destination),
+                http_archive::MakeReadOnly::No,
+                http_archive::ArchiveLink::Hard,
+            )
+            .context(format_context!(
+                "Failed to create hard links from {} to {}",
+                store_full.display(),
+                destination
+            ))?;
+        } else {
+            http_archive::HttpArchive::create_link(
+                destination.clone(),
+                store_full.to_string_lossy().to_string(),
+                http_archive::MakeReadOnly::No,
+                None,
+                http_archive::ArchiveLink::Hard,
+            )
+            .context(format_context!(
+                "Failed to create hard link from {} to {}",
+                store_full.display(),
+                destination
+            ))?;
+        }
 
         Ok(())
     }

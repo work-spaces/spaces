@@ -805,13 +805,50 @@ impl HttpArchive {
             progress.increment(1);
         }
 
+        Self::apply_soft_links(soft_links)?;
+
+        Ok(())
+    }
+
+    fn apply_soft_links(
+        soft_links: Vec<(std::path::PathBuf, std::path::PathBuf)>,
+    ) -> anyhow::Result<()> {
         for (original, link) in soft_links {
             symlink::symlink_file(&original, &link).context(format_context!(
                 "failed to create symlink {original:?} -> {link:?}"
             ))?;
         }
-
         Ok(())
+    }
+
+    pub fn create_links_from_directory(
+        source_dir: &std::path::Path,
+        dest_dir: &std::path::Path,
+        make_read_only: MakeReadOnly,
+        link_type: ArchiveLink,
+    ) -> anyhow::Result<()> {
+        let mut soft_links = Vec::new();
+        for entry in walkdir::WalkDir::new(source_dir)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file())
+        {
+            let relative = entry
+                .path()
+                .strip_prefix(source_dir)
+                .context(format_context!("internal error: path not prefixed by source dir"))?;
+            let target = dest_dir.join(relative).to_string_lossy().to_string();
+            let source = entry.path().to_string_lossy().to_string();
+            Self::create_link(
+                target.clone(),
+                source.clone(),
+                make_read_only.clone(),
+                Some(&mut soft_links),
+                link_type.clone(),
+            )
+            .context(format_context!("hard link {target} -> {source}"))?;
+        }
+        Self::apply_soft_links(soft_links)
     }
 
     pub fn create_link(
