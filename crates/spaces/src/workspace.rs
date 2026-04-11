@@ -1,4 +1,3 @@
-use crate::label;
 use crate::{singleton, stardoc};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
@@ -264,15 +263,7 @@ impl Workspace {
     /// Checks if a lock key is overridden by a command line lock.
     /// Handles both simple repo names and fully qualified labels.
     fn is_lock_overridden_by_command_line(lock_key: &str) -> bool {
-        let args_locks = singleton::get_args_locks();
-        let repo_name = label::get_rule_name_from_label(lock_key);
-
-        // Check if this lock key conflicts with any command line lock
-        args_locks.contains_key(lock_key)
-            || args_locks.contains_key(repo_name)
-            || args_locks
-                .keys()
-                .any(|cmd_key| label::get_rule_name_from_label(cmd_key.as_ref()) == repo_name)
+        singleton::get_args_lock_for_repo(lock_key).is_some()
     }
 
     pub fn update_locks(&mut self, locks: &HashMap<Arc<str>, Arc<str>>) {

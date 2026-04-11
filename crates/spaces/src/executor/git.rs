@@ -531,23 +531,43 @@ impl Git {
                 // strip the trailing newline
                 workspace.write().add_git_commit_lock(name, rev);
             }
-        } else if is_use_lock {
+        } else {
             let repo_name = label::get_rule_name_from_label(name);
-            let commit_hash_lock = {
+
+            // First check for command line locks (always apply if present)
+            // Uses comprehensive lookup that handles both simple names and fully-qualified labels
+            let command_line_lock = singleton::get_args_lock_for_repo(name);
+
+            // Then check workspace locks only if --locked was passed
+            let (commit_hash_lock, lock_source) = if let Some(lock) = command_line_lock {
+                logger(progress.console.clone(), self.url.clone())
+                    .debug(format!("Found command line lock for {name}: {lock}").as_str());
+                (Some(lock), "command line")
+            } else if is_use_lock {
                 let workspace_read = workspace.read();
-                workspace_read
+                let workspace_lock = workspace_read
                     .locks
                     .get(name)
                     .or(workspace_read.locks.get(repo_name))
-                    .cloned()
+                    .cloned();
+                if workspace_lock.is_some() {
+                    logger(progress.console.clone(), self.url.clone()).debug(
+                        format!("Found workspace lock for {name}: {workspace_lock:?}").as_str(),
+                    );
+                }
+                (workspace_lock, "workspace lock file")
+            } else {
+                (None, "")
             };
 
             logger(progress.console.clone(), self.url.clone())
                 .debug(format!("Is lock for {name}: {commit_hash_lock:?}").as_str());
 
             if let Some(commit_hash) = commit_hash_lock {
-                logger(progress.console.clone(), self.url.clone())
-                    .info(format!("applying {commit_hash} from lock file at {name}").as_str());
+                logger(progress.console.clone(), self.url.clone()).info(
+                    format!("applying locked revision {commit_hash} from {lock_source} at {name}")
+                        .as_str(),
+                );
 
                 let options = console::ExecuteOptions {
                     working_directory: Some(working_directory.clone()),

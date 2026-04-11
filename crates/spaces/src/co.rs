@@ -85,9 +85,6 @@ pub fn checkout_repo(
 ) -> anyhow::Result<()> {
     set_workspace_env(args.env).context(format_context!("While checking out repo"))?;
     set_workspace_store(args.store).context(format_context!("While checking out repo"))?;
-    if !args.lock.is_empty() {
-        singleton::set_use_locks();
-    }
     singleton::set_args_locks(args.lock).context(format_context!("While checking out repo"))?;
 
     let clone = repo_args.clone.unwrap_or(git::Clone::Default);
@@ -160,9 +157,6 @@ pub fn checkout_workflow(
 
     set_workspace_env(args.env).context(format_context!("While checking out workflow"))?;
     set_workspace_store(args.store).context(format_context!("While checking out workflow"))?;
-    if !args.lock.is_empty() {
-        singleton::set_use_locks();
-    }
     singleton::set_args_locks(args.lock).context(format_context!("While checking out workflow"))?;
 
     if let Some(workflow) = workflow_args.workflow.or(workflow_args.wf) {
@@ -263,6 +257,7 @@ impl CheckoutWorkflow {
         console: console::Console,
         name: Arc<str>,
         keep_workspace_on_failure: bool,
+        lock: Vec<Arc<str>>,
     ) -> anyhow::Result<()> {
         let is_ci: ci::IsCi = singleton::get_is_ci().into();
         let group = ci::GithubLogGroup::new_group(
@@ -289,7 +284,7 @@ impl CheckoutWorkflow {
                 create_lock_file: self.create_lock_file.unwrap_or_default(),
                 force_install_tools: false,
                 keep_workspace_on_failure,
-                lock: vec![],
+                lock,
             },
         );
         group.end_group(console.clone(), is_ci)?;
@@ -320,6 +315,7 @@ impl CheckoutRepo {
         console: console::Console,
         name: Arc<str>,
         keep_workspace_on_failure: bool,
+        lock: Vec<Arc<str>>,
     ) -> anyhow::Result<()> {
         let is_ci: ci::IsCi = singleton::get_is_ci().into();
         let group = ci::GithubLogGroup::new_group(
@@ -347,7 +343,7 @@ impl CheckoutRepo {
                 create_lock_file: self.create_lock_file.unwrap_or_default(),
                 force_install_tools: false,
                 keep_workspace_on_failure,
-                lock: vec![],
+                lock,
             },
         );
         group.end_group(console.clone(), is_ci)?;
@@ -394,12 +390,15 @@ impl Checkout {
         console: console::Console,
         name: Arc<str>,
         keep_workspace_on_failure: bool,
+        lock: Vec<Arc<str>>,
     ) -> anyhow::Result<()> {
         let result = match self {
             Checkout::Workflow(workflow) => {
-                workflow.checkout(console.clone(), name, keep_workspace_on_failure)
+                workflow.checkout(console.clone(), name, keep_workspace_on_failure, lock)
             }
-            Checkout::Repo(repo) => repo.checkout(console.clone(), name, keep_workspace_on_failure),
+            Checkout::Repo(repo) => {
+                repo.checkout(console.clone(), name, keep_workspace_on_failure, lock)
+            }
         };
         result.context(format_context!("during repo checkout"))?;
         Ok(())
