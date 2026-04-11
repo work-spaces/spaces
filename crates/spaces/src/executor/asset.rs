@@ -386,6 +386,17 @@ impl AddHomeAsset {
             ))?;
         }
 
+        // When the source is a directory, remove the existing store entry first so
+        // that files deleted from the source are not left behind (stale files would
+        // otherwise persist in the store and propagate back into the workspace links
+        // on subsequent runs).
+        if source_path.is_dir() && store_full.exists() {
+            std::fs::remove_dir_all(&store_full).context(format_context!(
+                "Failed to remove stale store directory {}",
+                store_full.display()
+            ))?;
+        }
+
         copy::copy_with_cow_semantics(
             progress,
             source_path.to_str().context(format_context!(

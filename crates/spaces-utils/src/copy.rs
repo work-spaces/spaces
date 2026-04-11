@@ -129,6 +129,10 @@ pub fn create_link(
         return Ok(());
     }
 
+    if link_type == LinkType::None {
+        return Ok(());
+    }
+
     if link_type == LinkType::Hard {
         std::fs::hard_link(original, target).context(format_context!(
             "If you get 'Operation Not Permitted' on mac try enabling 'Full Disk Access' for the terminal"))?;
