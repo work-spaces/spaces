@@ -1,3 +1,4 @@
+use crate::label;
 use crate::task;
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
@@ -252,6 +253,33 @@ pub fn set_use_locks() {
 pub fn get_args_locks() -> HashMap<Arc<str>, Arc<str>> {
     let state = get_state().read();
     state.args_locks.clone()
+}
+
+/// Looks up a command-line lock for a given repo name or label.
+/// Handles both simple repo names and fully qualified labels (e.g., `//path:repo`).
+/// This matches the logic used in `Workspace::is_lock_overridden_by_command_line`.
+pub fn get_args_lock_for_repo(name: &str) -> Option<Arc<str>> {
+    let state = get_state().read();
+    let repo_name = label::get_rule_name_from_label(name);
+
+    // Check exact match on name
+    if let Some(lock) = state.args_locks.get(name) {
+        return Some(lock.clone());
+    }
+
+    // Check match on simple repo name
+    if let Some(lock) = state.args_locks.get(repo_name) {
+        return Some(lock.clone());
+    }
+
+    // Check if any command-line lock key has the same rule name
+    for (cmd_key, lock_value) in state.args_locks.iter() {
+        if label::get_rule_name_from_label(cmd_key.as_ref()) == repo_name {
+            return Some(lock_value.clone());
+        }
+    }
+
+    None
 }
 
 pub fn set_args_locks(args: Vec<Arc<str>>) -> anyhow::Result<()> {

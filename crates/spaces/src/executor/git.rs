@@ -535,17 +535,14 @@ impl Git {
             let repo_name = label::get_rule_name_from_label(name);
 
             // First check for command line locks (always apply if present)
-            let args_locks = singleton::get_args_locks();
-            let command_line_lock = args_locks
-                .get(name)
-                .or_else(|| args_locks.get(repo_name))
-                .cloned();
+            // Uses comprehensive lookup that handles both simple names and fully-qualified labels
+            let command_line_lock = singleton::get_args_lock_for_repo(name);
 
             // Then check workspace locks only if --locked was passed
-            let commit_hash_lock = if let Some(lock) = command_line_lock {
+            let (commit_hash_lock, lock_source) = if let Some(lock) = command_line_lock {
                 logger(progress.console.clone(), self.url.clone())
                     .debug(format!("Found command line lock for {name}: {lock}").as_str());
-                Some(lock)
+                (Some(lock), "command line")
             } else if is_use_lock {
                 let workspace_read = workspace.read();
                 let workspace_lock = workspace_read
@@ -558,17 +555,19 @@ impl Git {
                         format!("Found workspace lock for {name}: {workspace_lock:?}").as_str(),
                     );
                 }
-                workspace_lock
+                (workspace_lock, "workspace lock file")
             } else {
-                None
+                (None, "")
             };
 
             logger(progress.console.clone(), self.url.clone())
                 .debug(format!("Is lock for {name}: {commit_hash_lock:?}").as_str());
 
             if let Some(commit_hash) = commit_hash_lock {
-                logger(progress.console.clone(), self.url.clone())
-                    .info(format!("applying {commit_hash} from lock file at {name}").as_str());
+                logger(progress.console.clone(), self.url.clone()).info(
+                    format!("applying locked revision {commit_hash} from {lock_source} at {name}")
+                        .as_str(),
+                );
 
                 let options = console::ExecuteOptions {
                     working_directory: Some(working_directory.clone()),
