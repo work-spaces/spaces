@@ -70,9 +70,8 @@ pub fn create_links_from_directory(
 
         if entry.file_type().is_dir() {
             let target_dir = dest_dir.join(relative);
-            std::fs::create_dir_all(&target_dir).context(format_context!(
-                "failed to create directory {target_dir:?}"
-            ))?;
+            std::fs::create_dir_all(&target_dir)
+                .context(format_context!("failed to create directory {target_dir:?}"))?;
             continue;
         }
 
