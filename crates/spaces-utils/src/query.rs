@@ -230,7 +230,7 @@ impl QueryCommand {
 
 #[cfg(test)]
 mod tests {
-    use super::highlighted_char_mask;
+    use super::query_highlight_mask;
     use std::sync::Arc;
 
     fn arc_terms(terms: &[&str]) -> Vec<Arc<str>> {
@@ -239,7 +239,7 @@ mod tests {
 
     #[test]
     fn only_highlights_whole_search_terms() {
-        let mask = highlighted_char_mask("some search thing", &arc_terms(&["something"]));
+        let mask = query_highlight_mask("some search thing", &arc_terms(&["something"]));
         let highlighted: Vec<usize> = mask
             .into_iter()
             .enumerate()
@@ -251,7 +251,7 @@ mod tests {
 
     #[test]
     fn highlights_term_substrings_and_multiple_occurrences() {
-        let mask = highlighted_char_mask("tested tests test", &arc_terms(&["test"]));
+        let mask = query_highlight_mask("tested tests test", &arc_terms(&["test"]));
         let highlighted: Vec<usize> = mask
             .into_iter()
             .enumerate()
@@ -262,8 +262,19 @@ mod tests {
     }
 
     #[test]
+    fn no_panic_on_length_changing_lowercase() {
+        // 'ß'.to_lowercase() == "ss" (1 char expands to 2), which previously caused an
+        // out-of-bounds panic because highlights was sized from the original char count
+        // while value_lower used the expanded length.
+        let mask = query_highlight_mask("Straße", &arc_terms(&["straße"]));
+        assert_eq!(mask.len(), "Straße".chars().count());
+        // "Straße".to_ascii_lowercase() == "straße", so the full string should match.
+        assert!(mask.iter().all(|&h| h));
+    }
+
+    #[test]
     fn merges_highlights_from_multiple_terms() {
-        let mask = highlighted_char_mask("build and test", &arc_terms(&["build", "test"]));
+        let mask = query_highlight_mask("build and test", &arc_terms(&["build", "test"]));
         let highlighted: Vec<usize> = mask
             .into_iter()
             .enumerate()
@@ -448,21 +459,21 @@ fn keyword_style() -> ContentStyle {
     }
 }
 
-fn highlighted_char_mask(value: &str, query: &[Arc<str>]) -> Vec<bool> {
-    let value_chars: Vec<char> = value.chars().collect();
-    let value_lower: Vec<char> = value.to_lowercase().chars().collect();
-    let mut highlights = vec![false; value_chars.len()];
+fn query_highlight_mask(value: &str, query: &[Arc<str>]) -> Vec<bool> {
+    // ASCII-only folding preserves char count, so value_lower.len() == value.chars().count().
+    let value_lower: Vec<char> = value.to_ascii_lowercase().chars().collect();
+    let mut highlights = vec![false; value_lower.len()];
 
     for term in query {
-        let term_lower: Vec<char> = term.as_ref().to_lowercase().chars().collect();
+        let term_lower: Vec<char> = term.as_ref().to_ascii_lowercase().chars().collect();
         if term_lower.is_empty() || term_lower.len() > value_lower.len() {
             continue;
         }
 
         for start in 0..=value_lower.len() - term_lower.len() {
             if value_lower[start..start + term_lower.len()] == term_lower[..] {
-                for highlighted in &mut highlights[start..start + term_lower.len()] {
-                    *highlighted = true;
+                for h in &mut highlights[start..start + term_lower.len()] {
+                    *h = true;
                 }
             }
         }
@@ -481,7 +492,7 @@ fn push_highlighted_value(
     };
 
     let chars: Vec<char> = value.chars().collect();
-    let highlights = highlighted_char_mask(value, highlight_terms);
+    let highlights = query_highlight_mask(value, highlight_terms);
     if !highlights.iter().any(|highlighted| *highlighted) {
         line.push(console::Span::new_unstyled_lossy(value));
         return;
@@ -527,7 +538,7 @@ fn make_name_line(name: &str, highlight_terms: Option<&[Arc<str>]>) -> console::
     };
 
     let chars: Vec<char> = name.chars().collect();
-    let highlights = highlighted_char_mask(name, highlight_terms);
+    let highlights = query_highlight_mask(name, highlight_terms);
     if !highlights.iter().any(|highlighted| *highlighted) {
         line.push(console::Span::new_styled_lossy(StyledContent::new(
             name_style(),
