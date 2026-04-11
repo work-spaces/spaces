@@ -56,15 +56,17 @@ fn label_logger(console: console::Console, label: &str) -> logger::Logger {
 
 /// Extracts the filename from a URL for use as a progress bar prefix.
 fn url_to_filename(url: &str) -> &str {
-    url.rsplit('/').next().unwrap_or(url)
+    let trimmed = url.trim_end_matches('/');
+    trimmed.rsplit('/').next().unwrap_or(trimmed)
 }
 
 /// Extracts the host from a URL for display in download messages.
-fn url_to_host(url: &str) -> &str {
-    url.split("://")
-        .nth(1)
-        .and_then(|s| s.split('/').next())
-        .unwrap_or(url)
+fn url_to_host(url: &str) -> String {
+    url::Url::parse(url)
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(|s| s.trim().to_string()))
+        .filter(|host| !host.is_empty())
+        .unwrap_or_else(|| "<unknown-host>".to_string())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

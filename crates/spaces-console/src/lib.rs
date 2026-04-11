@@ -457,7 +457,10 @@ impl Progress {
         self.final_message = vec![];
     }
 
-    pub fn set_finalize<FinalType: std::fmt::Display>(&mut self, final_message: FinalType) {
+    pub fn set_finalize<FinalMessageType: std::fmt::Display>(
+        &mut self,
+        final_message: FinalMessageType,
+    ) {
         self.final_message = super_console::string_to_lines(Some(&final_message.to_string()));
     }
 
