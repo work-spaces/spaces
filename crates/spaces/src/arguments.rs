@@ -184,7 +184,7 @@ pub fn execute() -> anyhow::Result<()> {
             let _ = effective_console.error("see also", format!("\n  {}", logs.join("\n  ")));
         } else {
             singleton::process_anyhow_error(error);
-            singleton::show_error_chain();
+            singleton::show_error_chain(effective_console.clone());
         }
         Err(anyhow::anyhow!("execution failed"))
     } else {

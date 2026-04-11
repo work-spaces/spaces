@@ -621,8 +621,8 @@ mod tests {
         match &dep {
             AnyDep::Glob(Globs::Includes(v)) => {
                 assert_eq!(v.len(), 1);
-                // IsAnnotated::No + starts with "//" → stripped to "src/**"
-                assert_eq!(v[0].as_ref(), "src/**");
+                // Already starts with "//" → returned as-is (idempotent for cloned rules)
+                assert_eq!(v[0].as_ref(), "//src/**");
             }
             _ => panic!("expected Globs::Includes"),
         }
@@ -640,7 +640,8 @@ mod tests {
         match &dep {
             AnyDep::Glob(Globs::Excludes(v)) => {
                 assert_eq!(v.len(), 1);
-                assert_eq!(v[0].as_ref(), "build/**");
+                // Already starts with "//" → returned as-is (idempotent for cloned rules)
+                assert_eq!(v[0].as_ref(), "//build/**");
             }
             _ => panic!("expected Globs::Excludes"),
         }
@@ -687,7 +688,8 @@ mod tests {
                     _ => panic!("expected Rule"),
                 }
                 match &list[1] {
-                    AnyDep::Glob(Globs::Includes(v)) => assert_eq!(v[0].as_ref(), "src/**"),
+                    // Already starts with "//" → returned as-is (idempotent for cloned rules)
+                    AnyDep::Glob(Globs::Includes(v)) => assert_eq!(v[0].as_ref(), "//src/**"),
                     _ => panic!("expected Globs::Includes"),
                 }
             }
