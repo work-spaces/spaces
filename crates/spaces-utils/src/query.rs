@@ -228,6 +228,52 @@ impl QueryCommand {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::highlighted_char_mask;
+    use std::sync::Arc;
+
+    fn arc_terms(terms: &[&str]) -> Vec<Arc<str>> {
+        terms.iter().map(|term| Arc::<str>::from(*term)).collect()
+    }
+
+    #[test]
+    fn only_highlights_whole_search_terms() {
+        let mask = highlighted_char_mask("some search thing", &arc_terms(&["something"]));
+        let highlighted: Vec<usize> = mask
+            .into_iter()
+            .enumerate()
+            .filter_map(|(idx, highlighted)| highlighted.then_some(idx))
+            .collect();
+
+        assert!(highlighted.is_empty());
+    }
+
+    #[test]
+    fn highlights_term_substrings_and_multiple_occurrences() {
+        let mask = highlighted_char_mask("tested tests test", &arc_terms(&["test"]));
+        let highlighted: Vec<usize> = mask
+            .into_iter()
+            .enumerate()
+            .filter_map(|(idx, highlighted)| highlighted.then_some(idx))
+            .collect();
+
+        assert_eq!(highlighted, vec![0, 1, 2, 3, 7, 8, 9, 10, 13, 14, 15, 16]);
+    }
+
+    #[test]
+    fn merges_highlights_from_multiple_terms() {
+        let mask = highlighted_char_mask("build and test", &arc_terms(&["build", "test"]));
+        let highlighted: Vec<usize> = mask
+            .into_iter()
+            .enumerate()
+            .filter_map(|(idx, highlighted)| highlighted.then_some(idx))
+            .collect();
+
+        assert_eq!(highlighted, vec![0, 1, 2, 3, 4, 10, 11, 12, 13]);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
@@ -393,22 +439,144 @@ fn key_style() -> ContentStyle {
     }
 }
 
-fn make_name_line(name: &str) -> console::Line {
+fn keyword_style() -> ContentStyle {
+    ContentStyle {
+        foreground_color: Some(Color::DarkYellow),
+        background_color: None,
+        underline_color: None,
+        attributes: Attributes::from(Attribute::Bold),
+    }
+}
+
+fn highlighted_char_mask(value: &str, query: &[Arc<str>]) -> Vec<bool> {
+    let value_chars: Vec<char> = value.chars().collect();
+    let value_lower: Vec<char> = value.to_lowercase().chars().collect();
+    let mut highlights = vec![false; value_chars.len()];
+
+    for term in query {
+        let term_lower: Vec<char> = term.as_ref().to_lowercase().chars().collect();
+        if term_lower.is_empty() || term_lower.len() > value_lower.len() {
+            continue;
+        }
+
+        for start in 0..=value_lower.len() - term_lower.len() {
+            if value_lower[start..start + term_lower.len()] == term_lower[..] {
+                for highlighted in &mut highlights[start..start + term_lower.len()] {
+                    *highlighted = true;
+                }
+            }
+        }
+    }
+    highlights
+}
+
+fn push_highlighted_value(
+    line: &mut console::Line,
+    value: &str,
+    highlight_terms: Option<&[Arc<str>]>,
+) {
+    let Some(highlight_terms) = highlight_terms.filter(|terms| !terms.is_empty()) else {
+        line.push(console::Span::new_unstyled_lossy(value));
+        return;
+    };
+
+    let chars: Vec<char> = value.chars().collect();
+    let highlights = highlighted_char_mask(value, highlight_terms);
+    if !highlights.iter().any(|highlighted| *highlighted) {
+        line.push(console::Span::new_unstyled_lossy(value));
+        return;
+    }
+
+    let mut current_highlighted = highlights[0];
+    let mut chunk = String::new();
+    for (ch, highlighted) in chars.into_iter().zip(highlights.into_iter()) {
+        if highlighted != current_highlighted {
+            if current_highlighted {
+                line.push(console::Span::new_styled_lossy(StyledContent::new(
+                    keyword_style(),
+                    std::mem::take(&mut chunk),
+                )));
+            } else {
+                line.push(console::Span::new_unstyled_lossy(std::mem::take(
+                    &mut chunk,
+                )));
+            }
+            current_highlighted = highlighted;
+        }
+        chunk.push(ch);
+    }
+
+    if current_highlighted {
+        line.push(console::Span::new_styled_lossy(StyledContent::new(
+            keyword_style(),
+            chunk,
+        )));
+    } else {
+        line.push(console::Span::new_unstyled_lossy(chunk));
+    }
+}
+
+fn make_name_line(name: &str, highlight_terms: Option<&[Arc<str>]>) -> console::Line {
     let mut line = console::Line::default();
-    line.push(console::Span::new_styled_lossy(StyledContent::new(
-        name_style(),
-        name.to_owned(),
-    )));
+    let Some(highlight_terms) = highlight_terms.filter(|terms| !terms.is_empty()) else {
+        line.push(console::Span::new_styled_lossy(StyledContent::new(
+            name_style(),
+            name.to_owned(),
+        )));
+        return line;
+    };
+
+    let chars: Vec<char> = name.chars().collect();
+    let highlights = highlighted_char_mask(name, highlight_terms);
+    if !highlights.iter().any(|highlighted| *highlighted) {
+        line.push(console::Span::new_styled_lossy(StyledContent::new(
+            name_style(),
+            name.to_owned(),
+        )));
+        return line;
+    }
+
+    let mut current_highlighted = highlights[0];
+    let mut chunk = String::new();
+    for (ch, highlighted) in chars.into_iter().zip(highlights.into_iter()) {
+        if highlighted != current_highlighted {
+            if current_highlighted {
+                line.push(console::Span::new_styled_lossy(StyledContent::new(
+                    keyword_style(),
+                    std::mem::take(&mut chunk),
+                )));
+            } else {
+                line.push(console::Span::new_styled_lossy(StyledContent::new(
+                    name_style(),
+                    std::mem::take(&mut chunk),
+                )));
+            }
+            current_highlighted = highlighted;
+        }
+        chunk.push(ch);
+    }
+
+    if current_highlighted {
+        line.push(console::Span::new_styled_lossy(StyledContent::new(
+            keyword_style(),
+            chunk,
+        )));
+    } else {
+        line.push(console::Span::new_styled_lossy(StyledContent::new(
+            name_style(),
+            chunk,
+        )));
+    }
     line
 }
 
-fn make_kv_line(key: &str, value: &str) -> console::Line {
+fn make_kv_line(key: &str, value: &str, highlight_terms: Option<&[Arc<str>]>) -> console::Line {
     let mut line = console::Line::default();
     line.push(console::Span::new_styled_lossy(StyledContent::new(
         key_style(),
         format!("  {key:<8}"),
     )));
-    line.push(console::Span::new_unstyled_lossy(value));
+    push_highlighted_value(&mut line, value, highlight_terms);
     line
 }
 
@@ -419,31 +587,31 @@ fn emit_styled_rule(
     help: &str,
     deps: Option<&Vec<Arc<str>>>,
     targets: Option<&Vec<Arc<str>>>,
+    highlight_terms: Option<&[Arc<str>]>,
 ) {
-    console.emit_line(make_name_line(name));
-    console.emit_line(make_kv_line("source", source));
+    console.emit_line(make_name_line(name, highlight_terms));
+    console.emit_line(make_kv_line("source", source, None));
     let help_lines: Vec<&str> = help.lines().collect();
     if let Some((first, rest)) = help_lines.split_first() {
-        console.emit_line(make_kv_line("help", first));
+        console.emit_line(make_kv_line("help", first, highlight_terms));
         for continuation in rest {
             let mut line = console::Line::default();
             let continuation = continuation.trim_start();
-            line.push(console::Span::new_unstyled_lossy(format!(
-                "          {continuation}"
-            )));
+            line.push(console::Span::new_unstyled_lossy("          "));
+            push_highlighted_value(&mut line, continuation, highlight_terms);
             console.emit_line(line);
         }
     } else {
-        console.emit_line(make_kv_line("help", ""));
+        console.emit_line(make_kv_line("help", "", highlight_terms));
     }
     if let Some(deps) = deps {
         for dep in deps {
-            console.emit_line(make_kv_line("dep", dep.as_ref()));
+            console.emit_line(make_kv_line("dep", dep.as_ref(), None));
         }
     }
     if let Some(targets) = targets {
         for target in targets {
-            console.emit_line(make_kv_line("target", target.as_ref()));
+            console.emit_line(make_kv_line("target", target.as_ref(), None));
         }
     }
     console.emit_line(console::Line::default());
@@ -533,6 +701,7 @@ impl QueryCommand {
                                     &info.help,
                                     info.deps.as_ref(),
                                     info.targets.as_ref(),
+                                    None,
                                 );
                             }
                         }
@@ -589,6 +758,7 @@ impl QueryCommand {
                         qr.rule.help.as_deref().unwrap_or("<Not Provided>"),
                         rule_deps,
                         rule_targets,
+                        None,
                     );
                     return Ok(());
                 }
@@ -745,6 +915,7 @@ impl QueryCommand {
                             &info.help,
                             info.deps.as_ref(),
                             info.targets.as_ref(),
+                            Some(query.as_slice()),
                         );
                     }
                 }
