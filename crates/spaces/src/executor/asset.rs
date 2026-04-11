@@ -397,24 +397,32 @@ impl AddHomeAsset {
             ))?;
         }
 
-        copy::copy_with_cow_semantics(
-            progress,
-            source_path.to_str().context(format_context!(
-                "Failed to convert source path to string {}",
-                source_path.display()
-            ))?,
-            store_full.to_str().context(format_context!(
-                "Failed to convert store path to string {}",
+        if source_path.is_dir() {
+            copy::copy_with_cow_semantics(
+                progress,
+                source_path.to_str().context(format_context!(
+                    "Failed to convert source path to string {}",
+                    source_path.display()
+                ))?,
+                store_full.to_str().context(format_context!(
+                    "Failed to convert store path to string {}",
+                    store_full.display()
+                ))?,
+                copy::UseCowSemantics::No,
+                None,
+            )
+            .context(format_context!(
+                "Failed to copy home asset {} to store {}",
+                source_path.display(),
                 store_full.display()
-            ))?,
-            copy::UseCowSemantics::No,
-            None,
-        )
-        .context(format_context!(
-            "Failed to copy home asset {} to store {}",
-            source_path.display(),
-            store_full.display()
-        ))?;
+            ))?;
+        } else {
+            std::fs::copy(&source_path, &store_full).context(format_context!(
+                "Failed to copy home asset {} to store {}",
+                source_path.display(),
+                store_full.display()
+            ))?;
+        }
 
         workspace_write_lock
             .add_store_entry(store_relative.clone().into())
