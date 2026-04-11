@@ -366,6 +366,7 @@ impl Git {
             progress,
             &store_repository.full_path,
             &self.spaces_key,
+            copy::UseCowSemantics::Yes,
             Some(git_lock_file_filter),
         )
         .context(format_context!(

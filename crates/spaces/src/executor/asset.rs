@@ -2,7 +2,7 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use utils::{http_archive, labels, logger, store, ws};
+use utils::{copy, labels, logger, store, ws};
 
 use crate::workspace;
 
@@ -164,12 +164,12 @@ impl AddWhichAsset {
 
         let source = path.to_string_lossy().to_string();
 
-        http_archive::HttpArchive::create_link(
+        copy::create_link(
             destination.clone(),
             source,
-            http_archive::MakeReadOnly::No,
+            copy::MakeReadOnly::No,
             None,
-            http_archive::ArchiveLink::Hard,
+            copy::LinkType::Hard,
         )
         .context(format_context!(
             "Failed to create hard link from {} to {}",
@@ -211,12 +211,12 @@ impl AddHardLink {
         let _ = labels::sanitize_path(self.source.clone().into(), None);
         let _ = labels::sanitize_path(self.destination.clone().into(), None);
 
-        http_archive::HttpArchive::create_link(
+        copy::create_link(
             destination.clone(),
             source.clone(),
-            http_archive::MakeReadOnly::No,
+            copy::MakeReadOnly::No,
             None,
-            http_archive::ArchiveLink::Hard,
+            copy::LinkType::Hard,
         )
         .context(format_context!(
             "Failed to create hard link from {} to {}",
@@ -355,7 +355,7 @@ pub struct AddHomeAsset {
 impl AddHomeAsset {
     pub fn execute(
         &self,
-        _progress: &mut console::Progress,
+        progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         _name: &str,
     ) -> anyhow::Result<()> {
@@ -386,7 +386,31 @@ impl AddHomeAsset {
             ))?;
         }
 
-        std::fs::copy(&source_path, &store_full).context(format_context!(
+        // When the source is a directory, remove the existing store entry first so
+        // that files deleted from the source are not left behind (stale files would
+        // otherwise persist in the store and propagate back into the workspace links
+        // on subsequent runs).
+        if source_path.is_dir() && store_full.exists() {
+            std::fs::remove_dir_all(&store_full).context(format_context!(
+                "Failed to remove stale store directory {}",
+                store_full.display()
+            ))?;
+        }
+
+        copy::copy_with_cow_semantics(
+            progress,
+            source_path.to_str().context(format_context!(
+                "Failed to convert source path to string {}",
+                source_path.display()
+            ))?,
+            store_full.to_str().context(format_context!(
+                "Failed to convert store path to string {}",
+                store_full.display()
+            ))?,
+            copy::UseCowSemantics::No,
+            None,
+        )
+        .context(format_context!(
             "Failed to copy home asset {} to store {}",
             source_path.display(),
             store_full.display()
@@ -402,18 +426,32 @@ impl AddHomeAsset {
         let workspace_path = workspace_write_lock.get_absolute_path();
         let destination = format!("{}/{}", workspace_path, self.source);
 
-        http_archive::HttpArchive::create_link(
-            destination.clone(),
-            store_full.to_string_lossy().to_string(),
-            http_archive::MakeReadOnly::No,
-            None,
-            http_archive::ArchiveLink::Hard,
-        )
-        .context(format_context!(
-            "Failed to create hard link from {} to {}",
-            store_full.display(),
-            destination
-        ))?;
+        if store_full.is_dir() {
+            copy::create_links_from_directory(
+                &store_full,
+                std::path::Path::new(&destination),
+                copy::MakeReadOnly::No,
+                copy::LinkType::Hard,
+            )
+            .context(format_context!(
+                "Failed to create hard links from {} to {}",
+                store_full.display(),
+                destination
+            ))?;
+        } else {
+            copy::create_link(
+                destination.clone(),
+                store_full.to_string_lossy().to_string(),
+                copy::MakeReadOnly::No,
+                None,
+                copy::LinkType::Hard,
+            )
+            .context(format_context!(
+                "Failed to create hard link from {} to {}",
+                store_full.display(),
+                destination
+            ))?;
+        }
 
         Ok(())
     }
