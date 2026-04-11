@@ -94,7 +94,7 @@ pub(crate) fn digest_file(
         progress,
         UpdateStatus {
             brief: None,
-            detail: Some("Digesting...".to_string()),
+            detail: Some("Verifying SHA256...".to_string()),
             total: Some(200),
             ..Default::default()
         },

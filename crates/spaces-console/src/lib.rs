@@ -19,6 +19,56 @@ pub use ui::format_duration;
 pub use verbosity::{Level, Verbosity};
 use writer::ConsoleWriter;
 
+#[derive(strum::Display)]
+pub enum FinalType {
+    Completed,
+    Failed,
+    NotRequired,
+    NoChanges,
+    NotPlatform,
+    Cancelled,
+    Finished,
+}
+
+const FINALIZE_PREFIX_WIDTH: usize = 12;
+
+pub fn make_finalize_line(
+    prefix: FinalType,
+    duration: Option<std::time::Duration>,
+    message: &str,
+) -> Vec<Line> {
+    let color = match prefix {
+        FinalType::Completed => style::Color::Green,
+        FinalType::Failed => style::Color::DarkRed,
+        FinalType::NotRequired => style::Color::Cyan,
+        FinalType::NoChanges => style::Color::Cyan,
+        FinalType::NotPlatform => style::Color::Cyan,
+        FinalType::Cancelled => style::Color::Yellow,
+        FinalType::Finished => style::Color::DarkCyan,
+    };
+    let bold_style = style::ContentStyle {
+        foreground_color: Some(color),
+        background_color: None,
+        underline_color: None,
+        attributes: style::Attributes::from(style::Attribute::Bold),
+    };
+    let padded_prefix = format!(
+        "{prefix:>width$}: ",
+        width = FINALIZE_PREFIX_WIDTH,
+        prefix = prefix.to_string()
+    );
+    let styled_prefix = style::StyledContent::new(bold_style, padded_prefix);
+    let mut line = Line::default();
+    line.push(Span::new_styled_lossy(styled_prefix));
+    if let Some(duration) = duration {
+        let secs = duration.as_secs_f64();
+        let duration_str = format!("[{}] ", format_duration(secs));
+        line.push(Span::new_unstyled_lossy(&duration_str));
+    }
+    line.push(Span::new_unstyled_lossy(message));
+    vec![line]
+}
+
 mod sealed {
     use super::*;
     pub struct State {
