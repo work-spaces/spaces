@@ -52,6 +52,11 @@ pub fn get_spaces_tools_path(store_path: &str) -> Arc<str> {
     format!("{store_path}/spaces_tools").into()
 }
 
+pub fn get_checkout_home_store_path(store_path: &str) -> Arc<str> {
+    let user = std::env::var("USER").unwrap_or("spaces-user".into());
+    format!("{store_path}/{}/{user}", store::SPACES_STORE_HOME).into()
+}
+
 pub fn get_rcache_path(store_path: &std::path::Path) -> Arc<std::path::Path> {
     if let Ok(rcache_path) = std::env::var(SPACES_RCACHE_PATH_ENV_VAR) {
         let trimmed = rcache_path.trim();
@@ -283,6 +288,8 @@ fn get_unknown_version() -> Arc<str> {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JsonSettings {
     pub store_path: Arc<str>,
+    #[serde(default)]
+    pub home_store_path: Arc<str>,
     #[serde(default = "get_unknown_version")]
     pub spaces_version: Arc<str>,
     pub digest: Option<Arc<str>>,
@@ -310,8 +317,11 @@ impl Default for JsonSettings {
 
 impl JsonSettings {
     fn new() -> Self {
+        let store_path = get_checkout_store_path();
+        let home_store_path = get_checkout_home_store_path(store_path.as_ref());
         Self {
-            store_path: get_checkout_store_path(),
+            store_path,
+            home_store_path,
             order: Vec::new(),
             spaces_version: env!("CARGO_PKG_VERSION").into(),
             is_scanned: None,
@@ -329,8 +339,11 @@ impl JsonSettings {
     fn load(path: &str) -> anyhow::Result<Self> {
         let content = std::fs::read_to_string(path)
             .context(format_context!("Failed to read load order file {path}"))?;
-        let settings: JsonSettings = serde_json::from_str(content.as_str())
+        let mut settings: JsonSettings = serde_json::from_str(content.as_str())
             .context(format_context!("Failed to parse load order file {path}"))?;
+        if settings.home_store_path.is_empty() {
+            settings.home_store_path = get_checkout_home_store_path(settings.store_path.as_ref());
+        }
         Ok(settings)
     }
 
