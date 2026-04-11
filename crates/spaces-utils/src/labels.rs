@@ -135,7 +135,8 @@ pub fn sanitize_glob_value(
             value
         ))
     } else if value.starts_with("//") {
-        Ok(value.strip_prefix("//").unwrap().into())
+        // Already sanitized, return as-is to make this function idempotent
+        Ok(value.into())
     } else {
         let rule_path = get_source_from_label(rule_name);
         // remove everything following the last slash
@@ -405,6 +406,7 @@ mod tests {
             "+some/path/*.rs"
         );
 
+        // Already starts with "//" → returned as-is (idempotent for cloned rules)
         assert_eq!(
             sanitize_glob_value(
                 "//some/path/*.rs",
@@ -414,7 +416,7 @@ mod tests {
             )
             .unwrap()
             .as_ref(),
-            "some/path/*.rs"
+            "//some/path/*.rs"
         );
 
         // "-//" prefix is replaced with "-"

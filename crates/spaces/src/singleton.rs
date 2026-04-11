@@ -82,14 +82,14 @@ pub fn process_error(error: String) {
     state.error_chain.push(error);
 }
 
-pub fn show_error_chain() {
+pub fn show_error_chain(console: console::Console) {
     let mut state = get_state().write();
     let args = std::env::args().collect::<Vec<String>>();
-    eprintln!("While executing: {}", args.join(" "));
+    let _ = console.error("While executing", args.join(" "));
     state.error_chain.reverse();
     for (offset, error) in state.error_chain.iter().enumerate() {
         let show_error = error.to_string().replace('\n', "\n    ");
-        eprintln!("  [{offset}]: {show_error}");
+        let _ = console.write(&format!("  [{offset}] {show_error}"));
     }
 }
 
