@@ -12,7 +12,6 @@ load(
     "//@star/sdk/star/checkout.star",
     "checkout_add_any_assets",
     "checkout_add_env_vars",
-    "checkout_add_home_assets",
 )
 load("//@star/sdk/star/env.star", "env_assign")
 load(
@@ -38,9 +37,7 @@ spaces_add_devutils(
 )
 
 spaces_add_star_formatter("star_formatter", configure_zed = True, deps = [":spaces0"])
-checkout_add_home_assets("home_assets", assets = [
-    ".zsh_sessions",
-])
+
 if not info_is_ci():
     SHORTCUTS = {
         "inspect": "spaces inspect",

@@ -4,8 +4,8 @@ use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, RwLock};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
 /// Default maximum number of retry attempts for network operations.
@@ -23,32 +23,9 @@ const REQUEST_TIMEOUT_SECS: u64 = 600;
 
 mod gh;
 
-struct State {}
+pub type ArchiveLink = crate::copy::LinkType;
 
-static STATE: state::InitCell<RwLock<State>> = state::InitCell::new();
-
-fn get_state() -> &'static RwLock<State> {
-    if let Some(state) = STATE.try_get() {
-        return state;
-    }
-
-    STATE.set(RwLock::new(State {}));
-    STATE.get()
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default, strum::Display)]
-pub enum ArchiveLink {
-    None,
-    #[default]
-    Hard,
-    Copy,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum MakeReadOnly {
-    No,
-    Yes,
-}
+pub type MakeReadOnly = crate::copy::MakeReadOnly;
 
 fn label_logger(console: console::Console, label: &str) -> logger::Logger {
     logger::Logger::new(console, label.into())
@@ -777,12 +754,12 @@ impl HttpArchive {
                         let _ = link_set.insert(workspace_path_to_target.into());
 
                         let make_read_only = if self.archive.link == ArchiveLink::Hard {
-                            MakeReadOnly::Yes
+                            crate::copy::MakeReadOnly::Yes
                         } else {
-                            MakeReadOnly::No
+                            crate::copy::MakeReadOnly::No
                         };
 
-                        Self::create_link(
+                        crate::copy::create_link(
                             full_target_path.clone(),
                             source.clone(),
                             make_read_only,
@@ -805,127 +782,7 @@ impl HttpArchive {
             progress.increment(1);
         }
 
-        Self::apply_soft_links(soft_links)?;
-
-        Ok(())
-    }
-
-    fn apply_soft_links(
-        soft_links: Vec<(std::path::PathBuf, std::path::PathBuf)>,
-    ) -> anyhow::Result<()> {
-        for (original, link) in soft_links {
-            symlink::symlink_file(&original, &link).context(format_context!(
-                "failed to create symlink {original:?} -> {link:?}"
-            ))?;
-        }
-        Ok(())
-    }
-
-    pub fn create_links_from_directory(
-        source_dir: &std::path::Path,
-        dest_dir: &std::path::Path,
-        make_read_only: MakeReadOnly,
-        link_type: ArchiveLink,
-    ) -> anyhow::Result<()> {
-        let mut soft_links = Vec::new();
-        for entry in walkdir::WalkDir::new(source_dir)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.file_type().is_file())
-        {
-            let relative = entry
-                .path()
-                .strip_prefix(source_dir)
-                .context(format_context!("internal error: path not prefixed by source dir"))?;
-            let target = dest_dir.join(relative).to_string_lossy().to_string();
-            let source = entry.path().to_string_lossy().to_string();
-            Self::create_link(
-                target.clone(),
-                source.clone(),
-                make_read_only.clone(),
-                Some(&mut soft_links),
-                link_type.clone(),
-            )
-            .context(format_context!("hard link {target} -> {source}"))?;
-        }
-        Self::apply_soft_links(soft_links)
-    }
-
-    pub fn create_link(
-        target_path: String,
-        source: String,
-        make_read_only: MakeReadOnly,
-        soft_links: Option<&mut Vec<(std::path::PathBuf, std::path::PathBuf)>>,
-        link_type: ArchiveLink,
-    ) -> anyhow::Result<()> {
-        let target = std::path::Path::new(target_path.as_str());
-        let original = std::path::Path::new(source.as_str());
-
-        // Hold the mutex to ensure operations are atomic
-        #[allow(clippy::readonly_write_lock)]
-        let _state = get_state().write().unwrap();
-
-        if !original.is_dir() && make_read_only == MakeReadOnly::Yes {
-            // original file needs to be updated to be read-only
-            let original_metadata = std::fs::metadata(original)
-                .context(format_context!("Failed to get metadata for {original:?}"))?;
-
-            // Update the metadata to be read-only
-            let mut read_only_permissions = original_metadata.permissions();
-            read_only_permissions.set_readonly(true);
-
-            // Set the permissions to read-only
-            std::fs::set_permissions(original, read_only_permissions).context(format_context!(
-                "Failed to set permissions for {original:?}"
-            ))?;
-        }
-
-        if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent)
-                .context(format_context!("{target_path} -> {source}"))?;
-        }
-
-        let _ = std::fs::remove_file(target);
-
-        //if the source is a symlink, read the symlink and create a symlink
-        if original.is_symlink() {
-            let link = std::fs::read_link(original)
-                .context(format_context!("failed to read symlink {original:?}"))?;
-
-            if let Some(soft_links) = soft_links {
-                // defer creation of soft links if a list is provided
-                soft_links.push((link, target.into()));
-            } else {
-                symlink::symlink_file(link.clone(), target).context(format_context!(
-                    "failed to create symlink {original:?} -> {link:?}"
-                ))?;
-            }
-
-            return Ok(());
-        }
-
-        if link_type == ArchiveLink::Hard {
-            std::fs::hard_link(original, target).context(format_context!(
-            "If you get 'Operation Not Permitted' on mac try enabling 'Full Disk Access' for the terminal"))?;
-        } else {
-            reflink_copy::reflink_or_copy(original, target).context(format_context!(
-            "If you get 'Operation Not Permitted' on mac try enabling 'Full Disk Access' for the terminal"))?;
-
-            let target_metadata = std::fs::metadata(target)
-                .context(format_context!("Failed to get metadata for {target:?}"))?;
-
-            // Update the metadata target file to be read-write
-            let mut read_write_permissions = target_metadata.permissions();
-
-            #[allow(clippy::permissions_set_readonly_false)]
-            read_write_permissions.set_readonly(false);
-
-            // Set the permissions to read-write
-            std::fs::set_permissions(target, read_write_permissions).context(format_context!(
-                "Failed to set permissions for {}",
-                target.display()
-            ))?;
-        }
+        crate::copy::apply_soft_links(soft_links)?;
 
         Ok(())
     }

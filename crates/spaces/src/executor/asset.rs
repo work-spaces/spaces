@@ -2,7 +2,7 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use utils::{copy, http_archive, labels, logger, store, ws};
+use utils::{copy, labels, logger, store, ws};
 
 use crate::workspace;
 
@@ -164,12 +164,12 @@ impl AddWhichAsset {
 
         let source = path.to_string_lossy().to_string();
 
-        http_archive::HttpArchive::create_link(
+        copy::create_link(
             destination.clone(),
             source,
-            http_archive::MakeReadOnly::No,
+            copy::MakeReadOnly::No,
             None,
-            http_archive::ArchiveLink::Hard,
+            copy::LinkType::Hard,
         )
         .context(format_context!(
             "Failed to create hard link from {} to {}",
@@ -211,12 +211,12 @@ impl AddHardLink {
         let _ = labels::sanitize_path(self.source.clone().into(), None);
         let _ = labels::sanitize_path(self.destination.clone().into(), None);
 
-        http_archive::HttpArchive::create_link(
+        copy::create_link(
             destination.clone(),
             source.clone(),
-            http_archive::MakeReadOnly::No,
+            copy::MakeReadOnly::No,
             None,
-            http_archive::ArchiveLink::Hard,
+            copy::LinkType::Hard,
         )
         .context(format_context!(
             "Failed to create hard link from {} to {}",
@@ -416,11 +416,11 @@ impl AddHomeAsset {
         let destination = format!("{}/{}", workspace_path, self.source);
 
         if store_full.is_dir() {
-            http_archive::HttpArchive::create_links_from_directory(
+            copy::create_links_from_directory(
                 &store_full,
                 std::path::Path::new(&destination),
-                http_archive::MakeReadOnly::No,
-                http_archive::ArchiveLink::Hard,
+                copy::MakeReadOnly::No,
+                copy::LinkType::Hard,
             )
             .context(format_context!(
                 "Failed to create hard links from {} to {}",
@@ -428,12 +428,12 @@ impl AddHomeAsset {
                 destination
             ))?;
         } else {
-            http_archive::HttpArchive::create_link(
+            copy::create_link(
                 destination.clone(),
                 store_full.to_string_lossy().to_string(),
-                http_archive::MakeReadOnly::No,
+                copy::MakeReadOnly::No,
                 None,
-                http_archive::ArchiveLink::Hard,
+                copy::LinkType::Hard,
             )
             .context(format_context!(
                 "Failed to create hard link from {} to {}",
