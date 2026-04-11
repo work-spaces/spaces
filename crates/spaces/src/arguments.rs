@@ -301,8 +301,6 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             if locked {
                 singleton::set_use_locks();
             }
-            singleton::set_args_locks(lock)
-                .context(format_context!("While setting lock overrides"))?;
             let checkout_map =
                 co::Checkout::load().context(format_context!("Failed to load co file"))?;
 
@@ -378,7 +376,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
 
             checkout
                 .clone()
-                .checkout(effective_console, name, keep_workspace_on_failure)
+                .checkout(effective_console, name, keep_workspace_on_failure, lock)
                 .context(format_context!("while checking out repo"))?;
         }
         Commands::Sync {

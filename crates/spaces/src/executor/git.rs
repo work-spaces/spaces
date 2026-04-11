@@ -531,15 +531,36 @@ impl Git {
                 // strip the trailing newline
                 workspace.write().add_git_commit_lock(name, rev);
             }
-        } else if is_use_lock {
+        } else {
             let repo_name = label::get_rule_name_from_label(name);
-            let commit_hash_lock = {
+
+            // First check for command line locks (always apply if present)
+            let args_locks = singleton::get_args_locks();
+            let command_line_lock = args_locks
+                .get(name)
+                .or_else(|| args_locks.get(repo_name))
+                .cloned();
+
+            // Then check workspace locks only if --locked was passed
+            let commit_hash_lock = if let Some(lock) = command_line_lock {
+                logger(progress.console.clone(), self.url.clone())
+                    .debug(format!("Found command line lock for {name}: {lock}").as_str());
+                Some(lock)
+            } else if is_use_lock {
                 let workspace_read = workspace.read();
-                workspace_read
+                let workspace_lock = workspace_read
                     .locks
                     .get(name)
                     .or(workspace_read.locks.get(repo_name))
-                    .cloned()
+                    .cloned();
+                if workspace_lock.is_some() {
+                    logger(progress.console.clone(), self.url.clone()).debug(
+                        format!("Found workspace lock for {name}: {workspace_lock:?}").as_str(),
+                    );
+                }
+                workspace_lock
+            } else {
+                None
             };
 
             logger(progress.console.clone(), self.url.clone())
