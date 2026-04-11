@@ -68,13 +68,17 @@ pub enum QueryCommand {
     #[command(about = r"Show details for a specific rule.
   - `spaces query rule //my-pkg:build`: show rule details in YAML
   - `spaces query rule //my-pkg:build --format=json`: show rule details in JSON
-  - `spaces query rule //my-pkg:build --deps`: include expanded deps in output")]
+  - `spaces query rule //my-pkg:build --deps`: include expanded deps in output
+  - `spaces query rule //my-pkg:checkout --checkout`: search checkout-phase rules")]
     Rule {
         /// The name of the rule to inspect (e.g. `//my-pkg:build`)
         name: Arc<str>,
         /// Include expanded deps in output
         #[arg(long)]
         deps: bool,
+        /// Include checkout-phase rules in search
+        #[arg(long)]
+        checkout: bool,
         /// Output format
         #[arg(long, value_enum, default_value_t = Format::Yaml)]
         format: Format,
@@ -83,7 +87,8 @@ pub enum QueryCommand {
   - `spaces query search build`: return top 10 matches for 'build'
   - `spaces query search build test`: return top 10 matches across all terms
   - `spaces query search build --deps`: include expanded deps and targets in results
-  - `spaces query search build --limit=20`: return top 20 matches")]
+  - `spaces query search build --limit=20`: return top 20 matches
+  - `spaces query search build --checkout`: include checkout-phase rules in search")]
     Search {
         /// One or more search terms; a rule matches if any term matches
         #[arg(required = true, num_args = 1..)]
@@ -91,6 +96,9 @@ pub enum QueryCommand {
         /// Include expanded deps and targets in results
         #[arg(long)]
         deps: bool,
+        /// Include checkout-phase rules in search
+        #[arg(long)]
+        checkout: bool,
         /// Maximum number of results to show
         #[arg(long, default_value_t = 10)]
         limit: usize,
@@ -108,10 +116,14 @@ pub enum QueryCommand {
     #[command(about = r"Export workspace documentation to a file.
   - `spaces query export ./docs/rules.md`: export as markdown
   - `spaces query export ./api.star --format=stardoc`: export as stardoc
+  - `spaces query export ./docs/rules.md --checkout`: include checkout-phase rules
   - Format is inferred from the file extension when not specified (.md → markdown, .star/.bzl → stardoc)")]
     Export {
         /// Output file path
         path: Arc<str>,
+        /// Include checkout-phase rules in export
+        #[arg(long)]
+        checkout: bool,
         /// Export format (inferred from file extension when omitted)
         #[arg(long, value_enum)]
         format: Option<ExportFormat>,
@@ -197,15 +209,11 @@ impl QueryCommand {
                 compute_serialization: *raw,
             },
             QueryCommand::Rule { deps, .. } => QueryContextConfig {
-                // Need expanded_deps if --deps flag is set
                 compute_expanded_deps: *deps,
-                // Always need serialization for single rule view
                 compute_serialization: true,
             },
             QueryCommand::Search { deps, .. } => QueryContextConfig {
-                // Need expanded_deps if --deps flag is set
                 compute_expanded_deps: *deps,
-                // Search doesn't need serialization
                 compute_serialization: false,
             },
             QueryCommand::Checkout { .. } => {
@@ -464,28 +472,29 @@ impl QueryCommand {
 
                 if *raw {
                     let glob_filter = glob::Globs::new_with_includes(&globs);
-                    let rules = if *checkout {
-                        ctx.checkout_rules
-                            .iter()
-                            .chain(ctx.run_rules.iter())
-                            .collect::<Vec<_>>()
-                    } else {
-                        ctx.run_rules.iter().collect::<Vec<_>>()
-                    };
-                    for qr in rules {
+                    let emit = |qr: &QueryRule| -> anyhow::Result<()> {
                         let raw_name = qr.rule.name.as_ref();
                         if !globs.is_empty()
                             && !glob_filter
                                 .is_match(raw_name.strip_prefix("//").unwrap_or(raw_name))
                         {
-                            continue;
+                            return Ok(());
                         }
                         if *has_help && qr.rule.help.is_none() {
-                            continue;
+                            return Ok(());
                         }
                         if let Some(yaml) = &qr.serialized_yaml {
                             console.write(&format!("# {raw_name}\n{yaml}"))?;
                         }
+                        Ok(())
+                    };
+                    if *checkout {
+                        for qr in &ctx.checkout_rules {
+                            emit(qr)?;
+                        }
+                    }
+                    for qr in &ctx.run_rules {
+                        emit(qr)?;
                     }
                     return Ok(());
                 }
@@ -547,13 +556,23 @@ impl QueryCommand {
             }
 
             // ------------------------------------------------------------------
-            QueryCommand::Rule { name, deps, format } => {
-                let qr = ctx
-                    .checkout_rules
-                    .iter()
-                    .chain(ctx.run_rules.iter())
-                    .find(|qr| qr.rule.name.as_ref() == name.as_ref())
-                    .ok_or_else(|| format_error!("Rule not found: {name}"))?;
+            QueryCommand::Rule {
+                name,
+                deps,
+                checkout,
+                format,
+            } => {
+                let qr = if *checkout {
+                    ctx.checkout_rules
+                        .iter()
+                        .chain(ctx.run_rules.iter())
+                        .find(|qr| qr.rule.name.as_ref() == name.as_ref())
+                } else {
+                    ctx.run_rules
+                        .iter()
+                        .find(|qr| qr.rule.name.as_ref() == name.as_ref())
+                }
+                .ok_or_else(|| format_error!("Rule not found: {name}"))?;
 
                 if matches!(format, Format::Pretty) {
                     let rule_deps = if *deps {
@@ -632,7 +651,12 @@ impl QueryCommand {
             }
 
             // ------------------------------------------------------------------
-            QueryCommand::Search { query, deps, limit } => {
+            QueryCommand::Search {
+                query,
+                deps,
+                checkout,
+                limit,
+            } => {
                 #[derive(Serialize)]
                 struct ScoredInfo {
                     source: String,
@@ -651,7 +675,7 @@ impl QueryCommand {
 
                 let mut scored: Vec<Scored> = Vec::new();
 
-                for qr in ctx.checkout_rules.iter().chain(ctx.run_rules.iter()) {
+                let mut score_rule = |qr: &QueryRule| {
                     let raw_name = qr.rule.name.as_ref();
                     // Score the rule against every term; keep the best match.
                     // Help-text matches are penalised (halved) so name matches rank higher.
@@ -692,6 +716,15 @@ impl QueryCommand {
                             },
                         });
                     }
+                };
+
+                if *checkout {
+                    for qr in &ctx.checkout_rules {
+                        score_rule(qr);
+                    }
+                }
+                for qr in &ctx.run_rules {
+                    score_rule(qr);
                 }
 
                 scored.sort_by(|a, b| b.score.cmp(&a.score));
@@ -730,7 +763,11 @@ impl QueryCommand {
             }
 
             // ------------------------------------------------------------------
-            QueryCommand::Export { path, format } => {
+            QueryCommand::Export {
+                path,
+                checkout,
+                format,
+            } => {
                 let effective_format = match format {
                     Some(f) => f.clone(),
                     None => ExportFormat::infer_from_path(path.as_ref()),
@@ -738,11 +775,6 @@ impl QueryCommand {
 
                 match effective_format {
                     ExportFormat::Markdown => {
-                        let checkout_pairs: Vec<(&rule::Rule, Option<String>)> = ctx
-                            .checkout_rules
-                            .iter()
-                            .map(|qr| (&qr.rule, qr.executor_markdown.clone()))
-                            .collect();
                         let run_pairs: Vec<(&rule::Rule, Option<String>)> = ctx
                             .run_rules
                             .iter()
@@ -752,13 +784,20 @@ impl QueryCommand {
                         let file_console = console::Console::new_file(path.as_ref())
                             .context(format_context!("Failed to create file {path}"))?;
                         let mut md = markdown::Markdown::new(file_console);
-                        rule::Rule::print_markdown_section(
-                            &mut md,
-                            "Checkout Rules",
-                            &checkout_pairs,
-                            false,
-                            false,
-                        )?;
+                        if *checkout {
+                            let checkout_pairs: Vec<(&rule::Rule, Option<String>)> = ctx
+                                .checkout_rules
+                                .iter()
+                                .map(|qr| (&qr.rule, qr.executor_markdown.clone()))
+                                .collect();
+                            rule::Rule::print_markdown_section(
+                                &mut md,
+                                "Checkout Rules",
+                                &checkout_pairs,
+                                false,
+                                false,
+                            )?;
+                        }
                         rule::Rule::print_markdown_section(
                             &mut md,
                             "Run Rules",
