@@ -547,10 +547,11 @@ impl Workspace {
 
         let removed_branches = singleton::get_removed_branches();
         if !removed_branches.is_empty() {
-            settings
-                .json
-                .dev_branches
-                .retain(|b| !removed_branches.contains(b));
+            settings.json.dev_branches.retain(|b| {
+                !removed_branches.iter().any(|r| {
+                    r == b || b.as_ref().ends_with(r.as_ref()) || r.as_ref().ends_with(b.as_ref())
+                })
+            });
         }
 
         if is_json_available == ws::IsJsonAvailable::Yes {
