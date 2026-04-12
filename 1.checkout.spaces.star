@@ -3,6 +3,7 @@ Spaces starlark checkout/run script to make changes to spaces, printer, and arch
 With VSCode/Zed integration
 """
 
+load("//@star/packages/star/package.star", "package_add")
 load("//@star/packages/star/rust.star", "rust_add")
 load("//@star/packages/star/sccache.star", "sccache_add")
 load("//@star/packages/star/spaces-cli.star", "spaces_add_devutils", "spaces_add_star_formatter")
@@ -34,6 +35,7 @@ load(
     "//@star/sdk/star/ws.star",
     "workspace_get_absolute_path",
     "workspace_get_path_to_checkout",
+    "workspace_load_value",
 )
 
 # Configure the top level workspace
@@ -48,19 +50,6 @@ spaces_add_devutils(
 )
 
 spaces_add_star_formatter("star_formatter", configure_zed = True, deps = [":spaces0"])
-
-checkout_add_home_store_env("home_store_env")
-checkout_add_home_assets(
-    "home_assets",
-    assets = [
-        ".gitconfig",
-        ".config/gh",
-        ".ssh",
-        ".gnupg",
-        ".config/git",
-        ".netrc",
-    ],
-)
 
 if not info_is_ci():
     SHORTCUTS = {
@@ -142,6 +131,22 @@ checkout_add_env_vars(
     ],
 )
 
-sandbox = sandbox_new("workspace-sandbox")
-sandbox_configure_for_os(sandbox)
-checkout_set_sandbox(sandbox)
+GH_RULE = package_add("github.com", "cli", "cli", "v2.88.1")
+
+if workspace_load_value("SPACES_ENABLE_SANDBOX") == True:
+    checkout_add_home_store_env("home_store_env")
+    checkout_add_home_assets(
+        "home_assets",
+        assets = [
+            ".gitconfig",
+            ".config/gh",
+            ".ssh",
+            ".gnupg",
+            ".config/git",
+            ".netrc",
+        ],
+    )
+
+    sandbox = sandbox_new("workspace-sandbox")
+    sandbox_configure_for_os(sandbox)
+    checkout_set_sandbox(sandbox)
