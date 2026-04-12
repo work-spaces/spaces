@@ -94,8 +94,8 @@ pub fn sanitize_rule(
 pub fn sanitize_path(path_label: Arc<str>, starlark_module: Option<Arc<str>>) -> Arc<str> {
     if path_label.starts_with("//") {
         path_label
-    } else if path_label.starts_with('/') {
-        // Absolute path — return as-is without prepending a workspace prefix
+    } else if std::path::Path::new(path_label.as_ref()).is_absolute() {
+        // Absolute filesystem path — return as-is without prepending a workspace prefix
         path_label
     } else if let Some(latest_module) = starlark_module.clone() {
         logger::push_deprecation_warning(starlark_module, format!(
@@ -485,6 +485,32 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err_msg.contains("unknown"));
+
+        // Absolute filesystem path → returned as-is without workspace prefix
+        assert_eq!(
+            sanitize_glob_value(
+                "/Volumes/Code/.spaces/store/cargo/bin/cargo",
+                IsAnnotated::No,
+                "//spaces:build",
+                Some("spaces/spaces.star".into())
+            )
+            .unwrap()
+            .as_ref(),
+            "/Volumes/Code/.spaces/store/cargo/bin/cargo"
+        );
+
+        // Absolute path with wildcard → returned as-is
+        assert_eq!(
+            sanitize_glob_value(
+                "/Volumes/Code/.spaces/store/cargo/bin/*",
+                IsAnnotated::No,
+                "//spaces:build",
+                Some("spaces/spaces.star".into())
+            )
+            .unwrap()
+            .as_ref(),
+            "/Volumes/Code/.spaces/store/cargo/bin/*"
+        );
     }
 
     #[test]
@@ -527,5 +553,36 @@ mod tests {
             &relative,
             &sanitize_working_directory(relative.clone(), None)
         ));
+    }
+
+    #[test]
+    fn test_sanitize_path_absolute() {
+        // Absolute filesystem path → returned as-is without workspace prefix
+        let abs: Arc<str> = "/Volumes/Code/.spaces/store/cargo/bin/cargo".into();
+        let result = sanitize_path(abs.clone(), Some("spaces/spaces.star".into()));
+        assert_eq!(
+            result.as_ref(),
+            "/Volumes/Code/.spaces/store/cargo/bin/cargo"
+        );
+
+        // Absolute path without module → still returned as-is
+        let result_no_module = sanitize_path(abs.clone(), None);
+        assert_eq!(
+            result_no_module.as_ref(),
+            "/Volumes/Code/.spaces/store/cargo/bin/cargo"
+        );
+
+        // Already workspace-rooted path → returned as-is (existing behaviour)
+        let ws: Arc<str> = "//spaces/bin/cargo".into();
+        assert!(Arc::ptr_eq(
+            &ws,
+            &sanitize_path(ws.clone(), Some("spaces/spaces.star".into()))
+        ));
+
+        // Relative path + module → workspace prefix prepended (existing behaviour)
+        assert_eq!(
+            sanitize_path("bin/cargo".into(), Some("spaces/spaces.star".into())).as_ref(),
+            "//spaces/bin/cargo"
+        );
     }
 }
