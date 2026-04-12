@@ -272,6 +272,91 @@ mod tests {
         assert_eq!(files.len(), 2);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn symlink_test() {
+        std::fs::create_dir_all("tmp/symlink_src").unwrap();
+
+        let real_file_path = "tmp/symlink_src/real_file.txt";
+        std::fs::write(real_file_path, "symlink target content\n").unwrap();
+
+        let symlink_path = "tmp/symlink_src/link_to_file.txt";
+        let _ = std::fs::remove_file(symlink_path);
+        std::os::unix::fs::symlink("real_file.txt", symlink_path).unwrap();
+
+        let entries = vec![
+            encoder::Entry {
+                archive_path: "real_file.txt".to_string(),
+                file_path: real_file_path.to_string(),
+            },
+            encoder::Entry {
+                archive_path: "link_to_file.txt".to_string(),
+                file_path: symlink_path.to_string(),
+            },
+        ];
+
+        let console = console::Console::new_stdout(console::Verbosity::default()).unwrap();
+
+        const DRIVERS: &[driver::Driver] = &[
+            driver::Driver::Gzip,
+            driver::Driver::Bzip2,
+            driver::Driver::Zip,
+            driver::Driver::SevenZ,
+            driver::Driver::Xz,
+        ];
+
+        for driver in DRIVERS {
+            let output_directory = "./tmp";
+            let output_filename = format!("symlink_test.{}", driver.extension());
+
+            let progress_bar =
+                console::Progress::new(console.clone(), output_filename.as_str(), None, None);
+
+            let mut encoder =
+                encoder::Encoder::new(output_directory, &output_filename, progress_bar).unwrap();
+
+            encoder.add_entries(&entries).unwrap();
+            let _digest = encoder.compress().unwrap().digest().unwrap();
+        }
+
+        for driver in DRIVERS {
+            let output_dir = format!("tmp/symlink_extract.{}", driver.extension());
+            std::fs::create_dir_all(output_dir.as_str()).unwrap();
+
+            let archive_path_string = format!("tmp/symlink_test.{}", driver.extension());
+
+            let digest = {
+                let contents = std::fs::read(archive_path_string.as_str()).unwrap();
+                sha256::digest(contents)
+            };
+
+            let progress_bar =
+                console::Progress::new(console.clone(), archive_path_string.as_str(), None, None);
+
+            let decoder = decoder::Decoder::new(
+                archive_path_string.as_str(),
+                Some(digest),
+                output_dir.as_str(),
+                progress_bar,
+            )
+            .unwrap();
+            decoder.extract().unwrap();
+
+            let extracted_link = format!("{}/link_to_file.txt", output_dir);
+            let extracted_link_path = std::path::Path::new(&extracted_link);
+            assert!(
+                extracted_link_path.is_symlink(),
+                "Expected symlink at {extracted_link} for driver {driver:?}"
+            );
+            let target = extracted_link_path.read_link().unwrap();
+            assert_eq!(
+                target.to_string_lossy(),
+                "real_file.txt",
+                "Symlink target mismatch for driver {driver:?}"
+            );
+        }
+    }
+
     #[test]
     fn compress_test() {
         let entries = generate_tmp_files();
