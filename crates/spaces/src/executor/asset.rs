@@ -2,7 +2,7 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use utils::{copy, labels, logger, store, ws};
+use utils::{copy, labels, logger, ws};
 
 use crate::workspace;
 
@@ -363,21 +363,16 @@ impl AddHomeAsset {
 
         let home = std::env::var("HOME")
             .context(format_context!("HOME environment variable is not set"))?;
-        let user = std::env::var("USER")
-            .context(format_context!("USER environment variable is not set"))?;
 
         let source_path = std::path::Path::new(&home).join(&self.source);
 
         if !source_path.exists() {
             logger.info(&format!(
-                "Source path {} does not exist - not importing to store home",
+                "Source path {} does not exist - not importing to workspace home",
                 source_path.display()
             ));
             return Ok(());
         }
-
-        // store_relative: home/$USER/<source>
-        let store_relative = format!("{}/{}/{}", store::SPACES_STORE_HOME, user, self.source);
 
         let mut workspace_write_lock = workspace.write();
         let _ = workspace_write_lock
@@ -386,20 +381,22 @@ impl AddHomeAsset {
             .links
             .insert(self.source.clone().into());
 
-        let store_path = workspace_write_lock.get_store_path();
-        let store_full = std::path::Path::new(store_path.as_ref()).join(&store_relative);
+        let workspace_path = workspace_write_lock.get_absolute_path();
+        let workspace_home = std::path::Path::new(workspace_path.as_ref())
+            .join(".spaces/home")
+            .join(&self.source);
 
-        if let Some(parent) = store_full.parent() {
+        if let Some(parent) = workspace_home.parent() {
             std::fs::create_dir_all(parent).context(format_context!(
-                "Failed to create store directories for home asset {}",
-                store_full.display()
+                "Failed to create workspace home directories for {}",
+                workspace_home.display()
             ))?;
         }
 
-        normalize_home_asset_store_entry(&store_full, source_path.is_dir()).context(
+        normalize_home_asset_store_entry(&workspace_home, source_path.is_dir()).context(
             format_context!(
-                "Failed to normalize home asset store entry for {}",
-                store_full.display()
+                "Failed to normalize home asset entry for {}",
+                workspace_home.display()
             ),
         )?;
 
@@ -410,60 +407,23 @@ impl AddHomeAsset {
                     "Failed to convert source path to string {}",
                     source_path.display()
                 ))?,
-                store_full.to_str().context(format_context!(
-                    "Failed to convert store path to string {}",
-                    store_full.display()
+                workspace_home.to_str().context(format_context!(
+                    "Failed to convert workspace home path to string {}",
+                    workspace_home.display()
                 ))?,
                 copy::UseCowSemantics::No,
                 None,
             )
             .context(format_context!(
-                "Failed to copy home asset {} to store {}",
+                "Failed to copy home asset {} to workspace home {}",
                 source_path.display(),
-                store_full.display()
+                workspace_home.display()
             ))?;
         } else {
-            std::fs::copy(&source_path, &store_full).context(format_context!(
-                "Failed to copy home asset {} to store {}",
+            std::fs::copy(&source_path, &workspace_home).context(format_context!(
+                "Failed to copy home asset {} to workspace home {}",
                 source_path.display(),
-                store_full.display()
-            ))?;
-        }
-
-        workspace_write_lock
-            .add_store_entry(store_relative.clone().into())
-            .context(format_context!(
-                "Failed to add home asset {} to store manifest",
-                store_relative
-            ))?;
-
-        let workspace_path = workspace_write_lock.get_absolute_path();
-        let destination = format!("{}/{}", workspace_path, self.source);
-
-        if store_full.is_dir() {
-            copy::create_links_from_directory(
-                &store_full,
-                std::path::Path::new(&destination),
-                copy::MakeReadOnly::No,
-                copy::LinkType::Hard,
-            )
-            .context(format_context!(
-                "Failed to create hard links from {} to {}",
-                store_full.display(),
-                destination
-            ))?;
-        } else {
-            copy::create_link(
-                destination.clone(),
-                store_full.to_string_lossy().to_string(),
-                copy::MakeReadOnly::No,
-                None,
-                copy::LinkType::Hard,
-            )
-            .context(format_context!(
-                "Failed to create hard link from {} to {}",
-                store_full.display(),
-                destination
+                workspace_home.display()
             ))?;
         }
 

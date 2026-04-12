@@ -651,4 +651,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             None => Ok(Value::new_none()),
         }
     }
+
+    /// Returns the relative workspace path to the workspce HOME directory.
+    ///
+    ///
+    /// Returns an error if no active workspace is found in the evaluator context.
+    fn get_path_to_home() -> anyhow::Result<String> {
+        Ok(ws::SPACES_HOME_NAME.into())
+    }
 }
