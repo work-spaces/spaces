@@ -148,8 +148,8 @@ impl Encoder {
                     let mut header = tar::Header::new_gnu();
                     header.set_entry_type(tar::EntryType::Symlink);
                     header.set_size(0);
-                    let metadata =
-                        std::fs::metadata(file_path).context(format_context!("{file_path}"))?;
+                    let metadata = std::fs::symlink_metadata(file_path)
+                        .context(format_context!("{file_path}"))?;
                     #[cfg(unix)]
                     {
                         use std::os::unix::fs::{MetadataExt, PermissionsExt};
