@@ -97,6 +97,50 @@ fn evaluate_environment(
     Ok(())
 }
 
+fn emit_foreach_separator(console: &console::Console) {
+    console.emit_line(console::Line::default());
+}
+
+fn emit_foreach_header(
+    console: &console::Console,
+    index: usize,
+    total: usize,
+    working_directory: &str,
+    command_string: &str,
+) {
+    let badge_style = console::style::ContentStyle {
+        foreground_color: Some(console::style::Color::DarkCyan),
+        background_color: None,
+        underline_color: None,
+        attributes: console::style::Attributes::from(console::style::Attribute::Bold),
+    };
+    let repo_style = console::style::ContentStyle {
+        foreground_color: Some(console::style::Color::Cyan),
+        background_color: None,
+        underline_color: None,
+        attributes: console::style::Attributes::from(console::style::Attribute::Bold),
+    };
+    let command_style = console::style::ContentStyle {
+        foreground_color: Some(console::style::Color::DarkGrey),
+        background_color: None,
+        underline_color: None,
+        attributes: console::style::Attributes::default(),
+    };
+
+    let mut line = console::Line::default();
+    line.push(console::Span::new_styled_lossy(
+        console::style::StyledContent::new(badge_style, format!("[{index}/{total}] ")),
+    ));
+    line.push(console::Span::new_styled_lossy(
+        console::style::StyledContent::new(repo_style, working_directory.to_string()),
+    ));
+    line.push(console::Span::new_unstyled_lossy(" $ "));
+    line.push(console::Span::new_styled_lossy(
+        console::style::StyledContent::new(command_style, command_string.to_string()),
+    ));
+    console.emit_line(line);
+}
+
 pub fn foreach_repo(
     console: console::Console,
     run_workspace: RunWorkspace,
@@ -180,7 +224,8 @@ pub fn foreach_repo(
 
     let command_string = command_arguments.join(" ");
     let command_label = command_arguments.join("_");
-    for member in repos.iter() {
+    let total_repos = repos.len();
+    for (index, member) in repos.iter().enumerate() {
         let mut args = command_arguments.to_owned().split_off(1);
         let command = command_arguments[0].clone();
         if command.as_ref() == "git" {
@@ -196,10 +241,17 @@ pub fn foreach_repo(
             Some("Complete".to_string()),
         );
 
-        exec_progress.console.log(
-            console::Level::Passthrough,
-            format!(">>> {working_directory} $ {command_string}").as_str(),
-        )?;
+        if index > 0 {
+            exec_progress.console.emit_line(console::Line::default());
+        }
+        emit_foreach_header(
+            &exec_progress.console,
+            index + 1,
+            total_repos,
+            working_directory.as_ref(),
+            command_string.as_ref(),
+        );
+        emit_foreach_separator(&exec_progress.console);
 
         let name = format!("__foreach_{working_directory}_{command_label}");
 
