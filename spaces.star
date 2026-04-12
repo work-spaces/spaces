@@ -7,7 +7,6 @@ load("//@star/sdk/star/deps.star", "deps")
 load("//@star/sdk/star/glob.star", "glob")
 load(
     "//@star/sdk/star/run.star",
-    "run_add_archive",
     "run_add_exec",
     "run_add_exec_test",
 )
@@ -45,10 +44,19 @@ run_add_exec(
 run_add_exec(
     "build",
     command = "cargo",
-    args = ["build"],
+    args = ["build", "--target-dir=build/target"],
     deps = deps(rules = [":rustup_update", ":check"], globs = [GLOB_DEPS]),
+    target_files = ["//build/target/debug/spaces"],
     visibility = visibility_private(),
     help = "Run cargo build on workspace",
+)
+
+run_add_exec(
+    "post_build",
+    command = "bash",
+    args = ["-c", "echo build changed > build/changed.txt"],
+    deps = deps(rules = [":build"]),
+    visibility = visibility_private(),
 )
 
 run_add_exec(
@@ -114,23 +122,32 @@ run_add_exec(
 
 shell(
     "install_release",
-    script = "cargo install --force --path=spaces/crates/spaces --profile=release --root={}".format(root),
+    script = "cargo install --target-dir=build/target --force --path=spaces/crates/spaces --profile=release --root={}".format(root),
     deps = [":rustup_update"],
     visibility = visibility_private(),
 )
 
 shell(
     "install_dev_lsp",
-    script = "cargo install --features=lsp-debug --force --path=spaces/crates/spaces --profile=dev --root={}".format(root),
+    script = "cargo install --target-dir=build/target --features=lsp-debug --force --path=spaces/crates/spaces --profile=dev --root={}".format(root),
     deps = [":rustup_update"],
     visibility = visibility_private(),
 )
 
+STARLARK_FILES = [
+    "0.checkout.spaces.star",
+    "1.checkout.spaces.star",
+    "spaces.star",
+]
+
 run_add_exec(
     "check_starlark",
     command = "buildifier",
-    args = ["-lint=warn", "-mode=check", "spaces.star"],
-    deps = [":rustup_update"],
+    args = [
+        "-lint=warn",
+        "-mode=check",
+    ] + STARLARK_FILES,
+    deps = deps(files = STARLARK_FILES),
     visibility = visibility_private(),
     working_directory = ".",
 )
@@ -149,12 +166,4 @@ run_add_exec(
     args = ["clippy"],
     visibility = visibility_private(),
     deps = [":check_rust_fmt", ":check_starlark", ":rustup_update"],
-)
-
-run_add_archive(
-    "build_install",
-    archive_name = "test-empty",
-    source_directory = "build/install",
-    version = "0.1.0",
-    deps = [],
 )
