@@ -109,6 +109,13 @@ impl CreateArchive {
             .build_file_list()
             .context(format_error!("Failed to build file list"))?;
 
+        if files.is_empty() {
+            return Err(format_error!(
+                "No files to archive for {} in {output_directory}",
+                self.name
+            ));
+        }
+
         let mut encoder = Encoder::new(output_directory, output_file_name.as_str(), progress)
             .context(format_context!("{output_file_path}"))?;
 
