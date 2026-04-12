@@ -94,6 +94,9 @@ pub fn sanitize_rule(
 pub fn sanitize_path(path_label: Arc<str>, starlark_module: Option<Arc<str>>) -> Arc<str> {
     if path_label.starts_with("//") {
         path_label
+    } else if path_label.starts_with('/') {
+        // Absolute path — return as-is without prepending a workspace prefix
+        path_label
     } else if let Some(latest_module) = starlark_module.clone() {
         logger::push_deprecation_warning(starlark_module, format!(
             "{path_label} will be treated as a path label in v0.16. Use // to reference the workspace root."
@@ -136,6 +139,9 @@ pub fn sanitize_glob_value(
         ))
     } else if value.starts_with("//") {
         // Already sanitized, return as-is to make this function idempotent
+        Ok(value.into())
+    } else if value.starts_with('/') {
+        // Absolute path — return as-is without prepending a workspace prefix
         Ok(value.into())
     } else {
         let rule_path = get_source_from_label(rule_name);
