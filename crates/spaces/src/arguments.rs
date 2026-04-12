@@ -284,189 +284,45 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             group.end_group(effective_console, is_ci)?;
             result?;
         }
-        Commands::Co {
-            checkout,
-            name,
-            keep_workspace_on_failure,
-            rule_name,
-            url,
-            rev,
-            env,
-            store,
-            new_branch,
-            no_env,
-            no_store,
-            no_new_branch,
-            lock,
-            locked,
-        } => {
+        Commands::Co { args } => {
             singleton::set_is_checkout();
-            if locked {
+            if args.locked {
                 singleton::set_use_locks();
             }
             let checkout_map =
                 co::Checkout::load().context(format_context!("Failed to load co file"))?;
 
-            let checkout = checkout_map.get(&checkout).context(format_context!(
-                "Failed to find `{}` in `{}`",
-                checkout,
-                co::CO_FILE_NAME
-            ))?;
+            let mut checkout = checkout_map
+                .get(&args.checkout)
+                .context(format_context!(
+                    "Failed to find `{}` in `{}`",
+                    args.checkout,
+                    co::CO_FILE_NAME
+                ))?
+                .clone();
 
-            let mut checkout = checkout.clone();
-
-            // override co.spaces.toml with command line arg
-            match &mut checkout {
-                co::Checkout::Repo(repo) => {
-                    if let Some(rule_name) = rule_name {
-                        repo.rule_name = Some(rule_name);
-                    }
-                    if let Some(url) = url {
-                        repo.url = url;
-                    }
-                    if let Some(rev) = rev {
-                        repo.rev = rev;
-                    }
-                    for entry in env {
-                        repo.env.get_or_insert_default().push(entry);
-                    }
-                    for entry in store {
-                        if let Some((key, value)) = entry.split_once('=') {
-                            repo.store
-                                .get_or_insert_default()
-                                .insert(key.into(), toml::Value::String(value.to_string()));
-                        } else {
-                            return Err(format_error!(
-                                "invalid store entry: {}. Use --store=<key>=<value>",
-                                entry
-                            ));
-                        }
-                    }
-                    for entry in new_branch {
-                        repo.new_branch.get_or_insert_default().push(entry);
-                    }
-                }
-                co::Checkout::Workflow(workflow) => {
-                    if rule_name.is_some() {
-                        return Err(format_error!(
-                            "--rule-name can only be used with CheckoutRepo"
-                        ));
-                    }
-                    if url.is_some() {
-                        return Err(format_error!("--url can only be used with CheckoutRepo"));
-                    }
-                    if rev.is_some() {
-                        return Err(format_error!("--rev can only be used with CheckoutRepo"));
-                    }
-                    for entry in env {
-                        workflow.env.get_or_insert_default().push(entry);
-                    }
-                    for entry in store {
-                        if let Some((key, value)) = entry.split_once('=') {
-                            workflow
-                                .store
-                                .get_or_insert_default()
-                                .insert(key.into(), toml::Value::String(value.to_string()));
-                        } else {
-                            return Err(format_error!(
-                                "invalid store entry: {}. Use --store=<key>=<value>",
-                                entry
-                            ));
-                        }
-                    }
-                }
-            }
-
-            // Apply --no-env / --no-store / --no-new-branch exclusions
-            // Error if a specified name does not exist in the config.
-            let (checkout_env, checkout_store, checkout_new_branch) = match &checkout {
-                co::Checkout::Repo(repo) => (
-                    repo.env.clone(),
-                    repo.store.clone(),
-                    repo.new_branch.clone(),
-                ),
-                co::Checkout::Workflow(workflow) => (
-                    workflow.env.clone(),
-                    workflow.store.clone(),
-                    workflow.new_branch.clone(),
-                ),
-            };
-            for name in &no_env {
-                let exists = checkout_env.as_ref().is_some_and(|list| {
-                    list.iter().any(|e| {
-                        let key = e.split_once('=').map(|(k, _)| k).unwrap_or(e);
-                        key == name.as_ref()
-                    })
-                });
-                if !exists {
-                    return Err(format_error!(
-                        "--no-env={} does not exist in the config",
-                        name
-                    ));
-                }
-            }
-            for name in &no_store {
-                let exists = checkout_store
-                    .as_ref()
-                    .is_some_and(|map| map.contains_key(name.as_ref()));
-                if !exists {
-                    return Err(format_error!(
-                        "--no-store={} does not exist in the config",
-                        name
-                    ));
-                }
-            }
-            for path in &no_new_branch {
-                let exists = checkout_new_branch
-                    .as_ref()
-                    .is_some_and(|list| list.iter().any(|e| e.as_ref() == path.as_ref()));
-                if !exists {
-                    return Err(format_error!(
-                        "--no-new-branch={} does not exist in the config",
-                        path
-                    ));
-                }
-            }
-            match &mut checkout {
-                co::Checkout::Repo(repo) => {
-                    if let Some(env_list) = repo.env.as_mut() {
-                        env_list.retain(|e| {
-                            let key = e.split_once('=').map(|(k, _)| k).unwrap_or(e);
-                            !no_env.iter().any(|n| n.as_ref() == key)
-                        });
-                    }
-                    if let Some(store_map) = repo.store.as_mut() {
-                        store_map
-                            .retain(|k, _| !no_store.iter().any(|n| n.as_ref() == k.as_ref()));
-                    }
-                    if let Some(nb_list) = repo.new_branch.as_mut() {
-                        nb_list.retain(|e| {
-                            !no_new_branch.iter().any(|n| n.as_ref() == e.as_ref())
-                        });
-                    }
-                }
-                co::Checkout::Workflow(workflow) => {
-                    if let Some(env_list) = workflow.env.as_mut() {
-                        env_list.retain(|e| {
-                            let key = e.split_once('=').map(|(k, _)| k).unwrap_or(e);
-                            !no_env.iter().any(|n| n.as_ref() == key)
-                        });
-                    }
-                    if let Some(store_map) = workflow.store.as_mut() {
-                        store_map
-                            .retain(|k, _| !no_store.iter().any(|n| n.as_ref() == k.as_ref()));
-                    }
-                    if let Some(nb_list) = workflow.new_branch.as_mut() {
-                        nb_list.retain(|e| {
-                            !no_new_branch.iter().any(|n| n.as_ref() == e.as_ref())
-                        });
-                    }
-                }
-            }
+            checkout
+                .apply_overrides(
+                    args.rule_name,
+                    args.url,
+                    args.rev,
+                    args.env,
+                    args.store,
+                    args.new_branch,
+                    args.no_env,
+                    args.no_store,
+                    args.no_new_branch,
+                )
+                .context(format_context!("while applying co overrides"))?;
 
             checkout
                 .clone()
-                .checkout(effective_console, name, keep_workspace_on_failure, lock)
+                .checkout(
+                    effective_console,
+                    args.name,
+                    args.keep_workspace_on_failure,
+                    args.lock,
+                )
                 .context(format_context!("while checking out repo"))?;
         }
         Commands::Sync {
@@ -1043,49 +899,8 @@ create-lock-file = false # optionally create a lock file
 ```
 "#)]
     Co {
-        /// The name of the checkout entry (e.g. `spaces-dev` or `ninja-build` from above).
-        checkout: Arc<str>,
-        /// The name of the workspace to create.
-        name: Arc<str>,
-        /// Do not delete the workspace directory if checkout fails.
-        #[arg(long)]
-        keep_workspace_on_failure: bool,
-        /// Override the checkout-repo revision in co.spaces.toml
-        #[arg(long)]
-        rev: Option<Arc<str>>,
-        /// Override the checkout-repo rule-name in co.spaces.toml
-        #[arg(long)]
-        rule_name: Option<Arc<str>>,
-        /// Override the checkout-repo url in co.spaces.toml
-        #[arg(long)]
-        url: Option<Arc<str>>,
-        /// Additional env values to augment co.spaces.toml
-        #[arg(long)]
-        env: Vec<Arc<str>>,
-        /// Additional store values to augment co.spaces.toml. Use `--store=KEY=VALUE`.
-        #[arg(long)]
-        store: Vec<Arc<str>>,
-        /// Additional new-branch values to augment co.spaces.toml
-        #[arg(long)]
-        new_branch: Vec<Arc<str>>,
-        /// Prevent a specific env entry from co.spaces.toml from being applied. Use `--no-env=NAME`.
-        #[arg(long)]
-        no_env: Vec<Arc<str>>,
-        /// Prevent a specific store entry from co.spaces.toml from being applied. Use `--no-store=NAME`.
-        #[arg(long)]
-        no_store: Vec<Arc<str>>,
-        /// Prevent a specific new-branch entry from co.spaces.toml from being applied. Use `--no-new-branch=PATH`.
-        #[arg(long)]
-        no_new_branch: Vec<Arc<str>>,
-        #[arg(
-            long,
-            help = r#"Override locks set in the rules.
-  Use `--lock=REPO=REV`. Can be used multiple times."#
-        )]
-        lock: Vec<Arc<str>>,
-        /// The workspaces lock rev's will override the rule rev for repos
-        #[arg(long)]
-        locked: bool,
+        #[command(flatten)]
+        args: co::CoArgs,
     },
     /// Runs checkout rules within an existing workspace
     Sync {
