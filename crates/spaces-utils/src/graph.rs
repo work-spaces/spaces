@@ -22,7 +22,7 @@ impl Graph {
             .directed_graph
             .node_indices()
             .find(|i| self.directed_graph[*i].as_ref() == task_name)
-            .ok_or(format_error!("Task not found {task_name}"))?;
+            .ok_or(format_error!("Rule not found {task_name}"))?;
 
         let dep_node = self
             .directed_graph

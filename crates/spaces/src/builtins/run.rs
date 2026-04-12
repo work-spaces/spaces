@@ -82,7 +82,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
         )
-        .context(format_context!("Failed to insert task {rule_name}"))?;
+        .context(format_context!("Failed to register rule {rule_name}"))?;
         Ok(NoneType)
     }
 
@@ -116,7 +116,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
         )
-        .context(format_context!("Failed to insert task {rule_name}"))?;
+        .context(format_context!("Failed to register rule {rule_name}"))?;
         Ok(NoneType)
     }
 
@@ -183,7 +183,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
         )
-        .context(format_context!("Failed to insert task {rule_name}"))?;
+        .context(format_context!("Failed to register rule {rule_name}"))?;
         Ok(NoneType)
     }
 
@@ -239,7 +239,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
         )
-        .context(format_context!("Failed to insert task {rule_name}"))?;
+        .context(format_context!("Failed to register rule {rule_name}"))?;
         Ok(NoneType)
     }
 
@@ -320,7 +320,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
         )
-        .context(format_context!("Failed to insert task {rule_name}"))?;
+        .context(format_context!("Failed to register rule {rule_name}"))?;
         Ok(NoneType)
     }
 
@@ -356,7 +356,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         }
 
         let cloned_task = rules::get_cloned_task_for_module(clone_from, &ctx.module_name)
-            .context(format_context!("Failed to clone task {}", clone_from))?;
+            .context(format_context!("Failed to clone rule {}", clone_from))?;
 
         match &cloned_task.executor {
             executor::Task::Exec(_) => (),
@@ -420,7 +420,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
         )
-        .context(format_context!("Failed to insert task {rule_name}"))?;
+        .context(format_context!("Failed to register rule {rule_name}"))?;
         Ok(NoneType)
     }
 }

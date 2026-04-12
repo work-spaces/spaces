@@ -790,7 +790,7 @@ impl QueryCommand {
                         Format::Yaml => {
                             let mut value: serde_yaml::Value =
                                 serde_yaml::from_str(serialized_yaml)
-                                    .context(format_context!("Failed to parse task YAML"))?;
+                                    .context(format_context!("Failed to parse rule YAML"))?;
                             if let Some(map) = value.as_mapping_mut() {
                                 map.insert(
                                     serde_yaml::Value::String("expanded_deps".into()),
@@ -800,12 +800,12 @@ impl QueryCommand {
                                 );
                             }
                             serde_yaml::to_string(&value)
-                                .context(format_context!("Failed to serialize task YAML"))?
+                                .context(format_context!("Failed to serialize rule YAML"))?
                         }
                         Format::Json => {
                             let mut value: serde_json::Value =
                                 serde_json::from_str(serialized_json)
-                                    .context(format_context!("Failed to parse task JSON"))?;
+                                    .context(format_context!("Failed to parse rule JSON"))?;
                             if let Some(map) = value.as_object_mut() {
                                 map.insert(
                                     "expanded_deps".into(),
@@ -815,7 +815,7 @@ impl QueryCommand {
                                 );
                             }
                             let mut s = serde_json::to_string_pretty(&value)
-                                .context(format_context!("Failed to serialize task JSON"))?;
+                                .context(format_context!("Failed to serialize rule JSON"))?;
                             s.push('\n');
                             s
                         }
