@@ -103,7 +103,7 @@ impl Changes {
         let entries = walkdir::WalkDir::new(glob_include_path.as_ref())
             .into_iter()
             .filter_entry(|e| {
-                if e.file_type().is_file() {
+                if !e.file_type().is_dir() {
                     has_any_entries = HasAnyEntries::Yes;
                 }
                 filter_update(
