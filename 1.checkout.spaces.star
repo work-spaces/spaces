@@ -31,7 +31,7 @@ SPACES_CHECKOUT_PATH = workspace_get_path_to_checkout()
 
 spaces_add_devutils(
     "spaces0",
-    "v0.15.29",
+    "v0.15.34",
     devutils_version = "devutils-v0.1.12",
     system_paths = ["/usr/bin", "/bin"],
 )

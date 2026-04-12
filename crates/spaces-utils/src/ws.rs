@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+pub const SPACES_HOME_NAME: &str = ".spaces/home";
 pub const SPACES_LOGS_NAME: &str = ".spaces/logs";
 pub const METRICS_FILE_NAME: &str = ".spaces/metrics.spaces.json";
 pub const SETTINGS_FILE_NAME: &str = ".spaces/settings.spaces.json";
@@ -50,11 +51,6 @@ pub fn get_checkout_store_path_as_path() -> Arc<std::path::Path> {
 
 pub fn get_spaces_tools_path(store_path: &str) -> Arc<str> {
     format!("{store_path}/spaces_tools").into()
-}
-
-pub fn get_checkout_home_store_path(store_path: &str) -> Arc<str> {
-    let user = std::env::var("USER").unwrap_or("spaces-user".into());
-    format!("{store_path}/{}/{user}", store::SPACES_STORE_HOME).into()
 }
 
 pub fn get_rcache_path(store_path: &std::path::Path) -> Arc<std::path::Path> {
@@ -288,8 +284,6 @@ fn get_unknown_version() -> Arc<str> {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JsonSettings {
     pub store_path: Arc<str>,
-    #[serde(default)]
-    pub home_store_path: Arc<str>,
     #[serde(default = "get_unknown_version")]
     pub spaces_version: Arc<str>,
     pub digest: Option<Arc<str>>,
@@ -318,10 +312,8 @@ impl Default for JsonSettings {
 impl JsonSettings {
     fn new() -> Self {
         let store_path = get_checkout_store_path();
-        let home_store_path = get_checkout_home_store_path(store_path.as_ref());
         Self {
             store_path,
-            home_store_path,
             order: Vec::new(),
             spaces_version: env!("CARGO_PKG_VERSION").into(),
             is_scanned: None,
@@ -339,11 +331,8 @@ impl JsonSettings {
     fn load(path: &str) -> anyhow::Result<Self> {
         let content = std::fs::read_to_string(path)
             .context(format_context!("Failed to read load order file {path}"))?;
-        let mut settings: JsonSettings = serde_json::from_str(content.as_str())
+        let settings: JsonSettings = serde_json::from_str(content.as_str())
             .context(format_context!("Failed to parse load order file {path}"))?;
-        if settings.home_store_path.is_empty() {
-            settings.home_store_path = get_checkout_home_store_path(settings.store_path.as_ref());
-        }
         Ok(settings)
     }
 

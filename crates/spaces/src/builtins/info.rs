@@ -259,16 +259,6 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(workspace.get_store_path().to_string())
     }
 
-    fn get_path_to_home_store(eval: &mut Evaluator) -> anyhow::Result<String> {
-        let ctx = get_eval_context(eval)?;
-        let workspace_arc = ctx
-            .workspace
-            .clone()
-            .ok_or_else(|| format_error!("No active workspace found"))?;
-        let workspace = workspace_arc.read();
-        Ok(workspace.get_home_store_path().to_string())
-    }
-
     /// Returns the path to the spaces tools directory.
     ///
     /// ```python

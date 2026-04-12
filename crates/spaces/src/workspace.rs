@@ -1032,10 +1032,6 @@ impl Workspace {
         self.settings.json.store_path.clone()
     }
 
-    pub fn get_home_store_path(&self) -> Arc<str> {
-        self.settings.json.home_store_path.clone()
-    }
-
     pub fn get_spaces_tools_path(&self) -> Arc<str> {
         ws::get_spaces_tools_path(self.get_store_path().as_ref())
     }
