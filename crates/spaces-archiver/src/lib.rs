@@ -109,6 +109,14 @@ impl CreateArchive {
             .build_file_list()
             .context(format_error!("Failed to build file list"))?;
 
+        if files.is_empty() {
+            return Err(format_error!(
+                "No files to archive for {} in {}",
+                self.name,
+                self.input
+            ));
+        }
+
         let mut encoder = Encoder::new(output_directory, output_file_name.as_str(), progress)
             .context(format_context!("{output_file_path}"))?;
 
@@ -142,6 +150,7 @@ impl CreateArchive {
 mod tests {
     use super::*;
     use std::io::Write;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     const FILE_COUNT: usize = 500;
     const LINE_COUNT: usize = 500;
@@ -184,6 +193,14 @@ mod tests {
             }
         }
         result
+    }
+
+    fn unique_test_path(name: &str) -> std::path::PathBuf {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("spaces-archiver-{name}-{suffix}"))
     }
 
     #[test]
@@ -309,5 +326,40 @@ mod tests {
 
             verify_generated_files(output_dir.as_str());
         }
+    }
+
+    #[test]
+    fn create_returns_error_for_empty_input_directory() {
+        let root = unique_test_path("empty-input");
+        let input = root.join("input");
+        let output = root.join("output");
+        std::fs::create_dir_all(&input).unwrap();
+
+        let console = console::Console::new_stdout(console::Verbosity::default()).unwrap();
+        let progress = console::Progress::new(console, "empty.tar.gz", None, None);
+
+        let create_archive = CreateArchive {
+            input: input.to_string_lossy().to_string(),
+            name: "empty".to_string(),
+            version: "1.0".to_string(),
+            driver: driver::Driver::Gzip,
+            platform: None,
+            includes: None,
+            excludes: None,
+        };
+
+        let error = create_archive
+            .create(output.to_string_lossy().as_ref(), progress)
+            .unwrap_err();
+
+        assert!(error.to_string().contains(
+            format!(
+                "No files to archive for {} in {}",
+                create_archive.name, create_archive.input
+            )
+            .as_str()
+        ));
+
+        let _ = std::fs::remove_dir_all(root);
     }
 }

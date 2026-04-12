@@ -7,6 +7,7 @@ load("//@star/sdk/star/deps.star", "deps")
 load("//@star/sdk/star/glob.star", "glob")
 load(
     "//@star/sdk/star/run.star",
+    "run_add_archive",
     "run_add_exec",
     "run_add_exec_test",
 )
@@ -148,4 +149,12 @@ run_add_exec(
     args = ["clippy"],
     visibility = visibility_private(),
     deps = [":check_rust_fmt", ":check_starlark", ":rustup_update"],
+)
+
+run_add_archive(
+    "build_install",
+    archive_name = "test-empty",
+    source_directory = "build/install",
+    version = "0.1.0",
+    deps = [],
 )
