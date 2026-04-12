@@ -26,6 +26,7 @@ chrono = "0.4"
 homedir = "0.3"
 arboard = "3"
 serde_with = "3"
+nono = "0.32"
 
 indexmap.workspace = true
 

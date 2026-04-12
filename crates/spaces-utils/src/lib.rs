@@ -18,6 +18,7 @@ pub mod platform;
 pub mod query;
 pub mod rcache;
 pub mod rule;
+pub mod sandbox;
 pub mod shell;
 pub mod store;
 pub mod suggest;

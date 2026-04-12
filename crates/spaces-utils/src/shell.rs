@@ -1,8 +1,26 @@
+use crate::sandbox;
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+
+pub enum IsSandbox {
+    No,
+    Yes,
+}
+
+impl From<IsSandbox> for bool {
+    fn from(value: IsSandbox) -> Self {
+        matches!(value, IsSandbox::Yes)
+    }
+}
+
+impl From<bool> for IsSandbox {
+    fn from(value: bool) -> Self {
+        if value { IsSandbox::Yes } else { IsSandbox::No }
+    }
+}
 
 pub const IS_SPACES_SHELL_ENV_NAME: &str = "SPACES_IS_SPACES_SHELL";
 pub const IS_SPACES_SHELL_ENV_VALUE: &str = "SPACES_IS_RUNNING_IN_A_SPACES_SHELL";
@@ -219,6 +237,37 @@ fn create_shortcuts(
     }
 
     Ok(functions)
+}
+
+pub fn create_sandbox(
+    env_path: Arc<str>,
+    store_path: Arc<str>,
+) -> anyhow::Result<sandbox::Sandbox> {
+    let cwd = std::env::current_dir()
+        .context(format_context!("Failed to get current working directory"))?;
+    let cwd_str: Arc<str> = cwd
+        .to_str()
+        .ok_or_else(|| format_error!("Current working directory path is not valid UTF-8"))?
+        .into();
+
+    let mut manifest = sandbox::Sandbox::new()
+        .with_name("spaces-shell")
+        .with_system_defaults()
+        .allow_write(cwd_str.clone())
+        .allow_exec(cwd_str)
+        .allow_read(store_path.clone())
+        .allow_write(store_path.clone())
+        .allow_exec(store_path)
+        .with_network(sandbox::NetworkPolicy::Unrestricted);
+
+    for path in env_path.split(':') {
+        let path = path.trim();
+        if !path.is_empty() {
+            manifest = manifest.allow_exec(path);
+        }
+    }
+
+    Ok(manifest)
 }
 
 pub fn run(

@@ -12,6 +12,8 @@ load(
     "//@star/sdk/star/checkout.star",
     "checkout_add_any_assets",
     "checkout_add_env_vars",
+    "checkout_add_home_assets",
+    "checkout_add_home_store_env",
 )
 load("//@star/sdk/star/env.star", "env_assign")
 load(
@@ -37,6 +39,19 @@ spaces_add_devutils(
 )
 
 spaces_add_star_formatter("star_formatter", configure_zed = True, deps = [":spaces0"])
+
+checkout_add_home_store_env("home_store_env")
+checkout_add_home_assets(
+    "home_assets",
+    assets = [
+        ".gitconfig",
+        ".config/gh",
+        ".ssh",
+        ".gnupg",
+        ".config/git",
+        ".netrc",
+    ],
+)
 
 if not info_is_ci():
     SHORTCUTS = {
@@ -108,6 +123,11 @@ checkout_add_env_vars(
         env_assign(
             "SPACES_ARCHIVER_SKIP_SDK_CHECKOUT",
             "TRUE",
+            help = "Skip SDK checkout for archiver",
+        ),
+        env_assign(
+            "GIT_CONFIG_GLOBAL",
+            workspace_get_absolute_path() + "/.spaces/.gitconfig",
             help = "Skip SDK checkout for archiver",
         ),
     ],
