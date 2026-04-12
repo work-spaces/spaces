@@ -294,6 +294,9 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             env,
             store,
             new_branch,
+            no_env,
+            no_store,
+            no_new_branch,
             lock,
             locked,
         } => {
@@ -370,6 +373,93 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                                 entry
                             ));
                         }
+                    }
+                }
+            }
+
+            // Apply --no-env / --no-store / --no-new-branch exclusions
+            // Error if a specified name does not exist in the config.
+            let (checkout_env, checkout_store, checkout_new_branch) = match &checkout {
+                co::Checkout::Repo(repo) => (
+                    repo.env.clone(),
+                    repo.store.clone(),
+                    repo.new_branch.clone(),
+                ),
+                co::Checkout::Workflow(workflow) => (
+                    workflow.env.clone(),
+                    workflow.store.clone(),
+                    workflow.new_branch.clone(),
+                ),
+            };
+            for name in &no_env {
+                let exists = checkout_env.as_ref().is_some_and(|list| {
+                    list.iter().any(|e| {
+                        let key = e.split_once('=').map(|(k, _)| k).unwrap_or(e);
+                        key == name.as_ref()
+                    })
+                });
+                if !exists {
+                    return Err(format_error!(
+                        "--no-env={} does not exist in the config",
+                        name
+                    ));
+                }
+            }
+            for name in &no_store {
+                let exists = checkout_store
+                    .as_ref()
+                    .is_some_and(|map| map.contains_key(name.as_ref()));
+                if !exists {
+                    return Err(format_error!(
+                        "--no-store={} does not exist in the config",
+                        name
+                    ));
+                }
+            }
+            for path in &no_new_branch {
+                let exists = checkout_new_branch
+                    .as_ref()
+                    .is_some_and(|list| list.iter().any(|e| e.as_ref() == path.as_ref()));
+                if !exists {
+                    return Err(format_error!(
+                        "--no-new-branch={} does not exist in the config",
+                        path
+                    ));
+                }
+            }
+            match &mut checkout {
+                co::Checkout::Repo(repo) => {
+                    if let Some(env_list) = repo.env.as_mut() {
+                        env_list.retain(|e| {
+                            let key = e.split_once('=').map(|(k, _)| k).unwrap_or(e);
+                            !no_env.iter().any(|n| n.as_ref() == key)
+                        });
+                    }
+                    if let Some(store_map) = repo.store.as_mut() {
+                        store_map
+                            .retain(|k, _| !no_store.iter().any(|n| n.as_ref() == k.as_ref()));
+                    }
+                    if let Some(nb_list) = repo.new_branch.as_mut() {
+                        nb_list.retain(|e| {
+                            !no_new_branch.iter().any(|n| n.as_ref() == e.as_ref())
+                        });
+                    }
+                }
+                co::Checkout::Workflow(workflow) => {
+                    if let Some(env_list) = workflow.env.as_mut() {
+                        env_list.retain(|e| {
+                            let key = e.split_once('=').map(|(k, _)| k).unwrap_or(e);
+                            !no_env.iter().any(|n| n.as_ref() == key)
+                        });
+                    }
+                    if let Some(store_map) = workflow.store.as_mut() {
+                        store_map
+                            .retain(|k, _| !no_store.iter().any(|n| n.as_ref() == k.as_ref()));
+                    }
+                    if let Some(nb_list) = workflow.new_branch.as_mut() {
+                        nb_list.retain(|e| {
+                            !no_new_branch.iter().any(|n| n.as_ref() == e.as_ref())
+                        });
                     }
                 }
             }
@@ -978,6 +1068,15 @@ create-lock-file = false # optionally create a lock file
         /// Additional new-branch values to augment co.spaces.toml
         #[arg(long)]
         new_branch: Vec<Arc<str>>,
+        /// Prevent a specific env entry from co.spaces.toml from being applied. Use `--no-env=NAME`.
+        #[arg(long)]
+        no_env: Vec<Arc<str>>,
+        /// Prevent a specific store entry from co.spaces.toml from being applied. Use `--no-store=NAME`.
+        #[arg(long)]
+        no_store: Vec<Arc<str>>,
+        /// Prevent a specific new-branch entry from co.spaces.toml from being applied. Use `--no-new-branch=PATH`.
+        #[arg(long)]
+        no_new_branch: Vec<Arc<str>>,
         #[arg(
             long,
             help = r#"Override locks set in the rules.
