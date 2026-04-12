@@ -559,9 +559,8 @@ impl Checkout {
                         .retain(|k, _| !args.no_store.iter().any(|n| n.as_ref() == k.as_ref()));
                 }
                 if let Some(nb_list) = repo.new_branch.as_mut() {
-                    nb_list.retain(|e| {
-                        !args.no_new_branch.iter().any(|n| n.as_ref() == e.as_ref())
-                    });
+                    nb_list
+                        .retain(|e| !args.no_new_branch.iter().any(|n| n.as_ref() == e.as_ref()));
                 }
             }
             Checkout::Workflow(workflow) => {
@@ -576,9 +575,8 @@ impl Checkout {
                         .retain(|k, _| !args.no_store.iter().any(|n| n.as_ref() == k.as_ref()));
                 }
                 if let Some(nb_list) = workflow.new_branch.as_mut() {
-                    nb_list.retain(|e| {
-                        !args.no_new_branch.iter().any(|n| n.as_ref() == e.as_ref())
-                    });
+                    nb_list
+                        .retain(|e| !args.no_new_branch.iter().any(|n| n.as_ref() == e.as_ref()));
                 }
             }
         }
