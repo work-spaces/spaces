@@ -545,6 +545,14 @@ impl Workspace {
             .dev_branches
             .extend(singleton::get_new_branches());
 
+        let removed_branches = singleton::get_removed_branches();
+        if !removed_branches.is_empty() {
+            settings
+                .json
+                .dev_branches
+                .retain(|b| !removed_branches.contains(b));
+        }
+
         if is_json_available == ws::IsJsonAvailable::Yes {
             logger(progress.console.clone()).debug("Loading modules from sync order");
             for module in settings.json.order.iter() {

@@ -432,34 +432,23 @@ impl Checkout {
         Ok(checkout)
     }
 
-    pub fn apply_overrides(
-        &mut self,
-        rule_name: Option<Arc<str>>,
-        url: Option<Arc<str>>,
-        rev: Option<Arc<str>>,
-        env: Vec<Arc<str>>,
-        store: Vec<Arc<str>>,
-        new_branch: Vec<Arc<str>>,
-        no_env: Vec<Arc<str>>,
-        no_store: Vec<Arc<str>>,
-        no_new_branch: Vec<Arc<str>>,
-    ) -> anyhow::Result<()> {
+    pub fn apply_overrides(&mut self, args: &CoArgs) -> anyhow::Result<()> {
         // Apply additive overrides
         match self {
             Checkout::Repo(repo) => {
-                if let Some(rule_name) = rule_name {
+                if let Some(rule_name) = args.rule_name.clone() {
                     repo.rule_name = Some(rule_name);
                 }
-                if let Some(url) = url {
+                if let Some(url) = args.url.clone() {
                     repo.url = url;
                 }
-                if let Some(rev) = rev {
+                if let Some(rev) = args.rev.clone() {
                     repo.rev = rev;
                 }
-                for entry in env {
+                for entry in args.env.iter().cloned() {
                     repo.env.get_or_insert_default().push(entry);
                 }
-                for entry in store {
+                for entry in args.store.iter() {
                     if let Some((key, value)) = entry.split_once('=') {
                         repo.store
                             .get_or_insert_default()
@@ -471,26 +460,26 @@ impl Checkout {
                         ));
                     }
                 }
-                for entry in new_branch {
+                for entry in args.new_branch.iter().cloned() {
                     repo.new_branch.get_or_insert_default().push(entry);
                 }
             }
             Checkout::Workflow(workflow) => {
-                if rule_name.is_some() {
+                if args.rule_name.is_some() {
                     return Err(format_error!(
                         "--rule-name can only be used with CheckoutRepo"
                     ));
                 }
-                if url.is_some() {
+                if args.url.is_some() {
                     return Err(format_error!("--url can only be used with CheckoutRepo"));
                 }
-                if rev.is_some() {
+                if args.rev.is_some() {
                     return Err(format_error!("--rev can only be used with CheckoutRepo"));
                 }
-                for entry in env {
+                for entry in args.env.iter().cloned() {
                     workflow.env.get_or_insert_default().push(entry);
                 }
-                for entry in store {
+                for entry in args.store.iter() {
                     if let Some((key, value)) = entry.split_once('=') {
                         workflow
                             .store
@@ -519,7 +508,7 @@ impl Checkout {
                 workflow.new_branch.clone(),
             ),
         };
-        for name in &no_env {
+        for name in &args.no_env {
             let exists = checkout_env.as_ref().is_some_and(|list| {
                 list.iter().any(|e| {
                     let key = e.split_once('=').map(|(k, _)| k).unwrap_or(e);
@@ -533,7 +522,7 @@ impl Checkout {
                 ));
             }
         }
-        for name in &no_store {
+        for name in &args.no_store {
             let exists = checkout_store
                 .as_ref()
                 .is_some_and(|map| map.contains_key(name.as_ref()));
@@ -544,7 +533,7 @@ impl Checkout {
                 ));
             }
         }
-        for path in &no_new_branch {
+        for path in &args.no_new_branch {
             let exists = checkout_new_branch
                 .as_ref()
                 .is_some_and(|list| list.iter().any(|e| e.as_ref() == path.as_ref()));
@@ -562,16 +551,16 @@ impl Checkout {
                 if let Some(env_list) = repo.env.as_mut() {
                     env_list.retain(|e| {
                         let key = e.split_once('=').map(|(k, _)| k).unwrap_or(e);
-                        !no_env.iter().any(|n| n.as_ref() == key)
+                        !args.no_env.iter().any(|n| n.as_ref() == key)
                     });
                 }
                 if let Some(store_map) = repo.store.as_mut() {
                     store_map
-                        .retain(|k, _| !no_store.iter().any(|n| n.as_ref() == k.as_ref()));
+                        .retain(|k, _| !args.no_store.iter().any(|n| n.as_ref() == k.as_ref()));
                 }
                 if let Some(nb_list) = repo.new_branch.as_mut() {
                     nb_list.retain(|e| {
-                        !no_new_branch.iter().any(|n| n.as_ref() == e.as_ref())
+                        !args.no_new_branch.iter().any(|n| n.as_ref() == e.as_ref())
                     });
                 }
             }
@@ -579,16 +568,16 @@ impl Checkout {
                 if let Some(env_list) = workflow.env.as_mut() {
                     env_list.retain(|e| {
                         let key = e.split_once('=').map(|(k, _)| k).unwrap_or(e);
-                        !no_env.iter().any(|n| n.as_ref() == key)
+                        !args.no_env.iter().any(|n| n.as_ref() == key)
                     });
                 }
                 if let Some(store_map) = workflow.store.as_mut() {
                     store_map
-                        .retain(|k, _| !no_store.iter().any(|n| n.as_ref() == k.as_ref()));
+                        .retain(|k, _| !args.no_store.iter().any(|n| n.as_ref() == k.as_ref()));
                 }
                 if let Some(nb_list) = workflow.new_branch.as_mut() {
                     nb_list.retain(|e| {
-                        !no_new_branch.iter().any(|n| n.as_ref() == e.as_ref())
+                        !args.no_new_branch.iter().any(|n| n.as_ref() == e.as_ref())
                     });
                 }
             }

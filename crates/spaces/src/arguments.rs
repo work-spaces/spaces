@@ -302,17 +302,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                 .clone();
 
             checkout
-                .apply_overrides(
-                    args.rule_name,
-                    args.url,
-                    args.rev,
-                    args.env,
-                    args.store,
-                    args.new_branch,
-                    args.no_env,
-                    args.no_store,
-                    args.no_new_branch,
-                )
+                .apply_overrides(&args)
                 .context(format_context!("while applying co overrides"))?;
 
             checkout
@@ -329,6 +319,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             env,
             store,
             dev_branch,
+            no_dev_branch,
         } => {
             singleton::set_execution_phase(task::Phase::Checkout);
 
@@ -348,6 +339,13 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                 let mut new_branches = singleton::get_new_branches();
                 new_branches.extend(dev_branch);
                 singleton::set_new_branches(new_branches);
+            }
+
+            // Remove any dev branches specified by --no-dev-branch
+            if !no_dev_branch.is_empty() {
+                let mut removed_branches = singleton::get_removed_branches();
+                removed_branches.extend(no_dev_branch);
+                singleton::set_removed_branches(removed_branches);
             }
 
             // Always need to evaluate when doing a sync
@@ -923,6 +921,12 @@ create-lock-file = false # optionally create a lock file
   Unlike --new-branch on checkout, this does not create a new git branch."#
         )]
         dev_branch: Vec<Arc<str>>,
+        #[arg(
+            long,
+            help = r#"Use --no-dev-branch=<rule> to remove a repo from the dev-branch list.
+  This has the opposite effect of --dev-branch."#
+        )]
+        no_dev_branch: Vec<Arc<str>>,
     },
     #[command(about = r"Runs a spaces run rule.
   - `spaces run`: Run all non-optional rules with dependencies
