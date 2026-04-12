@@ -45,10 +45,22 @@ run_add_exec(
     "build",
     command = "cargo",
     args = ["build", "--target-dir=build/target"],
-    deps = deps(rules = [":rustup_update", ":check"], globs = [GLOB_DEPS]),
+    deps = deps(
+        rules = [":rustup_update", ":check"],
+        globs = [GLOB_DEPS],
+        files = [
+            "{}/bin/cargo".format(workspace_get_env_var("CARGO_HOME")),
+            "{}/bin/rustc".format(workspace_get_env_var("CARGO_HOME")),
+        ],
+    ),
     target_files = ["//build/target/debug/spaces"],
     visibility = visibility_private(),
     help = "Run cargo build on workspace",
+    env = {
+        "SCCACHE_DIR": workspace_get_env_var("SCCACHE_DIR"),
+        "RUSTUP_HOME": workspace_get_env_var("RUSTUP_HOME"),
+        "CARGO_HOME": workspace_get_env_var("CARGO_HOME"),
+    },
 )
 
 run_add_exec(
