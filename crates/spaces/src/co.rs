@@ -54,6 +54,53 @@ fn set_workspace_store(store: Vec<Arc<str>>) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[derive(Debug, clap::Args)]
+pub struct CoArgs {
+    /// The name of the checkout entry (e.g. `spaces-dev` or `ninja-build` from above).
+    pub checkout: Arc<str>,
+    /// The name of the workspace to create.
+    pub name: Arc<str>,
+    /// Do not delete the workspace directory if checkout fails.
+    #[arg(long)]
+    pub keep_workspace_on_failure: bool,
+    /// Override the checkout-repo revision in co.spaces.toml
+    #[arg(long)]
+    pub rev: Option<Arc<str>>,
+    /// Override the checkout-repo rule-name in co.spaces.toml
+    #[arg(long)]
+    pub rule_name: Option<Arc<str>>,
+    /// Override the checkout-repo url in co.spaces.toml
+    #[arg(long)]
+    pub url: Option<Arc<str>>,
+    /// Additional env values to augment co.spaces.toml
+    #[arg(long)]
+    pub env: Vec<Arc<str>>,
+    /// Additional store values to augment co.spaces.toml. Use `--store=KEY=VALUE`.
+    #[arg(long)]
+    pub store: Vec<Arc<str>>,
+    /// Additional new-branch values to augment co.spaces.toml
+    #[arg(long)]
+    pub new_branch: Vec<Arc<str>>,
+    /// Prevent a specific env entry from co.spaces.toml from being applied. Use `--no-env=NAME`.
+    #[arg(long)]
+    pub no_env: Vec<Arc<str>>,
+    /// Prevent a specific store entry from co.spaces.toml from being applied. Use `--no-store=NAME`.
+    #[arg(long)]
+    pub no_store: Vec<Arc<str>>,
+    /// Prevent a specific new-branch entry from co.spaces.toml from being applied. Use `--no-new-branch=PATH`.
+    #[arg(long)]
+    pub no_new_branch: Vec<Arc<str>>,
+    #[arg(
+        long,
+        help = r#"Override locks set in the rules.
+  Use `--lock=REPO=REV`. Can be used multiple times."#
+    )]
+    pub lock: Vec<Arc<str>>,
+    /// The workspaces lock rev's will override the rule rev for repos
+    #[arg(long)]
+    pub locked: bool,
+}
+
 pub struct CheckoutRepoArgs {
     pub rule_name: Option<Arc<str>>,
     pub url: Arc<str>,
@@ -383,6 +430,158 @@ impl Checkout {
             effective_path.display()
         ))?;
         Ok(checkout)
+    }
+
+    pub fn apply_overrides(&mut self, args: &CoArgs) -> anyhow::Result<()> {
+        // Apply additive overrides
+        match self {
+            Checkout::Repo(repo) => {
+                if let Some(rule_name) = args.rule_name.clone() {
+                    repo.rule_name = Some(rule_name);
+                }
+                if let Some(url) = args.url.clone() {
+                    repo.url = url;
+                }
+                if let Some(rev) = args.rev.clone() {
+                    repo.rev = rev;
+                }
+                for entry in args.env.iter().cloned() {
+                    repo.env.get_or_insert_default().push(entry);
+                }
+                for entry in args.store.iter() {
+                    if let Some((key, value)) = entry.split_once('=') {
+                        repo.store
+                            .get_or_insert_default()
+                            .insert(key.into(), toml::Value::String(value.to_string()));
+                    } else {
+                        return Err(format_error!(
+                            "invalid store entry: {}. Use --store=<key>=<value>",
+                            entry
+                        ));
+                    }
+                }
+                for entry in args.new_branch.iter().cloned() {
+                    repo.new_branch.get_or_insert_default().push(entry);
+                }
+            }
+            Checkout::Workflow(workflow) => {
+                if args.rule_name.is_some() {
+                    return Err(format_error!(
+                        "--rule-name can only be used with CheckoutRepo"
+                    ));
+                }
+                if args.url.is_some() {
+                    return Err(format_error!("--url can only be used with CheckoutRepo"));
+                }
+                if args.rev.is_some() {
+                    return Err(format_error!("--rev can only be used with CheckoutRepo"));
+                }
+                for entry in args.env.iter().cloned() {
+                    workflow.env.get_or_insert_default().push(entry);
+                }
+                for entry in args.store.iter() {
+                    if let Some((key, value)) = entry.split_once('=') {
+                        workflow
+                            .store
+                            .get_or_insert_default()
+                            .insert(key.into(), toml::Value::String(value.to_string()));
+                    } else {
+                        return Err(format_error!(
+                            "invalid store entry: {}. Use --store=<key>=<value>",
+                            entry
+                        ));
+                    }
+                }
+            }
+        }
+
+        // Validate --no-* exclusions exist in the config
+        let (checkout_env, checkout_store, checkout_new_branch) = match self {
+            Checkout::Repo(repo) => (
+                repo.env.clone(),
+                repo.store.clone(),
+                repo.new_branch.clone(),
+            ),
+            Checkout::Workflow(workflow) => (
+                workflow.env.clone(),
+                workflow.store.clone(),
+                workflow.new_branch.clone(),
+            ),
+        };
+        for name in &args.no_env {
+            let exists = checkout_env.as_ref().is_some_and(|list| {
+                list.iter().any(|e| {
+                    let key = e.split_once('=').map(|(k, _)| k).unwrap_or(e);
+                    key == name.as_ref()
+                })
+            });
+            if !exists {
+                return Err(format_error!(
+                    "--no-env={} does not exist in the config",
+                    name
+                ));
+            }
+        }
+        for name in &args.no_store {
+            let exists = checkout_store
+                .as_ref()
+                .is_some_and(|map| map.contains_key(name.as_ref()));
+            if !exists {
+                return Err(format_error!(
+                    "--no-store={} does not exist in the config",
+                    name
+                ));
+            }
+        }
+        for path in &args.no_new_branch {
+            let exists = checkout_new_branch
+                .as_ref()
+                .is_some_and(|list| list.iter().any(|e| e.as_ref() == path.as_ref()));
+            if !exists {
+                return Err(format_error!(
+                    "--no-new-branch={} does not exist in the config",
+                    path
+                ));
+            }
+        }
+
+        // Apply exclusions
+        match self {
+            Checkout::Repo(repo) => {
+                if let Some(env_list) = repo.env.as_mut() {
+                    env_list.retain(|e| {
+                        let key = e.split_once('=').map(|(k, _)| k).unwrap_or(e);
+                        !args.no_env.iter().any(|n| n.as_ref() == key)
+                    });
+                }
+                if let Some(store_map) = repo.store.as_mut() {
+                    store_map
+                        .retain(|k, _| !args.no_store.iter().any(|n| n.as_ref() == k.as_ref()));
+                }
+                if let Some(nb_list) = repo.new_branch.as_mut() {
+                    nb_list
+                        .retain(|e| !args.no_new_branch.iter().any(|n| n.as_ref() == e.as_ref()));
+                }
+            }
+            Checkout::Workflow(workflow) => {
+                if let Some(env_list) = workflow.env.as_mut() {
+                    env_list.retain(|e| {
+                        let key = e.split_once('=').map(|(k, _)| k).unwrap_or(e);
+                        !args.no_env.iter().any(|n| n.as_ref() == key)
+                    });
+                }
+                if let Some(store_map) = workflow.store.as_mut() {
+                    store_map
+                        .retain(|k, _| !args.no_store.iter().any(|n| n.as_ref() == k.as_ref()));
+                }
+                if let Some(nb_list) = workflow.new_branch.as_mut() {
+                    nb_list
+                        .retain(|e| !args.no_new_branch.iter().any(|n| n.as_ref() == e.as_ref()));
+                }
+            }
+        }
+
+        Ok(())
     }
 
     pub fn checkout(

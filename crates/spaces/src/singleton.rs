@@ -25,6 +25,7 @@ struct State {
     args_store: HashMap<Arc<str>, serde_json::Value>,
     args_locks: HashMap<Arc<str>, Arc<str>>,
     new_branches: Vec<Arc<str>>,
+    removed_branches: Vec<Arc<str>>,
     inspect: inspect::Options,
     execution_phase: task::Phase,
     query_command: Option<query::QueryCommand>,
@@ -59,6 +60,7 @@ fn get_state() -> &'static lock::StateLock<State> {
         max_queue_count: 8,
         error_chain: Vec::new(),
         new_branches: Vec::new(),
+        removed_branches: Vec::new(),
         inspect: inspect::Options::default(),
         query_command: None,
         query_context: None,
@@ -213,6 +215,16 @@ pub fn get_new_branches() -> Vec<Arc<str>> {
 pub fn set_new_branches(new_branches: Vec<Arc<str>>) {
     let mut state = get_state().write();
     state.new_branches = new_branches;
+}
+
+pub fn get_removed_branches() -> Vec<Arc<str>> {
+    let state = get_state().read();
+    state.removed_branches.clone()
+}
+
+pub fn set_removed_branches(removed_branches: Vec<Arc<str>>) {
+    let mut state = get_state().write();
+    state.removed_branches = removed_branches;
 }
 
 pub fn get_is_sync() -> bool {
