@@ -161,11 +161,37 @@ impl Decoder {
 
                     let mut buffer = Vec::new();
                     let destination_path = format!("{}/{}", self.output_directory, zip_file.name());
-                    if zip_file.is_file() {
-                        let dest_parent = std::path::Path::new(destination_path.as_str())
+                    let dest_path = std::path::Path::new(destination_path.as_str());
+                    if zip_file.is_dir() {
+                        std::fs::create_dir_all(dest_path)
+                            .context(format_context!("failed to create {destination_path}"))?;
+                    } else if zip_file.is_symlink() {
+                        #[cfg(unix)]
+                        {
+                            let dest_parent = dest_path
+                                .parent()
+                                .context(format_context!("{destination_path}"))?;
+                            std::fs::create_dir_all(dest_parent)
+                                .context(format_context!("failed to create {dest_parent:?}"))?;
+
+                            zip_file.read_to_end(&mut buffer).context(format_context!(
+                                "failed to read symlink target for {destination_path}"
+                            ))?;
+                            let target = std::str::from_utf8(&buffer).context(format_context!(
+                                "symlink target is not valid UTF-8 for {destination_path}"
+                            ))?;
+                            // Remove any existing entry so reruns succeed.
+                            let _ = std::fs::remove_file(dest_path);
+                            std::os::unix::fs::symlink(target, dest_path).context(
+                                format_context!(
+                                    "failed to create symlink {destination_path} -> {target}"
+                                ),
+                            )?;
+                        }
+                    } else if zip_file.is_file() {
+                        let dest_parent = dest_path
                             .parent()
                             .context(format_context!("{destination_path}"))?;
-
                         std::fs::create_dir_all(dest_parent)
                             .context(format_context!("failed to create {dest_parent:?}"))?;
 
@@ -179,10 +205,6 @@ impl Decoder {
                             .context(format_context!("failed to write {destination_path}"))?;
                     }
                 }
-
-                decoder
-                    .extract(self.output_directory.as_str())
-                    .context(format_context!("{output_directory}"))?;
 
                 None
             }

@@ -169,19 +169,32 @@ impl Encoder {
                 }
             }
             EncoderDriver::Zip(encoder) => {
-                let options = zip::write::SimpleFileOptions::default()
-                    .compression_method(zip::CompressionMethod::Deflated)
-                    .unix_permissions(0o755);
-
-                let contents = std::fs::read(file_path).context(format_context!(
-                    "Failed to read file for zip archive {file_path}"
-                ))?;
-                encoder
-                    .start_file(archive_path, options)
-                    .context(format_context!("{file_path}"))?;
-                encoder
-                    .write_all(contents.as_slice())
-                    .context(format_context!("{file_path}"))?;
+                let path = std::path::Path::new(file_path);
+                if path.is_symlink() {
+                    let target = path
+                        .read_link()
+                        .context(format_context!("failed to read symlink {file_path}"))?;
+                    encoder
+                        .add_symlink(
+                            archive_path,
+                            target.to_string_lossy(),
+                            zip::write::SimpleFileOptions::default(),
+                        )
+                        .context(format_context!("failed to add symlink {file_path}"))?;
+                } else {
+                    let options = zip::write::SimpleFileOptions::default()
+                        .compression_method(zip::CompressionMethod::Deflated)
+                        .unix_permissions(0o755);
+                    let contents = std::fs::read(file_path).context(format_context!(
+                        "Failed to read file for zip archive {file_path}"
+                    ))?;
+                    encoder
+                        .start_file(archive_path, options)
+                        .context(format_context!("{file_path}"))?;
+                    encoder
+                        .write_all(contents.as_slice())
+                        .context(format_context!("{file_path}"))?;
+                }
             }
         }
         Ok(())
