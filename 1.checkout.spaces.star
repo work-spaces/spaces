@@ -14,6 +14,7 @@ load(
     "checkout_add_env_vars",
     "checkout_add_home_assets",
     "checkout_add_home_store_env",
+    "checkout_set_sandbox",
 )
 load("//@star/sdk/star/env.star", "env_assign")
 load(
@@ -33,7 +34,6 @@ load(
     "//@star/sdk/star/ws.star",
     "workspace_get_absolute_path",
     "workspace_get_path_to_checkout",
-    "workspace_set_sandbox",
 )
 
 # Configure the top level workspace
@@ -144,4 +144,4 @@ checkout_add_env_vars(
 
 sandbox = sandbox_new("workspace-sandbox")
 sandbox_configure_for_os(sandbox)
-workspace_set_sandbox(sandbox)
+checkout_set_sandbox(sandbox)

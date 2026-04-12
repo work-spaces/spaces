@@ -516,55 +516,6 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(alloc_value)
     }
 
-    /// Configures the sandbox applied to `spaces shell` for this workspace.
-    ///
-    /// The sandbox is merged with the default shell sandbox (which already grants access
-    /// to the current working directory, store path, and all `PATH` entries). Any paths or
-    /// policies declared here are unioned on top of those defaults.
-    ///
-    /// The sandbox is persisted in `.spaces/settings.spaces.json` and takes effect the
-    /// next time `spaces shell --sandbox` is run.
-    ///
-    /// ```python
-    /// workspace.set_sandbox(
-    ///     rule = {"name": "workspace_sandbox"},
-    ///     sandbox = {
-    ///         "read": ["/etc/ssl"],
-    ///         "write": [],
-    ///         "exec": [],
-    ///         "network": "Blocked",
-    ///     },
-    /// )
-    /// ```
-    ///
-    /// # Arguments
-    /// * `rule`: A `dict` rule definition containing at minimum `name` (`str`).
-    /// * `sandbox`: A `dict` describing the sandbox policy with optional keys:
-    ///     * `read` (`list[str]`): Additional read-only paths.
-    ///     * `write` (`list[str]`): Additional read-write paths.
-    ///     * `exec` (`list[str]`): Additional executable paths.
-    ///     * `scratch` (`str`): Scratch/temp directory for intermediate artifacts.
-    ///     * `network` (`str`): Network policy — `"Unrestricted"` (default) or `"Blocked"`.
-    ///     * `deny` (`list[str]`): Paths to explicitly deny even if covered by a broader grant.
-    fn set_sandbox(
-        #[starlark(require = named)] sandbox: starlark::values::Value,
-        eval: &mut Evaluator,
-    ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context(eval)?;
-
-        let sandbox_value: utils::sandbox::Sandbox =
-            serde_json::from_value(sandbox.to_json_value()?)
-                .context(format_context!("while parsing sandbox"))?;
-
-        let workspace_arc = ctx
-            .workspace
-            .clone()
-            .ok_or_else(|| format_error!("No active workspace found"))?;
-        workspace_arc.write().settings.json.sandbox = sandbox_value;
-
-        Ok(NoneType)
-    }
-
     /// Sets the default visibility to private for the current module.
     ///
     ///
