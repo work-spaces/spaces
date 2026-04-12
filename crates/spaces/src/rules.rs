@@ -44,7 +44,7 @@ fn get_task_signal_deps(task: &task::Task) -> anyhow::Result<Vec<task::SignalArc
         // # tasks * # deps + hashmap access is EXPENSIVE
         // this causes a substantial delay when starting spaces
         let dep_task = tasks.get(dep).ok_or(format_error!(
-            "Task Dependency {} not found for {}",
+            "Rule dependency {} not found for {}",
             dep,
             task.rule.name
         ))?;
@@ -57,7 +57,7 @@ fn get_task_signal_deps(task: &task::Task) -> anyhow::Result<Vec<task::SignalArc
             task::Phase::Run => {
                 if dep_task.phase != task::Phase::Run {
                     return Err(format_error!(
-                        "Run task {} cannot depend on non-run task {} -> {}",
+                        "Rule {} (phase: Run) cannot depend on rule {} in phase {}",
                         task.rule.name,
                         dep_task.rule.name,
                         dep_task.phase
@@ -67,7 +67,7 @@ fn get_task_signal_deps(task: &task::Task) -> anyhow::Result<Vec<task::SignalArc
                     && dep_task.rule.type_ != Some(rule::RuleType::Setup)
                 {
                     return Err(format_error!(
-                        "Setup task {} cannot depend on non-setup task {} -> {}",
+                        "Rule {} (type: Setup) cannot depend on non-setup rule {} in phase {}",
                         task.rule.name,
                         dep_task.rule.name,
                         dep_task.phase
@@ -77,7 +77,7 @@ fn get_task_signal_deps(task: &task::Task) -> anyhow::Result<Vec<task::SignalArc
             task::Phase::Checkout => {
                 if dep_task.phase != task::Phase::Checkout {
                     return Err(format_error!(
-                        "Checkout task {} cannot depend on non-checkout task {} -> {}",
+                        "Rule {} (phase: Checkout) cannot depend on rule {} in phase {}",
                         task.rule.name,
                         dep_task.rule.name,
                         dep_task.phase
@@ -172,7 +172,7 @@ pub fn execute_rule(
             let tasks = state.tasks.read();
             let task = tasks
                 .get(name.as_ref())
-                .context(format_context!("Task not found {name}"))?;
+                .context(format_context!("Rule not found {name}"))?;
             if task.phase == task::Phase::Cancelled {
                 logger.debug(format!("Skipping {name}: cancelled").as_str());
                 skip_execute_message = logger::make_finalize_line(
@@ -387,7 +387,7 @@ pub fn execute_rule(
 
             let task = tasks
                 .get_mut(name.as_ref())
-                .context(format_context!("Task not found {name}"))?;
+                .context(format_context!("Rule not found {name}"))?;
             task.phase = task::Phase::Complete;
 
             state.log_status.write().push(log_status);
@@ -551,7 +551,7 @@ impl State {
             let tasks = self.tasks.read();
             for (name, task) in tasks.iter() {
                 self.check_task_deps_visibility(task)
-                    .with_context(|| format_context!("Visibility check failed for task {name}"))?;
+                    .with_context(|| format_context!("Visibility check failed for rule {name}"))?;
             }
         }
 
@@ -597,7 +597,7 @@ impl State {
                     self.graph
                         .add_dependency(&task.rule.name, rule_dep)
                         .context(format_context!(
-                            "Failed to add dependency {rule_dep} to task {}: {}",
+                            "Failed to add dependency {rule_dep} to rule {}: {}",
                             task.rule.name,
                             self.graph.get_target_not_found(rule_dep.clone())
                         ))?;
@@ -627,7 +627,7 @@ impl State {
         self.sorted = self
             .graph
             .get_sorted_tasks(target.clone())
-            .context(format_context!("Failed to sort tasks"))?;
+            .context(format_context!("Failed to sort rules"))?;
 
         logger.debug(format!("done with {} nodes", self.sorted.len()).as_str());
 
@@ -639,7 +639,7 @@ impl State {
                 let task_name = self.graph.get_task(*node_index);
                 let task = tasks
                     .get_mut(task_name)
-                    .ok_or(format_error!("Task not found {task_name}"))?;
+                    .ok_or(format_error!("Rule not found {task_name}"))?;
                 if singleton::is_skip_deps_mode() {
                     if target != task.rule.name {
                         task.rule.type_ = Some(rule::RuleType::Optional);
@@ -666,7 +666,7 @@ impl State {
             let workspace = workspace.read();
             let mut tasks = self.tasks.write();
             *tasks = serde_json::from_str(&workspace.settings.bin.tasks_json)
-                .context(format_context!("Failed to parse tasks"))?;
+                .context(format_context!("Failed to parse rules"))?;
 
             for task in tasks.values_mut() {
                 task.signal = task::SignalArc::new(task.rule.name.clone());
@@ -761,7 +761,7 @@ impl State {
         let topo_sorted = self
             .graph
             .get_sorted_tasks(None)
-            .context(format_context!("Failed to sort tasks for phase digesting",))?;
+            .context(format_context!("Failed to sort rules for phase digesting",))?;
 
         logger.debug(
             format!(
@@ -850,7 +850,7 @@ impl State {
 
             let task = tasks
                 .get(task_name)
-                .ok_or(format_error!("Task not found {task_name}"))?;
+                .ok_or(format_error!("Rule not found {task_name}"))?;
 
             if singleton::get_inspect_options().has_help && task.rule.help.is_none() {
                 continue;
@@ -1058,7 +1058,7 @@ impl State {
                 let tasks = self.tasks.read();
                 tasks
                     .get(task_name)
-                    .ok_or(format_error!("Task not found {task_name}"))?
+                    .ok_or(format_error!("Rule not found {task_name}"))?
                     .clone()
             };
 
@@ -1419,7 +1419,7 @@ pub fn get_task(name: &str) -> anyhow::Result<task::Task> {
     tasks
         .get(name)
         .cloned()
-        .ok_or_else(|| format_error!("Task {} not found", name))
+        .ok_or_else(|| format_error!("Rule {} not found", name))
 }
 
 /// Clone a task using a caller-supplied module name instead of global state.
@@ -1434,7 +1434,7 @@ pub fn get_cloned_task_for_module(
         Ok(task.clone())
     } else {
         Err(format_error!(
-            "Task {} not found for cloning",
+            "Rule {} not found for cloning",
             sanitized_name
         ))
     }

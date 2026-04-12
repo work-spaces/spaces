@@ -142,7 +142,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
         )
-        .context(format_context!("Failed to insert task {rule_name}"))?;
+        .context(format_context!("Failed to register rule {rule_name}"))?;
         Ok(NoneType)
     }
 
@@ -193,7 +193,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
         )
-        .context(format_context!("Failed to insert task {rule_name}"))?;
+        .context(format_context!("Failed to register rule {rule_name}"))?;
         Ok(NoneType)
     }
 
@@ -282,7 +282,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
         )
-        .context(format_context!("Failed to insert task {rule_name}"))?;
+        .context(format_context!("Failed to register rule {rule_name}"))?;
         Ok(NoneType)
     }
 
@@ -365,7 +365,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             ctx.default_module_visibility.clone(),
         )
         .context(format_context!(
-            "Failed to insert task {cargo_bin_rule_name}"
+            "Failed to register rule {cargo_bin_rule_name}"
         ))?;
 
         let mut deps = vec![cargo_bin_rule_name.clone()];
@@ -391,7 +391,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 &ctx.module_name,
                 ctx.default_module_visibility.clone(),
             )
-            .context(format_context!("Failed to insert task {bin_rule_name}"))?;
+            .context(format_context!("Failed to register rule {bin_rule_name}"))?;
         }
 
         // add original rule name as a target with hardlink deps
@@ -549,7 +549,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
         )
-        .context(format_context!("Failed to insert task {rule_name}"))?;
+        .context(format_context!("Failed to register rule {rule_name}"))?;
 
         Ok(NoneType)
     }
@@ -598,7 +598,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
         )
-        .context(format_context!("Failed to insert task {rule_name}"))?;
+        .context(format_context!("Failed to register rule {rule_name}"))?;
 
         Ok(NoneType)
     }
@@ -648,7 +648,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
         )
-        .context(format_context!("Failed to insert task {rule_name}"))?;
+        .context(format_context!("Failed to register rule {rule_name}"))?;
 
         Ok(NoneType)
     }
@@ -692,7 +692,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
         )
-        .context(format_context!("Failed to insert task {rule_name}"))?;
+        .context(format_context!("Failed to register rule {rule_name}"))?;
 
         Ok(NoneType)
     }
@@ -768,7 +768,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
         )
-        .context(format_context!("Failed to insert task {rule_name}"))?;
+        .context(format_context!("Failed to register rule {rule_name}"))?;
 
         Ok(NoneType)
     }
@@ -817,7 +817,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
         )
-        .context(format_context!("Failed to insert task {rule_name}"))?;
+        .context(format_context!("Failed to register rule {rule_name}"))?;
         Ok(NoneType)
     }
 
@@ -880,7 +880,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
         )
-        .context(format_context!("Failed to insert task {rule_name}"))?;
+        .context(format_context!("Failed to register rule {rule_name}"))?;
 
         Ok(NoneType)
     }
@@ -943,7 +943,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
         )
-        .context(format_context!("Failed to insert task {rule_name}"))?;
+        .context(format_context!("Failed to register rule {rule_name}"))?;
 
         Ok(NoneType)
     }
@@ -1016,7 +1016,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
         )
-        .context(format_context!("Failed to insert task {rule_name}"))?;
+        .context(format_context!("Failed to register rule {rule_name}"))?;
 
         Ok(NoneType)
     }
@@ -1139,7 +1139,7 @@ fn add_http_archive(
             module_name,
             default_visibility,
         )
-        .context(format_context!("Failed to insert task {rule_name}"))?;
+        .context(format_context!("Failed to register rule {rule_name}"))?;
     }
     Ok(())
 }
