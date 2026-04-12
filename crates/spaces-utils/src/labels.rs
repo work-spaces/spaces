@@ -140,8 +140,8 @@ pub fn sanitize_glob_value(
     } else if value.starts_with("//") {
         // Already sanitized, return as-is to make this function idempotent
         Ok(value.into())
-    } else if value.starts_with('/') {
-        // Absolute path — return as-is without prepending a workspace prefix
+    } else if std::path::Path::new(value).is_absolute() {
+        // Absolute filesystem path — return as-is without prepending a workspace prefix
         Ok(value.into())
     } else {
         let rule_path = get_source_from_label(rule_name);
