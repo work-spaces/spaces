@@ -2,7 +2,7 @@ use crate::{completions, evaluator, executor, rules, task, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use std::sync::Arc;
-use utils::{ci, git, labels, lock, logger, logs, shell, store, version, ws};
+use utils::{ci, git, labels, lock, logger, logs, rcache, shell, store, version, ws};
 
 use crate::{lsp_context, singleton};
 use itertools::Itertools;
@@ -393,8 +393,9 @@ pub fn run_store_command_in_workspace(
 
     match store_command {
         store::StoreCommand::Info { sort_by } => {
+            let rcache_path = ws::get_rcache_path(store_path);
             store
-                .show_info(console.clone(), sort_by, is_ci)
+                .show_info(console.clone(), sort_by, is_ci, &rcache_path)
                 .context(format_context!("While getting store info"))?;
             store
                 .save(store_path)
@@ -409,14 +410,24 @@ pub fn run_store_command_in_workspace(
                 .save(store_path)
                 .context(format_context!("Failed to save store at {store_path_str}",))?;
         }
-        store::StoreCommand::Prune { age, dry_run } => {
-            store
-                .prune(console.clone(), age, dry_run, is_ci)
-                .context(format_context!("While pruning store"))?;
+        store::StoreCommand::Prune {
+            age,
+            dry_run,
+            rcache_only,
+        } => {
+            if !rcache_only {
+                store
+                    .prune(console.clone(), age, dry_run, is_ci)
+                    .context(format_context!("While pruning store"))?;
 
-            store
-                .save(store_path)
-                .context(format_context!("Failed to save store at {store_path_str}",))?;
+                store
+                    .save(store_path)
+                    .context(format_context!("Failed to save store at {store_path_str}",))?;
+            }
+
+            let rcache_path = ws::get_rcache_path(store_path);
+            rcache::prune(&rcache_path, age, dry_run, console.clone(), is_ci)
+                .context(format_context!("While pruning rcache"))?;
         }
     }
 

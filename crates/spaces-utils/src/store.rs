@@ -48,6 +48,9 @@ pub enum StoreCommand {
         /// Show which entries will be deleted without deleting the data
         #[clap(long)]
         dry_run: bool,
+        /// Prune only the rule cache, leaving store entries untouched
+        #[clap(long)]
+        rcache_only: bool,
     },
 }
 
@@ -183,6 +186,7 @@ impl Store {
         console: console::Console,
         sort_by: SortBy,
         is_ci: ci::IsCi,
+        rcache_path: &std::path::Path,
     ) -> anyhow::Result<()> {
         // Collect unmanaged directory sizes before printing anything, with progress indicator.
         let managed_top_level_dirs = self.get_managed_top_level_dirs();
@@ -286,6 +290,10 @@ impl Store {
         logger(console.clone()).info(format!("Total Size: {}", total_bytesize.display()).as_str());
 
         group.end_group(console.clone(), is_ci)?;
+
+        crate::rcache::show_info(rcache_path, console.clone(), is_ci)
+            .context(format_context!("While showing rcache info"))?;
+
         Ok(())
     }
 
