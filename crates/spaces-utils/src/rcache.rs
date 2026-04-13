@@ -603,7 +603,7 @@ fn emit_pretty_rcache_info(
             console::key_style(),
             format!("  {:<14}", ARTIFACT_CACHE_DIR),
         )));
-        line.push(console::Span::new_unstyled_lossy(&format!(
+        line.push(console::Span::new_unstyled_lossy(format!(
             "{}",
             ByteSize(artifacts_size).display()
         )));
@@ -617,7 +617,7 @@ fn emit_pretty_rcache_info(
             console::key_style(),
             format!("  {:<14}", RULE_DIGEST_CACHE_DIR),
         )));
-        line.push(console::Span::new_unstyled_lossy(&format!(
+        line.push(console::Span::new_unstyled_lossy(format!(
             "{}",
             ByteSize(rule_digests_size).display()
         )));

@@ -679,7 +679,7 @@ fn emit_pretty_summary(
             console::key_style(),
             format!("  {:<12}", "Managed"),
         )));
-        line.push(console::Span::new_unstyled_lossy(&format!(
+        line.push(console::Span::new_unstyled_lossy(format!(
             "{:>4} entries   {}",
             managed_count,
             ByteSize(managed_size).display()
@@ -694,7 +694,7 @@ fn emit_pretty_summary(
             console::key_style(),
             format!("  {:<12}", "Unmanaged"),
         )));
-        line.push(console::Span::new_unstyled_lossy(&format!(
+        line.push(console::Span::new_unstyled_lossy(format!(
             "{:>4} entries   {}",
             unmanaged_count,
             ByteSize(unmanaged_size).display()
@@ -731,7 +731,10 @@ fn emit_pretty_age_histogram(console: &console::Console, entries: &[StoreInfoEnt
     }
 
     let fresh = managed.iter().filter(|e| e.age_days < 7).count();
-    let aging = managed.iter().filter(|e| e.age_days >= 7 && e.age_days <= 30).count();
+    let aging = managed
+        .iter()
+        .filter(|e| e.age_days >= 7 && e.age_days <= 30)
+        .count();
     let stale = managed.iter().filter(|e| e.age_days > 30).count();
     let max_count = fresh.max(aging).max(stale).max(1);
     const BAR_WIDTH: usize = 20;
@@ -759,16 +762,12 @@ fn emit_pretty_age_histogram(console: &console::Console, entries: &[StoreInfoEnt
             age_style(representative_age),
             format!("{bar:<BAR_WIDTH$}"),
         )));
-        line.push(console::Span::new_unstyled_lossy(&format!("  {count}")));
+        line.push(console::Span::new_unstyled_lossy(format!("  {count}")));
         console.emit_line(line);
     }
 }
 
-fn emit_top_entries_group(
-    console: &console::Console,
-    heading: &str,
-    entries: &[&StoreInfoEntry],
-) {
+fn emit_top_entries_group(console: &console::Console, heading: &str, entries: &[&StoreInfoEntry]) {
     const TOP_N: usize = 5;
     let mut by_size = entries.to_vec();
     by_size.sort_by(|a, b| b.size_bytes.cmp(&a.size_bytes));
@@ -794,7 +793,9 @@ fn emit_top_entries_group(
             console::name_style(),
             format!("  {:<name_width$}", entry.path),
         )));
-        line.push(console::Span::new_unstyled_lossy(&format!("  {size_str:<10}")));
+        line.push(console::Span::new_unstyled_lossy(format!(
+            "  {size_str:<10}"
+        )));
         if entry.path_missing || entry.size_bytes == 0 {
             line.push(console::Span::new_styled_lossy(StyledContent::new(
                 console::warning_style(),
