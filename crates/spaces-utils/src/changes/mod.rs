@@ -237,7 +237,8 @@ impl Changes {
         hasher.update(seed.as_bytes());
         for input in inputs.iter() {
             if let Some(change_detail) = self.entries.get(*input)
-                && let ChangeDetailType::File(hash) = &change_detail.detail_type
+                && let ChangeDetailType::File(hash) | ChangeDetailType::Symlink(hash) =
+                    &change_detail.detail_type
             {
                 logger.trace(format!("Hashing {input}:{hash}").as_str());
                 count += 1;
@@ -362,5 +363,108 @@ fn process_entry(
                 ))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::changes::glob::Globs;
+
+    fn make_progress() -> console::Progress {
+        console::Progress::new(console::Console::new_null(), "", None, None)
+    }
+
+    fn make_globs(include: &str) -> Globs {
+        let mut globs = Globs::default();
+        globs.includes.insert(include.into());
+        globs
+    }
+
+    fn seed_only_digest(seed: &str, globs: &Globs) -> Arc<str> {
+        let changes = Changes::default();
+        let mut progress = make_progress();
+        changes
+            .calculate_digest(&mut progress, seed, globs)
+            .unwrap()
+    }
+
+    #[test]
+    fn test_calculate_digest_dangling_symlink_included() {
+        let mut changes = Changes::default();
+        changes.entries.insert(
+            "foo/link".into(),
+            ChangeDetail {
+                detail_type: ChangeDetailType::Symlink("old_target".into()),
+                modified: None,
+            },
+        );
+        let globs = make_globs("foo/**");
+        let mut progress = make_progress();
+        let digest = changes
+            .calculate_digest(&mut progress, "seed", &globs)
+            .unwrap();
+        let baseline = seed_only_digest("seed", &globs);
+        assert_ne!(
+            digest, baseline,
+            "dangling symlink hash should be mixed into digest"
+        );
+    }
+
+    #[test]
+    fn test_calculate_digest_dangling_symlink_retarget_detected() {
+        let globs = make_globs("foo/**");
+        let mut progress = make_progress();
+
+        let mut changes_a = Changes::default();
+        changes_a.entries.insert(
+            "foo/link".into(),
+            ChangeDetail {
+                detail_type: ChangeDetailType::Symlink("target_a".into()),
+                modified: None,
+            },
+        );
+        let digest_a = changes_a
+            .calculate_digest(&mut progress, "seed", &globs)
+            .unwrap();
+
+        let mut changes_b = Changes::default();
+        changes_b.entries.insert(
+            "foo/link".into(),
+            ChangeDetail {
+                detail_type: ChangeDetailType::Symlink("target_b".into()),
+                modified: None,
+            },
+        );
+        let digest_b = changes_b
+            .calculate_digest(&mut progress, "seed", &globs)
+            .unwrap();
+
+        assert_ne!(
+            digest_a, digest_b,
+            "retargeted symlink should produce a different digest"
+        );
+    }
+
+    #[test]
+    fn test_calculate_digest_directory_not_included() {
+        let mut changes = Changes::default();
+        changes.entries.insert(
+            "foo/dir".into(),
+            ChangeDetail {
+                detail_type: ChangeDetailType::Directory,
+                modified: None,
+            },
+        );
+        let globs = make_globs("foo/**");
+        let mut progress = make_progress();
+        let digest = changes
+            .calculate_digest(&mut progress, "seed", &globs)
+            .unwrap();
+        let baseline = seed_only_digest("seed", &globs);
+        assert_eq!(
+            digest, baseline,
+            "Directory entries should not affect the digest"
+        );
     }
 }
