@@ -3,6 +3,8 @@
 use crate::{age, ci, logger, targets};
 use anyhow::Context;
 use anyhow_source_location::format_context;
+use bytesize::ByteSize;
+use console::style::StyledContent;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -477,6 +479,7 @@ pub fn show_info(
     cache_path: &std::path::Path,
     console: console::Console,
     is_ci: ci::IsCi,
+    format: &console::Format,
 ) -> anyhow::Result<()> {
     if !cache_path.exists() {
         return Ok(());
@@ -499,28 +502,139 @@ pub fn show_info(
     };
     let total_size = artifacts_size + rule_digests_size;
 
-    logger(console.clone()).info("Path: rcache");
-    logger(console.clone()).info(
-        format!(
-            "  {}: {}",
-            ARTIFACT_CACHE_DIR,
-            bytesize::ByteSize(artifacts_size).display()
-        )
-        .as_str(),
-    );
-    logger(console.clone()).info(
-        format!(
-            "  {}: {}",
-            RULE_DIGEST_CACHE_DIR,
-            bytesize::ByteSize(rule_digests_size).display()
-        )
-        .as_str(),
-    );
-    logger(console.clone())
-        .info(format!("  Total Size: {}", bytesize::ByteSize(total_size).display()).as_str());
+    match format {
+        console::Format::Pretty => {
+            emit_pretty_rcache_info(&console, artifacts_size, rule_digests_size, total_size);
+        }
+        console::Format::Yaml => {
+            console.write(
+                &serialise_rcache_info_yaml(artifacts_size, rule_digests_size, total_size)
+                    .context(format_context!("Failed to serialize rcache info as YAML"))?,
+            )?;
+        }
+        console::Format::Json => {
+            console.write(
+                &serialise_rcache_info_json(artifacts_size, rule_digests_size, total_size)
+                    .context(format_context!("Failed to serialize rcache info as JSON"))?,
+            )?;
+        }
+    }
 
     group.end_group(console.clone(), is_ci)?;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// rcache info output types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+struct RCacheInfoOutput {
+    artifacts_size_bytes: u64,
+    rule_digests_size_bytes: u64,
+    total_size_bytes: u64,
+}
+
+fn serialise_rcache_info_json(
+    artifacts_size: u64,
+    rule_digests_size: u64,
+    total_size: u64,
+) -> anyhow::Result<String> {
+    let output = RCacheInfoOutput {
+        artifacts_size_bytes: artifacts_size,
+        rule_digests_size_bytes: rule_digests_size,
+        total_size_bytes: total_size,
+    };
+    serde_json::to_string_pretty(&output).context(format_context!(
+        "Internal Error: failed to serialize rcache info for JSON"
+    ))
+}
+
+fn serialise_rcache_info_yaml(
+    artifacts_size: u64,
+    rule_digests_size: u64,
+    total_size: u64,
+) -> anyhow::Result<String> {
+    let output = RCacheInfoOutput {
+        artifacts_size_bytes: artifacts_size,
+        rule_digests_size_bytes: rule_digests_size,
+        total_size_bytes: total_size,
+    };
+    serde_yaml::to_string(&output).context(format_context!(
+        "Internal Error: failed to serialize rcache info for YAML"
+    ))
+}
+
+// ---------------------------------------------------------------------------
+// rcache info pretty output
+// ---------------------------------------------------------------------------
+
+fn rcache_separator(console: &console::Console, width: usize) {
+    let mut line = console::Line::default();
+    line.push(console::Span::new_styled_lossy(StyledContent::new(
+        console::key_style(),
+        "─".repeat(width),
+    )));
+    console.emit_line(line);
+}
+
+fn emit_pretty_rcache_info(
+    console: &console::Console,
+    artifacts_size: u64,
+    rule_digests_size: u64,
+    total_size: u64,
+) {
+    rcache_separator(console, 56);
+
+    // heading
+    {
+        let mut line = console::Line::default();
+        line.push(console::Span::new_styled_lossy(StyledContent::new(
+            console::total_style(),
+            "Rule cache".to_owned(),
+        )));
+        console.emit_line(line);
+    }
+
+    // artifacts row
+    {
+        let mut line = console::Line::default();
+        line.push(console::Span::new_styled_lossy(StyledContent::new(
+            console::key_style(),
+            format!("  {:<14}", ARTIFACT_CACHE_DIR),
+        )));
+        line.push(console::Span::new_unstyled_lossy(format!(
+            "{}",
+            ByteSize(artifacts_size).display()
+        )));
+        console.emit_line(line);
+    }
+
+    // rule_digests row
+    {
+        let mut line = console::Line::default();
+        line.push(console::Span::new_styled_lossy(StyledContent::new(
+            console::key_style(),
+            format!("  {:<14}", RULE_DIGEST_CACHE_DIR),
+        )));
+        line.push(console::Span::new_unstyled_lossy(format!(
+            "{}",
+            ByteSize(rule_digests_size).display()
+        )));
+        console.emit_line(line);
+    }
+
+    // total row
+    {
+        let mut line = console::Line::default();
+        line.push(console::Span::new_styled_lossy(StyledContent::new(
+            console::total_style(),
+            format!("  {:<14}{}", "Total", ByteSize(total_size).display()),
+        )));
+        console.emit_line(line);
+    }
+
+    rcache_separator(console, 56);
 }
 
 fn remove_targets(targets: &[targets::Target]) -> anyhow::Result<()> {

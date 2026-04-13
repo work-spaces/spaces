@@ -2,7 +2,7 @@ use crate::{changes::glob, inspect, markdown, rule, targets};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::Subcommand;
-use console::style::{Attribute, Attributes, Color, ContentStyle, StyledContent};
+use console::style::StyledContent;
 use indexmap::IndexMap;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -11,14 +11,6 @@ use std::sync::Arc;
 // ---------------------------------------------------------------------------
 // Clap types
 // ---------------------------------------------------------------------------
-
-#[derive(clap::ValueEnum, Debug, Clone, Default)]
-pub enum Format {
-    #[default]
-    Pretty,
-    Yaml,
-    Json,
-}
 
 #[derive(clap::ValueEnum, Debug, Clone)]
 pub enum ExportFormat {
@@ -62,8 +54,8 @@ pub enum QueryCommand {
         #[arg(long, conflicts_with = "format")]
         raw: bool,
         /// Output format
-        #[arg(long, value_enum, default_value_t = Format::Pretty)]
-        format: Format,
+        #[arg(long, value_enum, default_value_t = console::Format::Pretty)]
+        format: console::Format,
     },
     #[command(about = r"Show details for a specific rule.
   - `spaces query rule //my-pkg:build`: show rule details in YAML
@@ -80,8 +72,8 @@ pub enum QueryCommand {
         #[arg(long)]
         checkout: bool,
         /// Output format
-        #[arg(long, value_enum, default_value_t = Format::Yaml)]
-        format: Format,
+        #[arg(long, value_enum, default_value_t = console::Format::Yaml)]
+        format: console::Format,
     },
     #[command(about = r"Search for rules using fuzzy matching.
   - `spaces query search build`: return top 10 matches for 'build'
@@ -432,33 +424,6 @@ fn serialise_rule_map_yaml(map: &HashMap<Arc<str>, RuleInfo>) -> anyhow::Result<
     ))
 }
 
-fn name_style() -> ContentStyle {
-    ContentStyle {
-        foreground_color: Some(Color::Cyan),
-        background_color: None,
-        underline_color: None,
-        attributes: Attributes::from(Attribute::Bold),
-    }
-}
-
-fn key_style() -> ContentStyle {
-    ContentStyle {
-        foreground_color: Some(Color::DarkGrey),
-        background_color: None,
-        underline_color: None,
-        attributes: Attributes::default(),
-    }
-}
-
-fn keyword_style() -> ContentStyle {
-    ContentStyle {
-        foreground_color: Some(Color::DarkYellow),
-        background_color: None,
-        underline_color: None,
-        attributes: Attributes::from(Attribute::Bold),
-    }
-}
-
 fn query_highlight_mask(value: &str, query: &[Arc<str>]) -> Vec<bool> {
     // ASCII-only folding preserves char count, so value_lower.len() == value.chars().count().
     let value_lower: Vec<char> = value.to_ascii_lowercase().chars().collect();
@@ -504,7 +469,7 @@ fn push_highlighted_value(
         if highlighted != current_highlighted {
             if current_highlighted {
                 line.push(console::Span::new_styled_lossy(StyledContent::new(
-                    keyword_style(),
+                    console::keyword_style(),
                     std::mem::take(&mut chunk),
                 )));
             } else {
@@ -519,7 +484,7 @@ fn push_highlighted_value(
 
     if current_highlighted {
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            keyword_style(),
+            console::keyword_style(),
             chunk,
         )));
     } else {
@@ -531,7 +496,7 @@ fn make_name_line(name: &str, highlight_terms: Option<&[Arc<str>]>) -> console::
     let mut line = console::Line::default();
     let Some(highlight_terms) = highlight_terms.filter(|terms| !terms.is_empty()) else {
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            name_style(),
+            console::name_style(),
             name.to_owned(),
         )));
         return line;
@@ -541,7 +506,7 @@ fn make_name_line(name: &str, highlight_terms: Option<&[Arc<str>]>) -> console::
     let highlights = query_highlight_mask(name, highlight_terms);
     if !highlights.iter().any(|highlighted| *highlighted) {
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            name_style(),
+            console::name_style(),
             name.to_owned(),
         )));
         return line;
@@ -553,12 +518,12 @@ fn make_name_line(name: &str, highlight_terms: Option<&[Arc<str>]>) -> console::
         if highlighted != current_highlighted {
             if current_highlighted {
                 line.push(console::Span::new_styled_lossy(StyledContent::new(
-                    keyword_style(),
+                    console::keyword_style(),
                     std::mem::take(&mut chunk),
                 )));
             } else {
                 line.push(console::Span::new_styled_lossy(StyledContent::new(
-                    name_style(),
+                    console::name_style(),
                     std::mem::take(&mut chunk),
                 )));
             }
@@ -569,12 +534,12 @@ fn make_name_line(name: &str, highlight_terms: Option<&[Arc<str>]>) -> console::
 
     if current_highlighted {
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            keyword_style(),
+            console::keyword_style(),
             chunk,
         )));
     } else {
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            name_style(),
+            console::name_style(),
             chunk,
         )));
     }
@@ -584,7 +549,7 @@ fn make_name_line(name: &str, highlight_terms: Option<&[Arc<str>]>) -> console::
 fn make_kv_line(key: &str, value: &str, highlight_terms: Option<&[Arc<str>]>) -> console::Line {
     let mut line = console::Line::default();
     line.push(console::Span::new_styled_lossy(StyledContent::new(
-        key_style(),
+        console::key_style(),
         format!("  {key:<8}"),
     )));
     push_highlighted_value(&mut line, value, highlight_terms);
@@ -700,7 +665,7 @@ impl QueryCommand {
                     console.error("No Results", "No matching rules available")?;
                 } else {
                     match format {
-                        Format::Pretty => {
+                        console::Format::Pretty => {
                             let mut names: Vec<&Arc<str>> = map.keys().collect();
                             names.sort();
                             for name in names {
@@ -716,14 +681,14 @@ impl QueryCommand {
                                 );
                             }
                         }
-                        Format::Yaml => {
+                        console::Format::Yaml => {
                             console.write(&serialise_rule_map_yaml(&map).context(
                                 format_context!(
                                     "Internal Error: while serialising rule map for YAML"
                                 ),
                             )?)?;
                         }
-                        Format::Json => {
+                        console::Format::Json => {
                             console.write(&serialise_rule_map_json(&map).context(
                                 format_context!(
                                     "Internal Error: while serialising rule map for JSON"
@@ -754,7 +719,7 @@ impl QueryCommand {
                 }
                 .ok_or_else(|| format_error!("Rule not found: {name}"))?;
 
-                if matches!(format, Format::Pretty) {
+                if matches!(format, console::Format::Pretty) {
                     let rule_deps = if *deps {
                         qr.expanded_deps.as_ref()
                     } else {
@@ -786,8 +751,8 @@ impl QueryCommand {
                         format_error!("Internal error: expanded_deps not computed for rule {name}")
                     })?;
                     match format {
-                        Format::Pretty => unreachable!(),
-                        Format::Yaml => {
+                        console::Format::Pretty => unreachable!(),
+                        console::Format::Yaml => {
                             let mut value: serde_yaml::Value =
                                 serde_yaml::from_str(serialized_yaml)
                                     .context(format_context!("Failed to parse rule YAML"))?;
@@ -802,7 +767,7 @@ impl QueryCommand {
                             serde_yaml::to_string(&value)
                                 .context(format_context!("Failed to serialize rule YAML"))?
                         }
-                        Format::Json => {
+                        console::Format::Json => {
                             let mut value: serde_json::Value =
                                 serde_json::from_str(serialized_json)
                                     .context(format_context!("Failed to parse rule JSON"))?;
@@ -822,9 +787,9 @@ impl QueryCommand {
                     }
                 } else {
                     match format {
-                        Format::Pretty => unreachable!(),
-                        Format::Yaml => serialized_yaml.clone(),
-                        Format::Json => serialized_json.clone(),
+                        console::Format::Pretty => unreachable!(),
+                        console::Format::Yaml => serialized_yaml.clone(),
+                        console::Format::Json => serialized_json.clone(),
                     }
                 };
                 console.raw(&output)?;

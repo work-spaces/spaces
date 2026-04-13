@@ -7,6 +7,7 @@ edition = "2024"
 superconsole = { git = "https://github.com/facebookincubator/superconsole", rev = "008c8068f980a110341887db4b74dff54650b8a7"}
 strum = { version = "0.26", features = ["derive"] }
 crossterm = { version = "0.28" }
+clap = { version = "4", features = ["derive"] }
 
 serde.workspace = true
 serde_yaml.workspace = true

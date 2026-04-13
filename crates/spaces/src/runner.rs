@@ -392,10 +392,10 @@ pub fn run_store_command_in_workspace(
     let is_ci: ci::IsCi = singleton::get_is_ci().into();
 
     match store_command {
-        store::StoreCommand::Info { sort_by } => {
+        store::StoreCommand::Info { sort_by, format } => {
             let rcache_path = ws::get_rcache_path(store_path);
             store
-                .show_info(console.clone(), sort_by, is_ci, &rcache_path)
+                .show_info(console.clone(), sort_by, format, is_ci, &rcache_path)
                 .context(format_context!("While getting store info"))?;
             store
                 .save(store_path)
