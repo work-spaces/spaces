@@ -778,10 +778,7 @@ mod tests {
                 path_in_workspace: Arc::from(format!("/fake/{h}")),
             })
             .collect();
-        let entry = RuleDigestCacheEntry {
-            last_used,
-            outputs,
-        };
+        let entry = RuleDigestCacheEntry { last_used, outputs };
         let encoded = postcard::to_stdvec(&entry).unwrap();
         let dir = cache_path.join(RULE_DIGEST_CACHE_DIR);
         std::fs::create_dir_all(&dir).unwrap();
@@ -840,8 +837,14 @@ mod tests {
         prune(&cache_path, 30, false, null_console(), ci::IsCi::No).unwrap();
 
         let digests_dir = cache_path.join(RULE_DIGEST_CACHE_DIR);
-        assert!(!digests_dir.join("stale_d").exists(), "stale digest should be removed");
-        assert!(digests_dir.join("fresh_d").exists(), "fresh digest should remain");
+        assert!(
+            !digests_dir.join("stale_d").exists(),
+            "stale digest should be removed"
+        );
+        assert!(
+            digests_dir.join("fresh_d").exists(),
+            "fresh digest should remain"
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -855,7 +858,12 @@ mod tests {
         write_digest_entry(&cache_path, "fresh_d", &["art_live"], last_used_days_ago(1));
 
         // One stale entry referencing "art_stale"
-        write_digest_entry(&cache_path, "stale_d", &["art_stale"], last_used_days_ago(90));
+        write_digest_entry(
+            &cache_path,
+            "stale_d",
+            &["art_stale"],
+            last_used_days_ago(90),
+        );
 
         // "art_orphan" is not referenced by any digest
         write_artifact(&cache_path, "art_live", b"live");
@@ -865,9 +873,18 @@ mod tests {
         prune(&cache_path, 30, false, null_console(), ci::IsCi::No).unwrap();
 
         let artifacts_dir = cache_path.join(ARTIFACT_CACHE_DIR);
-        assert!(artifacts_dir.join("art_live").exists(), "live artifact should remain");
-        assert!(!artifacts_dir.join("art_stale").exists(), "artifact only referenced by stale digest should be GC'd");
-        assert!(!artifacts_dir.join("art_orphan").exists(), "orphan artifact should be GC'd");
+        assert!(
+            artifacts_dir.join("art_live").exists(),
+            "live artifact should remain"
+        );
+        assert!(
+            !artifacts_dir.join("art_stale").exists(),
+            "artifact only referenced by stale digest should be GC'd"
+        );
+        assert!(
+            !artifacts_dir.join("art_orphan").exists(),
+            "orphan artifact should be GC'd"
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -878,15 +895,28 @@ mod tests {
         let cache_path = root.join("cache");
 
         // Both a stale and a fresh entry reference the same artifact
-        write_digest_entry(&cache_path, "stale_d", &["shared_art"], last_used_days_ago(60));
-        write_digest_entry(&cache_path, "fresh_d", &["shared_art"], last_used_days_ago(2));
+        write_digest_entry(
+            &cache_path,
+            "stale_d",
+            &["shared_art"],
+            last_used_days_ago(60),
+        );
+        write_digest_entry(
+            &cache_path,
+            "fresh_d",
+            &["shared_art"],
+            last_used_days_ago(2),
+        );
 
         write_artifact(&cache_path, "shared_art", b"shared");
 
         prune(&cache_path, 30, false, null_console(), ci::IsCi::No).unwrap();
 
         let artifacts_dir = cache_path.join(ARTIFACT_CACHE_DIR);
-        assert!(artifacts_dir.join("shared_art").exists(), "shared artifact should remain because a live digest still references it");
+        assert!(
+            artifacts_dir.join("shared_art").exists(),
+            "shared artifact should remain because a live digest still references it"
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -907,10 +937,22 @@ mod tests {
         let artifacts_dir = cache_path.join(ARTIFACT_CACHE_DIR);
         let stage_dir = cache_path.join(STAGE_CACHE_DIR);
 
-        assert!(digests_dir.join("stale_d").exists(), "dry run should not remove digest");
-        assert!(artifacts_dir.join("art1").exists(), "dry run should not remove artifact");
-        assert!(artifacts_dir.join("art_orphan").exists(), "dry run should not remove orphan artifact");
-        assert!(stage_dir.join("leftover").exists(), "dry run should not remove staged file");
+        assert!(
+            digests_dir.join("stale_d").exists(),
+            "dry run should not remove digest"
+        );
+        assert!(
+            artifacts_dir.join("art1").exists(),
+            "dry run should not remove artifact"
+        );
+        assert!(
+            artifacts_dir.join("art_orphan").exists(),
+            "dry run should not remove orphan artifact"
+        );
+        assert!(
+            stage_dir.join("leftover").exists(),
+            "dry run should not remove staged file"
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -924,17 +966,37 @@ mod tests {
         let cache_path = root.join("cache");
 
         // stale digest references "art_only_stale"
-        write_digest_entry(&cache_path, "stale_d", &["art_only_stale"], last_used_days_ago(60));
+        write_digest_entry(
+            &cache_path,
+            "stale_d",
+            &["art_only_stale"],
+            last_used_days_ago(60),
+        );
         write_artifact(&cache_path, "art_only_stale", b"stale only");
 
         // Dry run: nothing removed
         prune(&cache_path, 30, true, null_console(), ci::IsCi::No).unwrap();
-        assert!(cache_path.join(ARTIFACT_CACHE_DIR).join("art_only_stale").exists());
+        assert!(
+            cache_path
+                .join(ARTIFACT_CACHE_DIR)
+                .join("art_only_stale")
+                .exists()
+        );
 
         // Real run: both digest and artifact removed
         prune(&cache_path, 30, false, null_console(), ci::IsCi::No).unwrap();
-        assert!(!cache_path.join(RULE_DIGEST_CACHE_DIR).join("stale_d").exists());
-        assert!(!cache_path.join(ARTIFACT_CACHE_DIR).join("art_only_stale").exists());
+        assert!(
+            !cache_path
+                .join(RULE_DIGEST_CACHE_DIR)
+                .join("stale_d")
+                .exists()
+        );
+        assert!(
+            !cache_path
+                .join(ARTIFACT_CACHE_DIR)
+                .join("art_only_stale")
+                .exists()
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -955,9 +1017,18 @@ mod tests {
 
         prune(&cache_path, 30, false, null_console(), ci::IsCi::No).unwrap();
 
-        assert!(!digests_dir.join("corrupt_d").exists(), "corrupted digest should be removed");
-        assert!(digests_dir.join("fresh_d").exists(), "fresh digest should survive");
-        assert!(cache_path.join(ARTIFACT_CACHE_DIR).join("art1").exists(), "artifact referenced by fresh digest should survive");
+        assert!(
+            !digests_dir.join("corrupt_d").exists(),
+            "corrupted digest should be removed"
+        );
+        assert!(
+            digests_dir.join("fresh_d").exists(),
+            "fresh digest should survive"
+        );
+        assert!(
+            cache_path.join(ARTIFACT_CACHE_DIR).join("art1").exists(),
+            "artifact referenced by fresh digest should survive"
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -974,8 +1045,14 @@ mod tests {
         prune(&cache_path, 30, false, null_console(), ci::IsCi::No).unwrap();
 
         let stage_dir = cache_path.join(STAGE_CACHE_DIR);
-        assert!(!stage_dir.join("incomplete_1").exists(), "staged file should be swept");
-        assert!(!stage_dir.join("incomplete_2").exists(), "staged file should be swept");
+        assert!(
+            !stage_dir.join("incomplete_1").exists(),
+            "staged file should be swept"
+        );
+        assert!(
+            !stage_dir.join("incomplete_2").exists(),
+            "staged file should be swept"
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1000,7 +1077,10 @@ mod tests {
             .unwrap()
             .filter_map(|e| e.ok())
             .collect();
-        assert!(remaining_digests.is_empty(), "all stale digests should be removed");
+        assert!(
+            remaining_digests.is_empty(),
+            "all stale digests should be removed"
+        );
 
         // All artifacts removed
         let artifacts_dir = cache_path.join(ARTIFACT_CACHE_DIR);
@@ -1008,7 +1088,10 @@ mod tests {
             .unwrap()
             .filter_map(|e| e.ok())
             .collect();
-        assert!(remaining_artifacts.is_empty(), "all artifacts should be GC'd when no digests remain");
+        assert!(
+            remaining_artifacts.is_empty(),
+            "all artifacts should be GC'd when no digests remain"
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1034,7 +1117,12 @@ mod tests {
         // get_current_age returns days as integer division, so 30 * 86400000 ms ago
         // should report age == 30. The check is entry_age > age, so 30 > 30 is false
         // → entry should survive.
-        write_digest_entry(&cache_path, "boundary_d", &["art_b"], last_used_days_ago(30));
+        write_digest_entry(
+            &cache_path,
+            "boundary_d",
+            &["art_b"],
+            last_used_days_ago(30),
+        );
         // One day over the threshold → should be pruned
         write_digest_entry(&cache_path, "over_d", &["art_o"], last_used_days_ago(31));
 
@@ -1044,12 +1132,24 @@ mod tests {
         prune(&cache_path, 30, false, null_console(), ci::IsCi::No).unwrap();
 
         let digests_dir = cache_path.join(RULE_DIGEST_CACHE_DIR);
-        assert!(digests_dir.join("boundary_d").exists(), "entry at exactly the age threshold should survive (not strictly greater)");
-        assert!(!digests_dir.join("over_d").exists(), "entry one day over the threshold should be pruned");
+        assert!(
+            digests_dir.join("boundary_d").exists(),
+            "entry at exactly the age threshold should survive (not strictly greater)"
+        );
+        assert!(
+            !digests_dir.join("over_d").exists(),
+            "entry one day over the threshold should be pruned"
+        );
 
         let artifacts_dir = cache_path.join(ARTIFACT_CACHE_DIR);
-        assert!(artifacts_dir.join("art_b").exists(), "boundary artifact should survive");
-        assert!(!artifacts_dir.join("art_o").exists(), "over-threshold artifact should be GC'd");
+        assert!(
+            artifacts_dir.join("art_b").exists(),
+            "boundary artifact should survive"
+        );
+        assert!(
+            !artifacts_dir.join("art_o").exists(),
+            "over-threshold artifact should be GC'd"
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
