@@ -329,14 +329,11 @@ pub fn prune(
         } else {
             format!("{entry_age} days")
         };
-        let digest_size =
-            bytesize::ByteSize(std::fs::metadata(path).map(|m| m.len()).unwrap_or(0));
+        let digest_size = bytesize::ByteSize(std::fs::metadata(path).map(|m| m.len()).unwrap_or(0));
         total_size_removed += digest_size.0;
         logger(console.clone()).info(
-            format!(
-                "Pruning rule digest {short_digest}: age {age_display} ({digest_size})"
-            )
-            .as_str(),
+            format!("Pruning rule digest {short_digest}: age {age_display} ({digest_size})")
+                .as_str(),
         );
         progress.set_message(&format!("pruning digest {short_digest}"));
         if !is_dry_run {
@@ -361,21 +358,18 @@ pub fn prune(
             stale_digests.iter().map(|(_, _, p)| p.clone()).collect();
 
         // Collect artifact hashes still referenced by live rule_digest entries
-        let mut live_hashes: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        let mut live_hashes: std::collections::HashSet<String> = std::collections::HashSet::new();
         if let Ok(entries) = std::fs::read_dir(&rule_digests_path) {
             for dir_entry in entries.filter_map(|e| e.ok()) {
                 // Skip entries that were already pruned (or marked for pruning in dry-run)
                 if stale_paths.contains(&dir_entry.path()) {
                     continue;
                 }
-                if let Ok(contents) = std::fs::read(dir_entry.path()) {
-                    if let Ok(entry) =
-                        postcard::from_bytes::<RuleDigestCacheEntry>(&contents)
-                    {
-                        for output in &entry.outputs {
-                            live_hashes.insert(output.path_in_cache.to_string());
-                        }
+                if let Ok(contents) = std::fs::read(dir_entry.path())
+                    && let Ok(entry) = postcard::from_bytes::<RuleDigestCacheEntry>(&contents)
+                {
+                    for output in &entry.outputs {
+                        live_hashes.insert(output.path_in_cache.to_string());
                     }
                 }
             }
@@ -402,12 +396,9 @@ pub fn prune(
                         )
                         .as_str(),
                     );
-                    if !is_dry_run {
-                        if let Err(e) = std::fs::remove_file(&path) {
-                            logger(console.clone()).error(
-                                format!("Failed to remove artifact {short_hash}: {e}").as_str(),
-                            );
-                        }
+                    if !is_dry_run && let Err(e) = std::fs::remove_file(&path) {
+                        logger(console.clone())
+                            .error(format!("Failed to remove artifact {short_hash}: {e}").as_str());
                     }
                 }
             }
@@ -417,24 +408,24 @@ pub fn prune(
     // Sweep leftover staged files
     if !is_dry_run {
         let stage_path = cache_path.join(STAGE_CACHE_DIR);
-        if stage_path.exists() {
-            if let Ok(stage_entries) = std::fs::read_dir(&stage_path) {
-                for dir_entry in stage_entries.filter_map(|e| e.ok()) {
-                    let path = dir_entry.path();
-                    if path.is_file() {
-                        let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-                        total_size_removed += size;
-                        logger(console.clone()).info(
-                            format!(
-                                "Removing leftover staged file {}",
-                                path.file_name()
-                                    .map(|n| n.to_string_lossy().into_owned())
-                                    .unwrap_or_default()
-                            )
-                            .as_str(),
-                        );
-                        let _ = std::fs::remove_file(&path);
-                    }
+        if stage_path.exists()
+            && let Ok(stage_entries) = std::fs::read_dir(&stage_path)
+        {
+            for dir_entry in stage_entries.filter_map(|e| e.ok()) {
+                let path = dir_entry.path();
+                if path.is_file() {
+                    let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                    total_size_removed += size;
+                    logger(console.clone()).info(
+                        format!(
+                            "Removing leftover staged file {}",
+                            path.file_name()
+                                .map(|n| n.to_string_lossy().into_owned())
+                                .unwrap_or_default()
+                        )
+                        .as_str(),
+                    );
+                    let _ = std::fs::remove_file(&path);
                 }
             }
         }
@@ -514,9 +505,8 @@ pub fn show_info(
         )
         .as_str(),
     );
-    logger(console.clone()).info(
-        format!("  Total Size: {}", bytesize::ByteSize(total_size).display()).as_str(),
-    );
+    logger(console.clone())
+        .info(format!("  Total Size: {}", bytesize::ByteSize(total_size).display()).as_str());
 
     group.end_group(console.clone(), is_ci)?;
     Ok(())

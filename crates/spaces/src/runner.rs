@@ -410,7 +410,11 @@ pub fn run_store_command_in_workspace(
                 .save(store_path)
                 .context(format_context!("Failed to save store at {store_path_str}",))?;
         }
-        store::StoreCommand::Prune { age, dry_run, rcache_only } => {
+        store::StoreCommand::Prune {
+            age,
+            dry_run,
+            rcache_only,
+        } => {
             if !rcache_only {
                 store
                     .prune(console.clone(), age, dry_run, is_ci)
