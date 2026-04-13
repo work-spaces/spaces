@@ -2,6 +2,7 @@ use crate::{age, ci, http_archive, logger};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use bytesize::ByteSize;
+use console::style::{Attribute, Attributes, Color, ContentStyle, StyledContent};
 use serde::{Deserialize, Serialize};
 use serde_with::{TimestampSeconds, serde_as};
 use std::collections::HashMap;
@@ -14,6 +15,14 @@ pub const SPACES_STORE_HOME: &str = "home";
 
 pub fn logger(console: console::Console) -> logger::Logger {
     logger::Logger::new(console, "store".into())
+}
+
+#[derive(clap::ValueEnum, Debug, Clone, Default)]
+pub enum Format {
+    #[default]
+    Pretty,
+    Yaml,
+    Json,
 }
 
 #[derive(Debug, Clone, PartialEq, clap::ValueEnum)]
@@ -30,9 +39,12 @@ pub enum SortBy {
 pub enum StoreCommand {
     /// Show information about the data in the store
     Info {
-        /// Sorty by name/age/size
+        /// Sort by name/age/size
         #[clap(long, default_value = "name")]
         sort_by: SortBy,
+        /// Output format
+        #[clap(long, value_enum, default_value_t = Format::Pretty)]
+        format: Format,
     },
     /// Check the store for errors and delete any entries that have an error.
     Fix {
@@ -185,6 +197,7 @@ impl Store {
         &mut self,
         console: console::Console,
         sort_by: SortBy,
+        format: Format,
         is_ci: ci::IsCi,
         rcache_path: &std::path::Path,
     ) -> anyhow::Result<()> {
@@ -247,29 +260,21 @@ impl Store {
             SortBy::Age => entries.sort_by(|a, b| b.1.get_age(now).cmp(&a.1.get_age(now))),
         }
 
-        let mut total_size = 0;
+        // Collect managed entry info
+        let mut info_entries: Vec<StoreInfoEntry> = Vec::new();
         for (key, value) in entries.iter() {
-            logger(console.clone()).info(format!("Path: {key}").as_str());
             let path = self.get_path_in_store(std::path::Path::new(key.as_ref()));
-            if !path.exists() {
+            let path_missing = !path.exists();
+            if path_missing || value.size == 0 {
                 is_fix_needed = true;
-                logger(console.clone())
-                    .info(format!(" !!Path does not exist!! -- {}", path.display()).as_str());
             }
-            if value.size == 0 {
-                is_fix_needed = true;
-                logger(console.clone()).info(" !!Size is zero!!");
-            } else {
-                let bytesize = bytesize::ByteSize(value.size);
-                logger(console.clone()).info(format!("  Size: {}", bytesize.display()).as_str());
-            }
-            total_size += value.size;
-
-            let age = value.get_age(age::get_now());
-            logger(console.clone()).info(format!("  Age: {age} days").as_str());
-        }
-        if is_fix_needed {
-            logger(console.clone()).info("run `spaces store fix` to fix the issues");
+            info_entries.push(StoreInfoEntry {
+                path: key.to_string(),
+                size_bytes: value.size,
+                age_days: value.get_age(now),
+                managed: true,
+                path_missing,
+            });
         }
 
         match sort_by {
@@ -280,14 +285,34 @@ impl Store {
         }
 
         for (name, size, _) in &unmanaged {
-            logger(console.clone()).info(format!("Path: {name} (unmanaged)").as_str());
-            let bytesize = bytesize::ByteSize(*size);
-            logger(console.clone()).info(format!("  Size: {}", bytesize.display()).as_str());
-            total_size += size;
+            info_entries.push(StoreInfoEntry {
+                path: name.clone(),
+                size_bytes: *size,
+                age_days: 0,
+                managed: false,
+                path_missing: false,
+            });
         }
 
-        let total_bytesize = bytesize::ByteSize(total_size);
-        logger(console.clone()).info(format!("Total Size: {}", total_bytesize.display()).as_str());
+        let total_size: u64 = info_entries.iter().map(|e| e.size_bytes).sum();
+
+        match format {
+            Format::Pretty => {
+                emit_pretty_info(&console, &info_entries, total_size, is_fix_needed);
+            }
+            Format::Yaml => {
+                console.write(
+                    &serialise_store_info_yaml(&info_entries, total_size)
+                        .context(format_context!("Failed to serialize store info as YAML"))?,
+                )?;
+            }
+            Format::Json => {
+                console.write(
+                    &serialise_store_info_json(&info_entries, total_size)
+                        .context(format_context!("Failed to serialize store info as JSON"))?,
+                )?;
+            }
+        }
 
         group.end_group(console.clone(), is_ci)?;
 
@@ -613,6 +638,219 @@ impl Store {
 
         Ok(())
     }
+}
+
+// ---------------------------------------------------------------------------
+// store info output types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+struct StoreInfoEntry {
+    path: String,
+    size_bytes: u64,
+    age_days: u128,
+    managed: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    path_missing: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct StoreInfoOutput<'a> {
+    entries: &'a [StoreInfoEntry],
+    total_size_bytes: u64,
+}
+
+fn serialise_store_info_json(
+    entries: &[StoreInfoEntry],
+    total_size_bytes: u64,
+) -> anyhow::Result<String> {
+    let output = StoreInfoOutput {
+        entries,
+        total_size_bytes,
+    };
+    serde_json::to_string_pretty(&output).context(format_context!(
+        "Internal Error: failed to serialize store info for JSON"
+    ))
+}
+
+fn serialise_store_info_yaml(
+    entries: &[StoreInfoEntry],
+    total_size_bytes: u64,
+) -> anyhow::Result<String> {
+    let output = StoreInfoOutput {
+        entries,
+        total_size_bytes,
+    };
+    serde_yaml::to_string(&output).context(format_context!(
+        "Internal Error: failed to serialize store info for YAML"
+    ))
+}
+
+// ---------------------------------------------------------------------------
+// store info pretty output
+// ---------------------------------------------------------------------------
+
+fn entry_name_style() -> ContentStyle {
+    ContentStyle {
+        foreground_color: Some(Color::Cyan),
+        background_color: None,
+        underline_color: None,
+        attributes: Attributes::from(Attribute::Bold),
+    }
+}
+
+fn entry_key_style() -> ContentStyle {
+    ContentStyle {
+        foreground_color: Some(Color::DarkGrey),
+        background_color: None,
+        underline_color: None,
+        attributes: Attributes::default(),
+    }
+}
+
+fn unmanaged_suffix_style() -> ContentStyle {
+    ContentStyle {
+        foreground_color: Some(Color::DarkGrey),
+        background_color: None,
+        underline_color: None,
+        attributes: Attributes::default(),
+    }
+}
+
+fn age_style(age_days: u128) -> ContentStyle {
+    let color = if age_days < 7 {
+        Color::Green
+    } else if age_days <= 30 {
+        Color::DarkYellow
+    } else {
+        Color::DarkRed
+    };
+    ContentStyle {
+        foreground_color: Some(color),
+        background_color: None,
+        underline_color: None,
+        attributes: Attributes::default(),
+    }
+}
+
+fn warning_style() -> ContentStyle {
+    ContentStyle {
+        foreground_color: Some(Color::DarkRed),
+        background_color: None,
+        underline_color: None,
+        attributes: Attributes::from(Attribute::Bold),
+    }
+}
+
+fn total_style() -> ContentStyle {
+    ContentStyle {
+        foreground_color: None,
+        background_color: None,
+        underline_color: None,
+        attributes: Attributes::from(Attribute::Bold),
+    }
+}
+
+fn make_store_name_line(name: &str, managed: bool) -> console::Line {
+    let mut line = console::Line::default();
+    line.push(console::Span::new_styled_lossy(StyledContent::new(
+        entry_name_style(),
+        name.to_owned(),
+    )));
+    if !managed {
+        line.push(console::Span::new_styled_lossy(StyledContent::new(
+            unmanaged_suffix_style(),
+            "  (unmanaged)".to_owned(),
+        )));
+    }
+    line
+}
+
+fn make_store_kv_line(key: &str, value: &str) -> console::Line {
+    let mut line = console::Line::default();
+    line.push(console::Span::new_styled_lossy(StyledContent::new(
+        entry_key_style(),
+        format!("  {key:<8}"),
+    )));
+    line.push(console::Span::new_unstyled_lossy(value));
+    line
+}
+
+fn make_store_age_line(age_days: u128) -> console::Line {
+    let mut line = console::Line::default();
+    line.push(console::Span::new_styled_lossy(StyledContent::new(
+        entry_key_style(),
+        "  age     ".to_owned(),
+    )));
+    line.push(console::Span::new_styled_lossy(StyledContent::new(
+        age_style(age_days),
+        format!("{age_days} days"),
+    )));
+    line
+}
+
+fn emit_pretty_info(
+    console: &console::Console,
+    entries: &[StoreInfoEntry],
+    total_size: u64,
+    is_fix_needed: bool,
+) {
+    let managed_count = entries.iter().filter(|e| e.managed).count();
+    let unmanaged_count = entries.len() - managed_count;
+
+    for entry in entries {
+        console.emit_line(make_store_name_line(&entry.path, entry.managed));
+
+        if entry.path_missing {
+            let mut line = console::Line::default();
+            line.push(console::Span::new_styled_lossy(StyledContent::new(
+                warning_style(),
+                "  !! path does not exist !!".to_owned(),
+            )));
+            console.emit_line(line);
+        }
+
+        if entry.size_bytes == 0 {
+            let mut line = console::Line::default();
+            line.push(console::Span::new_styled_lossy(StyledContent::new(
+                warning_style(),
+                "  !! size is zero !!".to_owned(),
+            )));
+            console.emit_line(line);
+        } else {
+            let bytesize = bytesize::ByteSize(entry.size_bytes);
+            console.emit_line(make_store_kv_line("size", &bytesize.display().to_string()));
+        }
+
+        if entry.managed {
+            console.emit_line(make_store_age_line(entry.age_days));
+        }
+
+        console.emit_line(console::Line::default());
+    }
+
+    if is_fix_needed {
+        let mut line = console::Line::default();
+        line.push(console::Span::new_styled_lossy(StyledContent::new(
+            warning_style(),
+            "run `spaces store fix` to fix the issues".to_owned(),
+        )));
+        console.emit_line(line);
+        console.emit_line(console::Line::default());
+    }
+
+    let total_bytesize = bytesize::ByteSize(total_size);
+    let mut footer = console::Line::default();
+    footer.push(console::Span::new_styled_lossy(StyledContent::new(
+        total_style(),
+        format!(
+            "Total  {}   ({} managed, {} unmanaged)",
+            total_bytesize.display(),
+            managed_count,
+            unmanaged_count
+        ),
+    )));
+    console.emit_line(footer);
 }
 
 fn get_unmanaged_dir_entries(
