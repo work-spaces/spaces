@@ -322,6 +322,9 @@ pub fn prune(
         None,
     );
 
+    let mut successfully_removed_paths: std::collections::HashSet<std::path::PathBuf> =
+        std::collections::HashSet::new();
+
     for (digest, entry_age, path) in &stale_digests {
         let short_digest = &digest[..digest.len().min(8)];
         let age_display = if *entry_age == u128::MAX {
@@ -342,6 +345,7 @@ pub fn prune(
                     .error(format!("Failed to remove rule digest {short_digest}: {e}").as_str());
             } else {
                 logger(console.clone()).info("- Removed.");
+                successfully_removed_paths.insert(path.clone());
             }
         } else {
             logger(console.clone()).info("- Dry run. Not removed.");
@@ -352,17 +356,24 @@ pub fn prune(
     // Phase 2: GC unreferenced artifacts
     let artifacts_path = cache_path.join(ARTIFACT_CACHE_DIR);
     if artifacts_path.exists() {
-        // Build a set of paths that were pruned (or would be pruned) in Phase 1 so we
-        // can exclude them when computing live artifact references.
-        let stale_paths: std::collections::HashSet<std::path::PathBuf> =
-            stale_digests.iter().map(|(_, _, p)| p.clone()).collect();
+        // Build the set of digest paths to skip when computing live artifact references.
+        // In dry-run mode the stale files still exist on disk but should be treated as
+        // already removed, so we skip all of them.  In non-dry-run mode we only skip
+        // paths that were actually deleted in Phase 1; a digest whose removal failed
+        // is still present on disk and may be the sole reference to some artifacts, so
+        // we must not treat those artifacts as unreferenced.
+        let paths_to_skip: std::collections::HashSet<std::path::PathBuf> = if is_dry_run {
+            stale_digests.iter().map(|(_, _, p)| p.clone()).collect()
+        } else {
+            successfully_removed_paths
+        };
 
         // Collect artifact hashes still referenced by live rule_digest entries
         let mut live_hashes: std::collections::HashSet<String> = std::collections::HashSet::new();
         if let Ok(entries) = std::fs::read_dir(&rule_digests_path) {
             for dir_entry in entries.filter_map(|e| e.ok()) {
                 // Skip entries that were already pruned (or marked for pruning in dry-run)
-                if stale_paths.contains(&dir_entry.path()) {
+                if paths_to_skip.contains(&dir_entry.path()) {
                     continue;
                 }
                 if let Ok(contents) = std::fs::read(dir_entry.path())
