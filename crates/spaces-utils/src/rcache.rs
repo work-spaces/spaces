@@ -591,7 +591,7 @@ fn emit_pretty_rcache_info(
         let mut line = console::Line::default();
         line.push(console::Span::new_styled_lossy(StyledContent::new(
             console::total_style(),
-            "Rule digest cache".to_owned(),
+            "Rule cache".to_owned(),
         )));
         console.emit_line(line);
     }
