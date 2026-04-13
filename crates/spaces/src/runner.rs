@@ -266,11 +266,16 @@ pub fn foreach_repo(
             timeout: None,
         };
 
-        exec.execute(&mut exec_progress, workspace_arc.clone(), name.as_str())
-            .context(format_context!(
-                "while executing command {} in workspace",
-                command
-            ))?;
+        exec.execute(
+            &mut exec_progress,
+            workspace_arc.clone(),
+            name.as_str(),
+            executor::exec::UseWorkspaceEnv::Yes,
+        )
+        .context(format_context!(
+            "while executing command {} in workspace",
+            command
+        ))?;
     }
 
     Ok(())

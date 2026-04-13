@@ -12,6 +12,8 @@ use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+pub use exec::UseWorkspaceEnv;
+
 pub struct TaskResult {
     pub new_modules: Vec<Arc<str>>,
 }
@@ -52,12 +54,13 @@ impl Task {
         progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         name: &str,
+        use_workspace_env: UseWorkspaceEnv,
     ) -> anyhow::Result<TaskResult> {
         let mut check_new_modules = false;
         match self {
             Task::HttpArchive(archive) => archive.execute(progress, workspace.clone(), name),
             Task::OrasArchive(archive) => archive.execute(progress, workspace.clone(), name),
-            Task::Exec(exec) => exec.execute(progress, workspace.clone(), name),
+            Task::Exec(exec) => exec.execute(progress, workspace.clone(), name, use_workspace_env),
             Task::Kill(kill) => kill.execute(name, progress),
             Task::CreateArchive(archive) => archive.execute(progress, workspace.clone(), name),
             Task::UpdateAsset(asset) => asset.execute(progress, workspace.clone(), name),

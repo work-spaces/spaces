@@ -8,6 +8,12 @@ use utils::{lock, logger, rule};
 
 pub use rule::Expect;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum UseWorkspaceEnv {
+    No,
+    Yes,
+}
+
 #[derive(Debug, Clone, Default)]
 struct State {
     processes: HashMap<String, u32>,
@@ -61,12 +67,23 @@ impl Exec {
         progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
         name: &str,
+        use_workspace_env: UseWorkspaceEnv,
     ) -> anyhow::Result<()> {
         let mut arguments = self.args.clone().unwrap_or_default();
-        let mut exec_env_vars = workspace
+        let all_env_vars = workspace
             .read()
             .get_env_vars()
             .context(format_context!("while getting env vars"))?;
+
+        let mut exec_env_vars: HashMap<Arc<str>, Arc<str>> =
+            if use_workspace_env == UseWorkspaceEnv::Yes {
+                all_env_vars
+            } else {
+                all_env_vars
+                    .into_iter()
+                    .filter(|(key, _)| key.as_ref() == "PATH")
+                    .collect()
+            };
 
         let absolute_path_to_workspace = workspace.read().get_absolute_path();
         let (working_directory, pwd) = if let Some(directory) = self.working_directory.as_ref() {

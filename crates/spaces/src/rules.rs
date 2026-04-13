@@ -295,7 +295,12 @@ pub fn execute_rule(
                     targets.as_slice(),
                     || {
                         task.executor
-                            .execute(&mut progress, workspace.clone(), &rule_name)
+                            .execute(
+                                &mut progress,
+                                workspace.clone(),
+                                &rule_name,
+                                executor::UseWorkspaceEnv::No,
+                            )
                             .context(format_context!("[{rule_name}] Failed to exec"))
                     },
                     || task.rule.get_target_paths(),
@@ -325,7 +330,12 @@ pub fn execute_rule(
                 (
                     true,
                     task.executor
-                        .execute(&mut progress, workspace.clone(), &rule_name)
+                        .execute(
+                            &mut progress,
+                            workspace.clone(),
+                            &rule_name,
+                            executor::UseWorkspaceEnv::Yes,
+                        )
                         .context(format_context!("[{rule_name}] Failed to exec")),
                 )
             }
