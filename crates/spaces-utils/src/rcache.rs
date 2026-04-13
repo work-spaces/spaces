@@ -1,6 +1,6 @@
 /// Rule cache
 /// Cache the outputs of the rule based on the input digest
-use crate::{age, targets};
+use crate::{age, ci, logger, targets};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
@@ -262,6 +262,239 @@ impl RuleDigestCacheEntry {
 
         Ok(())
     }
+}
+
+fn logger(console: console::Console) -> logger::Logger {
+    logger::Logger::new(console, "rcache".into())
+}
+
+pub fn prune(
+    cache_path: &std::path::Path,
+    age: u16,
+    is_dry_run: bool,
+    console: console::Console,
+    is_ci: ci::IsCi,
+) -> anyhow::Result<()> {
+    let group = ci::GithubLogGroup::new_group(console.clone(), is_ci, "Spaces RCache Prune")?;
+
+    // Phase 1: find and remove stale rule_digest entries
+    let rule_digests_path = cache_path.join(RULE_DIGEST_CACHE_DIR);
+    let mut stale_digests: Vec<(String, u128, std::path::PathBuf)> = Vec::new();
+
+    if rule_digests_path.exists() {
+        let entries = std::fs::read_dir(&rule_digests_path)
+            .context(format_context!("Failed to read rule digests directory"))?;
+
+        for dir_entry in entries.filter_map(|e| e.ok()) {
+            let path = dir_entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let digest = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+
+            let entry = std::fs::read(&path)
+                .ok()
+                .and_then(|contents| postcard::from_bytes::<RuleDigestCacheEntry>(&contents).ok());
+
+            match entry {
+                Some(entry) => {
+                    let entry_age = entry.last_used.get_current_age();
+                    if entry_age > age as u128 {
+                        stale_digests.push((digest, entry_age, path));
+                    }
+                }
+                None => {
+                    // unreadable or corrupted — prune it
+                    stale_digests.push((digest, u128::MAX, path));
+                }
+            }
+        }
+    }
+
+    let mut total_size_removed = bytesize::ByteSize(0);
+    let mut progress = console::Progress::new(
+        console.clone(),
+        "rcache-prune",
+        Some(stale_digests.len() as u64),
+        None,
+    );
+
+    for (digest, entry_age, path) in &stale_digests {
+        let age_display = if *entry_age == u128::MAX {
+            "corrupted".to_string()
+        } else {
+            format!("{entry_age} days")
+        };
+        logger(console.clone())
+            .info(format!("Pruning rule digest {digest}: age {age_display}").as_str());
+        progress.set_message(&format!("pruning digest {digest}"));
+        if !is_dry_run {
+            if let Err(e) = std::fs::remove_file(path) {
+                logger(console.clone())
+                    .error(format!("Failed to remove rule digest {digest}: {e}").as_str());
+            } else {
+                logger(console.clone()).info("- Removed.");
+            }
+        } else {
+            logger(console.clone()).info("- Dry run. Not removed.");
+        }
+        progress.increment(1);
+    }
+
+    // Phase 2: GC unreferenced artifacts (skipped during dry-run)
+    if !is_dry_run {
+        let artifacts_path = cache_path.join(ARTIFACT_CACHE_DIR);
+        if artifacts_path.exists() {
+            // Collect artifact hashes still referenced by live rule_digest entries
+            let mut live_hashes: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            if let Ok(entries) = std::fs::read_dir(&rule_digests_path) {
+                for dir_entry in entries.filter_map(|e| e.ok()) {
+                    if let Ok(contents) = std::fs::read(dir_entry.path()) {
+                        if let Ok(entry) =
+                            postcard::from_bytes::<RuleDigestCacheEntry>(&contents)
+                        {
+                            for output in &entry.outputs {
+                                live_hashes.insert(output.path_in_cache.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let Ok(artifact_entries) = std::fs::read_dir(&artifacts_path) {
+                for dir_entry in artifact_entries.filter_map(|e| e.ok()) {
+                    let path = dir_entry.path();
+                    if !path.is_file() {
+                        continue;
+                    }
+                    let hash = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    if !live_hashes.contains(&hash) {
+                        let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                        total_size_removed += size;
+                        logger(console.clone())
+                            .info(format!("Removing unreferenced artifact {hash}").as_str());
+                        if let Err(e) = std::fs::remove_file(&path) {
+                            logger(console.clone()).error(
+                                format!("Failed to remove artifact {hash}: {e}").as_str(),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        // Sweep leftover staged files
+        let stage_path = cache_path.join(STAGE_CACHE_DIR);
+        if stage_path.exists() {
+            if let Ok(stage_entries) = std::fs::read_dir(&stage_path) {
+                for dir_entry in stage_entries.filter_map(|e| e.ok()) {
+                    let path = dir_entry.path();
+                    if path.is_file() {
+                        let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                        total_size_removed += size;
+                        logger(console.clone()).info(
+                            format!(
+                                "Removing leftover staged file {}",
+                                path.file_name()
+                                    .map(|n| n.to_string_lossy().into_owned())
+                                    .unwrap_or_default()
+                            )
+                            .as_str(),
+                        );
+                        let _ = std::fs::remove_file(&path);
+                    }
+                }
+            }
+        }
+    }
+
+    let total_removed_message = if is_dry_run {
+        format!("Total rule digests to prune in dry run: {}", stale_digests.len())
+    } else {
+        format!("Total removed: {total_size_removed}")
+    };
+    logger(console.clone()).info(total_removed_message.as_str());
+    let finalize_message = if is_dry_run {
+        format!("dry run: would prune {} rule digest(s)", stale_digests.len())
+    } else {
+        format!("pruned {total_size_removed}")
+    };
+    progress.set_finalize_lines(logger::make_finalize_line(
+        logger::FinalType::Finished,
+        progress.elapsed(),
+        finalize_message.as_str(),
+    ));
+
+    group.end_group(console.clone(), is_ci)?;
+    Ok(())
+}
+
+fn get_size_of_path(path: &std::path::Path) -> u64 {
+    walkdir::WalkDir::new(path)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter_map(|e| e.metadata().ok())
+        .filter(|m| m.is_file())
+        .map(|m| m.len())
+        .sum()
+}
+
+pub fn show_info(
+    cache_path: &std::path::Path,
+    console: console::Console,
+    is_ci: ci::IsCi,
+) -> anyhow::Result<()> {
+    if !cache_path.exists() {
+        return Ok(());
+    }
+
+    let group = ci::GithubLogGroup::new_group(console.clone(), is_ci, "Spaces RCache Info")?;
+
+    let artifacts_path = cache_path.join(ARTIFACT_CACHE_DIR);
+    let rule_digests_path = cache_path.join(RULE_DIGEST_CACHE_DIR);
+
+    let artifacts_size = if artifacts_path.exists() {
+        get_size_of_path(&artifacts_path)
+    } else {
+        0
+    };
+    let rule_digests_size = if rule_digests_path.exists() {
+        get_size_of_path(&rule_digests_path)
+    } else {
+        0
+    };
+    let total_size = artifacts_size + rule_digests_size;
+
+    logger(console.clone()).info("Path: rcache");
+    logger(console.clone()).info(
+        format!(
+            "  {}: {}",
+            ARTIFACT_CACHE_DIR,
+            bytesize::ByteSize(artifacts_size).display()
+        )
+        .as_str(),
+    );
+    logger(console.clone()).info(
+        format!(
+            "  {}: {}",
+            RULE_DIGEST_CACHE_DIR,
+            bytesize::ByteSize(rule_digests_size).display()
+        )
+        .as_str(),
+    );
+    logger(console.clone()).info(
+        format!("  Total Size: {}", bytesize::ByteSize(total_size).display()).as_str(),
+    );
+
+    group.end_group(console.clone(), is_ci)?;
+    Ok(())
 }
 
 fn remove_targets(targets: &[targets::Target]) -> anyhow::Result<()> {
