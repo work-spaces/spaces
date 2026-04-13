@@ -708,15 +708,6 @@ fn entry_key_style() -> ContentStyle {
     }
 }
 
-fn unmanaged_suffix_style() -> ContentStyle {
-    ContentStyle {
-        foreground_color: Some(Color::DarkGrey),
-        background_color: None,
-        underline_color: None,
-        attributes: Attributes::default(),
-    }
-}
-
 fn age_style(age_days: u128) -> ContentStyle {
     let color = if age_days < 7 {
         Color::Green
@@ -751,42 +742,211 @@ fn total_style() -> ContentStyle {
     }
 }
 
-fn make_store_name_line(name: &str, managed: bool) -> console::Line {
+fn emit_separator(console: &console::Console, width: usize) {
     let mut line = console::Line::default();
     line.push(console::Span::new_styled_lossy(StyledContent::new(
-        entry_name_style(),
-        name.to_owned(),
+        entry_key_style(),
+        "─".repeat(width),
     )));
-    if !managed {
+    console.emit_line(line);
+}
+
+fn emit_pretty_summary(
+    console: &console::Console,
+    entries: &[StoreInfoEntry],
+    total_size: u64,
+    is_fix_needed: bool,
+) {
+    let managed_count = entries.iter().filter(|e| e.managed).count();
+    let unmanaged_count = entries.len() - managed_count;
+    let managed_size: u64 = entries
+        .iter()
+        .filter(|e| e.managed)
+        .map(|e| e.size_bytes)
+        .sum();
+    let unmanaged_size = total_size - managed_size;
+
+    let label_style = ContentStyle {
+        foreground_color: Some(Color::DarkGrey),
+        background_color: None,
+        underline_color: None,
+        attributes: Attributes::default(),
+    };
+
+    // Managed row
+    {
+        let mut line = console::Line::default();
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            unmanaged_suffix_style(),
-            "  (unmanaged)".to_owned(),
+            label_style,
+            format!("  {:<12}", "Managed"),
         )));
+        line.push(console::Span::new_unstyled_lossy(&format!(
+            "{:>4} entries   {}",
+            managed_count,
+            ByteSize(managed_size).display()
+        )));
+        console.emit_line(line);
     }
-    line
+
+    // Unmanaged row
+    {
+        let mut line = console::Line::default();
+        line.push(console::Span::new_styled_lossy(StyledContent::new(
+            label_style,
+            format!("  {:<12}", "Unmanaged"),
+        )));
+        line.push(console::Span::new_unstyled_lossy(&format!(
+            "{:>4} entries   {}",
+            unmanaged_count,
+            ByteSize(unmanaged_size).display()
+        )));
+        console.emit_line(line);
+    }
+
+    // Total row
+    {
+        let mut line = console::Line::default();
+        line.push(console::Span::new_styled_lossy(StyledContent::new(
+            total_style(),
+            format!(
+                "  {:<12}{:>4} entries   {}",
+                "Total",
+                entries.len(),
+                ByteSize(total_size).display()
+            ),
+        )));
+        if is_fix_needed {
+            line.push(console::Span::new_styled_lossy(StyledContent::new(
+                warning_style(),
+                "   !! run `spaces store fix`".to_owned(),
+            )));
+        }
+        console.emit_line(line);
+    }
 }
 
-fn make_store_kv_line(key: &str, value: &str) -> console::Line {
-    let mut line = console::Line::default();
-    line.push(console::Span::new_styled_lossy(StyledContent::new(
-        entry_key_style(),
-        format!("  {key:<8}"),
+fn emit_pretty_age_histogram(console: &console::Console, entries: &[StoreInfoEntry]) {
+    let managed: Vec<_> = entries.iter().filter(|e| e.managed).collect();
+    if managed.is_empty() {
+        return;
+    }
+
+    let fresh = managed.iter().filter(|e| e.age_days < 7).count();
+    let aging = managed.iter().filter(|e| e.age_days >= 7 && e.age_days <= 30).count();
+    let stale = managed.iter().filter(|e| e.age_days > 30).count();
+    let max_count = fresh.max(aging).max(stale).max(1);
+    const BAR_WIDTH: usize = 20;
+
+    let bar_style = |age_days: u128| -> ContentStyle { age_style(age_days) };
+
+    let mut heading = console::Line::default();
+    heading.push(console::Span::new_styled_lossy(StyledContent::new(
+        total_style(),
+        "Age distribution".to_owned(),
     )));
-    line.push(console::Span::new_unstyled_lossy(value));
-    line
+    console.emit_line(heading);
+
+    for (label, count, representative_age) in [
+        ("fresh  < 7d ", fresh, 0u128),
+        ("aging 7-30d ", aging, 14u128),
+        ("stale  > 30d", stale, 60u128),
+    ] {
+        let bar_len = count * BAR_WIDTH / max_count;
+        let bar = "█".repeat(bar_len);
+        let mut line = console::Line::default();
+        line.push(console::Span::new_styled_lossy(StyledContent::new(
+            entry_key_style(),
+            format!("  {label}  "),
+        )));
+        line.push(console::Span::new_styled_lossy(StyledContent::new(
+            bar_style(representative_age),
+            format!("{bar:<BAR_WIDTH$}"),
+        )));
+        line.push(console::Span::new_unstyled_lossy(&format!("  {count}")));
+        console.emit_line(line);
+    }
 }
 
-fn make_store_age_line(age_days: u128) -> console::Line {
-    let mut line = console::Line::default();
-    line.push(console::Span::new_styled_lossy(StyledContent::new(
-        entry_key_style(),
-        "  age     ".to_owned(),
+fn emit_top_entries_group(
+    console: &console::Console,
+    heading: &str,
+    entries: &[&StoreInfoEntry],
+) {
+    const TOP_N: usize = 5;
+    let mut by_size = entries.to_vec();
+    by_size.sort_by(|a, b| b.size_bytes.cmp(&a.size_bytes));
+    let top = &by_size[..TOP_N.min(by_size.len())];
+
+    if top.is_empty() {
+        return;
+    }
+
+    let mut heading_line = console::Line::default();
+    heading_line.push(console::Span::new_styled_lossy(StyledContent::new(
+        total_style(),
+        heading.to_owned(),
     )));
-    line.push(console::Span::new_styled_lossy(StyledContent::new(
-        age_style(age_days),
-        format!("{age_days} days"),
+    console.emit_line(heading_line);
+
+    let name_width = top.iter().map(|e| e.path.len()).max().unwrap_or(10).max(10);
+
+    for entry in top {
+        let size_str = ByteSize(entry.size_bytes).display().to_string();
+        let mut line = console::Line::default();
+        line.push(console::Span::new_styled_lossy(StyledContent::new(
+            entry_name_style(),
+            format!("  {:<name_width$}", entry.path),
+        )));
+        line.push(console::Span::new_unstyled_lossy(&format!("  {size_str:<10}")));
+        if entry.path_missing || entry.size_bytes == 0 {
+            line.push(console::Span::new_styled_lossy(StyledContent::new(
+                warning_style(),
+                "  !!".to_owned(),
+            )));
+        }
+        console.emit_line(line);
+    }
+}
+
+fn emit_pretty_top_entries(console: &console::Console, entries: &[StoreInfoEntry]) {
+    let unmanaged: Vec<_> = entries.iter().filter(|e| !e.managed).collect();
+    emit_top_entries_group(console, "Top 5 unmanaged by size", &unmanaged);
+}
+
+fn emit_pretty_issues(console: &console::Console, entries: &[StoreInfoEntry]) {
+    let issues: Vec<_> = entries
+        .iter()
+        .filter(|e| e.path_missing || e.size_bytes == 0)
+        .collect();
+
+    if issues.is_empty() {
+        return;
+    }
+
+    console.emit_line(console::Line::default());
+    emit_separator(console, 56);
+
+    let mut heading = console::Line::default();
+    heading.push(console::Span::new_styled_lossy(StyledContent::new(
+        warning_style(),
+        format!("Issues  ({} entries need attention)", issues.len()),
     )));
-    line
+    console.emit_line(heading);
+
+    for entry in issues {
+        let mut line = console::Line::default();
+        let reason = if entry.path_missing {
+            "path does not exist"
+        } else {
+            "size is zero"
+        };
+        line.push(console::Span::new_styled_lossy(StyledContent::new(
+            warning_style(),
+            format!("  !! {reason:<22}"),
+        )));
+        line.push(console::Span::new_unstyled_lossy(&entry.path));
+        console.emit_line(line);
+    }
 }
 
 fn emit_pretty_info(
@@ -795,62 +955,23 @@ fn emit_pretty_info(
     total_size: u64,
     is_fix_needed: bool,
 ) {
-    let managed_count = entries.iter().filter(|e| e.managed).count();
-    let unmanaged_count = entries.len() - managed_count;
+    emit_separator(console, 56);
+    emit_pretty_summary(console, entries, total_size, is_fix_needed);
+    emit_separator(console, 56);
+    console.emit_line(console::Line::default());
+    emit_pretty_age_histogram(console, entries);
+    console.emit_line(console::Line::default());
+    emit_pretty_top_entries(console, entries);
+    emit_pretty_issues(console, entries);
+    console.emit_line(console::Line::default());
+    emit_separator(console, 56);
 
-    for entry in entries {
-        console.emit_line(make_store_name_line(&entry.path, entry.managed));
-
-        if entry.path_missing {
-            let mut line = console::Line::default();
-            line.push(console::Span::new_styled_lossy(StyledContent::new(
-                warning_style(),
-                "  !! path does not exist !!".to_owned(),
-            )));
-            console.emit_line(line);
-        }
-
-        if entry.size_bytes == 0 {
-            let mut line = console::Line::default();
-            line.push(console::Span::new_styled_lossy(StyledContent::new(
-                warning_style(),
-                "  !! size is zero !!".to_owned(),
-            )));
-            console.emit_line(line);
-        } else {
-            let bytesize = bytesize::ByteSize(entry.size_bytes);
-            console.emit_line(make_store_kv_line("size", &bytesize.display().to_string()));
-        }
-
-        if entry.managed {
-            console.emit_line(make_store_age_line(entry.age_days));
-        }
-
-        console.emit_line(console::Line::default());
-    }
-
-    if is_fix_needed {
-        let mut line = console::Line::default();
-        line.push(console::Span::new_styled_lossy(StyledContent::new(
-            warning_style(),
-            "run `spaces store fix` to fix the issues".to_owned(),
-        )));
-        console.emit_line(line);
-        console.emit_line(console::Line::default());
-    }
-
-    let total_bytesize = bytesize::ByteSize(total_size);
-    let mut footer = console::Line::default();
-    footer.push(console::Span::new_styled_lossy(StyledContent::new(
-        total_style(),
-        format!(
-            "Total  {}   ({} managed, {} unmanaged)",
-            total_bytesize.display(),
-            managed_count,
-            unmanaged_count
-        ),
+    let mut hint = console::Line::default();
+    hint.push(console::Span::new_styled_lossy(StyledContent::new(
+        entry_key_style(),
+        "use --sort-by=age|size|name  ·  `spaces store prune` removes stale entries".to_owned(),
     )));
-    console.emit_line(footer);
+    console.emit_line(hint);
 }
 
 fn get_unmanaged_dir_entries(
