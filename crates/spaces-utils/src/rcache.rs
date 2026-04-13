@@ -355,11 +355,20 @@ pub fn prune(
     // Phase 2: GC unreferenced artifacts
     let artifacts_path = cache_path.join(ARTIFACT_CACHE_DIR);
     if artifacts_path.exists() {
+        // Build a set of paths that were pruned (or would be pruned) in Phase 1 so we
+        // can exclude them when computing live artifact references.
+        let stale_paths: std::collections::HashSet<std::path::PathBuf> =
+            stale_digests.iter().map(|(_, _, p)| p.clone()).collect();
+
         // Collect artifact hashes still referenced by live rule_digest entries
         let mut live_hashes: std::collections::HashSet<String> =
             std::collections::HashSet::new();
         if let Ok(entries) = std::fs::read_dir(&rule_digests_path) {
             for dir_entry in entries.filter_map(|e| e.ok()) {
+                // Skip entries that were already pruned (or marked for pruning in dry-run)
+                if stale_paths.contains(&dir_entry.path()) {
+                    continue;
+                }
                 if let Ok(contents) = std::fs::read(dir_entry.path()) {
                     if let Ok(entry) =
                         postcard::from_bytes::<RuleDigestCacheEntry>(&contents)
