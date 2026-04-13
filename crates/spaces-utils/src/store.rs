@@ -2,7 +2,7 @@ use crate::{age, ci, http_archive, logger};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use bytesize::ByteSize;
-use console::style::{Attribute, Attributes, Color, ContentStyle, StyledContent};
+use console::style::{Color, ContentStyle, StyledContent};
 use serde::{Deserialize, Serialize};
 use serde_with::{TimestampSeconds, serde_as};
 use std::collections::HashMap;
@@ -13,14 +13,6 @@ pub const SPACES_STORE: &str = ".spaces/store";
 pub const SPACES_STORE_RCACHE: &str = "rcache";
 pub fn logger(console: console::Console) -> logger::Logger {
     logger::Logger::new(console, "store".into())
-}
-
-#[derive(clap::ValueEnum, Debug, Clone, Default)]
-pub enum Format {
-    #[default]
-    Pretty,
-    Yaml,
-    Json,
 }
 
 #[derive(Debug, Clone, PartialEq, clap::ValueEnum)]
@@ -41,8 +33,8 @@ pub enum StoreCommand {
         #[clap(long, default_value = "name")]
         sort_by: SortBy,
         /// Output format
-        #[clap(long, value_enum, default_value_t = Format::Pretty)]
-        format: Format,
+        #[clap(long, value_enum, default_value_t = console::Format::Pretty)]
+        format: console::Format,
     },
     /// Check the store for errors and delete any entries that have an error.
     Fix {
@@ -195,7 +187,7 @@ impl Store {
         &mut self,
         console: console::Console,
         sort_by: SortBy,
-        format: Format,
+        format: console::Format,
         is_ci: ci::IsCi,
         rcache_path: &std::path::Path,
     ) -> anyhow::Result<()> {
@@ -295,16 +287,16 @@ impl Store {
         let total_size: u64 = info_entries.iter().map(|e| e.size_bytes).sum();
 
         match format {
-            Format::Pretty => {
+            console::Format::Pretty => {
                 emit_pretty_info(&console, &info_entries, total_size, is_fix_needed);
             }
-            Format::Yaml => {
+            console::Format::Yaml => {
                 console.write(
                     &serialise_store_info_yaml(&info_entries, total_size)
                         .context(format_context!("Failed to serialize store info as YAML"))?,
                 )?;
             }
-            Format::Json => {
+            console::Format::Json => {
                 console.write(
                     &serialise_store_info_json(&info_entries, total_size)
                         .context(format_context!("Failed to serialize store info as JSON"))?,
@@ -314,7 +306,7 @@ impl Store {
 
         group.end_group(console.clone(), is_ci)?;
 
-        crate::rcache::show_info(rcache_path, console.clone(), is_ci)
+        crate::rcache::show_info(rcache_path, console.clone(), is_ci, &format)
             .context(format_context!("While showing rcache info"))?;
 
         Ok(())
@@ -640,24 +632,6 @@ fn serialise_store_info_yaml(
 // store info pretty output
 // ---------------------------------------------------------------------------
 
-fn entry_name_style() -> ContentStyle {
-    ContentStyle {
-        foreground_color: Some(Color::Cyan),
-        background_color: None,
-        underline_color: None,
-        attributes: Attributes::from(Attribute::Bold),
-    }
-}
-
-fn entry_key_style() -> ContentStyle {
-    ContentStyle {
-        foreground_color: Some(Color::DarkGrey),
-        background_color: None,
-        underline_color: None,
-        attributes: Attributes::default(),
-    }
-}
-
 fn age_style(age_days: u128) -> ContentStyle {
     let color = if age_days < 7 {
         Color::Green
@@ -670,32 +644,14 @@ fn age_style(age_days: u128) -> ContentStyle {
         foreground_color: Some(color),
         background_color: None,
         underline_color: None,
-        attributes: Attributes::default(),
-    }
-}
-
-fn warning_style() -> ContentStyle {
-    ContentStyle {
-        foreground_color: Some(Color::DarkRed),
-        background_color: None,
-        underline_color: None,
-        attributes: Attributes::from(Attribute::Bold),
-    }
-}
-
-fn total_style() -> ContentStyle {
-    ContentStyle {
-        foreground_color: None,
-        background_color: None,
-        underline_color: None,
-        attributes: Attributes::from(Attribute::Bold),
+        attributes: Default::default(),
     }
 }
 
 fn emit_separator(console: &console::Console, width: usize) {
     let mut line = console::Line::default();
     line.push(console::Span::new_styled_lossy(StyledContent::new(
-        entry_key_style(),
+        console::key_style(),
         "─".repeat(width),
     )));
     console.emit_line(line);
@@ -716,18 +672,11 @@ fn emit_pretty_summary(
         .sum();
     let unmanaged_size = total_size - managed_size;
 
-    let label_style = ContentStyle {
-        foreground_color: Some(Color::DarkGrey),
-        background_color: None,
-        underline_color: None,
-        attributes: Attributes::default(),
-    };
-
     // Managed row
     {
         let mut line = console::Line::default();
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            label_style,
+            console::key_style(),
             format!("  {:<12}", "Managed"),
         )));
         line.push(console::Span::new_unstyled_lossy(&format!(
@@ -742,7 +691,7 @@ fn emit_pretty_summary(
     {
         let mut line = console::Line::default();
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            label_style,
+            console::key_style(),
             format!("  {:<12}", "Unmanaged"),
         )));
         line.push(console::Span::new_unstyled_lossy(&format!(
@@ -757,7 +706,7 @@ fn emit_pretty_summary(
     {
         let mut line = console::Line::default();
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            total_style(),
+            console::total_style(),
             format!(
                 "  {:<12}{:>4} entries   {}",
                 "Total",
@@ -767,7 +716,7 @@ fn emit_pretty_summary(
         )));
         if is_fix_needed {
             line.push(console::Span::new_styled_lossy(StyledContent::new(
-                warning_style(),
+                console::warning_style(),
                 "   !! run `spaces store fix`".to_owned(),
             )));
         }
@@ -787,11 +736,9 @@ fn emit_pretty_age_histogram(console: &console::Console, entries: &[StoreInfoEnt
     let max_count = fresh.max(aging).max(stale).max(1);
     const BAR_WIDTH: usize = 20;
 
-    let bar_style = |age_days: u128| -> ContentStyle { age_style(age_days) };
-
     let mut heading = console::Line::default();
     heading.push(console::Span::new_styled_lossy(StyledContent::new(
-        total_style(),
+        console::total_style(),
         "Age distribution".to_owned(),
     )));
     console.emit_line(heading);
@@ -805,11 +752,11 @@ fn emit_pretty_age_histogram(console: &console::Console, entries: &[StoreInfoEnt
         let bar = "█".repeat(bar_len);
         let mut line = console::Line::default();
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            entry_key_style(),
+            console::key_style(),
             format!("  {label}  "),
         )));
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            bar_style(representative_age),
+            age_style(representative_age),
             format!("{bar:<BAR_WIDTH$}"),
         )));
         line.push(console::Span::new_unstyled_lossy(&format!("  {count}")));
@@ -833,7 +780,7 @@ fn emit_top_entries_group(
 
     let mut heading_line = console::Line::default();
     heading_line.push(console::Span::new_styled_lossy(StyledContent::new(
-        total_style(),
+        console::total_style(),
         heading.to_owned(),
     )));
     console.emit_line(heading_line);
@@ -844,13 +791,13 @@ fn emit_top_entries_group(
         let size_str = ByteSize(entry.size_bytes).display().to_string();
         let mut line = console::Line::default();
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            entry_name_style(),
+            console::name_style(),
             format!("  {:<name_width$}", entry.path),
         )));
         line.push(console::Span::new_unstyled_lossy(&format!("  {size_str:<10}")));
         if entry.path_missing || entry.size_bytes == 0 {
             line.push(console::Span::new_styled_lossy(StyledContent::new(
-                warning_style(),
+                console::warning_style(),
                 "  !!".to_owned(),
             )));
         }
@@ -878,7 +825,7 @@ fn emit_pretty_issues(console: &console::Console, entries: &[StoreInfoEntry]) {
 
     let mut heading = console::Line::default();
     heading.push(console::Span::new_styled_lossy(StyledContent::new(
-        warning_style(),
+        console::warning_style(),
         format!("Issues  ({} entries need attention)", issues.len()),
     )));
     console.emit_line(heading);
@@ -891,7 +838,7 @@ fn emit_pretty_issues(console: &console::Console, entries: &[StoreInfoEntry]) {
             "size is zero"
         };
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            warning_style(),
+            console::warning_style(),
             format!("  !! {reason:<22}"),
         )));
         line.push(console::Span::new_unstyled_lossy(&entry.path));
@@ -914,14 +861,6 @@ fn emit_pretty_info(
     emit_pretty_top_entries(console, entries);
     emit_pretty_issues(console, entries);
     console.emit_line(console::Line::default());
-    emit_separator(console, 56);
-
-    let mut hint = console::Line::default();
-    hint.push(console::Span::new_styled_lossy(StyledContent::new(
-        entry_key_style(),
-        "use --sort-by=age|size|name  ·  `spaces store prune` removes stale entries".to_owned(),
-    )));
-    console.emit_line(hint);
 }
 
 fn get_unmanaged_dir_entries(

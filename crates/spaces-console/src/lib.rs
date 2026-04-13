@@ -19,6 +19,67 @@ pub use ui::format_duration;
 pub use verbosity::{Level, Verbosity};
 use writer::ConsoleWriter;
 
+// ---------------------------------------------------------------------------
+// Output format
+// ---------------------------------------------------------------------------
+
+#[derive(clap::ValueEnum, Debug, Clone, Default)]
+pub enum Format {
+    #[default]
+    Pretty,
+    Yaml,
+    Json,
+}
+
+// ---------------------------------------------------------------------------
+// Shared ContentStyle helpers
+// ---------------------------------------------------------------------------
+
+pub fn name_style() -> style::ContentStyle {
+    style::ContentStyle {
+        foreground_color: Some(style::Color::Cyan),
+        background_color: None,
+        underline_color: None,
+        attributes: style::Attributes::from(style::Attribute::Bold),
+    }
+}
+
+pub fn key_style() -> style::ContentStyle {
+    style::ContentStyle {
+        foreground_color: Some(style::Color::DarkGrey),
+        background_color: None,
+        underline_color: None,
+        attributes: style::Attributes::default(),
+    }
+}
+
+pub fn keyword_style() -> style::ContentStyle {
+    style::ContentStyle {
+        foreground_color: Some(style::Color::DarkYellow),
+        background_color: None,
+        underline_color: None,
+        attributes: style::Attributes::from(style::Attribute::Bold),
+    }
+}
+
+pub fn warning_style() -> style::ContentStyle {
+    style::ContentStyle {
+        foreground_color: Some(style::Color::DarkRed),
+        background_color: None,
+        underline_color: None,
+        attributes: style::Attributes::from(style::Attribute::Bold),
+    }
+}
+
+pub fn total_style() -> style::ContentStyle {
+    style::ContentStyle {
+        foreground_color: None,
+        background_color: None,
+        underline_color: None,
+        attributes: style::Attributes::from(style::Attribute::Bold),
+    }
+}
+
 #[derive(strum::Display)]
 pub enum FinalType {
     Completed,
