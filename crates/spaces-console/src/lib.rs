@@ -27,6 +27,7 @@ pub enum FinalType {
     NoChanges,
     NotPlatform,
     Cancelled,
+    Restored,
     Finished,
 }
 
@@ -43,6 +44,7 @@ pub fn make_finalize_line(
         FinalType::NotRequired => style::Color::Cyan,
         FinalType::NoChanges => style::Color::Cyan,
         FinalType::NotPlatform => style::Color::Cyan,
+        FinalType::Restored => style::Color::DarkGreen,
         FinalType::Cancelled => style::Color::Yellow,
         FinalType::Finished => style::Color::DarkCyan,
     };

@@ -321,6 +321,11 @@ pub fn execute_rule(
                         )
                     }
                     None => {
+                        progress.set_finalize_lines(logger::make_finalize_line(
+                            logger::FinalType::Restored,
+                            progress.elapsed(),
+                            displayed_rule.as_ref(),
+                        ));
                         cache_status =
                             workspace::CacheStatus::Restored(effective_rule_digest.clone());
                         (false, Ok(executor::TaskResult::new()))
@@ -789,13 +794,6 @@ impl State {
                 if let Some(task) = task {
                     let mut task_hasher = blake3::Hasher::new();
                     task_hasher.update(task.calculate_digest().as_bytes());
-                    let mut rule_deps = task.collect_rule_deps();
-                    rule_deps.sort();
-                    for dep in rule_deps {
-                        if let Some(dep_task) = tasks.get(&dep) {
-                            task_hasher.update(dep_task.digest.as_bytes());
-                        }
-                    }
                     if let Some(task_mut) = tasks.get_mut(task_name) {
                         task_mut.digest = task_hasher.finalize().to_string().into();
                     }
