@@ -920,8 +920,8 @@ create-lock-file = false # optionally create a lock file
         store: Vec<Arc<str>>,
         #[arg(
             long,
-            help = r#"Remove a store value previously set via --store=NAME=VALUE.
-  Use `--no-store=NAME`. Removes the named key from the command-line store entry."#
+            help = r#"Remove a store value previously set via --store=KEY=VALUE.
+  Use `--no-store=KEY`. Removes the named key from the command-line store entry."#
         )]
         no_store: Vec<Arc<str>>,
         #[arg(
