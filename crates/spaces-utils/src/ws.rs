@@ -163,6 +163,13 @@ impl CheckoutStore {
         ))?;
         Ok(())
     }
+
+    /// Clears all store entries written by checkout.store_value() in scripts.
+    /// The "//" entry (command-line --store=KEY=VALUE values) is removed here
+    /// but will be re-applied from args immediately after this call.
+    pub fn clear_script_values(&mut self) {
+        self.entries.retain(|key, _| key.as_ref() == "//");
+    }
 }
 
 impl Asset {
