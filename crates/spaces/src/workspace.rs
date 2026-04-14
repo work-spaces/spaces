@@ -739,6 +739,9 @@ impl Workspace {
             settings
                 .clear_inputs()
                 .context(format_context!("Failed to clear inputs"))?;
+            // Clear store values written by scripts so sync starts fresh.
+            // Command-line --store=KEY=VALUE values are re-applied below.
+            settings.checkout_store.clear_script_values();
         }
 
         // Workspace is assumed to reproducible until a rule is processed
@@ -773,6 +776,30 @@ impl Workspace {
             }
             // store values may affect script behavior,
             // so they need to rerun if any are passed on the command line
+            settings.bin.is_always_evaluate = true;
+        }
+
+        // Apply --no-store=NAME removals from the command-line store entry
+        let args_store_removals = singleton::get_args_store_removals();
+        if !args_store_removals.is_empty() {
+            if let Some(entry) = settings.checkout_store.entries.get_mut("//" as &str) {
+                for key in &args_store_removals {
+                    if entry.values.remove(key.as_ref()).is_none() {
+                        return Err(format_error!(
+                            "--no-store={} does not exist in the command-line store",
+                            key
+                        ));
+                    }
+                }
+                if entry.values.is_empty() {
+                    settings.checkout_store.entries.remove("//" as &str);
+                }
+            } else {
+                return Err(format_error!(
+                    "--no-store={} does not exist in the command-line store",
+                    args_store_removals[0]
+                ));
+            }
             settings.bin.is_always_evaluate = true;
         }
 

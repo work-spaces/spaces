@@ -23,6 +23,7 @@ struct State {
     error_chain: Vec<String>,
     args_env: HashMap<Arc<str>, Arc<str>>,
     args_store: HashMap<Arc<str>, serde_json::Value>,
+    args_store_removals: Vec<Arc<str>>,
     args_locks: HashMap<Arc<str>, Arc<str>>,
     new_branches: Vec<Arc<str>>,
     removed_branches: Vec<Arc<str>>,
@@ -66,6 +67,7 @@ fn get_state() -> &'static lock::StateLock<State> {
         query_context: None,
         args_env: HashMap::new(),
         args_store: HashMap::new(),
+        args_store_removals: Vec::new(),
         args_locks: HashMap::new(),
         execution_phase: task::Phase::Complete,
     }));
@@ -176,6 +178,16 @@ pub fn set_args_store(args: Vec<Arc<str>>) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+pub fn get_args_store_removals() -> Vec<Arc<str>> {
+    let state = get_state().read();
+    state.args_store_removals.clone()
+}
+
+pub fn set_args_store_removals(args: Vec<Arc<str>>) {
+    let mut state = get_state().write();
+    state.args_store_removals = args;
 }
 
 pub fn set_args_store_from_toml(store: HashMap<Arc<str>, toml::Value>) -> anyhow::Result<()> {

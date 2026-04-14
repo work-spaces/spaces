@@ -318,6 +318,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
         Commands::Sync {
             env,
             store,
+            no_store,
             dev_branch,
             no_dev_branch,
         } => {
@@ -333,6 +334,8 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
 
             singleton::set_args_store(store)
                 .context(format_context!("while setting store values for sync"))?;
+
+            singleton::set_args_store_removals(no_store);
 
             // Add any dev branches specified by the command line
             if !dev_branch.is_empty() {
@@ -915,6 +918,12 @@ create-lock-file = false # optionally create a lock file
   Command line store values take priority over all other path or url values."#
         )]
         store: Vec<Arc<str>>,
+        #[arg(
+            long,
+            help = r#"Remove a store value previously set via --store=KEY=VALUE.
+  Use `--no-store=KEY`. Removes the named key from the command-line store entry."#
+        )]
+        no_store: Vec<Arc<str>>,
         #[arg(
             long,
             help = r#"Use --dev-branch=<rule> to add a repo to the dev-branch list.
