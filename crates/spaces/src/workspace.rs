@@ -779,6 +779,30 @@ impl Workspace {
             settings.bin.is_always_evaluate = true;
         }
 
+        // Apply --no-store=NAME removals from the command-line store entry
+        let args_store_removals = singleton::get_args_store_removals();
+        if !args_store_removals.is_empty() {
+            if let Some(entry) = settings.checkout_store.entries.get_mut("//" as &str) {
+                for key in &args_store_removals {
+                    if entry.values.remove(key.as_ref()).is_none() {
+                        return Err(format_error!(
+                            "--no-store={} does not exist in the command-line store",
+                            key
+                        ));
+                    }
+                }
+                if entry.values.is_empty() {
+                    settings.checkout_store.entries.remove("//" as &str);
+                }
+            } else {
+                return Err(format_error!(
+                    "--no-store={} does not exist in the command-line store",
+                    args_store_removals[0]
+                ));
+            }
+            settings.bin.is_always_evaluate = true;
+        }
+
         let store = store::Store::new(std::path::Path::new(settings.json.store_path.as_ref()));
 
         Ok(Self {

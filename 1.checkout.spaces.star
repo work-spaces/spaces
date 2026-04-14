@@ -12,7 +12,6 @@ load(
     "//@star/sdk/star/checkout.star",
     "checkout_add_any_assets",
     "checkout_add_env_vars",
-    "checkout_store_value",
 )
 load("//@star/sdk/star/env.star", "env_assign")
 load(
@@ -24,14 +23,11 @@ load(
     "//@star/sdk/star/ws.star",
     "workspace_get_absolute_path",
     "workspace_get_path_to_checkout",
-    "workspace_load_value",
 )
 
 # Configure the top level workspace
 
 SPACES_CHECKOUT_PATH = workspace_get_path_to_checkout()
-
-checkout_store_value("SOME_VALUE", workspace_load_value("SOME_VALUE"))
 
 spaces_add_devutils(
     "spaces0",
