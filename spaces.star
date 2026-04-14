@@ -9,6 +9,7 @@ load(
     "//@star/sdk/star/run.star",
     "run_add_exec",
     "run_add_exec_test",
+    "run_load_file_contents",
 )
 load("//@star/sdk/star/shell.star", "shell")
 load(
@@ -107,6 +108,15 @@ run_add_exec_test(
     },
     deps = deps(rules = [":rustup_update"], globs = [GLOB_DEPS]),
     visibility = visibility_rules(["//:test"]),
+)
+
+run_add_exec(
+    "echo_file",
+    command = "echo",
+    args = [run_load_file_contents("//hello.txt")],
+    deps = deps(files = ["//hello.txt"]),
+    redirect_stdout = "echo_file.txt",
+    log_level = "Passthrough",
 )
 
 SPACES_INSTALL_ROOT = "SPACES_INSTALL_ROOT"

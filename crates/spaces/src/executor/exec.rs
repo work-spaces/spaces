@@ -48,6 +48,36 @@ fn get_process_id(rule: &str) -> Option<u32> {
     state.processes.get(rule).copied()
 }
 
+fn expand_file_tokens(
+    value: &str,
+    workspace_root: &str,
+    working_directory: &str,
+) -> anyhow::Result<Arc<str>> {
+    let mut result = String::new();
+    let mut remaining = value;
+    let file_open = format!("{}{{", rule::FILE_CONTENT_MARKER);
+
+    while let Some(start) = remaining.find(&file_open) {
+        result.push_str(&remaining[..start]);
+        let after = &remaining[start + file_open.len()..];
+        let end = after.find('}').ok_or_else(|| {
+            format_error!("Unclosed $FILE{{}} token in: {}", value)
+        })?;
+        let file_path = &after[..end];
+        let abs_path = if let Some(ws_relative) = file_path.strip_prefix("//") {
+            format!("{workspace_root}/{ws_relative}")
+        } else {
+            format!("{working_directory}/{file_path}")
+        };
+        let contents = std::fs::read_to_string(&abs_path)
+            .context(format_context!("Failed to read $FILE{{{}}}", file_path))?;
+        result.push_str(&contents);
+        remaining = &after[end + 1..];
+    }
+    result.push_str(remaining);
+    Ok(result.into())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Exec {
@@ -100,10 +130,20 @@ impl Exec {
             (None, absolute_path_to_workspace.clone())
         };
 
-        exec_env_vars.insert("PWD".into(), pwd);
+        exec_env_vars.insert("PWD".into(), pwd.clone());
+
+        let workspace_root = absolute_path_to_workspace.as_ref();
+        let working_dir = pwd.as_ref();
+
+        for arg in arguments.iter_mut() {
+            *arg = expand_file_tokens(arg, workspace_root, working_dir)
+                .context(format_context!("Failed to expand $FILE tokens in args"))?;
+        }
 
         for (key, value) in self.env.clone().unwrap_or_default() {
-            exec_env_vars.insert(key, value);
+            let expanded = expand_file_tokens(&value, workspace_root, working_dir)
+                .context(format_context!("Failed to expand $FILE tokens in env var {key}"))?;
+            exec_env_vars.insert(key, expanded);
         }
 
         let command_line_target = workspace.read().target.clone();

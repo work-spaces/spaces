@@ -9,6 +9,75 @@ use utils::{logger, rule, targets};
 use crate::builtins::eval_context::get_eval_context;
 use crate::{executor, rules, task};
 
+fn extract_file_token_paths(value: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    let mut remaining = value;
+    let file_open = format!("{}{{", rule::FILE_CONTENT_MARKER);
+    while let Some(start) = remaining.find(&file_open) {
+        let after = &remaining[start + file_open.len()..];
+        if let Some(end) = after.find('}') {
+            paths.push(after[..end].to_string());
+            remaining = &after[end + 1..];
+        } else {
+            break;
+        }
+    }
+    paths
+}
+
+fn validate_file_tokens_in_deps(
+    exec: &executor::exec::Exec,
+    rule: &rule::Rule,
+) -> anyhow::Result<()> {
+    let mut file_paths: Vec<String> = Vec::new();
+    for arg in exec.args.iter().flatten() {
+        file_paths.extend(extract_file_token_paths(arg));
+    }
+    for value in exec.env.iter().flat_map(|e| e.values()) {
+        file_paths.extend(extract_file_token_paths(value));
+    }
+
+    if file_paths.is_empty() {
+        return Ok(());
+    }
+
+    let normalize = |path: &str| -> String {
+        if path.starts_with("//") {
+            path.to_string()
+        } else {
+            match exec.working_directory.as_ref() {
+                Some(wd) => format!("{wd}/{path}"),
+                None => format!("//{path}"),
+            }
+        }
+    };
+
+    let include_patterns: Vec<std::sync::Arc<str>> = rule
+        .deps
+        .iter()
+        .flat_map(|deps| deps.collect_globs())
+        .filter_map(|g| match g {
+            rule::Globs::Includes(v) => Some(v),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+
+    for raw_path in &file_paths {
+        let normalized = normalize(raw_path);
+        let covered = include_patterns
+            .iter()
+            .any(|p| p.as_ref() == normalized.as_str());
+        if !covered {
+            return Err(format_error!(
+                "$FILE{{{raw_path}}} is used in exec but \"{normalized}\" is not declared \
+                 in the rule's deps. Add {{\"Includes\": [\"{normalized}\"]}} to deps."
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn add_rule_to_all(
     rule: &rule::Rule,
     workspace_arc: &crate::workspace::WorkspaceArc,
@@ -177,6 +246,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         if let Some(redirect_stdout) = exec.redirect_stdout.as_mut() {
             *redirect_stdout = format!("build/{redirect_stdout}").into();
         }
+
+        validate_file_tokens_in_deps(&exec, &rule)
+            .context(format_context!("$FILE validation failed for rule {}", rule.name))?;
+
         let rule_name = rule.name.clone();
         rules::insert_task_for_module(
             task::Task::new(rule, task::Phase::Run, executor::Task::Exec(exec)),
