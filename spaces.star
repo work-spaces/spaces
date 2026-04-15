@@ -9,6 +9,7 @@ load(
     "//@star/sdk/star/run.star",
     "run_add_exec",
     "run_add_exec_test",
+    "run_load_exit_code",
     "run_load_file_contents",
 )
 load("//@star/sdk/star/shell.star", "shell")
@@ -115,6 +116,13 @@ run_add_exec(
     command = "echo",
     args = [run_load_file_contents("//hello.txt")],
     redirect_stdout = "echo_file.txt",
+    log_level = "Passthrough",
+)
+
+run_add_exec(
+    "echo_file_result",
+    command = "echo",
+    args = [run_load_exit_code(":echo_file")],
     log_level = "Passthrough",
 )
 

@@ -12,7 +12,7 @@ mod verbosity;
 mod writer;
 
 pub use crossterm::style;
-pub use process::{ExecuteOptions, LogHeader, get_log_divider};
+pub use process::{ExecuteOptions, ExecuteResult, LogHeader, get_log_divider};
 pub use secrets::Secrets;
 pub use superconsole::{Line, Span};
 pub use ui::format_duration;
@@ -417,7 +417,7 @@ impl Console {
         command: &str,
         options: ExecuteOptions,
         label: &str,
-    ) -> anyhow::Result<Option<String>> {
+    ) -> anyhow::Result<ExecuteResult> {
         use std::sync::mpsc;
 
         let child = options
@@ -468,7 +468,7 @@ impl Console {
         &self,
         command: &str,
         options: ExecuteOptions,
-    ) -> anyhow::Result<Option<String>> {
+    ) -> anyhow::Result<ExecuteResult> {
         let label = options.label.clone();
         self.execute_process_with_progress_label(command, options, &label)
     }
@@ -572,7 +572,7 @@ impl Progress {
         &self,
         command: &str,
         options: ExecuteOptions,
-    ) -> anyhow::Result<Option<String>> {
+    ) -> anyhow::Result<ExecuteResult> {
         self.console
             .execute_process_with_progress_label(command, options, self.label.as_ref())
     }

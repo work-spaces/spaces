@@ -97,7 +97,7 @@ impl Manager {
 
         if let Some(stdout) = progress_bar
             .execute_process(gh_command.to_string_lossy().as_ref(), options)
-            .context(format_context!("Failed to execute gh api to get releases"))?
+            .context(format_context!("Failed to execute gh api to get releases"))?.stdout
         {
             let releases: Vec<GithubRelease> = serde_json::from_str(stdout.as_str()).context(
                 format_context!("Failed to parse JSON response ```\n{stdout}```\n"),

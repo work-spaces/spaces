@@ -290,7 +290,7 @@ pub fn execute_git_command(
                     url_logger(progress.console.clone(), url)
                         .info(format!("Succeeded after {attempt} retry(ies)").as_str());
                 }
-                return Ok(value);
+                return Ok(value.stdout);
             }
             Err(err) => {
                 if attempt < GIT_MAX_RETRIES && is_retryable_git_error(&err) {

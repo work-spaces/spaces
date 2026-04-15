@@ -4,26 +4,10 @@ use starlark::eval::Evaluator;
 use starlark::{environment::GlobalsBuilder, values::none::NoneType};
 
 use std::sync::Arc;
-use utils::{logger, rule, targets};
+use utils::{logger, marker, rule, targets};
 
 use crate::builtins::eval_context::get_eval_context;
 use crate::{executor, rules, task};
-
-fn extract_file_token_paths(value: &str) -> Vec<String> {
-    let mut paths = Vec::new();
-    let mut remaining = value;
-    let file_open = format!("{}{{", rule::FILE_CONTENT_MARKER);
-    while let Some(start) = remaining.find(&file_open) {
-        let after = &remaining[start + file_open.len()..];
-        if let Some(end) = after.find('}') {
-            paths.push(after[..end].to_string());
-            remaining = &after[end + 1..];
-        } else {
-            break;
-        }
-    }
-    paths
-}
 
 fn add_file_tokens_to_deps(
     exec: &executor::exec::Exec,
@@ -31,10 +15,10 @@ fn add_file_tokens_to_deps(
 ) -> anyhow::Result<()> {
     let mut file_paths: Vec<String> = Vec::new();
     for arg in exec.args.iter().flatten() {
-        file_paths.extend(extract_file_token_paths(arg));
+        file_paths.extend(marker::extract_marker_values(arg, rule::FILE_CONTENT_MARKER));
     }
     for value in exec.env.iter().flat_map(|e| e.values()) {
-        file_paths.extend(extract_file_token_paths(value));
+        file_paths.extend(marker::extract_marker_values(value, rule::FILE_CONTENT_MARKER));
     }
 
     if file_paths.is_empty() {
@@ -70,6 +54,36 @@ fn add_file_tokens_to_deps(
                 &mut rule.deps,
                 rule::AnyDep::Glob(rule::Globs::Includes(vec![normalized.into()])),
             );
+        }
+    }
+    Ok(())
+}
+
+fn add_exit_value_rule_deps(
+    exec: &executor::exec::Exec,
+    rule: &mut rule::Rule,
+    module_name: &Arc<str>,
+) -> anyhow::Result<()> {
+    let mut rule_names: Vec<String> = Vec::new();
+    for arg in exec.args.iter().flatten() {
+        rule_names.extend(marker::extract_marker_values(arg, rule::EXIT_VALUE_MARKER));
+    }
+    for value in exec.env.iter().flat_map(|e| e.values()) {
+        rule_names.extend(marker::extract_marker_values(value, rule::EXIT_VALUE_MARKER));
+    }
+
+    for raw_name in &rule_names {
+        let sanitized: Arc<str> = rules::get_sanitized_rule_name_for_module(
+            raw_name.as_str().into(),
+            module_name,
+        );
+        let already_dep = rule
+            .deps
+            .iter()
+            .flat_map(|deps| deps.collect_rules())
+            .any(|r| r.as_ref() == sanitized.as_ref());
+        if !already_dep {
+            rule::Deps::push_any_dep(&mut rule.deps, rule::AnyDep::Rule(sanitized));
         }
     }
     Ok(())
@@ -246,6 +260,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         add_file_tokens_to_deps(&exec, &mut rule)
             .context(format_context!("Failed to add $FILE tokens to deps for rule {}", rule.name))?;
+        add_exit_value_rule_deps(&exec, &mut rule, &ctx.module_name)
+            .context(format_context!("Failed to add $RUN_LOAD_EXIT_VALUE rule deps for rule {}", rule.name))?;
 
         let rule_name = rule.name.clone();
         rules::insert_task_for_module(

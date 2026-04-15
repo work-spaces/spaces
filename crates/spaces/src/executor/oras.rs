@@ -90,7 +90,7 @@ impl OrasArchive {
                 "failed to download {artifact_label} using oras",
             ))?;
 
-        if let Some(manifest) = manifest {
+        if let Some(manifest) = manifest.stdout {
             let value: serde_json::Value = serde_json::from_str(&manifest).context(
                 format_context!("failed to parse manifest from {artifact_label}"),
             )?;

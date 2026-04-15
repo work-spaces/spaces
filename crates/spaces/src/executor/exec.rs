@@ -17,6 +17,7 @@ pub enum UseWorkspaceEnv {
 #[derive(Debug, Clone, Default)]
 struct State {
     processes: HashMap<String, u32>,
+    exit_values: HashMap<String, i32>,
 }
 
 static STATE: state::InitCell<lock::StateLock<State>> = state::InitCell::new();
@@ -46,6 +47,37 @@ fn handle_process_ended(rule: &str) {
 fn get_process_id(rule: &str) -> Option<u32> {
     let state = get_state().read();
     state.processes.get(rule).copied()
+}
+
+fn store_exit_value(rule: &str, exit_code: i32) {
+    let mut state = get_state().write();
+    state.exit_values.insert(rule.to_string(), exit_code);
+}
+
+pub fn get_exit_value(rule: &str) -> Option<i32> {
+    let state = get_state().read();
+    state.exit_values.get(rule).copied()
+}
+
+fn expand_exit_value_tokens(value: &str) -> anyhow::Result<Arc<str>> {
+    let mut result = String::new();
+    let mut remaining = value;
+    let marker_open = format!("{}{{", rule::EXIT_VALUE_MARKER);
+
+    while let Some(start) = remaining.find(&marker_open) {
+        result.push_str(&remaining[..start]);
+        let after = &remaining[start + marker_open.len()..];
+        let end = after.find('}').ok_or_else(|| {
+            format_error!("Unclosed $RUN_LOAD_EXIT_VALUE{{}} token in: {}", value)
+        })?;
+        let dep_rule = &after[..end];
+        let exit_code = get_exit_value(dep_rule)
+            .ok_or_else(|| format_error!("No exit value stored for rule '{}'", dep_rule))?;
+        result.push_str(&exit_code.to_string());
+        remaining = &after[end + 1..];
+    }
+    result.push_str(remaining);
+    Ok(result.into())
 }
 
 fn expand_file_tokens(
@@ -138,11 +170,15 @@ impl Exec {
         for arg in arguments.iter_mut() {
             *arg = expand_file_tokens(arg, workspace_root, working_dir)
                 .context(format_context!("Failed to expand $FILE tokens in args"))?;
+            *arg = expand_exit_value_tokens(arg)
+                .context(format_context!("Failed to expand $RUN_LOAD_EXIT_VALUE tokens in args"))?;
         }
 
         for (key, value) in self.env.clone().unwrap_or_default() {
             let expanded = expand_file_tokens(&value, workspace_root, working_dir)
                 .context(format_context!("Failed to expand $FILE tokens in env var {key}"))?;
+            let expanded = expand_exit_value_tokens(&expanded)
+                .context(format_context!("Failed to expand $RUN_LOAD_EXIT_VALUE tokens in env var {key}"))?;
             exec_env_vars.insert(key, expanded);
         }
 
@@ -194,52 +230,51 @@ impl Exec {
             .as_str(),
         );
 
-        let result = progress.execute_process(&self.command, options);
+        let result = progress
+            .execute_process(&self.command, options)
+            .context(format_context!("Failed to execute {}", self.command))?;
 
         handle_process_ended(name);
+        store_exit_value(name, result.exit_code);
 
         logger(progress.console.clone(), name)
             .debug(format!("log file: {log_file_path:?}").as_str());
 
-        let stdout_content = match result {
-            Ok(content) => {
-                logger(progress.console.clone(), name).info("succeeded");
-
-                if let Some(Expect::Failure) = self.expect.as_ref() {
-                    return Err(format_error!("Expected failure but task succeeded"));
-                } else {
-                    content
-                }
+        let stdout_content = if result.exit_code == 0 {
+            logger(progress.console.clone(), name).info("succeeded");
+            if let Some(Expect::Failure) = self.expect.as_ref() {
+                return Err(format_error!("Expected failure but task succeeded"));
             }
-            Err(exec_error) => {
-                logger(progress.console.clone(), name).info("Failed");
-                if let Some(Expect::Failure) = self.expect.as_ref() {
-                    None
-                } else if let Some(Expect::Any) = self.expect.as_ref() {
-                    None
-                } else {
-                    // if the command failed to execute, there won't be a log file
-                    if let Some(log_file_path) = log_file_path {
-                        if std::path::Path::new(log_file_path.as_ref()).exists() {
-                            let log_contents =
-                                std::fs::read_to_string(log_file_path.as_ref()).context(
-                                    format_context!("Failed to read log file {}", log_file_path),
-                                )?;
-                            if log_contents.len() > 10 * 1024 * 1024 {
-                                logger(progress.console.clone(), name).error(
-                                    format!("See log file {log_file_path} for details").as_str(),
-                                );
-                            } else {
-                                logger(progress.console.clone(), name).error(log_contents.as_str());
-                            }
+            result.stdout
+        } else {
+            logger(progress.console.clone(), name).info("Failed");
+            if let Some(Expect::Failure) | Some(Expect::Any) = self.expect.as_ref() {
+                None
+            } else {
+                if let Some(log_file_path) = log_file_path {
+                    if std::path::Path::new(log_file_path.as_ref()).exists() {
+                        let log_contents =
+                            std::fs::read_to_string(log_file_path.as_ref()).context(
+                                format_context!("Failed to read log file {}", log_file_path),
+                            )?;
+                        if log_contents.len() > 10 * 1024 * 1024 {
+                            logger(progress.console.clone(), name).error(
+                                format!("See log file {log_file_path} for details").as_str(),
+                            );
+                        } else {
+                            logger(progress.console.clone(), name).error(log_contents.as_str());
                         }
-                    } else {
-                        logger(progress.console.clone(), name).error(
-                            "No log file is available (log files disabled with the --ci option)",
-                        );
                     }
-                    return Err(exec_error);
+                } else {
+                    logger(progress.console.clone(), name).error(
+                        "No log file is available (log files disabled with the --ci option)",
+                    );
                 }
+                return Err(format_error!(
+                    "Command `{}` failed with exit code: {}",
+                    self.command,
+                    result.exit_code
+                ));
             }
         };
 
@@ -373,15 +408,17 @@ impl Kill {
                 ..Default::default()
             };
 
-            let result = progress.execute_process("kill", options);
+            let result = progress
+                .execute_process("kill", options)
+                .context(format_context!("Failed to execute kill"))?;
             match self.expect.as_ref() {
                 Some(Expect::Success) => {
-                    if result.is_err() {
+                    if result.exit_code != 0 {
                         return Err(format_error!("Expected success but kill failed {self:?}"));
                     }
                 }
                 Some(Expect::Failure) => {
-                    if result.is_ok() {
+                    if result.exit_code == 0 {
                         return Err(format_error!(
                             "Expected failure but kill succeeded {self:?}"
                         ));

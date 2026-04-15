@@ -11,6 +11,7 @@ pub mod inputs;
 pub mod inspect;
 pub mod labels;
 pub mod lock;
+pub mod marker;
 pub mod logger;
 pub mod logs;
 pub mod markdown;
