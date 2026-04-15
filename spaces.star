@@ -114,7 +114,6 @@ run_add_exec(
     "echo_file",
     command = "echo",
     args = [run_load_file_contents("//hello.txt")],
-    deps = deps(files = ["//hello.txt"]),
     redirect_stdout = "echo_file.txt",
     log_level = "Passthrough",
 )

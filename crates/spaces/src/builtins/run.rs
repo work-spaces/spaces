@@ -25,9 +25,9 @@ fn extract_file_token_paths(value: &str) -> Vec<String> {
     paths
 }
 
-fn validate_file_tokens_in_deps(
+fn add_file_tokens_to_deps(
     exec: &executor::exec::Exec,
-    rule: &rule::Rule,
+    rule: &mut rule::Rule,
 ) -> anyhow::Result<()> {
     let mut file_paths: Vec<String> = Vec::new();
     for arg in exec.args.iter().flatten() {
@@ -52,27 +52,24 @@ fn validate_file_tokens_in_deps(
         }
     };
 
-    let include_patterns: Vec<std::sync::Arc<str>> = rule
-        .deps
-        .iter()
-        .flat_map(|deps| deps.collect_globs())
-        .filter_map(|g| match g {
-            rule::Globs::Includes(v) => Some(v),
-            _ => None,
-        })
-        .flatten()
-        .collect();
-
     for raw_path in &file_paths {
         let normalized = normalize(raw_path);
-        let covered = include_patterns
+        let already_covered = rule
+            .deps
             .iter()
+            .flat_map(|deps| deps.collect_globs())
+            .filter_map(|g| match g {
+                rule::Globs::Includes(v) => Some(v),
+                _ => None,
+            })
+            .flatten()
             .any(|p| p.as_ref() == normalized.as_str());
-        if !covered {
-            return Err(format_error!(
-                "$FILE{{{raw_path}}} is used in exec but \"{normalized}\" is not declared \
-                 in the rule's deps. Add {{\"Includes\": [\"{normalized}\"]}} to deps."
-            ));
+
+        if !already_covered {
+            rule::Deps::push_any_dep(
+                &mut rule.deps,
+                rule::AnyDep::Glob(rule::Globs::Includes(vec![normalized.into()])),
+            );
         }
     }
     Ok(())
@@ -214,7 +211,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
         let ctx = get_eval_context(eval)?;
-        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+        let mut rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for exec rule"))?;
 
         if let Some(inputs) = rule.inputs.as_ref() {
@@ -247,8 +244,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             *redirect_stdout = format!("build/{redirect_stdout}").into();
         }
 
-        validate_file_tokens_in_deps(&exec, &rule)
-            .context(format_context!("$FILE validation failed for rule {}", rule.name))?;
+        add_file_tokens_to_deps(&exec, &mut rule)
+            .context(format_context!("Failed to add $FILE tokens to deps for rule {}", rule.name))?;
 
         let rule_name = rule.name.clone();
         rules::insert_task_for_module(
