@@ -6,9 +6,11 @@ use anyhow_source_location::{format_context, format_error};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use utils::{changes::glob, targets};
 
-use utils::{environment, graph, labels, lock, logger, logs, platform, rcache, rule, ws};
+use utils::{
+    changes, environment, graph, labels, lock, logger, logs, markdown, platform, rcache, rule,
+    targets, ws,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum HasHelp {
@@ -123,7 +125,7 @@ pub fn execute_rule(
             signal: task.signal.clone(),
         };
 
-        let displayed_rule = utils::labels::sanitize_rule_for_display(name.clone());
+        let displayed_rule = labels::sanitize_rule_for_display(name.clone());
         let mut skip_execute_message: Vec<console::Line> = Vec::new();
         if let (Some(platforms), Some(current_platform)) = (
             task.rule.platforms.as_ref(),
@@ -847,7 +849,7 @@ impl State {
         let glob_logger = logger::Logger::new(console.clone(), "glob".into());
         for node_index in self.sorted.iter() {
             let task_name = self.graph.get_task(*node_index);
-            let globs = glob::Globs::new_with_includes(filter);
+            let globs = changes::glob::Globs::new_with_includes(filter);
 
             if !filter.is_empty()
                 && !globs.is_match(task_name.strip_prefix("//").unwrap_or(task_name))
@@ -916,7 +918,7 @@ impl State {
                         );
                         let files = workspace
                             .read()
-                            .inspect_inputs(&mut progress, &globs)
+                            .inspect_inputs(&mut progress, &globs, changes::IsAllowNoEntries::Yes)
                             .context(format_context!("Failed to inspect deps globs"))?;
                         dep_strings.extend(files.into_iter().map(|e| format!("//{e}").into()));
 
@@ -1007,7 +1009,7 @@ impl State {
 
         let console = console::Console::new_file(path)
             .context(format_context!("Failed to create file {path}"))?;
-        let mut md_printer = utils::markdown::Markdown::new(console.clone());
+        let mut md_printer = markdown::Markdown::new(console.clone());
         let md = &mut md_printer;
         rule::Rule::print_markdown_section(md, "Checkout Rules", &checkout_rules, false, false)?;
         rule::Rule::print_markdown_section(md, "Run Rules", &run_rules, true, true)?;
@@ -1074,8 +1076,7 @@ impl State {
                 let mut progress_bar =
                     console::Progress::new(console.clone(), task.rule.name.clone(), None, None);
 
-                let displayed_rule =
-                    utils::labels::sanitize_rule_for_display(task.rule.name.clone());
+                let displayed_rule = labels::sanitize_rule_for_display(task.rule.name.clone());
                 if task.rule.type_ == Some(rule::RuleType::Optional) {
                     progress_bar.set_finalize_lines(logger::make_finalize_line(
                         logger::FinalType::NotRequired,
@@ -1110,7 +1111,7 @@ impl State {
                         .iter()
                         .filter_map(|(name, handle)| {
                             if !handle.is_finished() {
-                                Some(utils::labels::get_rule_name_from_label(name.as_ref()))
+                                Some(labels::get_rule_name_from_label(name.as_ref()))
                             } else {
                                 None
                             }
@@ -1151,7 +1152,7 @@ impl State {
                 active_tasks.remove(offset);
                 let active_rule_names: Vec<_> = active_tasks
                     .iter()
-                    .map(|e| utils::labels::get_rule_name_from_label(e.as_ref()))
+                    .map(|e| labels::get_rule_name_from_label(e.as_ref()))
                     .collect();
                 progress.set_message(active_rule_names.join(",").as_str());
             }
