@@ -15,10 +15,16 @@ fn add_file_tokens_to_deps(
 ) -> anyhow::Result<()> {
     let mut file_paths: Vec<String> = Vec::new();
     for arg in exec.args.iter().flatten() {
-        file_paths.extend(marker::extract_marker_values(arg, rule::FILE_CONTENT_MARKER));
+        file_paths.extend(marker::extract_marker_values(
+            arg,
+            rule::FILE_CONTENT_MARKER,
+        ));
     }
     for value in exec.env.iter().flat_map(|e| e.values()) {
-        file_paths.extend(marker::extract_marker_values(value, rule::FILE_CONTENT_MARKER));
+        file_paths.extend(marker::extract_marker_values(
+            value,
+            rule::FILE_CONTENT_MARKER,
+        ));
     }
 
     if file_paths.is_empty() {
@@ -59,6 +65,38 @@ fn add_file_tokens_to_deps(
     Ok(())
 }
 
+fn sanitize_exit_value_tokens(
+    exec: &mut executor::exec::Exec,
+    module_name: &Arc<str>,
+) -> anyhow::Result<()> {
+    let marker_open = format!("{}{{", rule::EXIT_VALUE_MARKER);
+    let sanitize_str = |s: &Arc<str>| -> anyhow::Result<Arc<str>> {
+        let mut result = s.to_string();
+        for raw_name in marker::extract_marker_values(s.as_ref(), rule::EXIT_VALUE_MARKER) {
+            if !raw_name.starts_with("//") && !raw_name.starts_with(':') {
+                return Err(format_error!(
+                    "$RUN_LOAD_EXIT_VALUE{{{raw_name}}} must start with '//' or ':'"
+                ));
+            }
+            let expanded =
+                rules::get_sanitized_rule_name_for_module(raw_name.as_str().into(), module_name);
+            let old_token = format!("{marker_open}{raw_name}}}");
+            let new_token = format!("{marker_open}{expanded}}}");
+            result = result.replace(&old_token, &new_token);
+        }
+        Ok(result.into())
+    };
+
+    for arg in exec.args.iter_mut().flatten() {
+        *arg = sanitize_str(arg).context(format_context!("invalid $RUN_LOAD_EXIT_VALUE in arg"))?;
+    }
+    for value in exec.env.iter_mut().flat_map(|e| e.values_mut()) {
+        *value =
+            sanitize_str(value).context(format_context!("invalid $RUN_LOAD_EXIT_VALUE in env"))?;
+    }
+    Ok(())
+}
+
 fn add_exit_value_rule_deps(
     exec: &executor::exec::Exec,
     rule: &mut rule::Rule,
@@ -69,14 +107,15 @@ fn add_exit_value_rule_deps(
         rule_names.extend(marker::extract_marker_values(arg, rule::EXIT_VALUE_MARKER));
     }
     for value in exec.env.iter().flat_map(|e| e.values()) {
-        rule_names.extend(marker::extract_marker_values(value, rule::EXIT_VALUE_MARKER));
+        rule_names.extend(marker::extract_marker_values(
+            value,
+            rule::EXIT_VALUE_MARKER,
+        ));
     }
 
     for raw_name in &rule_names {
-        let sanitized: Arc<str> = rules::get_sanitized_rule_name_for_module(
-            raw_name.as_str().into(),
-            module_name,
-        );
+        let sanitized: Arc<str> =
+            rules::get_sanitized_rule_name_for_module(raw_name.as_str().into(), module_name);
         let already_dep = rule
             .deps
             .iter()
@@ -258,10 +297,18 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             *redirect_stdout = format!("build/{redirect_stdout}").into();
         }
 
-        add_file_tokens_to_deps(&exec, &mut rule)
-            .context(format_context!("Failed to add $FILE tokens to deps for rule {}", rule.name))?;
-        add_exit_value_rule_deps(&exec, &mut rule, &ctx.module_name)
-            .context(format_context!("Failed to add $RUN_LOAD_EXIT_VALUE rule deps for rule {}", rule.name))?;
+        sanitize_exit_value_tokens(&mut exec, &ctx.module_name).context(format_context!(
+            "Failed to sanitize $RUN_LOAD_EXIT_VALUE tokens for rule {}",
+            rule.name
+        ))?;
+        add_file_tokens_to_deps(&exec, &mut rule).context(format_context!(
+            "Failed to add $FILE tokens to deps for rule {}",
+            rule.name
+        ))?;
+        add_exit_value_rule_deps(&exec, &mut rule, &ctx.module_name).context(format_context!(
+            "Failed to add $RUN_LOAD_EXIT_VALUE rule deps for rule {}",
+            rule.name
+        ))?;
 
         let rule_name = rule.name.clone();
         rules::insert_task_for_module(
