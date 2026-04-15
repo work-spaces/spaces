@@ -12,6 +12,8 @@ pub const TEST_RULE_NAME: &str = "//:test";
 pub const PRE_COMMIT_RULE_NAME: &str = "//:pre-commit";
 pub const CLEAN_RULE_NAME: &str = "//:clean";
 pub const ALL_RULE_NAME: &str = "//:all";
+pub const FILE_CONTENT_MARKER: &str = "$RUN_LOAD_FILE_CONTENTS";
+pub const EXIT_VALUE_MARKER: &str = "$RUN_LOAD_EXIT_VALUE";
 
 // add pub enum Inputs with globs and envs
 // add outputs as globs (includes/excludes)

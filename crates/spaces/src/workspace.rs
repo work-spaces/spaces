@@ -1043,12 +1043,13 @@ impl Workspace {
         &self,
         progress: &mut console::Progress,
         globs: &[rule::Globs],
+        is_allow_no_entries: utils::changes::IsAllowNoEntries,
     ) -> anyhow::Result<Vec<String>> {
         let changes_globs = rule::Globs::to_changes_globs(globs);
         self.settings
             .bin
             .changes
-            .inspect_inputs(progress, &changes_globs)
+            .inspect_inputs(progress, &changes_globs, is_allow_no_entries)
             .context(format_context!("Failed to inspect workspace inputs"))
     }
 

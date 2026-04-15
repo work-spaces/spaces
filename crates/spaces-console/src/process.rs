@@ -18,6 +18,12 @@ pub fn get_log_divider() -> Arc<str> {
     "=".repeat(80).into()
 }
 
+#[derive(Debug, Clone)]
+pub struct ExecuteResult {
+    pub stdout: Option<String>,
+    pub exit_code: i32,
+}
+
 #[derive(Clone, Debug)]
 pub struct ExecuteOptions {
     pub label: Arc<str>,
@@ -30,6 +36,9 @@ pub struct ExecuteOptions {
     pub process_started_with_id: Option<fn(&str, u32)>,
     pub log_level: Option<Level>,
     pub timeout: Option<std::time::Duration>,
+    /// When true, a non-zero exit code is **not** promoted to `Err`.
+    /// The caller is expected to inspect `ExecuteResult::exit_code` itself.
+    pub allow_failure: bool,
 }
 
 impl Default for ExecuteOptions {
@@ -45,6 +54,7 @@ impl Default for ExecuteOptions {
             process_started_with_id: None,
             log_level: None,
             timeout: None,
+            allow_failure: false,
         }
     }
 }
@@ -124,7 +134,7 @@ pub(crate) fn monitor_process(
     sender: &mpsc::Sender<String>,
     options: &ExecuteOptions,
     secrets: &Secrets,
-) -> anyhow::Result<Option<String>> {
+) -> anyhow::Result<ExecuteResult> {
     let start_time = std::time::Instant::now();
 
     let child_stdout = child_process
@@ -237,29 +247,26 @@ pub(crate) fn monitor_process(
     handle_stderr(sender, output_file.as_mut(), &mut stderr_content)
         .context("while handling stderr")?;
 
-    if let Some(exit_status) = exit_status
-        && !exit_status.success()
-    {
-        let stderr_message = if output_file.is_some() {
-            String::new()
+    let exit_code = if let Some(exit_status) = exit_status {
+        exit_status.code().unwrap_or(-1)
+    } else {
+        -1
+    };
+
+    let result = ExecuteResult {
+        stdout: if options.is_return_stdout {
+            Some(stdout_content)
         } else {
-            format!(": {stderr_content}")
-        };
-        if let Some(code) = exit_status.code() {
-            let exit_message = format!("Command `{command}` failed with exit code: {code}");
-            return Err(anyhow::anyhow!("{exit_message}{stderr_message}"));
-        } else {
-            return Err(anyhow::anyhow!(
-                "Command `{command}` failed with unknown exit code{stderr_message}"
-            ));
-        }
+            None
+        },
+        exit_code,
+    };
+
+    if !options.allow_failure && exit_code != 0 {
+        return Err(anyhow::anyhow!("Process exited with code {exit_code}"));
     }
 
-    Ok(if options.is_return_stdout {
-        Some(stdout_content)
-    } else {
-        None
-    })
+    Ok(result)
 }
 
 pub(crate) fn create_log_file(

@@ -28,6 +28,12 @@ enum HasAnyEntries {
     Yes,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum IsAllowNoEntries {
+    No,
+    Yes,
+}
+
 fn changes_logger(console: console::Console) -> logger::Logger {
     logger::Logger::new(console, "changes".into())
 }
@@ -127,6 +133,7 @@ impl Changes {
         &self,
         progress: &mut console::Progress,
         inputs: &glob::Globs,
+        is_allow_no_entries: IsAllowNoEntries,
     ) -> anyhow::Result<Vec<String>> {
         let logger = changes_logger(progress.console.clone());
         let mut set = HashSet::new();
@@ -141,6 +148,9 @@ impl Changes {
                     self.walk_glob_dir(progress, input_path, CheckIsModified::No, inputs);
 
                 if has_any_entries == HasAnyEntries::No {
+                    if is_allow_no_entries == IsAllowNoEntries::Yes {
+                        continue;
+                    }
                     return Err(format_error!("glob includes `{input}` but has no entries"));
                 }
                 for entry in walk_dir.into_iter() {

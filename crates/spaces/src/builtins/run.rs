@@ -4,10 +4,129 @@ use starlark::eval::Evaluator;
 use starlark::{environment::GlobalsBuilder, values::none::NoneType};
 
 use std::sync::Arc;
-use utils::{logger, rule, targets};
+use utils::{logger, marker, rule, targets};
 
 use crate::builtins::eval_context::get_eval_context;
 use crate::{executor, rules, task};
+
+fn add_file_tokens_to_deps(
+    exec: &executor::exec::Exec,
+    rule: &mut rule::Rule,
+) -> anyhow::Result<()> {
+    let mut file_paths: Vec<String> = Vec::new();
+    for arg in exec.args.iter().flatten() {
+        file_paths.extend(marker::extract_marker_values(
+            arg,
+            rule::FILE_CONTENT_MARKER,
+        ));
+    }
+    for value in exec.env.iter().flat_map(|e| e.values()) {
+        file_paths.extend(marker::extract_marker_values(
+            value,
+            rule::FILE_CONTENT_MARKER,
+        ));
+    }
+
+    if file_paths.is_empty() {
+        return Ok(());
+    }
+
+    let normalize = |path: &str| -> String {
+        if path.starts_with("//") {
+            path.to_string()
+        } else {
+            match exec.working_directory.as_ref() {
+                Some(wd) => format!("{wd}/{path}"),
+                None => format!("//{path}"),
+            }
+        }
+    };
+
+    for raw_path in &file_paths {
+        let normalized = normalize(raw_path);
+        let already_covered = rule
+            .deps
+            .iter()
+            .flat_map(|deps| deps.collect_globs())
+            .filter_map(|g| match g {
+                rule::Globs::Includes(v) => Some(v),
+                _ => None,
+            })
+            .flatten()
+            .any(|p| p.as_ref() == normalized.as_str());
+
+        if !already_covered {
+            rule::Deps::push_any_dep(
+                &mut rule.deps,
+                rule::AnyDep::Glob(rule::Globs::Includes(vec![normalized.into()])),
+            );
+        }
+    }
+    Ok(())
+}
+
+fn sanitize_exit_value_tokens(
+    exec: &mut executor::exec::Exec,
+    module_name: &Arc<str>,
+) -> anyhow::Result<()> {
+    let marker_open = format!("{}{{", rule::EXIT_VALUE_MARKER);
+    let sanitize_str = |s: &Arc<str>| -> anyhow::Result<Arc<str>> {
+        let mut result = s.to_string();
+        for raw_name in marker::extract_marker_values(s.as_ref(), rule::EXIT_VALUE_MARKER) {
+            if !raw_name.starts_with("//") && !raw_name.starts_with(':') {
+                return Err(format_error!(
+                    "$RUN_LOAD_EXIT_VALUE{{{raw_name}}} must start with '//' or ':'"
+                ));
+            }
+            let expanded =
+                rules::get_sanitized_rule_name_for_module(raw_name.as_str().into(), module_name);
+            let old_token = format!("{marker_open}{raw_name}}}");
+            let new_token = format!("{marker_open}{expanded}}}");
+            result = result.replace(&old_token, &new_token);
+        }
+        Ok(result.into())
+    };
+
+    for arg in exec.args.iter_mut().flatten() {
+        *arg = sanitize_str(arg).context(format_context!("invalid $RUN_LOAD_EXIT_VALUE in arg"))?;
+    }
+    for value in exec.env.iter_mut().flat_map(|e| e.values_mut()) {
+        *value =
+            sanitize_str(value).context(format_context!("invalid $RUN_LOAD_EXIT_VALUE in env"))?;
+    }
+    Ok(())
+}
+
+fn add_exit_value_rule_deps(
+    exec: &executor::exec::Exec,
+    rule: &mut rule::Rule,
+    module_name: &Arc<str>,
+) -> anyhow::Result<()> {
+    let mut rule_names: Vec<String> = Vec::new();
+    for arg in exec.args.iter().flatten() {
+        rule_names.extend(marker::extract_marker_values(arg, rule::EXIT_VALUE_MARKER));
+    }
+    for value in exec.env.iter().flat_map(|e| e.values()) {
+        rule_names.extend(marker::extract_marker_values(
+            value,
+            rule::EXIT_VALUE_MARKER,
+        ));
+    }
+
+    for raw_name in &rule_names {
+        let sanitized: Arc<str> =
+            rules::get_sanitized_rule_name_for_module(raw_name.as_str().into(), module_name);
+        let already_dep = rule
+            .deps
+            .iter()
+            .flat_map(|deps| deps.collect_rules())
+            .any(|r| r.as_ref() == sanitized.as_ref());
+        if !already_dep {
+            rule::Deps::push_any_dep(&mut rule.deps, rule::AnyDep::Rule(sanitized));
+        }
+    }
+    Ok(())
+}
 
 fn add_rule_to_all(
     rule: &rule::Rule,
@@ -145,7 +264,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
         let ctx = get_eval_context(eval)?;
-        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+        let mut rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for exec rule"))?;
 
         if let Some(inputs) = rule.inputs.as_ref() {
@@ -177,6 +296,20 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         if let Some(redirect_stdout) = exec.redirect_stdout.as_mut() {
             *redirect_stdout = format!("build/{redirect_stdout}").into();
         }
+
+        sanitize_exit_value_tokens(&mut exec, &ctx.module_name).context(format_context!(
+            "Failed to sanitize $RUN_LOAD_EXIT_VALUE tokens for rule {}",
+            rule.name
+        ))?;
+        add_file_tokens_to_deps(&exec, &mut rule).context(format_context!(
+            "Failed to add $FILE tokens to deps for rule {}",
+            rule.name
+        ))?;
+        add_exit_value_rule_deps(&exec, &mut rule, &ctx.module_name).context(format_context!(
+            "Failed to add $RUN_LOAD_EXIT_VALUE rule deps for rule {}",
+            rule.name
+        ))?;
+
         let rule_name = rule.name.clone();
         rules::insert_task_for_module(
             task::Task::new(rule, task::Phase::Run, executor::Task::Exec(exec)),

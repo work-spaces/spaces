@@ -48,6 +48,68 @@ fn get_process_id(rule: &str) -> Option<u32> {
     state.processes.get(rule).copied()
 }
 
+fn expand_exit_value_tokens(
+    value: &str,
+    workspace: &workspace::WorkspaceArc,
+) -> anyhow::Result<Arc<str>> {
+    let mut result = String::new();
+    let mut remaining = value;
+    let marker_open = format!("{}{{", rule::EXIT_VALUE_MARKER);
+
+    while let Some(start) = remaining.find(&marker_open) {
+        result.push_str(&remaining[..start]);
+        let after = &remaining[start + marker_open.len()..];
+        let end = after.find('}').ok_or_else(|| {
+            format_error!("Unclosed $RUN_LOAD_EXIT_VALUE{{}} token in: {}", value)
+        })?;
+        let dep_rule = &after[..end];
+        let exit_code = workspace
+            .read()
+            .settings
+            .bin
+            .exit_codes
+            .get(dep_rule)
+            .copied()
+            .ok_or_else(|| format_error!("No exit value stored for rule '{}'", dep_rule))?;
+        result.push_str(&exit_code.to_string());
+        remaining = &after[end + 1..];
+    }
+    result.push_str(remaining);
+    Ok(result.into())
+}
+
+fn expand_file_tokens(
+    value: &str,
+    workspace_root: &str,
+    working_directory: &str,
+) -> anyhow::Result<Arc<str>> {
+    let mut result = String::new();
+    let mut remaining = value;
+    let file_open = format!("{}{{", rule::FILE_CONTENT_MARKER);
+
+    while let Some(start) = remaining.find(&file_open) {
+        result.push_str(&remaining[..start]);
+        let after = &remaining[start + file_open.len()..];
+        let end = after.find('}').ok_or_else(|| {
+            format_error!("Unclosed $RUN_LOAD_FILE_CONTENTS{{}} token in: {}", value)
+        })?;
+        let file_path = &after[..end];
+        let abs_path = if let Some(ws_relative) = file_path.strip_prefix("//") {
+            format!("{workspace_root}/{ws_relative}")
+        } else {
+            format!("{working_directory}/{file_path}")
+        };
+        let contents = std::fs::read_to_string(&abs_path).context(format_context!(
+            "Failed to read $RUN_LOAD_FILE_CONTENTS{{{}}}",
+            file_path
+        ))?;
+        result.push_str(&contents);
+        remaining = &after[end + 1..];
+    }
+    result.push_str(remaining);
+    Ok(result.into())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Exec {
@@ -100,10 +162,28 @@ impl Exec {
             (None, absolute_path_to_workspace.clone())
         };
 
-        exec_env_vars.insert("PWD".into(), pwd);
+        exec_env_vars.insert("PWD".into(), pwd.clone());
+
+        let workspace_root = absolute_path_to_workspace.as_ref();
+        let working_dir = pwd.as_ref();
+
+        for arg in arguments.iter_mut() {
+            *arg = expand_file_tokens(arg, workspace_root, working_dir).context(
+                format_context!("Failed to expand $RUN_LOAD_FILE_CONTENTS tokens in args"),
+            )?;
+            *arg = expand_exit_value_tokens(arg, &workspace).context(format_context!(
+                "Failed to expand $RUN_LOAD_EXIT_VALUE tokens in args"
+            ))?;
+        }
 
         for (key, value) in self.env.clone().unwrap_or_default() {
-            exec_env_vars.insert(key, value);
+            let expanded = expand_file_tokens(&value, workspace_root, working_dir).context(
+                format_context!("Failed to expand $RUN_LOAD_FILE_CONTENTS tokens in env var {key}"),
+            )?;
+            let expanded = expand_exit_value_tokens(&expanded, &workspace).context(
+                format_context!("Failed to expand $RUN_LOAD_EXIT_VALUE tokens in env var {key}"),
+            )?;
+            exec_env_vars.insert(key, expanded);
         }
 
         let command_line_target = workspace.read().target.clone();
@@ -143,6 +223,7 @@ impl Exec {
             process_started_with_id: Some(handle_process_started),
             log_level,
             timeout: self.timeout.map(std::time::Duration::from_secs_f64),
+            allow_failure: true,
         };
 
         logger(progress.console.clone(), name).info(
@@ -154,52 +235,56 @@ impl Exec {
             .as_str(),
         );
 
-        let result = progress.execute_process(&self.command, options);
+        let result = progress
+            .execute_process(&self.command, options)
+            .context(format_context!("Failed to execute {}", self.command))?;
 
         handle_process_ended(name);
+        workspace
+            .write()
+            .settings
+            .bin
+            .exit_codes
+            .insert(name.into(), result.exit_code);
 
         logger(progress.console.clone(), name)
             .debug(format!("log file: {log_file_path:?}").as_str());
 
-        let stdout_content = match result {
-            Ok(content) => {
-                logger(progress.console.clone(), name).info("succeeded");
-
-                if let Some(Expect::Failure) = self.expect.as_ref() {
-                    return Err(format_error!("Expected failure but task succeeded"));
-                } else {
-                    content
-                }
+        let stdout_content = if result.exit_code == 0 {
+            logger(progress.console.clone(), name).info("succeeded");
+            if let Some(Expect::Failure) = self.expect.as_ref() {
+                return Err(format_error!("Expected failure but task succeeded"));
             }
-            Err(exec_error) => {
-                logger(progress.console.clone(), name).info("Failed");
-                if let Some(Expect::Failure) = self.expect.as_ref() {
-                    None
-                } else if let Some(Expect::Any) = self.expect.as_ref() {
-                    None
-                } else {
-                    // if the command failed to execute, there won't be a log file
-                    if let Some(log_file_path) = log_file_path {
-                        if std::path::Path::new(log_file_path.as_ref()).exists() {
-                            let log_contents =
-                                std::fs::read_to_string(log_file_path.as_ref()).context(
-                                    format_context!("Failed to read log file {}", log_file_path),
-                                )?;
-                            if log_contents.len() > 10 * 1024 * 1024 {
-                                logger(progress.console.clone(), name).error(
-                                    format!("See log file {log_file_path} for details").as_str(),
-                                );
-                            } else {
-                                logger(progress.console.clone(), name).error(log_contents.as_str());
-                            }
+            result.stdout
+        } else {
+            logger(progress.console.clone(), name).info("Failed");
+            if let Some(Expect::Failure) | Some(Expect::Any) = self.expect.as_ref() {
+                None
+            } else {
+                if let Some(log_file_path) = log_file_path {
+                    if std::path::Path::new(log_file_path.as_ref()).exists() {
+                        let log_contents =
+                            std::fs::read_to_string(log_file_path.as_ref()).context(
+                                format_context!("Failed to read log file {}", log_file_path),
+                            )?;
+                        if log_contents.len() > 10 * 1024 * 1024 {
+                            logger(progress.console.clone(), name).error(
+                                format!("See log file {log_file_path} for details").as_str(),
+                            );
+                        } else {
+                            logger(progress.console.clone(), name).error(log_contents.as_str());
                         }
-                    } else {
-                        logger(progress.console.clone(), name).error(
-                            "No log file is available (log files disabled with the --ci option)",
-                        );
                     }
-                    return Err(exec_error);
+                } else {
+                    logger(progress.console.clone(), name).error(
+                        "No log file is available (log files disabled with the --ci option)",
+                    );
                 }
+                return Err(format_error!(
+                    "Command `{}` failed with exit code: {}",
+                    self.command,
+                    result.exit_code
+                ));
             }
         };
 
@@ -330,18 +415,21 @@ impl Kill {
                     self.signal.to_kill_arg(),
                     format!("{process_id}").into(),
                 ],
+                allow_failure: true,
                 ..Default::default()
             };
 
-            let result = progress.execute_process("kill", options);
+            let result = progress
+                .execute_process("kill", options)
+                .context(format_context!("Failed to execute kill"))?;
             match self.expect.as_ref() {
                 Some(Expect::Success) => {
-                    if result.is_err() {
+                    if result.exit_code != 0 {
                         return Err(format_error!("Expected success but kill failed {self:?}"));
                     }
                 }
                 Some(Expect::Failure) => {
-                    if result.is_ok() {
+                    if result.exit_code == 0 {
                         return Err(format_error!(
                             "Expected failure but kill succeeded {self:?}"
                         ));
