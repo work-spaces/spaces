@@ -17,7 +17,6 @@ pub enum UseWorkspaceEnv {
 #[derive(Debug, Clone, Default)]
 struct State {
     processes: HashMap<String, u32>,
-    exit_values: HashMap<String, i32>,
 }
 
 static STATE: state::InitCell<lock::StateLock<State>> = state::InitCell::new();
@@ -49,17 +48,10 @@ fn get_process_id(rule: &str) -> Option<u32> {
     state.processes.get(rule).copied()
 }
 
-fn store_exit_value(rule: &str, exit_code: i32) {
-    let mut state = get_state().write();
-    state.exit_values.insert(rule.to_string(), exit_code);
-}
-
-pub fn get_exit_value(rule: &str) -> Option<i32> {
-    let state = get_state().read();
-    state.exit_values.get(rule).copied()
-}
-
-fn expand_exit_value_tokens(value: &str) -> anyhow::Result<Arc<str>> {
+fn expand_exit_value_tokens(
+    value: &str,
+    workspace: &workspace::WorkspaceArc,
+) -> anyhow::Result<Arc<str>> {
     let mut result = String::new();
     let mut remaining = value;
     let marker_open = format!("{}{{", rule::EXIT_VALUE_MARKER);
@@ -71,7 +63,13 @@ fn expand_exit_value_tokens(value: &str) -> anyhow::Result<Arc<str>> {
             format_error!("Unclosed $RUN_LOAD_EXIT_VALUE{{}} token in: {}", value)
         })?;
         let dep_rule = &after[..end];
-        let exit_code = get_exit_value(dep_rule)
+        let exit_code = workspace
+            .read()
+            .settings
+            .bin
+            .exit_codes
+            .get(dep_rule)
+            .copied()
             .ok_or_else(|| format_error!("No exit value stored for rule '{}'", dep_rule))?;
         result.push_str(&exit_code.to_string());
         remaining = &after[end + 1..];
@@ -92,9 +90,9 @@ fn expand_file_tokens(
     while let Some(start) = remaining.find(&file_open) {
         result.push_str(&remaining[..start]);
         let after = &remaining[start + file_open.len()..];
-        let end = after.find('}').ok_or_else(|| {
-            format_error!("Unclosed $FILE{{}} token in: {}", value)
-        })?;
+        let end = after
+            .find('}')
+            .ok_or_else(|| format_error!("Unclosed $FILE{{}} token in: {}", value))?;
         let file_path = &after[..end];
         let abs_path = if let Some(ws_relative) = file_path.strip_prefix("//") {
             format!("{workspace_root}/{ws_relative}")
@@ -170,15 +168,18 @@ impl Exec {
         for arg in arguments.iter_mut() {
             *arg = expand_file_tokens(arg, workspace_root, working_dir)
                 .context(format_context!("Failed to expand $FILE tokens in args"))?;
-            *arg = expand_exit_value_tokens(arg)
-                .context(format_context!("Failed to expand $RUN_LOAD_EXIT_VALUE tokens in args"))?;
+            *arg = expand_exit_value_tokens(arg, &workspace).context(format_context!(
+                "Failed to expand $RUN_LOAD_EXIT_VALUE tokens in args"
+            ))?;
         }
 
         for (key, value) in self.env.clone().unwrap_or_default() {
-            let expanded = expand_file_tokens(&value, workspace_root, working_dir)
-                .context(format_context!("Failed to expand $FILE tokens in env var {key}"))?;
-            let expanded = expand_exit_value_tokens(&expanded)
-                .context(format_context!("Failed to expand $RUN_LOAD_EXIT_VALUE tokens in env var {key}"))?;
+            let expanded = expand_file_tokens(&value, workspace_root, working_dir).context(
+                format_context!("Failed to expand $FILE tokens in env var {key}"),
+            )?;
+            let expanded = expand_exit_value_tokens(&expanded, &workspace).context(
+                format_context!("Failed to expand $RUN_LOAD_EXIT_VALUE tokens in env var {key}"),
+            )?;
             exec_env_vars.insert(key, expanded);
         }
 
@@ -235,7 +236,12 @@ impl Exec {
             .context(format_context!("Failed to execute {}", self.command))?;
 
         handle_process_ended(name);
-        store_exit_value(name, result.exit_code);
+        workspace
+            .write()
+            .settings
+            .bin
+            .exit_codes
+            .insert(name.into(), result.exit_code);
 
         logger(progress.console.clone(), name)
             .debug(format!("log file: {log_file_path:?}").as_str());

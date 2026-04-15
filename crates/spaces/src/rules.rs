@@ -277,6 +277,7 @@ pub fn execute_rule(
             } else {
                 progress.set_finalize_lines(skip_execute_message);
             }
+
             (false, Ok(executor::TaskResult::new()))
         } else {
             let cache_path = {

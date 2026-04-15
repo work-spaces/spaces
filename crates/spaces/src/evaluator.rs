@@ -920,7 +920,11 @@ fn build_query_rule(
         let glob_deps = rules::collect_task_glob_deps(task);
         let files = workspace
             .read()
-            .inspect_inputs(&mut progress, &glob_deps, utils::changes::IsAllowNoEntries::Yes)
+            .inspect_inputs(
+                &mut progress,
+                &glob_deps,
+                utils::changes::IsAllowNoEntries::Yes,
+            )
             .context(format_context!("Failed to inspect deps globs for query"))?;
         dep_strings.extend(files.into_iter().map(|e| format!("//{e}").into()));
         Some(dep_strings)
