@@ -78,6 +78,7 @@ impl OrasArchive {
         let options = console::ExecuteOptions {
             arguments: vec!["manifest".into(), "fetch".into(), artifact_label.clone()],
             is_return_stdout: true,
+            allow_failure: true,
             ..Default::default()
         };
 
@@ -87,8 +88,15 @@ impl OrasArchive {
                 options,
             )
             .context(format_context!(
-                "failed to download {artifact_label} using oras",
+                "failed to fetch manifest for {artifact_label} using oras",
             ))?;
+
+        if manifest.exit_code != 0 {
+            return Err(format_error!(
+                "oras manifest fetch for {artifact_label} failed with exit code {}",
+                manifest.exit_code
+            ));
+        }
 
         if let Some(manifest) = manifest.stdout {
             let value: serde_json::Value = serde_json::from_str(&manifest).context(

@@ -90,17 +90,19 @@ fn expand_file_tokens(
     while let Some(start) = remaining.find(&file_open) {
         result.push_str(&remaining[..start]);
         let after = &remaining[start + file_open.len()..];
-        let end = after
-            .find('}')
-            .ok_or_else(|| format_error!("Unclosed $FILE{{}} token in: {}", value))?;
+        let end = after.find('}').ok_or_else(|| {
+            format_error!("Unclosed $RUN_LOAD_FILE_CONTENTS{{}} token in: {}", value)
+        })?;
         let file_path = &after[..end];
         let abs_path = if let Some(ws_relative) = file_path.strip_prefix("//") {
             format!("{workspace_root}/{ws_relative}")
         } else {
             format!("{working_directory}/{file_path}")
         };
-        let contents = std::fs::read_to_string(&abs_path)
-            .context(format_context!("Failed to read $FILE{{{}}}", file_path))?;
+        let contents = std::fs::read_to_string(&abs_path).context(format_context!(
+            "Failed to read $RUN_LOAD_FILE_CONTENTS{{{}}}",
+            file_path
+        ))?;
         result.push_str(&contents);
         remaining = &after[end + 1..];
     }
@@ -166,8 +168,9 @@ impl Exec {
         let working_dir = pwd.as_ref();
 
         for arg in arguments.iter_mut() {
-            *arg = expand_file_tokens(arg, workspace_root, working_dir)
-                .context(format_context!("Failed to expand $FILE tokens in args"))?;
+            *arg = expand_file_tokens(arg, workspace_root, working_dir).context(
+                format_context!("Failed to expand $RUN_LOAD_FILE_CONTENTS tokens in args"),
+            )?;
             *arg = expand_exit_value_tokens(arg, &workspace).context(format_context!(
                 "Failed to expand $RUN_LOAD_EXIT_VALUE tokens in args"
             ))?;
@@ -175,7 +178,7 @@ impl Exec {
 
         for (key, value) in self.env.clone().unwrap_or_default() {
             let expanded = expand_file_tokens(&value, workspace_root, working_dir).context(
-                format_context!("Failed to expand $FILE tokens in env var {key}"),
+                format_context!("Failed to expand $RUN_LOAD_FILE_CONTENTS tokens in env var {key}"),
             )?;
             let expanded = expand_exit_value_tokens(&expanded, &workspace).context(
                 format_context!("Failed to expand $RUN_LOAD_EXIT_VALUE tokens in env var {key}"),
@@ -220,6 +223,7 @@ impl Exec {
             process_started_with_id: Some(handle_process_started),
             log_level,
             timeout: self.timeout.map(std::time::Duration::from_secs_f64),
+            allow_failure: true,
         };
 
         logger(progress.console.clone(), name).info(
@@ -411,6 +415,7 @@ impl Kill {
                     self.signal.to_kill_arg(),
                     format!("{process_id}").into(),
                 ],
+                allow_failure: true,
                 ..Default::default()
             };
 

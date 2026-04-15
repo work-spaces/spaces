@@ -36,6 +36,9 @@ pub struct ExecuteOptions {
     pub process_started_with_id: Option<fn(&str, u32)>,
     pub log_level: Option<Level>,
     pub timeout: Option<std::time::Duration>,
+    /// When true, a non-zero exit code is **not** promoted to `Err`.
+    /// The caller is expected to inspect `ExecuteResult::exit_code` itself.
+    pub allow_failure: bool,
 }
 
 impl Default for ExecuteOptions {
@@ -51,6 +54,7 @@ impl Default for ExecuteOptions {
             process_started_with_id: None,
             log_level: None,
             timeout: None,
+            allow_failure: false,
         }
     }
 }
@@ -249,14 +253,20 @@ pub(crate) fn monitor_process(
         -1
     };
 
-    Ok(ExecuteResult {
+    let result = ExecuteResult {
         stdout: if options.is_return_stdout {
             Some(stdout_content)
         } else {
             None
         },
         exit_code,
-    })
+    };
+
+    if !options.allow_failure && exit_code != 0 {
+        return Err(anyhow::anyhow!("Process exited with code {exit_code}"));
+    }
+
+    Ok(result)
 }
 
 pub(crate) fn create_log_file(
