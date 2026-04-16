@@ -201,7 +201,7 @@ impl Decoder {
                         zip_file.read_to_end(&mut buffer).context(format_context!(
                             "failed to read zip for {destination_path}"
                         ))?;
-                        file.write(buffer.as_slice())
+                        file.write_all(buffer.as_slice())
                             .context(format_context!("failed to write {destination_path}"))?;
 
                         #[cfg(unix)]
