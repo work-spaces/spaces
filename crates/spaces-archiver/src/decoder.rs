@@ -203,6 +203,18 @@ impl Decoder {
                         ))?;
                         file.write(buffer.as_slice())
                             .context(format_context!("failed to write {destination_path}"))?;
+
+                        #[cfg(unix)]
+                        if let Some(mode) = zip_file.unix_mode() {
+                            use std::os::unix::fs::PermissionsExt;
+                            std::fs::set_permissions(
+                                dest_path,
+                                std::fs::Permissions::from_mode(mode),
+                            )
+                            .context(format_context!(
+                                "failed to set permissions on {destination_path}"
+                            ))?;
+                        }
                     }
                 }
 
