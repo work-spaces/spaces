@@ -3597,6 +3597,7 @@ dependencies = [
  "anyhow-source-location",
  "clap",
  "crossterm",
+ "libc",
  "serde",
  "serde_yaml",
  "strum",

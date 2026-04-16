@@ -5,6 +5,8 @@ use std::sync::{Arc, Mutex, RwLock};
 mod file;
 mod null;
 mod process;
+#[cfg(unix)]
+mod pty;
 mod secrets;
 mod super_console;
 pub mod ui;
@@ -420,7 +422,7 @@ impl Console {
     ) -> anyhow::Result<ExecuteResult> {
         use std::sync::mpsc;
 
-        let child = options
+        let (child, pty_master) = options
             .spawn(command)
             .context(format_context!("Failed to spawn command {command}"))?;
         let (tx, rx) = mpsc::channel::<String>();
@@ -458,7 +460,7 @@ impl Console {
         });
 
         let secrets = self.state.read().unwrap().secrets.clone();
-        let result = process::monitor_process(command, child, &tx, &options, &secrets);
+        let result = process::monitor_process(command, child, &tx, &options, &secrets, pty_master);
         drop(tx);
         let _ = status_thread.join();
         result

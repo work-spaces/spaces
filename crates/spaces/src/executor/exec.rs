@@ -224,6 +224,8 @@ impl Exec {
             log_level,
             timeout: self.timeout.map(std::time::Duration::from_secs_f64),
             allow_failure: true,
+            use_pty: log_level
+                .is_some_and(|l| l == console::Level::Passthrough || l == console::Level::App),
         };
 
         logger(progress.console.clone(), name).info(

@@ -39,6 +39,9 @@ pub struct ExecuteOptions {
     /// When true, a non-zero exit code is **not** promoted to `Err`.
     /// The caller is expected to inspect `ExecuteResult::exit_code` itself.
     pub allow_failure: bool,
+    /// When true, stdout is connected to a PTY so the child process
+    /// uses line-buffered output instead of block-buffered.
+    pub use_pty: bool,
 }
 
 impl Default for ExecuteOptions {
@@ -55,6 +58,7 @@ impl Default for ExecuteOptions {
             log_level: None,
             timeout: None,
             allow_failure: false,
+            use_pty: false,
         }
     }
 }
@@ -77,7 +81,10 @@ impl ExecuteOptions {
         Ok((thread, rx))
     }
 
-    pub(crate) fn spawn(&self, command: &str) -> anyhow::Result<std::process::Child> {
+    pub(crate) fn spawn(
+        &self,
+        command: &str,
+    ) -> anyhow::Result<(std::process::Child, Option<std::fs::File>)> {
         use std::process::{Command, Stdio};
         let mut process = Command::new(command);
 
@@ -97,8 +104,23 @@ impl ExecuteOptions {
             process.env(key.as_ref(), value.as_ref());
         }
 
+        #[cfg(unix)]
+        let pty_master = if self.use_pty {
+            let pty = crate::pty::open_pty()?;
+            process.stdout(pty.slave);
+            Some(pty.master)
+        } else {
+            process.stdout(Stdio::piped());
+            None
+        };
+
+        #[cfg(not(unix))]
+        let pty_master: Option<std::fs::File> = {
+            process.stdout(Stdio::piped());
+            None
+        };
+
         let result = process
-            .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(Stdio::null())
             .spawn()
@@ -108,7 +130,7 @@ impl ExecuteOptions {
             callback(self.label.as_ref(), result.id());
         }
 
-        Ok(result)
+        Ok((result, pty_master))
     }
 
     pub fn get_full_command(&self, command: &str) -> String {
@@ -134,13 +156,21 @@ pub(crate) fn monitor_process(
     sender: &mpsc::Sender<String>,
     options: &ExecuteOptions,
     secrets: &Secrets,
+    pty_master: Option<std::fs::File>,
 ) -> anyhow::Result<ExecuteResult> {
     let start_time = std::time::Instant::now();
 
-    let child_stdout = child_process
-        .stdout
-        .take()
-        .ok_or(anyhow::anyhow!("Internal Error: Child has no stdout"))?;
+    let child_stdout: Box<dyn std::io::Read + Send> = if let Some(master) = pty_master {
+        drop(child_process.stdout.take());
+        Box::new(master)
+    } else {
+        Box::new(
+            child_process
+                .stdout
+                .take()
+                .ok_or(anyhow::anyhow!("Internal Error: Child has no stdout"))?,
+        )
+    };
 
     let child_stderr = child_process
         .stderr
