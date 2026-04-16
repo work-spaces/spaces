@@ -1,4 +1,4 @@
-use crate::{http_archive, logger, platform, ws};
+use crate::{http_archive, logger, platform, store, ws};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use std::sync::Arc;
@@ -337,6 +337,25 @@ impl Manager {
                         release.tag_name
                     ))?;
                 }
+
+                // Update the store manifest so this entry is tracked for pruning/info
+                let relative_path = http_archive::HttpArchive::url_to_relative_path(
+                    &asset.browser_download_url,
+                    &None,
+                )
+                .context(format_context!(
+                    "Failed to get relative path for {}",
+                    asset.browser_download_url
+                ))?;
+                let mut manifest_store = store::Store::new_from_store_path(&self.path_to_store)
+                    .context(format_context!("Failed to load store manifest"))?;
+                manifest_store
+                    .add_entry(std::path::Path::new(&relative_path))
+                    .context(format_context!("Failed to add version to store manifest"))?;
+                manifest_store
+                    .save(&self.path_to_store)
+                    .context(format_context!("Failed to save store manifest"))?;
+
                 let binary_path = self.get_tools_path_to_binary(release.tag_name.as_ref());
 
                 if !binary_path.exists() {
