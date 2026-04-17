@@ -20,7 +20,16 @@ pub enum Command {
         /// The tag to fetch, default is the latest version
         #[clap(long)]
         tag: Option<Arc<str>>,
+        /// Include pre-releases when fetching the latest version
+        #[clap(long)]
+        prerelease: bool,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IncludePrerelease {
+    No,
+    Yes,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -48,6 +57,8 @@ impl GithubAsset {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct GithubRelease {
     tag_name: Arc<str>,
+    #[serde(default)]
+    prerelease: bool,
     assets: Vec<GithubAsset>,
 }
 
@@ -276,6 +287,7 @@ impl Manager {
         &self,
         console: console::Console,
         tag: Option<Arc<str>>,
+        include_prerelease: IncludePrerelease,
     ) -> Result<(), anyhow::Error> {
         let mut progress_bar = console::Progress::new(console.clone(), "fetch", None, None);
 
@@ -285,8 +297,10 @@ impl Manager {
 
         let release = if let Some(tag) = tag.clone() {
             releases.iter().find(|release| release.tag_name == tag)
-        } else {
+        } else if include_prerelease == IncludePrerelease::Yes {
             releases.first()
+        } else {
+            releases.iter().find(|release| !release.prerelease)
         };
 
         if let Some(release) = release {
