@@ -245,9 +245,9 @@ impl Store {
         match sort_by {
             SortBy::Name => entries.sort_by(|a, b| a.0.cmp(b.0)),
             // largest to smallest
-            SortBy::Size => entries.sort_by(|a, b| b.1.size.cmp(&a.1.size)),
+            SortBy::Size => entries.sort_by_key(|b| std::cmp::Reverse(b.1.size)),
             // oldest to newest
-            SortBy::Age => entries.sort_by(|a, b| b.1.get_age(now).cmp(&a.1.get_age(now))),
+            SortBy::Age => entries.sort_by_key(|b| std::cmp::Reverse(b.1.get_age(now))),
         }
 
         // Collect managed entry info

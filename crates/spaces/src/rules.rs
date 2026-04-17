@@ -1101,10 +1101,8 @@ impl State {
                     for (name, handle) in handle_list.iter() {
                         if !handle.is_finished() {
                             number_running += 1;
-                        } else {
-                            if task_pending_set.remove(name.as_ref()) {
-                                progress.increment(1);
-                            }
+                        } else if task_pending_set.remove(name.as_ref()) {
+                            progress.increment(1);
                         }
                     }
 
