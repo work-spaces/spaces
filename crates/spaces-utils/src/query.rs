@@ -465,7 +465,7 @@ fn push_highlighted_value(
 
     let mut current_highlighted = highlights[0];
     let mut chunk = String::new();
-    for (ch, highlighted) in chars.into_iter().zip(highlights.into_iter()) {
+    for (ch, highlighted) in chars.into_iter().zip(highlights) {
         if highlighted != current_highlighted {
             if current_highlighted {
                 line.push(console::Span::new_styled_lossy(StyledContent::new(
@@ -514,7 +514,7 @@ fn make_name_line(name: &str, highlight_terms: Option<&[Arc<str>]>) -> console::
 
     let mut current_highlighted = highlights[0];
     let mut chunk = String::new();
-    for (ch, highlighted) in chars.into_iter().zip(highlights.into_iter()) {
+    for (ch, highlighted) in chars.into_iter().zip(highlights) {
         if highlighted != current_highlighted {
             if current_highlighted {
                 line.push(console::Span::new_styled_lossy(StyledContent::new(
@@ -873,7 +873,7 @@ impl QueryCommand {
                     score_rule(qr);
                 }
 
-                scored.sort_by(|a, b| b.score.cmp(&a.score));
+                scored.sort_by_key(|b| std::cmp::Reverse(b.score));
                 let top: IndexMap<Arc<str>, ScoredInfo> = scored
                     .into_iter()
                     .take(*limit)

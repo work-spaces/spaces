@@ -136,7 +136,6 @@ pub fn validate(globs: &HashSet<Arc<str>>) -> anyhow::Result<()> {
 }
 
 #[cfg(test)]
-
 mod tests {
     use super::*;
 
@@ -160,71 +159,71 @@ mod tests {
 
         let globs =
             Globs::new_with_annotated_set(&vec!["+//**/*:*bin".into()].into_iter().collect());
-        assert_eq!(globs.is_match(INPUT_LIST[0]), true);
-        assert_eq!(globs.is_match(INPUT_LIST[1]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[2]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[3]), true);
-        assert_eq!(globs.is_match(INPUT_LIST[4]), true);
-        assert_eq!(globs.is_match(INPUT_LIST[5]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[7]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[8]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[9]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[10]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[11]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[12]), true);
+        assert!(globs.is_match(INPUT_LIST[0]));
+        assert!(!globs.is_match(INPUT_LIST[1]));
+        assert!(!globs.is_match(INPUT_LIST[2]));
+        assert!(globs.is_match(INPUT_LIST[3]));
+        assert!(globs.is_match(INPUT_LIST[4]));
+        assert!(!globs.is_match(INPUT_LIST[5]));
+        assert!(!globs.is_match(INPUT_LIST[7]));
+        assert!(!globs.is_match(INPUT_LIST[8]));
+        assert!(!globs.is_match(INPUT_LIST[9]));
+        assert!(!globs.is_match(INPUT_LIST[10]));
+        assert!(!globs.is_match(INPUT_LIST[11]));
+        assert!(globs.is_match(INPUT_LIST[12]));
 
         let globs = Globs::new_with_annotated_set(
             &vec!["+//**/*:*bin".into(), "-//**/*:*ftp.gnu.org*".into()]
                 .into_iter()
                 .collect(),
         );
-        assert_eq!(globs.is_match(INPUT_LIST[0]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[1]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[2]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[3]), true);
-        assert_eq!(globs.is_match(INPUT_LIST[4]), true);
-        assert_eq!(globs.is_match(INPUT_LIST[5]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[6]), true);
-        assert_eq!(globs.is_match(INPUT_LIST[7]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[8]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[9]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[10]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[11]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[12]), true);
+        assert!(!globs.is_match(INPUT_LIST[0]));
+        assert!(!globs.is_match(INPUT_LIST[1]));
+        assert!(!globs.is_match(INPUT_LIST[2]));
+        assert!(globs.is_match(INPUT_LIST[3]));
+        assert!(globs.is_match(INPUT_LIST[4]));
+        assert!(!globs.is_match(INPUT_LIST[5]));
+        assert!(globs.is_match(INPUT_LIST[6]));
+        assert!(!globs.is_match(INPUT_LIST[7]));
+        assert!(!globs.is_match(INPUT_LIST[8]));
+        assert!(!globs.is_match(INPUT_LIST[9]));
+        assert!(!globs.is_match(INPUT_LIST[10]));
+        assert!(!globs.is_match(INPUT_LIST[11]));
+        assert!(globs.is_match(INPUT_LIST[12]));
         let globs = Globs::new_with_annotated_set(
             &vec!["+//**/**".into(), "-//capsules:*".into()]
                 .into_iter()
                 .collect(),
         );
-        assert_eq!(globs.is_match(INPUT_LIST[0]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[1]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[2]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[3]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[4]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[5]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[6]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[7]), true);
-        assert_eq!(globs.is_match(INPUT_LIST[8]), true);
-        assert_eq!(globs.is_match(INPUT_LIST[9]), true);
-        assert_eq!(globs.is_match(INPUT_LIST[10]), true);
-        assert_eq!(globs.is_match(INPUT_LIST[11]), true);
-        assert_eq!(globs.is_match(INPUT_LIST[12]), true);
+        assert!(!globs.is_match(INPUT_LIST[0]));
+        assert!(!globs.is_match(INPUT_LIST[1]));
+        assert!(!globs.is_match(INPUT_LIST[2]));
+        assert!(!globs.is_match(INPUT_LIST[3]));
+        assert!(!globs.is_match(INPUT_LIST[4]));
+        assert!(!globs.is_match(INPUT_LIST[5]));
+        assert!(!globs.is_match(INPUT_LIST[6]));
+        assert!(globs.is_match(INPUT_LIST[7]));
+        assert!(globs.is_match(INPUT_LIST[8]));
+        assert!(globs.is_match(INPUT_LIST[9]));
+        assert!(globs.is_match(INPUT_LIST[10]));
+        assert!(globs.is_match(INPUT_LIST[11]));
+        assert!(globs.is_match(INPUT_LIST[12]));
         let globs = Globs::new_with_annotated_set(
             &vec!["+//**/capsules/**:*".into()].into_iter().collect(),
         );
-        assert_eq!(globs.is_match(INPUT_LIST[0]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[1]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[2]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[3]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[4]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[5]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[6]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[7]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[8]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[9]), true);
-        assert_eq!(globs.is_match(INPUT_LIST[10]), true);
-        assert_eq!(globs.is_match(INPUT_LIST[11]), true);
-        assert_eq!(globs.is_match(INPUT_LIST[12]), true);
+        assert!(!globs.is_match(INPUT_LIST[0]));
+        assert!(!globs.is_match(INPUT_LIST[1]));
+        assert!(!globs.is_match(INPUT_LIST[2]));
+        assert!(!globs.is_match(INPUT_LIST[3]));
+        assert!(!globs.is_match(INPUT_LIST[4]));
+        assert!(!globs.is_match(INPUT_LIST[5]));
+        assert!(!globs.is_match(INPUT_LIST[6]));
+        assert!(!globs.is_match(INPUT_LIST[7]));
+        assert!(!globs.is_match(INPUT_LIST[8]));
+        assert!(globs.is_match(INPUT_LIST[9]));
+        assert!(globs.is_match(INPUT_LIST[10]));
+        assert!(globs.is_match(INPUT_LIST[11]));
+        assert!(globs.is_match(INPUT_LIST[12]));
         let globs = Globs::new_with_annotated_set(
             &vec![
                 "+//*/capsules/**:*".into(),
@@ -233,19 +232,19 @@ mod tests {
             .into_iter()
             .collect(),
         );
-        assert_eq!(globs.is_match(INPUT_LIST[0]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[1]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[2]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[3]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[4]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[5]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[6]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[7]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[8]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[9]), true);
-        assert_eq!(globs.is_match(INPUT_LIST[10]), true);
-        assert_eq!(globs.is_match(INPUT_LIST[11]), false);
-        assert_eq!(globs.is_match(INPUT_LIST[12]), false);
+        assert!(!globs.is_match(INPUT_LIST[0]));
+        assert!(!globs.is_match(INPUT_LIST[1]));
+        assert!(!globs.is_match(INPUT_LIST[2]));
+        assert!(!globs.is_match(INPUT_LIST[3]));
+        assert!(!globs.is_match(INPUT_LIST[4]));
+        assert!(!globs.is_match(INPUT_LIST[5]));
+        assert!(!globs.is_match(INPUT_LIST[6]));
+        assert!(!globs.is_match(INPUT_LIST[7]));
+        assert!(!globs.is_match(INPUT_LIST[8]));
+        assert!(globs.is_match(INPUT_LIST[9]));
+        assert!(globs.is_match(INPUT_LIST[10]));
+        assert!(!globs.is_match(INPUT_LIST[11]));
+        assert!(!globs.is_match(INPUT_LIST[12]));
     }
 
     #[test]
@@ -264,9 +263,9 @@ mod tests {
                 .collect(),
         );
 
-        assert_eq!(globs.is_match("foo"), false);
-        assert_eq!(globs.is_match("bar"), true);
-        assert_eq!(globs.is_match("baz"), false);
+        assert!(!globs.is_match("foo"));
+        assert!(globs.is_match("bar"));
+        assert!(!globs.is_match("baz"));
     }
 
     #[test]

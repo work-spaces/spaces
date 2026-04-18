@@ -76,15 +76,13 @@ fn get_task_signal_deps(task: &task::Task) -> anyhow::Result<Vec<task::SignalArc
                     ));
                 }
             }
-            task::Phase::Checkout => {
-                if dep_task.phase != task::Phase::Checkout {
-                    return Err(format_error!(
-                        "Rule {} (phase: Checkout) cannot depend on rule {} in phase {}",
-                        task.rule.name,
-                        dep_task.rule.name,
-                        dep_task.phase
-                    ));
-                }
+            task::Phase::Checkout if dep_task.phase != task::Phase::Checkout => {
+                return Err(format_error!(
+                    "Rule {} (phase: Checkout) cannot depend on rule {} in phase {}",
+                    task.rule.name,
+                    dep_task.rule.name,
+                    dep_task.phase
+                ));
             }
             _ => {}
         }
@@ -149,8 +147,7 @@ pub fn execute_rule(
 
         logger.trace(format!("{total} dependencies").as_str());
 
-        let mut count = 1;
-        for deps_rule_signal in deps_signals {
+        for (count, deps_rule_signal) in (1..).zip(deps_signals) {
             let signal_name = {
                 let (lock, _) = &*deps_rule_signal.signal;
                 let signal_access = lock.lock().unwrap();
@@ -162,7 +159,6 @@ pub fn execute_rule(
             );
 
             deps_rule_signal.wait_is_ready(std::time::Duration::from_millis(100));
-            count += 1;
             progress.reset_elapsed();
         }
 
@@ -961,7 +957,7 @@ impl State {
 
         if fuzzy_query.is_some() {
             // Sort by score descending so the best matches come first
-            scored_tasks.sort_by(|a, b| b.score.cmp(&a.score));
+            scored_tasks.sort_by_key(|b| std::cmp::Reverse(b.score));
 
             // Only show the top matching targets (top 10)
             let top_count = 10.min(scored_tasks.len());
@@ -1101,10 +1097,8 @@ impl State {
                     for (name, handle) in handle_list.iter() {
                         if !handle.is_finished() {
                             number_running += 1;
-                        } else {
-                            if task_pending_set.remove(name.as_ref()) {
-                                progress.increment(1);
-                            }
+                        } else if task_pending_set.remove(name.as_ref()) {
+                            progress.increment(1);
                         }
                     }
 

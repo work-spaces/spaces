@@ -187,7 +187,7 @@ mod tests {
 
             if let Some(file) = file.as_mut() {
                 for j in 0..LINE_COUNT {
-                    file.write(format!("This is line #{j}\n").as_bytes())
+                    file.write_all(format!("This is line #{j}\n").as_bytes())
                         .unwrap();
                 }
             }
@@ -205,7 +205,7 @@ mod tests {
 
     #[test]
     fn test_file_list() {
-        fn contains(files: &Vec<(String, String)>, archive_path: &str) -> bool {
+        fn contains(files: &[(String, String)], archive_path: &str) -> bool {
             files.iter().any(|(a, _)| a == archive_path)
         }
 
@@ -220,55 +220,55 @@ mod tests {
         };
 
         let files = create_archive.build_file_list().unwrap();
-        assert_eq!(contains(&files, "a/a.txt"), true);
-        assert_eq!(contains(&files, "a/b.txt"), true);
-        assert_eq!(contains(&files, "b/a.txt"), true);
-        assert_eq!(contains(&files, "b/b.txt"), true);
-        assert_eq!(contains(&files, "a.txt"), false);
-        assert_eq!(contains(&files, "b.txt"), false);
+        assert!(contains(&files, "a/a.txt"));
+        assert!(contains(&files, "a/b.txt"));
+        assert!(contains(&files, "b/a.txt"));
+        assert!(contains(&files, "b/b.txt"));
+        assert!(!contains(&files, "a.txt"));
+        assert!(!contains(&files, "b.txt"));
         assert_eq!(files.len(), 4);
 
         create_archive.excludes = Some(vec!["a/*".to_string()]);
         let files = create_archive.build_file_list().unwrap();
-        assert_eq!(contains(&files, "a/a.txt"), false);
-        assert_eq!(contains(&files, "a/b.txt"), false);
-        assert_eq!(contains(&files, "b/a.txt"), true);
-        assert_eq!(contains(&files, "b/b.txt"), true);
-        assert_eq!(contains(&files, "a.txt"), true);
-        assert_eq!(contains(&files, "b.txt"), true);
+        assert!(!contains(&files, "a/a.txt"));
+        assert!(!contains(&files, "a/b.txt"));
+        assert!(contains(&files, "b/a.txt"));
+        assert!(contains(&files, "b/b.txt"));
+        assert!(contains(&files, "a.txt"));
+        assert!(contains(&files, "b.txt"));
         assert_eq!(files.len(), 4);
 
         create_archive.includes = Some(vec!["a/*".to_string()]);
         create_archive.excludes = None;
         let files = create_archive.build_file_list().unwrap();
-        assert_eq!(contains(&files, "a/a.txt"), true);
-        assert_eq!(contains(&files, "a/b.txt"), true);
-        assert_eq!(contains(&files, "b/a.txt"), false);
-        assert_eq!(contains(&files, "b/b.txt"), false);
-        assert_eq!(contains(&files, "a.txt"), false);
-        assert_eq!(contains(&files, "b.txt"), false);
+        assert!(contains(&files, "a/a.txt"));
+        assert!(contains(&files, "a/b.txt"));
+        assert!(!contains(&files, "b/a.txt"));
+        assert!(!contains(&files, "b/b.txt"));
+        assert!(!contains(&files, "a.txt"));
+        assert!(!contains(&files, "b.txt"));
         assert_eq!(files.len(), 2);
 
         create_archive.includes = None;
         create_archive.excludes = None;
         let files = create_archive.build_file_list().unwrap();
-        assert_eq!(contains(&files, "a/a.txt"), true);
-        assert_eq!(contains(&files, "a/b.txt"), true);
-        assert_eq!(contains(&files, "b/a.txt"), true);
-        assert_eq!(contains(&files, "b/b.txt"), true);
-        assert_eq!(contains(&files, "a.txt"), true);
-        assert_eq!(contains(&files, "a.txt"), true);
+        assert!(contains(&files, "a/a.txt"));
+        assert!(contains(&files, "a/b.txt"));
+        assert!(contains(&files, "b/a.txt"));
+        assert!(contains(&files, "b/b.txt"));
+        assert!(contains(&files, "a.txt"));
+        assert!(contains(&files, "b.txt"));
         assert_eq!(files.len(), 6);
 
         create_archive.includes = Some(vec!["b/*".to_string()]);
         create_archive.excludes = None;
         let files = create_archive.build_file_list().unwrap();
-        assert_eq!(contains(&files, "a/a.txt"), false);
-        assert_eq!(contains(&files, "a/b.txt"), false);
-        assert_eq!(contains(&files, "b/a.txt"), true);
-        assert_eq!(contains(&files, "b/b.txt"), true);
-        assert_eq!(contains(&files, "a.txt"), false);
-        assert_eq!(contains(&files, "a.txt"), false);
+        assert!(!contains(&files, "a/a.txt"));
+        assert!(!contains(&files, "a/b.txt"));
+        assert!(contains(&files, "b/a.txt"));
+        assert!(contains(&files, "b/b.txt"));
+        assert!(!contains(&files, "a.txt"));
+        assert!(!contains(&files, "b.txt"));
         assert_eq!(files.len(), 2);
     }
 

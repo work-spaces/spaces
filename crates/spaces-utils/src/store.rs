@@ -245,9 +245,9 @@ impl Store {
         match sort_by {
             SortBy::Name => entries.sort_by(|a, b| a.0.cmp(b.0)),
             // largest to smallest
-            SortBy::Size => entries.sort_by(|a, b| b.1.size.cmp(&a.1.size)),
+            SortBy::Size => entries.sort_by_key(|b| std::cmp::Reverse(b.1.size)),
             // oldest to newest
-            SortBy::Age => entries.sort_by(|a, b| b.1.get_age(now).cmp(&a.1.get_age(now))),
+            SortBy::Age => entries.sort_by_key(|b| std::cmp::Reverse(b.1.get_age(now))),
         }
 
         // Collect managed entry info
@@ -269,9 +269,9 @@ impl Store {
 
         match sort_by {
             SortBy::Name => unmanaged.sort_by(|a, b| a.0.cmp(&b.0)),
-            SortBy::Size => unmanaged.sort_by(|a, b| b.1.cmp(&a.1)),
+            SortBy::Size => unmanaged.sort_by_key(|b| std::cmp::Reverse(b.1)),
             // oldest modified first
-            SortBy::Age => unmanaged.sort_by(|a, b| a.2.cmp(&b.2)),
+            SortBy::Age => unmanaged.sort_by_key(|a| a.2),
         }
 
         for (name, size, _) in &unmanaged {
@@ -770,7 +770,7 @@ fn emit_pretty_age_histogram(console: &console::Console, entries: &[StoreInfoEnt
 fn emit_top_entries_group(console: &console::Console, heading: &str, entries: &[&StoreInfoEntry]) {
     const TOP_N: usize = 5;
     let mut by_size = entries.to_vec();
-    by_size.sort_by(|a, b| b.size_bytes.cmp(&a.size_bytes));
+    by_size.sort_by_key(|b| std::cmp::Reverse(b.size_bytes));
     let top = &by_size[..TOP_N.min(by_size.len())];
 
     if top.is_empty() {

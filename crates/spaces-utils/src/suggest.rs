@@ -7,6 +7,6 @@ pub fn get_suggestions(input: Arc<str>, options: &Vec<Arc<str>>) -> Vec<(usize, 
         let score = levenshtein::levenshtein(input.as_ref(), option);
         suggestions.push((score, option.clone()));
     }
-    suggestions.sort_by(|a, b| a.0.cmp(&b.0));
+    suggestions.sort_by_key(|a| a.0);
     suggestions
 }

@@ -480,9 +480,14 @@ pub fn run_version_command_in_workspace(
                 .list(console)
                 .context(format_context!("Failed to list versions"))?;
         }
-        version::Command::Fetch { tag } => {
+        version::Command::Fetch { tag, prerelease } => {
+            let include_prerelease = if prerelease {
+                version::IncludePrerelease::Yes
+            } else {
+                version::IncludePrerelease::No
+            };
             version_manager
-                .fetch(console, tag.clone())
+                .fetch(console, tag.clone(), include_prerelease)
                 .context(format_context!(
                     "Failed to fetch {}",
                     tag.as_ref().map(|e| e.as_ref()).unwrap_or("latest")
