@@ -26,6 +26,7 @@ chrono = "0.4"
 homedir = "0.3"
 arboard = "3"
 serde_with = "3"
+nono = { git = "https://github.com/work-spaces/nono", rev = "258622707fbc10728aeeea769281f1ab26e1d416"}
 
 indexmap.workspace = true
 
