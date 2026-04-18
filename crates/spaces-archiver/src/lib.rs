@@ -257,7 +257,7 @@ mod tests {
         assert!(contains(&files, "b/a.txt"));
         assert!(contains(&files, "b/b.txt"));
         assert!(contains(&files, "a.txt"));
-        assert!(contains(&files, "a.txt"));
+        assert!(contains(&files, "b.txt"));
         assert_eq!(files.len(), 6);
 
         create_archive.includes = Some(vec!["b/*".to_string()]);
@@ -268,7 +268,7 @@ mod tests {
         assert!(contains(&files, "b/a.txt"));
         assert!(contains(&files, "b/b.txt"));
         assert!(!contains(&files, "a.txt"));
-        assert!(!contains(&files, "a.txt"));
+        assert!(!contains(&files, "b.txt"));
         assert_eq!(files.len(), 2);
     }
 

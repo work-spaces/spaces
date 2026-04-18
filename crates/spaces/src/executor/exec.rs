@@ -423,17 +423,13 @@ impl Kill {
                 .execute_process("kill", options)
                 .context(format_context!("Failed to execute kill"))?;
             match self.expect.as_ref() {
-                Some(Expect::Success) => {
-                    if result.exit_code != 0 {
-                        return Err(format_error!("Expected success but kill failed {self:?}"));
-                    }
+                Some(Expect::Success) if result.exit_code != 0 => {
+                    return Err(format_error!("Expected success but kill failed {self:?}"));
                 }
-                Some(Expect::Failure) => {
-                    if result.exit_code == 0 {
-                        return Err(format_error!(
-                            "Expected failure but kill succeeded {self:?}"
-                        ));
-                    }
+                Some(Expect::Failure) if result.exit_code == 0 => {
+                    return Err(format_error!(
+                        "Expected failure but kill succeeded {self:?}"
+                    ));
                 }
                 _ => {}
             }
