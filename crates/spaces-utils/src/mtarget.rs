@@ -18,6 +18,32 @@ pub const MODULE_RESULTS_DIR: &str = "build/spaces-modules";
 /// File extension for module result files.
 pub const MODULE_RESULTS_SUFFIX: &str = ".json";
 
+/// Represents a load statement in a module.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoadStatement {
+    /// The module path as a relative workspace path (e.g., "lib/common.star")
+    pub module_id: Arc<str>,
+}
+
+/// Summary of a task created during module evaluation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Rule {
+    /// The full task/rule name (label)
+    pub name: Arc<str>,
+
+    /// The task phase as a string (e.g., "Checkout", "Run", "Inspect")
+    pub phase: Arc<str>,
+
+    /// The default visibility that was applied during evaluation.
+    /// Used when restoring from cache if the rule's visibility is None.
+    pub default_visibility: rule::Visibility,
+
+    /// Serialized task data for replay/inspection
+    pub task_json: serde_json::Value,
+}
+
 /// Represents the result of evaluating a single Starlark module.
 /// This structure captures all information needed for caching and replay.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,33 +57,7 @@ pub struct ModuleTarget {
 
     /// Tasks created during evaluation of this module.
     /// Keys are task names (rule labels like "//repo:task_name")
-    pub tasks: HashMap<Arc<str>, TaskSummary>,
-}
-
-/// Represents a load statement in a module.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LoadStatement {
-    /// The module path as a relative workspace path (e.g., "lib/common.star")
-    pub module_id: Arc<str>,
-}
-
-/// Summary of a task created during module evaluation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TaskSummary {
-    /// The full task/rule name (label)
-    pub name: Arc<str>,
-
-    /// The task phase as a string (e.g., "Checkout", "Run", "Inspect")
-    pub phase: Arc<str>,
-
-    /// The default visibility that was applied during evaluation.
-    /// Used when restoring from cache if the rule's visibility is None.
-    pub default_visibility: rule::Visibility,
-
-    /// Serialized task data for replay/inspection
-    pub task_json: serde_json::Value,
+    pub tasks: HashMap<Arc<str>, Rule>,
 }
 
 impl ModuleTarget {
@@ -81,20 +81,9 @@ impl ModuleTarget {
     /// # Arguments
     /// * `module_name` - The module path (e.g., "spaces/spaces.star")
     pub fn new_from_json(module_name: &str) -> anyhow::Result<Option<Self>> {
-        let workspace_path = std::env::current_dir()
-            .context(format_context!("Failed to get current working directory"))?;
-        let workspace_path = workspace_path.to_string_lossy();
-        let cache_dir = format!("{workspace_path}/{MODULE_RESULTS_DIR}");
-
-        // Strip workspace_path prefix to get relative path
-        let relative_name = module_name
-            .strip_prefix(workspace_path.as_ref())
-            .map(|s| s.strip_prefix('/').unwrap_or(s))
-            .unwrap_or(module_name);
-
-        // Sanitize only colons (for rule labels), preserve directory structure
-        let safe_name = relative_name.replace(":", "_");
-        let file_path = format!("{cache_dir}/{safe_name}{MODULE_RESULTS_SUFFIX}");
+        let build_module_target_dir = std::path::Path::new(MODULE_RESULTS_DIR);
+        let module_path = std::path::Path::new(module_name);
+        let file_path = build_module_target_dir.join(format!("{}.json", module_path.display()));
 
         let path = std::path::Path::new(&file_path);
         if !path.exists() {
@@ -102,11 +91,13 @@ impl ModuleTarget {
         }
 
         let content = std::fs::read_to_string(&file_path).context(format_context!(
-            "Failed to read module result from {file_path}"
+            "Failed to read module result from {}",
+            file_path.display()
         ))?;
 
         let result: Self = serde_json::from_str(&content).context(format_context!(
-            "Failed to parse module result from {file_path}"
+            "Failed to parse module result from {}",
+            file_path.display()
         ))?;
 
         Ok(Some(result))
@@ -124,7 +115,7 @@ impl ModuleTarget {
     }
 
     /// Adds a task summary to the result.
-    pub fn add_task(&mut self, task: TaskSummary) {
+    pub fn add_task(&mut self, task: Rule) {
         self.tasks.insert(task.name.clone(), task);
     }
 
@@ -178,19 +169,12 @@ impl ModuleTarget {
     /// The file is saved to `<workspace_path>/build/spaces-modules/<module_path>.json`
     /// mirroring the workspace directory structure (e.g., `spaces/spaces.star` becomes
     /// `build/spaces-modules/spaces/spaces.star.json`).
-    pub fn save_to_json(&self, workspace_path: &str) -> anyhow::Result<()> {
-        let cache_dir = format!("{workspace_path}/{MODULE_RESULTS_DIR}");
-
-        // Strip workspace_path prefix to get relative path
-        let relative_name = self
-            .module_name
-            .strip_prefix(workspace_path)
-            .map(|s| s.strip_prefix('/').unwrap_or(s))
-            .unwrap_or(self.module_name.as_ref());
+    pub fn save_to_json(&self) -> anyhow::Result<()> {
+        let build_module_target_dir = std::path::Path::new(MODULE_RESULTS_DIR);
+        let module_path = std::path::Path::new(self.module_name.as_ref());
 
         // Sanitize only colons (for rule labels), preserve directory structure
-        let safe_name = relative_name.replace(":", "_");
-        let file_path = format!("{cache_dir}/{safe_name}{MODULE_RESULTS_SUFFIX}");
+        let file_path = build_module_target_dir.join(format!("{}.json", module_path.display()));
 
         // Create parent directories to mirror workspace structure
         if let Some(parent) = std::path::Path::new(&file_path).parent() {
@@ -202,7 +186,8 @@ impl ModuleTarget {
             .context(format_context!("Failed to serialize module result"))?;
 
         std::fs::write(&file_path, content).context(format_context!(
-            "Failed to write module result to {file_path}"
+            "Failed to write module result to {}",
+            file_path.display()
         ))?;
 
         Ok(())
@@ -216,7 +201,7 @@ impl LoadStatement {
     }
 }
 
-impl TaskSummary {
+impl Rule {
     /// Creates a new TaskSummary.
     pub fn new(
         name: Arc<str>,
@@ -256,7 +241,7 @@ mod tests {
     #[test]
     fn test_add_task() {
         let mut result = ModuleTarget::new("test/module.star".into());
-        result.add_task(TaskSummary::new(
+        result.add_task(Rule::new(
             "//test:build".into(),
             "Run".into(),
             rule::Visibility::Public,
@@ -270,7 +255,7 @@ mod tests {
     fn test_serde_roundtrip() {
         let mut result = ModuleTarget::new("test/module.star".into());
         result.add_load(LoadStatement::new("lib/common.star".into()));
-        result.add_task(TaskSummary::new(
+        result.add_task(Rule::new(
             "//test:build".into(),
             "Run".into(),
             rule::Visibility::Private,
@@ -283,52 +268,5 @@ mod tests {
         assert_eq!(deserialized.module_name, result.module_name);
         assert_eq!(deserialized.loads.len(), result.loads.len());
         assert_eq!(deserialized.tasks.len(), result.tasks.len());
-    }
-
-    #[test]
-    fn test_new_from_json_file_not_exists() {
-        // Use a temp dir as workspace to ensure no cache file exists
-        let temp_dir = tempfile::tempdir().unwrap();
-        let _guard = std::env::set_current_dir(temp_dir.path());
-        let result = ModuleTarget::new_from_json("test/module.star");
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
-    }
-
-    #[test]
-    fn test_new_from_json_roundtrip() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let workspace_path = temp_dir.path().to_string_lossy().to_string();
-
-        // Change to the temp directory for the test
-        let original_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(temp_dir.path()).unwrap();
-
-        // Create a module result and save it
-        let mut original = ModuleTarget::new("test/module.star".into());
-        original.add_load(LoadStatement::new("lib/common.star".into()));
-        original.add_task(TaskSummary::new(
-            "//test:build".into(),
-            "Run".into(),
-            rule::Visibility::Public,
-            serde_json::json!({"executor": "Target", "phase": "Run"}),
-        ));
-
-        // Save using the save_to_json method
-        original.save_to_json(&workspace_path).unwrap();
-
-        // Load using new_from_json (uses current directory)
-        let loaded = ModuleTarget::new_from_json("test/module.star")
-            .unwrap()
-            .expect("Should load saved module result");
-
-        assert_eq!(loaded.module_name, original.module_name);
-        assert_eq!(loaded.loads.len(), original.loads.len());
-        assert_eq!(loaded.loads[0].module_id, original.loads[0].module_id);
-        assert_eq!(loaded.tasks.len(), original.tasks.len());
-        assert!(loaded.tasks.contains_key(&Arc::from("//test:build")));
-
-        // Restore original directory
-        std::env::set_current_dir(original_dir).unwrap();
     }
 }

@@ -84,7 +84,7 @@ pub fn build_module_result(
     for task_name in created_task_names {
         if let Ok(task) = rules::get_task(task_name.as_ref()) {
             let task_json = serde_json::to_value(&task).unwrap_or_default();
-            let task_summary = mtarget::TaskSummary::new(
+            let task_summary = mtarget::Rule::new(
                 task_name.clone(),
                 task.phase.to_string().into(),
                 eval_context.default_module_visibility.clone(),
@@ -302,7 +302,12 @@ pub fn evaluate_module(
             task::Phase::Run | task::Phase::Inspect
         )
     {
-        let _ = result.save_to_json(workspace_path.as_ref());
+        result.save_to_json().with_context(|| {
+            format_context!(
+                "Internal Error: Failed to save module result for {}",
+                name.as_ref()
+            )
+        })?;
     }
 
     Ok((module, module_result))
@@ -327,7 +332,7 @@ fn try_evaluate_with_cache(
     let workspace_path = workspace.read().get_absolute_path();
     let eval_logger = star_logger(console.clone());
 
-    if phase == task::Phase::Checkout {
+    if phase == task::Phase::Checkout || singleton::get_is_rescan() {
         let (_, _) = evaluate_module(Some(workspace), workspace_path, name, content, with_rules)
             .map_err(|e| format_error!("Failed to evaluate module during checkout {:?}", e))?;
         return Ok(());
