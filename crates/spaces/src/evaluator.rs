@@ -8,7 +8,7 @@ use starlark::eval::{Evaluator, ReturnFileLoader};
 use starlark::syntax::{AstModule, Dialect};
 use std::collections::HashSet;
 use std::sync::Arc;
-use utils::{inspect, labels, logger, mtarget, query, rule, ws};
+use utils::{inspect, labels, logger, mtarget, query, rcache, rule, targets, ws};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WithRules {
@@ -26,6 +26,10 @@ pub enum IsExecuteTasks {
 enum IsSaveBin {
     No,
     Yes,
+}
+
+fn star_logger(console: console::Console) -> logger::Logger {
+    logger::Logger::new(console, "starlark".into())
 }
 
 pub fn get_dialect() -> Dialect {
@@ -71,7 +75,7 @@ pub fn get_globals(with_rules: WithRules) -> GlobalsBuilder {
 pub fn build_module_result(
     module_name: Arc<str>,
     eval_context: &EvalContext,
-) -> mtarget::ModuleEvaluationResult {
+) -> mtarget::ModuleTarget {
     let load_statements = eval_context.get_load_statements();
     let created_task_names = eval_context.get_created_tasks();
 
@@ -90,7 +94,7 @@ pub fn build_module_result(
         }
     }
 
-    let mut result = mtarget::ModuleEvaluationResult::new(module_name);
+    let mut result = mtarget::ModuleTarget::new(module_name);
     result.set_loads(load_statements);
     result.tasks = tasks;
     result
@@ -103,7 +107,7 @@ pub struct LoadResult {
     pub module_id: String,
     pub normalized_path: Arc<str>,
     pub frozen_module: FrozenModule,
-    pub module_result: Option<mtarget::ModuleEvaluationResult>,
+    pub module_result: Option<mtarget::ModuleTarget>,
 }
 
 pub fn evaluate_loads(
@@ -163,7 +167,7 @@ pub fn evaluate_ast(
     workspace_path: Arc<str>,
     with_rules: WithRules,
     eval_context: Option<EvalContext>,
-) -> starlark::Result<(FrozenModule, Option<mtarget::ModuleEvaluationResult>)> {
+) -> starlark::Result<(FrozenModule, Option<mtarget::ModuleTarget>)> {
     let loads = evaluate_loads(
         &ast,
         name.clone(),
@@ -265,7 +269,7 @@ pub fn evaluate_module(
     name: Arc<str>,
     content: String,
     with_rules: WithRules,
-) -> starlark::Result<(FrozenModule, Option<mtarget::ModuleEvaluationResult>)> {
+) -> starlark::Result<(FrozenModule, Option<mtarget::ModuleTarget>)> {
     // Register the module name so that the global task-graph machinery can
     // track which modules exist, without writing to `latest_starlark_module`
     // (which would race with parallel evaluations).
@@ -291,22 +295,115 @@ pub fn evaluate_module(
     )?;
 
     // Save module result for rules modules in Run/Inspect phases
-    if let Some(ref result) = module_result {
-        if workspace::is_rules_module(name.as_ref())
-            && matches!(
-                singleton::get_execution_phase(),
-                task::Phase::Run | task::Phase::Inspect
-            )
-        {
-            let _ = mtarget::save_module_result(workspace_path.as_ref(), result);
-        }
+    if let Some(ref result) = module_result
+        && workspace::is_rules_module(name.as_ref())
+        && matches!(
+            singleton::get_execution_phase(),
+            task::Phase::Run | task::Phase::Inspect
+        )
+    {
+        let _ = result.save_to_json(workspace_path.as_ref());
     }
 
     Ok((module, module_result))
 }
 
-fn star_logger(console: console::Console) -> logger::Logger {
-    logger::Logger::new(console, "starlark".into())
+/// Attempts to evaluate a module with rcache caching.
+///
+/// This function wraps module evaluation with rcache logic:
+/// - If the module is `env.spaces.star`, it is always evaluated (never cached)
+/// - If no cached module result exists, evaluation proceeds without caching
+/// - If a cached result exists, computes a digest and uses rcache to either:
+///   - Restore tasks from cache on hit (skipping evaluation)
+///   - Evaluate and cache on miss
+fn try_evaluate_with_cache(
+    console: console::Console,
+    workspace: WorkspaceArc,
+    phase: task::Phase,
+    with_rules: WithRules,
+    name: Arc<str>,
+    content: String,
+) -> anyhow::Result<()> {
+    let workspace_path = workspace.read().get_absolute_path();
+    let eval_logger = star_logger(console.clone());
+
+    if phase == task::Phase::Checkout {
+        let (_, _) = evaluate_module(Some(workspace), workspace_path, name, content, with_rules)
+            .map_err(|e| format_error!("Failed to evaluate module during checkout {:?}", e))?;
+        return Ok(());
+    }
+
+    // Try to load existing module result from build folder
+    let mtarget_option = mtarget::ModuleTarget::new_from_json(name.as_ref()).context(
+        format_context!("Failed to load module target for {:?}", name),
+    )?;
+
+    // If no cached result exists, evaluate without rcache
+    let Some(mtarget) = mtarget_option else {
+        eval_logger
+            .debug(format!("Evaluating module {:?} (no module target found)", name).as_str());
+        let (_, _) = evaluate_module(Some(workspace), workspace_path, name, content, with_rules)
+            .map_err(|e| format_error!("Failed to evaluate module {:?}", e))?;
+        return Ok(());
+    };
+
+    // Compute digest from mtarget
+    let module_digest = {
+        let workspace = workspace.read();
+        mtarget
+            .compute_digest(&workspace.settings.bin.changes)
+            .context(format_context!(
+                "Failed to compute digest for module {:?}",
+                name,
+            ))?
+    };
+
+    // Get rcache path
+    let cache_path = {
+        let store_path = workspace.read().get_store_path();
+        ws::get_rcache_path(std::path::Path::new(store_path.as_ref()))
+    };
+
+    // rcache targets = the JSON file
+    let json_target: Arc<str> = format!(
+        "{}/{}{}",
+        mtarget::MODULE_RESULTS_DIR,
+        name.as_ref().replace(":", "_"),
+        mtarget::MODULE_RESULTS_SUFFIX
+    )
+    .into();
+    let cache_targets = vec![targets::Target::File(json_target.clone())];
+
+    // Execute with rcache
+    let result = rcache::execute(
+        cache_path.as_ref(),
+        module_digest,
+        &cache_targets,
+        || {
+            evaluate_module(
+                Some(workspace.clone()),
+                workspace_path.clone(),
+                name.clone(),
+                content.clone(),
+                with_rules,
+            )
+            .map_err(|e| format_error!("Failed to evaluate module {:?}", e))
+        },
+        || vec![Arc::from(std::path::Path::new(json_target.as_ref()))],
+    );
+
+    match result {
+        Some(Ok(_)) => {
+            eval_logger.debug(format!("No cache hit for module {:?}", name).as_str());
+            Ok(())
+        }
+        Some(Err(e)) => Err(e),
+        None => {
+            eval_logger.debug(format!("Cache hit for module {:?}", name).as_str());
+            // Cache hit - restore tasks from mtarget
+            rules::restore_tasks_from_cache(&mtarget, &name)
+        }
+    }
 }
 
 fn insert_setup_and_all_rules(
@@ -526,18 +623,19 @@ pub fn evaluate_starlark_modules(
             logger.debug(format!("evaluating {name} from front of queue").as_str());
             eval_progress.set_message(name.as_ref());
             let eval_name = name.clone();
-            let workspace_arc = workspace.clone();
-            let eval_workspace_path = workspace_path.clone();
+            let eval_console = console.clone();
+            let eval_workspace = workspace.clone();
 
             let handle = std::thread::spawn(move || -> anyhow::Result<()> {
-                let (_, _) = evaluate_module(
-                    Some(workspace_arc),
-                    eval_workspace_path,
+                try_evaluate_with_cache(
+                    eval_console,
+                    eval_workspace,
+                    phase,
+                    WithRules::Yes,
                     eval_name.clone(),
                     content.to_string(),
-                    WithRules::Yes,
                 )
-                .map_err(|e| format_error!("Failed to evaluate module {:?}", e))?;
+                .context(format_context!("Failed to evaluate module {eval_name}"))?;
                 Ok(())
             });
 

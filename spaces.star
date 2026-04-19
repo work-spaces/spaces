@@ -69,7 +69,7 @@ run_add_exec(
     args = ["-c", "echo $(build/target/debug/spaces --version) > build/changed.txt"],
     deps = deps(rules = [":build"]),
     target_files = ["//build/changed.txt"],
-    help = "Run a quick post build action",
+    help = "Run a quick post build action for testing ",
     visibility = visibility_private(),
 )
 

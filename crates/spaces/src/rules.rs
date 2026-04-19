@@ -9,8 +9,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use utils::{
-    changes, environment, graph, labels, lock, logger, logs, markdown, platform, rcache, rule,
-    targets, ws,
+    changes, environment, graph, labels, lock, logger, logs, markdown, mtarget, platform, rcache,
+    rule, targets, ws,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -511,6 +511,30 @@ impl State {
         }
 
         Ok(rule_label)
+    }
+
+    /// Restores tasks from a cached ModuleEvaluationResult into the task graph.
+    ///
+    /// This is the reverse of `build_module_result()` in evaluator.rs - it takes
+    /// a cached module result and inserts all its tasks into the rules state,
+    /// allowing module evaluation to be skipped when the cache is valid.
+    fn restore_tasks_from_cache(
+        &self,
+        mtarget: &mtarget::ModuleTarget,
+        module_name: &Arc<str>,
+    ) -> anyhow::Result<()> {
+        for task_summary in mtarget.tasks.values() {
+            let task: task::Task = serde_json::from_value(task_summary.task_json.clone()).context(
+                format_context!("Failed to deserialize cached task {}", task_summary.name),
+            )?;
+
+            self.insert_task_with_context(
+                task,
+                module_name,
+                task_summary.default_visibility.clone(),
+            )?;
+        }
+        Ok(())
     }
 
     fn check_task_deps_visibility(&self, task: &task::Task) -> anyhow::Result<()> {
@@ -1287,6 +1311,24 @@ pub fn insert_task_for_module(
 pub fn register_module(name: Arc<str>) {
     let mut state = get_state().write();
     state.all_modules.insert(name);
+}
+
+/// Restores tasks from a cached ModuleEvaluationResult.
+///
+/// This is the reverse of `build_module_result()` in evaluator.rs - it takes
+/// a cached module result and inserts all its tasks into the rules state,
+/// allowing module evaluation to be skipped when the cache is valid.
+///
+/// # Arguments
+/// * `mtarget` - The cached module evaluation result containing serialized tasks
+/// * `module_name` - The module name to register
+pub fn restore_tasks_from_cache(
+    mtarget: &mtarget::ModuleTarget,
+    module_name: &Arc<str>,
+) -> anyhow::Result<()> {
+    let mut state = get_state().write();
+    state.all_modules.insert(module_name.clone());
+    state.restore_tasks_from_cache(mtarget, module_name)
 }
 
 pub fn show_tasks(
