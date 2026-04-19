@@ -5,7 +5,7 @@
 //! of module evaluation results to avoid re-evaluation when the
 //! module and its dependencies haven't changed.
 
-use crate::changes;
+use crate::{changes, rule};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -51,6 +51,10 @@ pub struct TaskSummary {
 
     /// The task phase as a string (e.g., "Checkout", "Run", "Inspect")
     pub phase: Arc<str>,
+
+    /// The default visibility that was applied during evaluation.
+    /// Used when restoring from cache if the rule's visibility is None.
+    pub default_visibility: rule::Visibility,
 
     /// Serialized task data for replay/inspection
     pub task_json: serde_json::Value,
@@ -144,10 +148,16 @@ impl LoadStatement {
 
 impl TaskSummary {
     /// Creates a new TaskSummary.
-    pub fn new(name: Arc<str>, phase: Arc<str>, task_json: serde_json::Value) -> Self {
+    pub fn new(
+        name: Arc<str>,
+        phase: Arc<str>,
+        default_visibility: rule::Visibility,
+        task_json: serde_json::Value,
+    ) -> Self {
         Self {
             name,
             phase,
+            default_visibility,
             task_json,
         }
     }
@@ -210,6 +220,7 @@ mod tests {
         result.add_task(TaskSummary::new(
             "//test:build".into(),
             "Run".into(),
+            rule::Visibility::Public,
             serde_json::json!({"name": "//test:build"}),
         ));
         assert_eq!(result.tasks.len(), 1);
@@ -223,6 +234,7 @@ mod tests {
         result.add_task(TaskSummary::new(
             "//test:build".into(),
             "Run".into(),
+            rule::Visibility::Private,
             serde_json::json!({"executor": "Target", "phase": "Run"}),
         ));
 

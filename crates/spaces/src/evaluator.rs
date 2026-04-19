@@ -83,6 +83,7 @@ pub fn build_module_result(
             let task_summary = mtarget::TaskSummary::new(
                 task_name.clone(),
                 task.phase.to_string().into(),
+                eval_context.default_module_visibility.clone(),
                 task_json,
             );
             tasks.insert(task_name, task_summary);
