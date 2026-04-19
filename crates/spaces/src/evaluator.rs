@@ -130,18 +130,11 @@ pub fn evaluate_loads(
             )
         })?;
 
-        // Normalize the load path to //-prefixed workspace-relative format
+        // Normalize the load path to workspace-relative format (no leading slashes)
         let normalized_path: Arc<str> = module_load_path
             .strip_prefix(workspace_path.as_ref())
-            .and_then(|p| p.strip_prefix("/"))
-            .map(|p| {
-                if p.starts_with("/") {
-                    // Path was already //-prefixed (like //@star/...), preserve it
-                    p.into()
-                } else {
-                    format!("//{}", p).into()
-                }
-            })
+            .map(|p| p.trim_start_matches('/'))
+            .map(|p| p.into())
             .unwrap_or_else(|| module_load_path.clone());
 
         let (frozen_module, module_result) = evaluate_module(

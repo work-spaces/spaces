@@ -5,6 +5,7 @@
 //! of module evaluation results to avoid re-evaluation when the
 //! module and its dependencies haven't changed.
 
+use crate::changes;
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -37,7 +38,7 @@ pub struct ModuleEvaluationResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LoadStatement {
-    /// The module path as written in the load() call
+    /// The module path as a relative workspace path (e.g., "lib/common.star")
     pub module_id: Arc<str>,
 }
 
@@ -102,7 +103,7 @@ impl ModuleEvaluationResult {
     ///
     /// # Returns
     /// A blake3 digest string, or an error if required files aren't found in changes.
-    pub fn compute_digest(&self, changes: &crate::changes::Changes) -> anyhow::Result<Arc<str>> {
+    pub fn compute_digest(&self, changes: &changes::Changes) -> anyhow::Result<Arc<str>> {
         use crate::changes::ChangeDetailType;
 
         let mut hasher = blake3::Hasher::new();
@@ -198,9 +199,9 @@ mod tests {
     #[test]
     fn test_add_load() {
         let mut result = ModuleEvaluationResult::new("test/module.star".into());
-        result.add_load(LoadStatement::new("//lib:common.star".into()));
+        result.add_load(LoadStatement::new("lib/common.star".into()));
         assert_eq!(result.loads.len(), 1);
-        assert_eq!(result.loads[0].module_id.as_ref(), "//lib:common.star");
+        assert_eq!(result.loads[0].module_id.as_ref(), "lib/common.star");
     }
 
     #[test]
@@ -218,7 +219,7 @@ mod tests {
     #[test]
     fn test_serde_roundtrip() {
         let mut result = ModuleEvaluationResult::new("test/module.star".into());
-        result.add_load(LoadStatement::new("//lib:common.star".into()));
+        result.add_load(LoadStatement::new("lib/common.star".into()));
         result.add_task(TaskSummary::new(
             "//test:build".into(),
             "Run".into(),
