@@ -1,5 +1,6 @@
 use crate::{singleton, task, workspace};
-use std::sync::{Arc, Mutex};
+use std::cell::RefCell;
+use std::sync::Arc;
 use utils::{mtarget, rule};
 
 /// Per-evaluation context passed to builtin functions via `eval.extra_mut`.
@@ -24,14 +25,16 @@ pub struct EvalContext {
 
     /// Task names created during this module's evaluation.
     /// Used for module result caching to track which tasks originated from this module.
-    created_tasks: Mutex<Vec<Arc<str>>>,
+    /// Uses RefCell for interior mutability since callers borrow other ctx fields
+    /// while recording tasks.
+    created_tasks: RefCell<Vec<Arc<str>>>,
 
     /// Load statements captured during evaluation.
     /// Used for module result caching to track module dependencies.
-    load_statements: Mutex<Vec<mtarget::LoadStatement>>,
+    load_statements: Vec<mtarget::LoadStatement>,
 }
 
-// SAFETY: All fields are 'static (Arc, bool, enum, Mutex<Vec<...>>) so EvalContext is 'static.
+// SAFETY: All fields are 'static (Arc, bool, enum, RefCell<Vec<...>>, Vec<...>) so EvalContext is 'static.
 unsafe impl<'a> starlark::any::ProvidesStaticType<'a> for EvalContext {
     type StaticType = Self;
 }
@@ -47,39 +50,29 @@ impl EvalContext {
             is_lsp: singleton::is_lsp_mode(),
             is_ci: singleton::get_is_ci(),
             execution_phase: singleton::get_execution_phase(),
-            created_tasks: Mutex::new(Vec::new()),
-            load_statements: Mutex::new(Vec::new()),
+            created_tasks: RefCell::new(Vec::new()),
+            load_statements: Vec::new(),
         }
     }
 
     /// Records that a task was created during this module's evaluation.
     pub fn record_task(&self, task_name: Arc<str>) {
-        if let Ok(mut tasks) = self.created_tasks.lock() {
-            tasks.push(task_name);
-        }
+        self.created_tasks.borrow_mut().push(task_name);
     }
 
     /// Returns the list of task names created during this module's evaluation.
     pub fn get_created_tasks(&self) -> Vec<Arc<str>> {
-        self.created_tasks
-            .lock()
-            .map(|tasks| tasks.clone())
-            .unwrap_or_default()
+        self.created_tasks.borrow().clone()
     }
 
     /// Sets the load statements for this module.
-    pub fn set_load_statements(&self, loads: Vec<mtarget::LoadStatement>) {
-        if let Ok(mut statements) = self.load_statements.lock() {
-            *statements = loads;
-        }
+    pub fn set_load_statements(&mut self, loads: Vec<mtarget::LoadStatement>) {
+        self.load_statements = loads;
     }
 
     /// Returns the load statements captured for this module.
-    pub fn get_load_statements(&self) -> Vec<mtarget::LoadStatement> {
-        self.load_statements
-            .lock()
-            .map(|loads| loads.clone())
-            .unwrap_or_default()
+    pub fn get_load_statements(&self) -> &[mtarget::LoadStatement] {
+        &self.load_statements
     }
 }
 

@@ -1,4 +1,4 @@
-use crate::builtins::eval_context::get_eval_context;
+use crate::builtins::eval_context::get_eval_context_mut;
 use crate::executor::asset;
 use crate::workspace::WorkspaceArc;
 use crate::{executor, rules, task};
@@ -65,7 +65,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             "Failed to convert value to JSON for key '{key}'"
         ))?;
 
-        let ctx = get_eval_context(eval)?;
+        let ctx = get_eval_context_mut(eval)?;
 
         if !ctx.is_checkout && !ctx.is_sync {
             return Ok(NoneType);
@@ -110,7 +110,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// * `message`: Abort message to show the user.
     ///
     fn abort(message: &str, eval: &mut Evaluator) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context(eval)?;
+        let ctx = get_eval_context_mut(eval)?;
         if ctx.is_lsp {
             Ok(NoneType)
         } else {
@@ -132,7 +132,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context(eval)?;
+        let ctx = get_eval_context_mut(eval)?;
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for add target rule"))?;
 
@@ -164,7 +164,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] exec: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context(eval)?;
+        let ctx = get_eval_context_mut(eval)?;
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for exec rule"))?;
 
@@ -224,7 +224,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] repo: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context(eval)?;
+        let ctx = get_eval_context_mut(eval)?;
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for repo rule"))?;
 
@@ -310,7 +310,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] cargo_bin: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context(eval)?;
+        let ctx = get_eval_context_mut(eval)?;
         let cargo_bin: CargoBin = serde_json::from_value(cargo_bin.to_json_value()?)
             .context(format_context!("bad options for cargo_bin"))?;
 
@@ -473,7 +473,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] platforms: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context(eval)?;
+        let ctx = get_eval_context_mut(eval)?;
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for add platform archive rule"))?;
         //convert platforms to starlark value
@@ -535,7 +535,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] asset: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context(eval)?;
+        let ctx = get_eval_context_mut(eval)?;
         logger::push_deprecation_warning(
             Some(ctx.module_name.clone()),
             "Support for checkout.add_which_asset() will be removed in v0.16. Use checkout.add_any_asset().",
@@ -584,7 +584,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] asset: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context(eval)?;
+        let ctx = get_eval_context_mut(eval)?;
         logger::push_deprecation_warning(
             Some(ctx.module_name.clone()),
             "Support for checkout.add_hard_link_asset() will be removed in v0.16. Use checkout.add_any_asset()",
@@ -635,7 +635,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] asset: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context(eval)?;
+        let ctx = get_eval_context_mut(eval)?;
         logger::push_deprecation_warning(
             Some(ctx.module_name.clone()),
             "Support for checkout.add_soft_link_asset() will be removed in v0.16. Use checkout.add_any_asset()",
@@ -685,7 +685,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] assets: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context(eval)?;
+        let ctx = get_eval_context_mut(eval)?;
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for which asset rule"))?;
 
@@ -733,7 +733,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         // includes, excludes, strip_prefix
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context(eval)?;
+        let ctx = get_eval_context_mut(eval)?;
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for add archive rule"))?;
 
@@ -762,7 +762,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         // includes, excludes, strip_prefix
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context(eval)?;
+        let ctx = get_eval_context_mut(eval)?;
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for oras rule"))?;
 
@@ -808,7 +808,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] asset: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context(eval)?;
+        let ctx = get_eval_context_mut(eval)?;
         logger::push_deprecation_warning(
             Some(ctx.module_name.clone()),
             "Support for checkout.add_asset() will be removed in v0.16. Use checkout.add_any_asset()",
@@ -876,7 +876,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] asset: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context(eval)?;
+        let ctx = get_eval_context_mut(eval)?;
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for update asset rule"))?;
         // support JSON, yaml, and toml
@@ -931,7 +931,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] env: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context(eval)?;
+        let ctx = get_eval_context_mut(eval)?;
         logger::push_deprecation_warning(
             Some(ctx.module_name.clone()),
             "Support for checkout.update_env() will be removed in v0.16. Use checkout.add_env_vars()",
@@ -995,7 +995,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] any_env: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context(eval)?;
+        let ctx = get_eval_context_mut(eval)?;
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for update env rule"))?;
 

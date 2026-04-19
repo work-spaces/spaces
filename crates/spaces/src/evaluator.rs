@@ -90,12 +90,12 @@ pub fn build_module_result(
                 eval_context.default_module_visibility.clone(),
                 task_json,
             );
-            tasks.insert(task_name, task_summary);
+            tasks.insert(task_name.clone(), task_summary);
         }
     }
 
     let mut result = mtarget::ModuleTarget::new(module_name);
-    result.set_loads(load_statements);
+    result.set_loads(load_statements.to_vec());
     result.tasks = tasks;
     result
 }
@@ -166,7 +166,7 @@ pub fn evaluate_ast(
     workspace: Option<WorkspaceArc>,
     workspace_path: Arc<str>,
     with_rules: WithRules,
-    eval_context: Option<EvalContext>,
+    mut eval_context: Option<EvalContext>,
 ) -> starlark::Result<(FrozenModule, Option<mtarget::ModuleTarget>)> {
     let loads = evaluate_loads(
         &ast,
@@ -197,7 +197,7 @@ pub fn evaluate_ast(
     all_loads.dedup_by(|a, b| a.module_id == b.module_id);
 
     // Store load statements in context if available
-    if let Some(ref ctx) = eval_context {
+    if let Some(ref mut ctx) = eval_context {
         ctx.set_load_statements(all_loads);
     }
 
