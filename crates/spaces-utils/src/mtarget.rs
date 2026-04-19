@@ -82,14 +82,6 @@ impl ModuleEvaluationResult {
         self.tasks.insert(task.name.clone(), task);
     }
 
-    /// Converts a load statement module_id to a Changes entry path.
-    ///
-    /// Load statements use the format `//path/to/file.star` while
-    /// Changes entries use `path/to/file.star` (without the `//` prefix).
-    fn load_path_to_changes_key(module_id: &str) -> &str {
-        module_id.strip_prefix("//").unwrap_or(module_id)
-    }
-
     /// Computes a unique digest for this module evaluation result.
     ///
     /// The digest incorporates:
@@ -122,13 +114,21 @@ impl ModuleEvaluationResult {
 
         // Iterate over loads (assumed to be sorted via set_loads)
         for load in &self.loads {
-            let load_key = Self::load_path_to_changes_key(&load.module_id);
-            if let Some(detail) = changes.entries.get(load_key) {
+            if let Some(detail) = changes.entries.get(&load.module_id) {
                 if let ChangeDetailType::File(hash) = &detail.detail_type {
                     hasher.update(hash.as_bytes());
+                } else {
+                    return Err(format_error!(
+                        "Load module '{}' is not of type file in changes",
+                        load.module_id
+                    ));
                 }
+            } else {
+                return Err(format_error!(
+                    "Internal Error: Load module '{}' not found in changes",
+                    load.module_id
+                ));
             }
-            // Note: We don't fail if a load isn't found - it may be a built-in module
         }
 
         Ok(hasher.finalize().to_string().into())
