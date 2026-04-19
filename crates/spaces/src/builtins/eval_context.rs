@@ -1,6 +1,6 @@
 use crate::{singleton, task, workspace};
 use std::sync::{Arc, Mutex};
-use utils::{mcache, rule};
+use utils::{mtarget, rule};
 
 /// Per-evaluation context passed to builtin functions via `eval.extra_mut`.
 ///
@@ -28,7 +28,7 @@ pub struct EvalContext {
 
     /// Load statements captured during evaluation.
     /// Used for module result caching to track module dependencies.
-    load_statements: Mutex<Vec<mcache::LoadStatement>>,
+    load_statements: Mutex<Vec<mtarget::LoadStatement>>,
 }
 
 // SAFETY: All fields are 'static (Arc, bool, enum, Mutex<Vec<...>>) so EvalContext is 'static.
@@ -68,14 +68,14 @@ impl EvalContext {
     }
 
     /// Sets the load statements for this module.
-    pub fn set_load_statements(&self, loads: Vec<mcache::LoadStatement>) {
+    pub fn set_load_statements(&self, loads: Vec<mtarget::LoadStatement>) {
         if let Ok(mut statements) = self.load_statements.lock() {
             *statements = loads;
         }
     }
 
     /// Returns the load statements captured for this module.
-    pub fn get_load_statements(&self) -> Vec<mcache::LoadStatement> {
+    pub fn get_load_statements(&self) -> Vec<mtarget::LoadStatement> {
         self.load_statements
             .lock()
             .map(|loads| loads.clone())

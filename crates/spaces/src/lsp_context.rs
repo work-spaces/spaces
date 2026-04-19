@@ -214,7 +214,6 @@ impl SpacesContext {
             workspace_path.clone(),
             evaluator::WithRules::Yes,
             eval_context,
-            None, // No content hash for LSP mode - don't save module results
         );
 
         eprintln!("run: {name} - got result");

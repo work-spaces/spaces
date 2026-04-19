@@ -6,7 +6,7 @@
 //! module and its dependencies haven't changed.
 
 use anyhow::Context;
-use anyhow_source_location::format_context;
+use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,9 +25,6 @@ pub struct ModuleEvaluationResult {
     /// The module path (e.g., "spaces/spaces.star" or "//repo:spaces.star")
     pub module_name: Arc<str>,
 
-    /// Blake3 hash of the module's source content
-    pub content_hash: Arc<str>,
-
     /// List of load statements - modules that this module depends on
     pub loads: Vec<LoadStatement>,
 
@@ -42,12 +39,6 @@ pub struct ModuleEvaluationResult {
 pub struct LoadStatement {
     /// The module path as written in the load() call
     pub module_id: Arc<str>,
-
-    /// The resolved absolute path to the loaded module
-    pub resolved_path: Arc<str>,
-
-    /// Blake3 hash of the loaded module's content
-    pub content_hash: Arc<str>,
 }
 
 /// Summary of a task created during module evaluation.
@@ -66,10 +57,9 @@ pub struct TaskSummary {
 
 impl ModuleEvaluationResult {
     /// Creates a new ModuleEvaluationResult.
-    pub fn new(module_name: Arc<str>, content_hash: Arc<str>) -> Self {
+    pub fn new(module_name: Arc<str>) -> Self {
         Self {
             module_name,
-            content_hash,
             loads: Vec::new(),
             tasks: HashMap::new(),
         }
@@ -80,39 +70,74 @@ impl ModuleEvaluationResult {
         self.loads.push(load);
     }
 
+    /// Sets all load statements, sorting them by module_id for deterministic digest computation.
+    pub fn set_loads(&mut self, mut loads: Vec<LoadStatement>) {
+        loads.sort_by(|a, b| a.module_id.cmp(&b.module_id));
+        self.loads = loads;
+    }
+
     /// Adds a task summary to the result.
     pub fn add_task(&mut self, task: TaskSummary) {
         self.tasks.insert(task.name.clone(), task);
     }
 
-    /// Computes a combined hash of this module and all its loads.
-    /// This can be used to determine if the module needs re-evaluation.
-    pub fn compute_combined_hash(&self) -> Arc<str> {
+    /// Converts a load statement module_id to a Changes entry path.
+    ///
+    /// Load statements use the format `//path/to/file.star` while
+    /// Changes entries use `path/to/file.star` (without the `//` prefix).
+    fn load_path_to_changes_key(module_id: &str) -> &str {
+        module_id.strip_prefix("//").unwrap_or(module_id)
+    }
+
+    /// Computes a unique digest for this module evaluation result.
+    ///
+    /// The digest incorporates:
+    /// - The hash of the original module file
+    /// - The hashes of all files loaded via load() statements
+    ///
+    /// This allows cache invalidation when any input file changes.
+    ///
+    /// # Arguments
+    /// * `changes` - The Changes struct containing file hashes
+    ///
+    /// # Returns
+    /// A blake3 digest string, or an error if required files aren't found in changes.
+    pub fn compute_digest(&self, changes: &crate::changes::Changes) -> anyhow::Result<Arc<str>> {
+        use crate::changes::ChangeDetailType;
+
         let mut hasher = blake3::Hasher::new();
 
-        // Include the module's own content hash
-        hasher.update(self.content_hash.as_bytes());
-
-        // Include all load hashes in a deterministic order
-        let mut load_hashes: Vec<&str> =
-            self.loads.iter().map(|l| l.content_hash.as_ref()).collect();
-        load_hashes.sort();
-        for hash in load_hashes {
-            hasher.update(hash.as_bytes());
+        // Hash the module file itself (module_name is already a relative workspace path)
+        if let Some(detail) = changes.entries.get(self.module_name.as_ref()) {
+            if let ChangeDetailType::File(hash) = &detail.detail_type {
+                hasher.update(hash.as_bytes());
+            }
+        } else {
+            return Err(format_error!(
+                "Internal Error: Module file '{}' not found in changes",
+                self.module_name
+            ));
         }
 
-        hasher.finalize().to_string().into()
+        // Iterate over loads (assumed to be sorted via set_loads)
+        for load in &self.loads {
+            let load_key = Self::load_path_to_changes_key(&load.module_id);
+            if let Some(detail) = changes.entries.get(load_key) {
+                if let ChangeDetailType::File(hash) = &detail.detail_type {
+                    hasher.update(hash.as_bytes());
+                }
+            }
+            // Note: We don't fail if a load isn't found - it may be a built-in module
+        }
+
+        Ok(hasher.finalize().to_string().into())
     }
 }
 
 impl LoadStatement {
     /// Creates a new LoadStatement.
-    pub fn new(module_id: Arc<str>, resolved_path: Arc<str>, content_hash: Arc<str>) -> Self {
-        Self {
-            module_id,
-            resolved_path,
-            content_hash,
-        }
+    pub fn new(module_id: Arc<str>) -> Self {
+        Self { module_id }
     }
 }
 
@@ -164,28 +189,23 @@ mod tests {
 
     #[test]
     fn test_module_evaluation_result_new() {
-        let result = ModuleEvaluationResult::new("test/module.star".into(), "abc123".into());
+        let result = ModuleEvaluationResult::new("test/module.star".into());
         assert_eq!(result.module_name.as_ref(), "test/module.star");
-        assert_eq!(result.content_hash.as_ref(), "abc123");
         assert!(result.loads.is_empty());
         assert!(result.tasks.is_empty());
     }
 
     #[test]
     fn test_add_load() {
-        let mut result = ModuleEvaluationResult::new("test/module.star".into(), "abc123".into());
-        result.add_load(LoadStatement::new(
-            "//lib:common.star".into(),
-            "/workspace/lib/common.star".into(),
-            "def456".into(),
-        ));
+        let mut result = ModuleEvaluationResult::new("test/module.star".into());
+        result.add_load(LoadStatement::new("//lib:common.star".into()));
         assert_eq!(result.loads.len(), 1);
         assert_eq!(result.loads[0].module_id.as_ref(), "//lib:common.star");
     }
 
     #[test]
     fn test_add_task() {
-        let mut result = ModuleEvaluationResult::new("test/module.star".into(), "abc123".into());
+        let mut result = ModuleEvaluationResult::new("test/module.star".into());
         result.add_task(TaskSummary::new(
             "//test:build".into(),
             "Run".into(),
@@ -196,47 +216,9 @@ mod tests {
     }
 
     #[test]
-    fn test_compute_combined_hash() {
-        let mut result = ModuleEvaluationResult::new("test/module.star".into(), "abc123".into());
-        result.add_load(LoadStatement::new(
-            "//lib:a.star".into(),
-            "/workspace/lib/a.star".into(),
-            "hash_a".into(),
-        ));
-        result.add_load(LoadStatement::new(
-            "//lib:b.star".into(),
-            "/workspace/lib/b.star".into(),
-            "hash_b".into(),
-        ));
-
-        let hash1 = result.compute_combined_hash();
-
-        // Same loads in different order should produce same hash
-        let mut result2 = ModuleEvaluationResult::new("test/module.star".into(), "abc123".into());
-        result2.add_load(LoadStatement::new(
-            "//lib:b.star".into(),
-            "/workspace/lib/b.star".into(),
-            "hash_b".into(),
-        ));
-        result2.add_load(LoadStatement::new(
-            "//lib:a.star".into(),
-            "/workspace/lib/a.star".into(),
-            "hash_a".into(),
-        ));
-
-        let hash2 = result2.compute_combined_hash();
-
-        assert_eq!(hash1, hash2);
-    }
-
-    #[test]
     fn test_serde_roundtrip() {
-        let mut result = ModuleEvaluationResult::new("test/module.star".into(), "abc123".into());
-        result.add_load(LoadStatement::new(
-            "//lib:common.star".into(),
-            "/workspace/lib/common.star".into(),
-            "def456".into(),
-        ));
+        let mut result = ModuleEvaluationResult::new("test/module.star".into());
+        result.add_load(LoadStatement::new("//lib:common.star".into()));
         result.add_task(TaskSummary::new(
             "//test:build".into(),
             "Run".into(),
@@ -247,7 +229,6 @@ mod tests {
         let deserialized: ModuleEvaluationResult = serde_json::from_str(&json).unwrap();
 
         assert_eq!(deserialized.module_name, result.module_name);
-        assert_eq!(deserialized.content_hash, result.content_hash);
         assert_eq!(deserialized.loads.len(), result.loads.len());
         assert_eq!(deserialized.tasks.len(), result.tasks.len());
     }

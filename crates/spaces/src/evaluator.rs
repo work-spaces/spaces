@@ -8,7 +8,7 @@ use starlark::eval::{Evaluator, ReturnFileLoader};
 use starlark::syntax::{AstModule, Dialect};
 use std::collections::HashSet;
 use std::sync::Arc;
-use utils::{inspect, labels, logger, mcache, query, rule, ws};
+use utils::{inspect, labels, logger, mtarget, query, rule, ws};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WithRules {
@@ -65,28 +65,12 @@ pub fn get_globals(with_rules: WithRules) -> GlobalsBuilder {
 }
 
 /// Captures load statement metadata from an AST for module caching.
-/// This extracts the module IDs, resolved paths, and content hashes
-/// without performing the actual evaluation.
-pub fn capture_load_statements(
-    ast: &AstModule,
-    name: &str,
-    workspace_path: &str,
-) -> Vec<mcache::LoadStatement> {
+/// This extracts the module IDs without performing the actual evaluation.
+pub fn capture_load_statements(ast: &AstModule) -> Vec<mtarget::LoadStatement> {
     let mut load_statements = Vec::new();
 
     for load in ast.loads() {
-        let module_load_path = workspace::get_workspace_path(workspace_path, name, load.module_id);
-
-        // Read content and compute hash (if file exists)
-        let content_hash = std::fs::read_to_string(module_load_path.as_ref())
-            .map(|contents| blake3::hash(contents.as_bytes()).to_string())
-            .unwrap_or_default();
-
-        load_statements.push(mcache::LoadStatement::new(
-            load.module_id.into(),
-            module_load_path,
-            content_hash.into(),
-        ));
+        load_statements.push(mtarget::LoadStatement::new(load.module_id.into()));
     }
 
     load_statements
@@ -98,9 +82,8 @@ pub fn capture_load_statements(
 /// and assembles them into a result structure suitable for caching.
 pub fn build_module_result(
     module_name: Arc<str>,
-    content_hash: Arc<str>,
     eval_context: &EvalContext,
-) -> mcache::ModuleEvaluationResult {
+) -> mtarget::ModuleEvaluationResult {
     let load_statements = eval_context.get_load_statements();
     let created_task_names = eval_context.get_created_tasks();
 
@@ -109,7 +92,7 @@ pub fn build_module_result(
     for task_name in created_task_names {
         if let Ok(task) = rules::get_task(task_name.as_ref()) {
             let task_json = serde_json::to_value(&task).unwrap_or_default();
-            let task_summary = mcache::TaskSummary::new(
+            let task_summary = mtarget::TaskSummary::new(
                 task_name.clone(),
                 task.phase.to_string().into(),
                 task_json,
@@ -118,12 +101,10 @@ pub fn build_module_result(
         }
     }
 
-    mcache::ModuleEvaluationResult {
-        module_name,
-        content_hash,
-        loads: load_statements,
-        tasks,
-    }
+    let mut result = mtarget::ModuleEvaluationResult::new(module_name);
+    result.set_loads(load_statements);
+    result.tasks = tasks;
+    result
 }
 
 pub fn evaluate_loads(
@@ -172,10 +153,9 @@ pub fn evaluate_ast(
     workspace_path: Arc<str>,
     with_rules: WithRules,
     eval_context: Option<EvalContext>,
-    content_hash: Option<Arc<str>>,
-) -> starlark::Result<(FrozenModule, Option<mcache::ModuleEvaluationResult>)> {
+) -> starlark::Result<(FrozenModule, Option<mtarget::ModuleEvaluationResult>)> {
     // Capture load statements before evaluation for caching
-    let load_statements = capture_load_statements(&ast, name.as_ref(), workspace_path.as_ref());
+    let load_statements = capture_load_statements(&ast);
 
     // Store load statements in context if available
     if let Some(ref ctx) = eval_context {
@@ -209,16 +189,9 @@ pub fn evaluate_ast(
         }
 
         // Build module result for caching (caller will save if appropriate)
-        let module_result =
-            if let (Some(ctx), Some(hash)) = (eval_context.as_ref(), content_hash.as_ref()) {
-                Some(build_module_result(
-                    ctx.module_name.clone(),
-                    hash.clone(),
-                    ctx,
-                ))
-            } else {
-                None
-            };
+        let module_result = eval_context
+            .as_ref()
+            .map(|ctx| build_module_result(ctx.module_name.clone(), ctx));
 
         if let Some(workspace) = workspace
             && singleton::get_inspect_options().stardoc.is_some()
@@ -276,13 +249,6 @@ pub fn evaluate_module(
         .as_ref()
         .map(|w| EvalContext::new(Some(w.clone()), name.clone()));
 
-    // Compute content hash for module caching
-    let content_hash: Option<Arc<str>> = if eval_context.is_some() {
-        Some(blake3::hash(content.as_bytes()).to_string().into())
-    } else {
-        None
-    };
-
     let dialect = get_dialect();
     let ast = AstModule::parse(name.as_ref(), content, &dialect)?;
     let (module, module_result) = evaluate_ast(
@@ -292,7 +258,6 @@ pub fn evaluate_module(
         workspace_path.clone(),
         with_rules,
         eval_context,
-        content_hash,
     )?;
 
     // Save module result for rules modules in Run/Inspect phases
@@ -303,7 +268,7 @@ pub fn evaluate_module(
                 task::Phase::Run | task::Phase::Inspect
             )
         {
-            let _ = mcache::save_module_result(workspace_path.as_ref(), &result);
+            let _ = mtarget::save_module_result(workspace_path.as_ref(), &result);
         }
     }
 
