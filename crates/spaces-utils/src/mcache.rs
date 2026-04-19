@@ -139,7 +139,13 @@ pub fn save_module_result(
         .context(format_context!("Failed to create module results directory"))?;
 
     // Create filename from module name (sanitized)
-    let safe_name = result.module_name.replace("/", "_").replace(":", "_");
+    // Strip workspace_path prefix to get relative path for the filename
+    let relative_name = result
+        .module_name
+        .strip_prefix(workspace_path)
+        .map(|s| s.strip_prefix('/').unwrap_or(s))
+        .unwrap_or(result.module_name.as_ref());
+    let safe_name = relative_name.replace("/", "_").replace(":", "_");
     let file_path = format!("{cache_dir}/{safe_name}{MODULE_RESULTS_SUFFIX}");
 
     let content = serde_json::to_string_pretty(&result)

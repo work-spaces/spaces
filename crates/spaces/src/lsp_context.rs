@@ -221,12 +221,12 @@ impl SpacesContext {
 
         Self::err(
             name,
-            eval_result.map(|result| EvalResult {
+            eval_result.map(|(module, _module_result)| EvalResult {
                 lsp_eval_result: LspEvalResult {
                     diagnostics: vec![],
                     ast: Some(ast),
                 },
-                module: Some(result),
+                module: Some(module),
             }),
         )
     }

@@ -173,7 +173,7 @@ pub fn evaluate_ast(
     with_rules: WithRules,
     eval_context: Option<EvalContext>,
     content_hash: Option<Arc<str>>,
-) -> starlark::Result<FrozenModule> {
+) -> starlark::Result<(FrozenModule, Option<mcache::ModuleEvaluationResult>)> {
     // Capture load statements before evaluation for caching
     let load_statements = capture_load_statements(&ast, name.as_ref(), workspace_path.as_ref());
 
@@ -208,18 +208,17 @@ pub fn evaluate_ast(
             eval.eval_module(ast, &globals)?;
         }
 
-        // Save module evaluation result for caching (only in Run/Inspect phases)
-        if let (Some(ctx), Some(hash)) = (eval_context.as_ref(), content_hash.as_ref()) {
-            let should_save =
-                matches!(ctx.execution_phase, task::Phase::Run | task::Phase::Inspect);
-            if should_save {
-                let result = build_module_result(ctx.module_name.clone(), hash.clone(), ctx);
-                // Log but don't fail if saving fails
-                if let Err(e) = mcache::save_module_result(workspace_path.as_ref(), &result) {
-                    eprintln!("Warning: Failed to save module result: {e}");
-                }
-            }
-        }
+        // Build module result for caching (caller will save if appropriate)
+        let module_result =
+            if let (Some(ctx), Some(hash)) = (eval_context.as_ref(), content_hash.as_ref()) {
+                Some(build_module_result(
+                    ctx.module_name.clone(),
+                    hash.clone(),
+                    ctx,
+                ))
+            } else {
+                None
+            };
 
         if let Some(workspace) = workspace
             && singleton::get_inspect_options().stardoc.is_some()
@@ -253,7 +252,7 @@ pub fn evaluate_ast(
 
         let frozen_module = module.freeze()?;
 
-        Ok(frozen_module)
+        Ok((frozen_module, module_result))
     })
 }
 
@@ -286,15 +285,28 @@ pub fn evaluate_module(
 
     let dialect = get_dialect();
     let ast = AstModule::parse(name.as_ref(), content, &dialect)?;
-    let module = evaluate_ast(
+    let (module, module_result) = evaluate_ast(
         ast,
-        name,
+        name.clone(),
         workspace,
-        workspace_path,
+        workspace_path.clone(),
         with_rules,
         eval_context,
         content_hash,
     )?;
+
+    // Save module result for rules modules in Run/Inspect phases
+    if let Some(result) = module_result {
+        if workspace::is_rules_module(name.as_ref())
+            && matches!(
+                singleton::get_execution_phase(),
+                task::Phase::Run | task::Phase::Inspect
+            )
+        {
+            let _ = mcache::save_module_result(workspace_path.as_ref(), &result);
+        }
+    }
+
     Ok(module)
 }
 
