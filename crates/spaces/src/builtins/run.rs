@@ -200,6 +200,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             task::Task::new(rule, task::Phase::Run, executor::Task::Target),
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
+            Some(ctx),
         )
         .context(format_context!("Failed to register rule {rule_name}"))?;
         Ok(NoneType)
@@ -234,6 +235,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             task::Task::new(rule, task::Phase::Run, executor::Task::Target),
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
+            Some(ctx),
         )
         .context(format_context!("Failed to register rule {rule_name}"))?;
         Ok(NoneType)
@@ -315,6 +317,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             task::Task::new(rule, task::Phase::Run, executor::Task::Exec(exec)),
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
+            Some(ctx),
         )
         .context(format_context!("Failed to register rule {rule_name}"))?;
         Ok(NoneType)
@@ -371,6 +374,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             task::Task::new(rule, task::Phase::Run, executor::Task::Kill(kill_exec)),
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
+            Some(ctx),
         )
         .context(format_context!("Failed to register rule {rule_name}"))?;
         Ok(NoneType)
@@ -452,6 +456,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             ),
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
+            Some(ctx),
         )
         .context(format_context!("Failed to register rule {rule_name}"))?;
         Ok(NoneType)
@@ -552,6 +557,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             task::Task::new(rule, task::Phase::Run, cloned_task.executor),
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
+            Some(ctx),
         )
         .context(format_context!("Failed to register rule {rule_name}"))?;
         Ok(NoneType)

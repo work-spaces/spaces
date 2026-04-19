@@ -141,6 +141,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             task::Task::new(rule, task::Phase::Checkout, executor::Task::Target),
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
+            Some(ctx),
         )
         .context(format_context!("Failed to register rule {rule_name}"))?;
         Ok(NoneType)
@@ -192,6 +193,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             task::Task::new(rule, task::Phase::Checkout, executor::Task::Exec(exec)),
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
+            Some(ctx),
         )
         .context(format_context!("Failed to register rule {rule_name}"))?;
         Ok(NoneType)
@@ -281,6 +283,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             ),
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
+            Some(ctx),
         )
         .context(format_context!("Failed to register rule {rule_name}"))?;
         Ok(NoneType)
@@ -363,6 +366,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             ),
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
+            Some(ctx),
         )
         .context(format_context!(
             "Failed to register rule {cargo_bin_rule_name}"
@@ -390,6 +394,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 ),
                 &ctx.module_name,
                 ctx.default_module_visibility.clone(),
+                Some(ctx),
             )
             .context(format_context!("Failed to register rule {bin_rule_name}"))?;
         }
@@ -401,6 +406,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             task::Task::new(rule, task::Phase::Checkout, executor::Task::Target),
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
+            Some(ctx),
         )
         .context(format_context!("Failed to insert final target {rule_name}",))?;
 
@@ -502,6 +508,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             workspace_arc,
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
+            Some(ctx),
         )
         .context(format_context!("Failed to add archive"))?;
 
@@ -548,6 +555,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             ),
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
+            Some(ctx),
         )
         .context(format_context!("Failed to register rule {rule_name}"))?;
 
@@ -597,6 +605,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             ),
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
+            Some(ctx),
         )
         .context(format_context!("Failed to register rule {rule_name}"))?;
 
@@ -647,6 +656,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             ),
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
+            Some(ctx),
         )
         .context(format_context!("Failed to register rule {rule_name}"))?;
 
@@ -691,6 +701,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             ),
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
+            Some(ctx),
         )
         .context(format_context!("Failed to register rule {rule_name}"))?;
 
@@ -739,6 +750,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             workspace_arc,
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
+            Some(ctx),
         )
         .context(format_context!("Failed to add archive"))?;
         Ok(NoneType)
@@ -767,6 +779,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             ),
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
+            Some(ctx),
         )
         .context(format_context!("Failed to register rule {rule_name}"))?;
 
@@ -816,6 +829,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             ),
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
+            Some(ctx),
         )
         .context(format_context!("Failed to register rule {rule_name}"))?;
         Ok(NoneType)
@@ -879,6 +893,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             ),
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
+            Some(ctx),
         )
         .context(format_context!("Failed to register rule {rule_name}"))?;
 
@@ -942,6 +957,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             ),
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
+            Some(ctx),
         )
         .context(format_context!("Failed to register rule {rule_name}"))?;
 
@@ -1015,6 +1031,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             ),
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
+            Some(ctx),
         )
         .context(format_context!("Failed to register rule {rule_name}"))?;
 
@@ -1064,6 +1081,7 @@ fn add_http_archive(
     workspace_arc: WorkspaceArc,
     module_name: &Arc<str>,
     default_visibility: rule::Visibility,
+    eval_context: Option<&crate::builtins::eval_context::EvalContext>,
 ) -> anyhow::Result<()> {
     if let Some(mut archive) = archive_option {
         //create a target that waits for all downloads
@@ -1138,6 +1156,7 @@ fn add_http_archive(
             ),
             module_name,
             default_visibility,
+            eval_context,
         )
         .context(format_context!("Failed to register rule {rule_name}"))?;
     }

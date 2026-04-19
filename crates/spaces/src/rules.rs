@@ -1,3 +1,4 @@
+use crate::builtins::eval_context::EvalContext;
 use crate::workspace::WorkspaceArc;
 use crate::{executor, singleton, task, workspace};
 use anyhow::Context;
@@ -426,7 +427,12 @@ pub struct State {
 
 impl State {
     pub fn insert_task(&self, task: task::Task) -> anyhow::Result<()> {
-        self.insert_task_with_context(task, &Arc::from(""), self.default_module_visibility.clone())
+        self.insert_task_with_context(
+            task,
+            &Arc::from(""),
+            self.default_module_visibility.clone(),
+        )?;
+        Ok(())
     }
 
     /// Insert a task using an explicitly supplied module name and default
@@ -438,10 +444,10 @@ impl State {
         mut task_to_insert: task::Task,
         module_name: &Arc<str>,
         default_visibility: rule::Visibility,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Arc<str>> {
         // don't insert tasks in lsp mode
         if singleton::is_lsp_mode() {
-            return Ok(());
+            return Ok("".into());
         }
 
         // check to see if the task will cause a conflict
@@ -501,10 +507,10 @@ impl State {
                 "Rule already exists {rule_label} with {task:?}"
             ));
         } else {
-            tasks.insert(rule_label, task_to_insert);
+            tasks.insert(rule_label.clone(), task_to_insert);
         }
 
-        Ok(())
+        Ok(rule_label)
     }
 
     fn check_task_deps_visibility(&self, task: &task::Task) -> anyhow::Result<()> {
@@ -1266,9 +1272,14 @@ pub fn insert_task_for_module(
     task: task::Task,
     module_name: &Arc<str>,
     default_visibility: rule::Visibility,
+    eval_context: Option<&EvalContext>,
 ) -> anyhow::Result<()> {
     let state = get_state().read();
-    state.insert_task_with_context(task, module_name, default_visibility)
+    let rule_label = state.insert_task_with_context(task, module_name, default_visibility)?;
+    if let Some(ctx) = eval_context {
+        ctx.record_task(rule_label);
+    }
+    Ok(())
 }
 
 /// Register a module name in `all_modules`.
