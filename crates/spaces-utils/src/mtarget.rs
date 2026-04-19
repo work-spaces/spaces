@@ -200,8 +200,6 @@ impl ModuleTarget {
             file_path.display()
         ))?;
 
-        println!("done {}", file_path.display());
-
         Ok(())
     }
 }
