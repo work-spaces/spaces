@@ -351,7 +351,7 @@ fn try_evaluate_with_cache(
     let module_digest = {
         let workspace = workspace.read();
         mtarget
-            .compute_digest(&workspace.settings.bin.changes)
+            .compute_digest(&workspace.settings.bin.star_files)
             .context(format_context!(
                 "Failed to compute digest for module {:?}",
                 name,

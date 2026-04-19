@@ -5,7 +5,7 @@
 //! of module evaluation results to avoid re-evaluation when the
 //! module and its dependencies haven't changed.
 
-use crate::{changes, rule};
+use crate::{rule, ws};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -129,49 +129,42 @@ impl ModuleTarget {
     }
 
     /// Computes a unique digest for this module evaluation result.
+    /// Computes a digest for the module and its dependencies.
     ///
-    /// The digest incorporates:
-    /// - The hash of the original module file
+    /// The digest is computed from:
+    /// - The hash of the module file itself
     /// - The hashes of all files loaded via load() statements
     ///
     /// This allows cache invalidation when any input file changes.
     ///
     /// # Arguments
-    /// * `changes` - The Changes struct containing file hashes
+    /// * `star_files` - The HashMap of star file paths to their BinDetail (containing hashes)
     ///
     /// # Returns
-    /// A blake3 digest string, or an error if required files aren't found in changes.
-    pub fn compute_digest(&self, changes: &changes::Changes) -> anyhow::Result<Arc<str>> {
-        use crate::changes::ChangeDetailType;
-
+    /// A blake3 digest string, or an error if required files aren't found in star_files.
+    pub fn compute_digest(
+        &self,
+        star_files: &HashMap<Arc<str>, ws::BinDetail>,
+    ) -> anyhow::Result<Arc<str>> {
         let mut hasher = blake3::Hasher::new();
 
         // Hash the module file itself (module_name is already a relative workspace path)
-        if let Some(detail) = changes.entries.get(self.module_name.as_ref()) {
-            if let ChangeDetailType::File(hash) = &detail.detail_type {
-                hasher.update(hash.as_bytes());
-            }
+        if let Some(detail) = star_files.get(self.module_name.as_ref()) {
+            hasher.update(&detail.hash);
         } else {
             return Err(format_error!(
-                "Internal Error: Module file '{}' not found in changes",
+                "Internal Error: Module file '{}' not found in star_files",
                 self.module_name
             ));
         }
 
         // Iterate over loads (assumed to be sorted via set_loads)
         for load in &self.loads {
-            if let Some(detail) = changes.entries.get(&load.module_id) {
-                if let ChangeDetailType::File(hash) = &detail.detail_type {
-                    hasher.update(hash.as_bytes());
-                } else {
-                    return Err(format_error!(
-                        "Load module '{}' is not of type file in changes",
-                        load.module_id
-                    ));
-                }
+            if let Some(detail) = star_files.get(&load.module_id) {
+                hasher.update(&detail.hash);
             } else {
                 return Err(format_error!(
-                    "Internal Error: Load module '{}' not found in changes",
+                    "Internal Error: Load module '{}' not found in star_files",
                     load.module_id
                 ));
             }
