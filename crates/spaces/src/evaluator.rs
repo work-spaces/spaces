@@ -302,12 +302,10 @@ pub fn evaluate_module(
             task::Phase::Run | task::Phase::Inspect
         )
     {
-        result.save_to_json().with_context(|| {
-            format_context!(
-                "Internal Error: Failed to save module result for {}",
-                name.as_ref()
-            )
-        })?;
+        result.save_to_json().context(format_context!(
+            "Internal Error: Failed to save module result for {}",
+            name.as_ref()
+        ))?;
     }
 
     Ok((module, module_result))
@@ -334,7 +332,9 @@ fn try_evaluate_with_cache(
 
     if phase == task::Phase::Checkout || singleton::get_is_rescan() {
         let (_, _) = evaluate_module(Some(workspace), workspace_path, name, content, with_rules)
-            .map_err(|e| format_error!("Failed to evaluate module during checkout {:?}", e))?;
+            .map_err(|e| {
+                format_error!("Failed to evaluate module during checkout {:?} -> {e}", e)
+            })?;
         return Ok(());
     }
 

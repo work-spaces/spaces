@@ -192,7 +192,22 @@ pub fn get_workspace_path(workspace_path: &str, current_path: &str, target_path:
     } else {
         let name_path = std::path::Path::new(current_path);
         if let Some(parent) = name_path.parent() {
-            format!("{}/{}", parent.to_string_lossy(), target_path).into()
+            let joined = parent.join(target_path);
+            // Normalize the path by resolving `.` and `..` components
+            let normalized: std::path::PathBuf =
+                joined
+                    .components()
+                    .fold(std::path::PathBuf::new(), |mut acc, c| {
+                        match c {
+                            std::path::Component::ParentDir => {
+                                acc.pop();
+                            }
+                            std::path::Component::CurDir => {}
+                            _ => acc.push(c),
+                        }
+                        acc
+                    });
+            normalized.to_string_lossy().into()
         } else {
             target_path.into()
         }

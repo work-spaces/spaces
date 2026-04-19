@@ -82,9 +82,11 @@ impl ModuleTarget {
     /// * `module_name` - The module path (e.g., "spaces/spaces.star")
     pub fn new_from_json(module_name: &str) -> anyhow::Result<Option<Self>> {
         let build_module_target_dir = std::path::Path::new(MODULE_RESULTS_DIR);
-        let module_path = std::path::Path::new(module_name);
-        let file_path = build_module_target_dir.join(format!("{}.json", module_path.display()));
+        let module_name_json = format!("{module_name}.json");
+        let module_path = std::path::Path::new(module_name_json.as_str());
 
+        // Sanitize only colons (for rule labels), preserve directory structure
+        let file_path = build_module_target_dir.join(module_path);
         let path = std::path::Path::new(&file_path);
         if !path.exists() {
             return Ok(None);
@@ -171,24 +173,34 @@ impl ModuleTarget {
     /// `build/spaces-modules/spaces/spaces.star.json`).
     pub fn save_to_json(&self) -> anyhow::Result<()> {
         let build_module_target_dir = std::path::Path::new(MODULE_RESULTS_DIR);
-        let module_path = std::path::Path::new(self.module_name.as_ref());
+        let module_name_json = format!("{}.json", self.module_name.as_ref());
+        let module_path = std::path::Path::new(module_name_json.as_str());
 
         // Sanitize only colons (for rule labels), preserve directory structure
-        let file_path = build_module_target_dir.join(format!("{}.json", module_path.display()));
+        let file_path = build_module_target_dir.join(module_path);
 
         // Create parent directories to mirror workspace structure
         if let Some(parent) = std::path::Path::new(&file_path).parent() {
-            std::fs::create_dir_all(parent)
-                .context(format_context!("Failed to create module results directory"))?;
+            std::fs::create_dir_all(parent).context(format_context!(
+                "Failed to create module results directory at {}",
+                parent.display()
+            ))?;
         }
 
         let content = serde_json::to_string_pretty(&self)
             .context(format_context!("Failed to serialize module result"))?;
 
+        // rcache links files in as read-only - remove to replace the file
+        // this does not run exclusively under rcache so rcache
+        // cannot manage the file removal
+        let _ = std::fs::remove_file(&file_path);
+
         std::fs::write(&file_path, content).context(format_context!(
             "Failed to write module result to {}",
             file_path.display()
         ))?;
+
+        println!("done {}", file_path.display());
 
         Ok(())
     }
