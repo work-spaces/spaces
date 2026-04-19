@@ -137,7 +137,7 @@ impl SpacesContext {
         let content =
             fs::read_to_string(path).context(format_context!("Failed to read {path:?}"))?;
 
-        let frozen_module = evaluator::evaluate_module(
+        let (frozen_module, _) = evaluator::evaluate_module(
             None,
             workspace_path,
             path.to_string_lossy().into(),
