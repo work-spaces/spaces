@@ -1,8 +1,8 @@
-//! Module evaluation result caching.
+//! Module Target creation (spaces modules to JSON compilation).
 //!
 //! This module provides data structures for capturing and persisting
-//! the results of evaluating Starlark modules. This enables caching
-//! of module evaluation results to avoid re-evaluation when the
+//! the results of evaluating Starlark modules. This enables compiling
+//! spaces modules to JSON to avoid re-evaluation when the
 //! module and its dependencies haven't changed.
 
 use crate::{rule, ws};
