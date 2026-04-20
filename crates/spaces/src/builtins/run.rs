@@ -6,7 +6,7 @@ use starlark::{environment::GlobalsBuilder, values::none::NoneType};
 use std::sync::Arc;
 use utils::{logger, marker, rule, targets};
 
-use crate::builtins::eval_context::get_eval_context;
+use crate::builtins::eval_context::get_eval_context_mut;
 use crate::{executor, rules, task};
 
 fn add_file_tokens_to_deps(
@@ -159,7 +159,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Arguments
     /// * `message`: Abort message to show the user.
     fn abort(message: &str, eval: &mut Evaluator) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context(eval)?;
+        let ctx = get_eval_context_mut(eval)?;
         if ctx.is_lsp {
             Ok(NoneType)
         } else {
@@ -186,7 +186,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context(eval)?;
+        let ctx = get_eval_context_mut(eval)?;
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for add target rule"))?;
 
@@ -200,6 +200,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             task::Task::new(rule, task::Phase::Run, executor::Task::Target),
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
+            Some(ctx),
         )
         .context(format_context!("Failed to register rule {rule_name}"))?;
         Ok(NoneType)
@@ -215,7 +216,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context(eval)?;
+        let ctx = get_eval_context_mut(eval)?;
         logger::push_deprecation_warning(
             Some(ctx.module_name.clone()),
             "Support for checkout.add_which_asset() will be removed in v0.16. Use checkout.add_any_asset().",
@@ -234,6 +235,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             task::Task::new(rule, task::Phase::Run, executor::Task::Target),
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
+            Some(ctx),
         )
         .context(format_context!("Failed to register rule {rule_name}"))?;
         Ok(NoneType)
@@ -263,7 +265,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] exec: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context(eval)?;
+        let ctx = get_eval_context_mut(eval)?;
         let mut rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for exec rule"))?;
 
@@ -315,6 +317,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             task::Task::new(rule, task::Phase::Run, executor::Task::Exec(exec)),
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
+            Some(ctx),
         )
         .context(format_context!("Failed to register rule {rule_name}"))?;
         Ok(NoneType)
@@ -341,7 +344,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] kill: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context(eval)?;
+        let ctx = get_eval_context_mut(eval)?;
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for kill rule"))?;
 
@@ -371,6 +374,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             task::Task::new(rule, task::Phase::Run, executor::Task::Kill(kill_exec)),
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
+            Some(ctx),
         )
         .context(format_context!("Failed to register rule {rule_name}"))?;
         Ok(NoneType)
@@ -398,7 +402,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] archive: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context(eval)?;
+        let ctx = get_eval_context_mut(eval)?;
         let mut rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for add_archive rule"))?;
 
@@ -452,6 +456,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             ),
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
+            Some(ctx),
         )
         .context(format_context!("Failed to register rule {rule_name}"))?;
         Ok(NoneType)
@@ -480,7 +485,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] clone_from: &str,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context(eval)?;
+        let ctx = get_eval_context_mut(eval)?;
         let mut rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for add_from_clone rule"))?;
 
@@ -552,6 +557,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             task::Task::new(rule, task::Phase::Run, cloned_task.executor),
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
+            Some(ctx),
         )
         .context(format_context!("Failed to register rule {rule_name}"))?;
         Ok(NoneType)

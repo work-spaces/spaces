@@ -137,7 +137,7 @@ impl SpacesContext {
         let content =
             fs::read_to_string(path).context(format_context!("Failed to read {path:?}"))?;
 
-        let frozen_module = evaluator::evaluate_module(
+        let (frozen_module, _) = evaluator::evaluate_module(
             None,
             workspace_path,
             path.to_string_lossy().into(),
@@ -220,12 +220,12 @@ impl SpacesContext {
 
         Self::err(
             name,
-            eval_result.map(|result| EvalResult {
+            eval_result.map(|(module, _module_result)| EvalResult {
                 lsp_eval_result: LspEvalResult {
                     diagnostics: vec![],
                     ast: Some(ast),
                 },
-                module: Some(result),
+                module: Some(module),
             }),
         )
     }

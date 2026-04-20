@@ -1,3 +1,4 @@
+use crate::builtins::eval_context::EvalContext;
 use crate::workspace::WorkspaceArc;
 use crate::{executor, singleton, task, workspace};
 use anyhow::Context;
@@ -8,8 +9,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use utils::{
-    changes, environment, graph, labels, lock, logger, logs, markdown, platform, rcache, rule,
-    targets, ws,
+    changes, environment, graph, labels, lock, logger, logs, markdown, mtarget, platform, rcache,
+    rule, targets, ws,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -426,7 +427,12 @@ pub struct State {
 
 impl State {
     pub fn insert_task(&self, task: task::Task) -> anyhow::Result<()> {
-        self.insert_task_with_context(task, &Arc::from(""), self.default_module_visibility.clone())
+        self.insert_task_with_context(
+            task,
+            &Arc::from(""),
+            self.default_module_visibility.clone(),
+        )?;
+        Ok(())
     }
 
     /// Insert a task using an explicitly supplied module name and default
@@ -438,10 +444,10 @@ impl State {
         mut task_to_insert: task::Task,
         module_name: &Arc<str>,
         default_visibility: rule::Visibility,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Arc<str>> {
         // don't insert tasks in lsp mode
         if singleton::is_lsp_mode() {
-            return Ok(());
+            return Ok("".into());
         }
 
         // check to see if the task will cause a conflict
@@ -501,9 +507,33 @@ impl State {
                 "Rule already exists {rule_label} with {task:?}"
             ));
         } else {
-            tasks.insert(rule_label, task_to_insert);
+            tasks.insert(rule_label.clone(), task_to_insert);
         }
 
+        Ok(rule_label)
+    }
+
+    /// Restores tasks from a cached ModuleEvaluationResult into the task graph.
+    ///
+    /// This is the reverse of `build_module_result()` in evaluator.rs - it takes
+    /// a cached module result and inserts all its tasks into the rules state,
+    /// allowing module evaluation to be skipped when the cache is valid.
+    fn restore_tasks_from_cache(
+        &self,
+        mtarget: &mtarget::ModuleTarget,
+        module_name: &Arc<str>,
+    ) -> anyhow::Result<()> {
+        for task_summary in mtarget.tasks.values() {
+            let task: task::Task = serde_json::from_value(task_summary.task_json.clone()).context(
+                format_context!("Failed to deserialize cached task {}", task_summary.name),
+            )?;
+
+            self.insert_task_with_context(
+                task,
+                module_name,
+                task_summary.default_visibility.clone(),
+            )?;
+        }
         Ok(())
     }
 
@@ -1266,9 +1296,14 @@ pub fn insert_task_for_module(
     task: task::Task,
     module_name: &Arc<str>,
     default_visibility: rule::Visibility,
+    eval_context: Option<&EvalContext>,
 ) -> anyhow::Result<()> {
     let state = get_state().read();
-    state.insert_task_with_context(task, module_name, default_visibility)
+    let rule_label = state.insert_task_with_context(task, module_name, default_visibility)?;
+    if let Some(ctx) = eval_context {
+        ctx.record_task(rule_label);
+    }
+    Ok(())
 }
 
 /// Register a module name in `all_modules`.
@@ -1276,6 +1311,24 @@ pub fn insert_task_for_module(
 pub fn register_module(name: Arc<str>) {
     let mut state = get_state().write();
     state.all_modules.insert(name);
+}
+
+/// Restores tasks from a cached ModuleEvaluationResult.
+///
+/// This is the reverse of `build_module_result()` in evaluator.rs - it takes
+/// a cached module result and inserts all its tasks into the rules state,
+/// allowing module evaluation to be skipped when the cache is valid.
+///
+/// # Arguments
+/// * `mtarget` - The cached module evaluation result containing serialized tasks
+/// * `module_name` - The module name to register
+pub fn restore_tasks_from_cache(
+    mtarget: &mtarget::ModuleTarget,
+    module_name: &Arc<str>,
+) -> anyhow::Result<()> {
+    let mut state = get_state().write();
+    state.all_modules.insert(module_name.clone());
+    state.restore_tasks_from_cache(mtarget, module_name)
 }
 
 pub fn show_tasks(
