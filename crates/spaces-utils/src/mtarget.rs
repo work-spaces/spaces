@@ -85,7 +85,6 @@ impl ModuleTarget {
         let module_name_json = format!("{module_name}.json");
         let module_path = std::path::Path::new(module_name_json.as_str());
 
-        // Sanitize only colons (for rule labels), preserve directory structure
         let file_path = build_module_target_dir.join(module_path);
         let path = std::path::Path::new(&file_path);
         if !path.exists() {
@@ -175,8 +174,6 @@ impl ModuleTarget {
         let build_module_target_dir = std::path::Path::new(MODULE_RESULTS_DIR);
         let module_name_json = format!("{}.json", self.module_name.as_ref());
         let module_path = std::path::Path::new(module_name_json.as_str());
-
-        // Sanitize only colons (for rule labels), preserve directory structure
         let file_path = build_module_target_dir.join(module_path);
 
         // Create parent directories to mirror workspace structure

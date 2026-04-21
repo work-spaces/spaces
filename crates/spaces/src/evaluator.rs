@@ -75,29 +75,36 @@ pub fn get_globals(with_rules: WithRules) -> GlobalsBuilder {
 pub fn build_module_result(
     module_name: Arc<str>,
     eval_context: &EvalContext,
-) -> mtarget::ModuleTarget {
+) -> anyhow::Result<mtarget::ModuleTarget> {
     let load_statements = eval_context.get_load_statements();
     let created_task_names = eval_context.get_created_tasks();
 
     // Build task summaries from the task names
     let mut tasks = std::collections::HashMap::new();
     for task_name in created_task_names {
-        if let Ok(task) = rules::get_task(task_name.as_ref()) {
-            let task_json = serde_json::to_value(&task).unwrap_or_default();
-            let task_summary = mtarget::Rule::new(
-                task_name.clone(),
-                task.phase.to_string().into(),
-                eval_context.default_module_visibility.clone(),
-                task_json,
-            );
-            tasks.insert(task_name.clone(), task_summary);
-        }
+        let task = rules::get_task(task_name.as_ref()).context(format_context!(
+            "Failed to get task '{}' while building module result for '{}'",
+            task_name,
+            module_name
+        ))?;
+        let task_json = serde_json::to_value(&task).context(format_context!(
+            "Failed to serialize task '{}' while building module result for '{}'",
+            task_name,
+            module_name
+        ))?;
+        let task_summary = mtarget::Rule::new(
+            task_name.clone(),
+            task.phase.to_string().into(),
+            eval_context.default_module_visibility.clone(),
+            task_json,
+        );
+        tasks.insert(task_name.clone(), task_summary);
     }
 
     let mut result = mtarget::ModuleTarget::new(module_name);
     result.set_loads(load_statements.to_vec());
     result.tasks = tasks;
-    result
+    Ok(result)
 }
 
 /// Result of evaluating a single load statement.
@@ -225,7 +232,9 @@ pub fn evaluate_ast(
         // Build module result for caching (caller will save if appropriate)
         let module_result = eval_context
             .as_ref()
-            .map(|ctx| build_module_result(ctx.module_name.clone(), ctx));
+            .map(|ctx| build_module_result(ctx.module_name.clone(), ctx))
+            .transpose()
+            .map_err(|e| format_error!("Failed to build module result: {}", e))?;
 
         if let Some(workspace) = workspace
             && singleton::get_inspect_options().stardoc.is_some()
@@ -330,7 +339,8 @@ fn try_evaluate_with_cache(
     let workspace_path = workspace.read().get_absolute_path();
     let eval_logger = star_logger(console.clone());
 
-    if phase == task::Phase::Checkout || singleton::get_is_rescan() {
+    let is_always_evaluate = workspace.read().settings.bin.is_always_evaluate;
+    if phase == task::Phase::Checkout || singleton::get_is_rescan() || is_always_evaluate {
         let (_, _) = evaluate_module(Some(workspace), workspace_path, name, content, with_rules)
             .map_err(|e| {
                 format_error!("Failed to evaluate module during checkout {:?} -> {e}", e)
