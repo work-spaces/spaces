@@ -72,11 +72,10 @@ pub fn get_globals(with_rules: WithRules) -> GlobalsBuilder {
 ///
 /// This collects the load statements and created tasks from the context
 /// and assembles them into a result structure suitable for caching.
-pub fn build_module_result(
+fn build_module_target(
     module_name: Arc<str>,
     eval_context: &EvalContext,
 ) -> anyhow::Result<mtarget::ModuleTarget> {
-    let load_statements = eval_context.get_load_statements();
     let created_task_names = eval_context.get_created_tasks();
 
     // Build task summaries from the task names
@@ -102,9 +101,16 @@ pub fn build_module_result(
     }
 
     let mut result = mtarget::ModuleTarget::new(module_name);
-    result.set_loads(load_statements.to_vec());
-    result.tasks = tasks;
+    result.rules = tasks;
     Ok(result)
+}
+
+fn build_module_deps(
+    module_name: Arc<str>,
+    eval_context: &EvalContext,
+    env_values: HashMap<Arc<str>, Arc<str>>,
+    store_values: HashMap<Arc<str>, Arc<str>>,
+) -> anyhow::Result<mtarget::ModuleDeps> {
 }
 
 /// Result of evaluating a single load statement.
@@ -232,7 +238,7 @@ pub fn evaluate_ast(
         // Build module result for caching (caller will save if appropriate)
         let module_result = eval_context
             .as_ref()
-            .map(|ctx| build_module_result(ctx.module_name.clone(), ctx))
+            .map(|ctx| build_module_target(ctx.module_name.clone(), ctx))
             .transpose()
             .map_err(|e| format_error!("Failed to build module result: {}", e))?;
 
@@ -349,12 +355,12 @@ fn try_evaluate_with_cache(
     }
 
     // Try to load existing module result from build folder
-    let mtarget_option = mtarget::ModuleTarget::new_from_json(name.as_ref()).context(
+    let module_deps_option = mtarget::ModuleDeps::new_from_json(name.as_ref()).context(
         format_context!("Failed to load module target for {:?}", name),
     )?;
 
     // If no cached result exists, evaluate without rcache
-    let Some(mtarget) = mtarget_option else {
+    let Some(module_deps) = module_deps_option else {
         eval_logger
             .debug(format!("Evaluating module {:?} (no module target found)", name).as_str());
         let (_, _) = evaluate_module(Some(workspace), workspace_path, name, content, with_rules)
@@ -365,7 +371,7 @@ fn try_evaluate_with_cache(
     // Compute digest from mtarget
     let module_digest = {
         let workspace = workspace.read();
-        mtarget
+        module_deps
             .compute_digest(&workspace.settings.bin.star_files)
             .context(format_context!(
                 "Failed to compute digest for module {:?}",
@@ -380,13 +386,10 @@ fn try_evaluate_with_cache(
     };
 
     // rcache targets = the JSON file
-    let json_target: Arc<str> = format!(
-        "{}/{}{}",
-        mtarget::MODULE_RESULTS_DIR,
-        name.as_ref().replace(":", "_"),
-        mtarget::MODULE_RESULTS_SUFFIX
-    )
-    .into();
+    let json_target: Arc<str> = mtarget::ModuleTarget::get_json_path(name.as_ref())
+        .to_string_lossy()
+        .into();
+
     let cache_targets = vec![targets::Target::File(json_target.clone())];
 
     // Execute with rcache
@@ -415,6 +418,13 @@ fn try_evaluate_with_cache(
         Some(Err(e)) => Err(e),
         None => {
             eval_logger.debug(format!("Cache hit for module {:?}", name).as_str());
+            let Some(mtarget) = mtarget::ModuleTarget::new_from_json(name.as_ref())
+                .context(format_context!("Failed to load mtarget for cache hit"))?
+            else {
+                return Err(format_error!(
+                    "Internal error: mtarget not found for cache hit {name}",
+                ));
+            };
             // Cache hit - restore tasks from mtarget
             rules::restore_tasks_from_cache(&mtarget, &name)
         }
