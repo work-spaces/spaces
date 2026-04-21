@@ -3,14 +3,22 @@ Spaces starlark checkout/run script to make changes to spaces, printer, and arch
 With VSCode/Zed integration
 """
 
+load("//@star/packages/star/musl-gcc.star", "musl_gcc_get_env")
 load("//@star/sdk/star/deps.star", "deps")
 load("//@star/sdk/star/glob.star", "glob")
 load(
+    "//@star/sdk/star/info.star",
+    "info_is_platform_aarch64",
+    "info_is_platform_linux",
+    "info_is_platform_x86_64",
+)
+load(
     "//@star/sdk/star/run.star",
+    "run_add",
     "run_add_exec",
     "run_add_exec_test",
+    "run_log_level_passthrough",
 )
-load("//@star/sdk/star/shell.star", "shell")
 load(
     "//@star/sdk/star/visibility.star",
     "visibility_private",
@@ -20,6 +28,7 @@ load(
     "//@star/sdk/star/ws.star",
     "workspace_get_env_var",
     "workspace_is_env_var_set",
+    "workspace_load_value",
 )
 
 GLOB_DEPS = glob(includes = [
@@ -32,12 +41,21 @@ GLOB_DEPS = glob(includes = [
     "//spaces/target/**",
 ])
 
+DBUS_DEPS = ["//spaces/deps:dbus"] if workspace_load_value("SPACES_DBUS_ENABLED") else []
+
+run_add(
+    "base_deps",
+    deps = [
+        ":rustup_update",
+    ] + DBUS_DEPS,
+)
+
 run_add_exec(
     "check",
     command = "cargo",
     args = ["check"],
     help = "Run cargo check on workspace",
-    deps = deps(rules = [":rustup_update"], globs = [GLOB_DEPS]),
+    deps = deps(rules = [":base_deps"], globs = [GLOB_DEPS]),
     visibility = visibility_private(),
 )
 
@@ -46,7 +64,7 @@ run_add_exec(
     command = "cargo",
     args = ["build", "--target-dir=build/target"],
     deps = deps(
-        rules = [":rustup_update", ":check"],
+        rules = [":check"],
         globs = [GLOB_DEPS],
         files = [
             "{}/bin/cargo".format(workspace_get_env_var("CARGO_HOME")),
@@ -78,7 +96,7 @@ run_add_exec(
     command = "cargo",
     args = ["clippy"],
     log_level = "Passthrough",
-    deps = deps(rules = [":rustup_update"], globs = [GLOB_DEPS]),
+    deps = deps(rules = [":base_deps"], globs = [GLOB_DEPS]),
     help = "Run cargo clippy on workspace",
     visibility = visibility_private(),
 )
@@ -88,7 +106,7 @@ run_add_exec(
     command = "cargo",
     args = ["fmt"],
     log_level = "Passthrough",
-    deps = deps(rules = [":rustup_update"], globs = [GLOB_DEPS]),
+    deps = deps(rules = [":base_deps"], globs = [GLOB_DEPS]),
     help = "Run cargo fmt on workspace",
     visibility = visibility_private(),
 )
@@ -105,7 +123,7 @@ run_add_exec_test(
         "RUST_BACKTRACE": "1",
         "RUST_LOG": "trace",
     },
-    deps = deps(rules = [":rustup_update"], globs = [GLOB_DEPS]),
+    deps = deps(rules = [":base_deps"], globs = [GLOB_DEPS]),
     visibility = visibility_rules(["//:test"]),
 )
 
@@ -120,31 +138,63 @@ run_add_exec(
     "rustup_update",
     command = "rustup",
     args = ["update"],
-    deps = deps(files = ["//spaces/rust-toolchain.toml"]),
+    deps = deps(files = ["//rust-toolchain.toml"]),
     help = "Update the Rust toolchain via rustup",
     visibility = visibility_private(),
 )
 
 run_add_exec(
     "install_dev",
-    command = "bash",
-    args = ["-c", "cargo install --force --path=spaces/crates/spaces --profile=dev --root={}".format(root)],
-    deps = [":rustup_update"],
+    command = "cargo",
+    args = ["install", "--force", "--path=spaces/crates/spaces", "--profile=dev", "--root={}".format(root)],
+    deps = [":base_deps"],
     visibility = visibility_private(),
     help = "Install dev build on local system",
 )
 
-shell(
+_install_release_args = [
+    "install",
+    "--target-dir=build/target",
+    "--force",
+    "--path=spaces/crates/spaces",
+    "--profile=release",
+    "--root={}".format(root),
+]
+_install_release_env = {}
+
+if info_is_platform_linux():
+    if info_is_platform_x86_64():
+        _MUSL_TARGET = "x86_64-unknown-linux-musl"
+    elif info_is_platform_aarch64():
+        _MUSL_TARGET = "aarch64-unknown-linux-musl"
+    else:
+        _MUSL_TARGET = None
+    _install_release_args.append("--target={}".format(_MUSL_TARGET))
+    _install_release_env = musl_gcc_get_env()
+
+run_add_exec(
     "install_release",
-    script = "cargo install --target-dir=build/target --force --path=spaces/crates/spaces --profile=release --root={}".format(root),
-    deps = [":rustup_update"],
+    command = "cargo",
+    args = _install_release_args,
+    deps = [":base_deps"],
+    env = _install_release_env,
     visibility = visibility_private(),
 )
 
-shell(
+if info_is_platform_linux():
+    run_add_exec(
+        "check_static_build",
+        command = "ldd",
+        args = ["build/target/{}/release/spaces".format(_MUSL_TARGET)],
+        deps = [":install_release"],
+        log_level = run_log_level_passthrough(),
+    )
+
+run_add_exec(
     "install_dev_lsp",
-    script = "cargo install --target-dir=build/target --features=lsp-debug --force --path=spaces/crates/spaces --profile=dev --root={}".format(root),
-    deps = [":rustup_update"],
+    command = "cargo",
+    args = ["install", "--target-dir=build/target", "--features=lsp-debug", "--force", "--path=spaces/crates/spaces", "--profile=dev", "--root={}".format(root)],
+    deps = [":base_deps"],
     visibility = visibility_private(),
 )
 
@@ -179,5 +229,9 @@ run_add_exec(
     command = "cargo",
     args = ["clippy"],
     visibility = visibility_private(),
-    deps = [":check_rust_fmt", ":check_starlark", ":rustup_update"],
+    deps = [
+        ":base_deps",
+        ":check_rust_fmt",
+        ":check_starlark",
+    ],
 )
