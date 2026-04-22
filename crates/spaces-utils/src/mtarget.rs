@@ -34,7 +34,7 @@ fn get_existing_json_path(dir: &str, module_name: &str) -> Option<Arc<std::path:
         return None;
     }
 
-    Some(path.into())
+    Some(path)
 }
 
 /// Represents a load statement in a module.
@@ -74,29 +74,10 @@ pub struct ModuleDeps {
     /// List of load statements - modules that this module depends on
     pub loads: Vec<LoadStatement>,
 
-    pub platform: platform::Platform,
-
-    /// needed because info.is_ci() can affect evaluation
-    pub is_ci: bool,
-
-    /// store values
-    pub store_values: Vec<(Arc<str>, Arc<str>)>,
-
-    /// env values
-    pub env_values: Vec<(Arc<str>, Arc<str>)>,
+    pub checkout_state_digest: Arc<str>,
 }
 
 impl ModuleDeps {
-    fn sort_values(values: HashMap<Arc<str>, Arc<str>>) -> Vec<(Arc<str>, Arc<str>)> {
-        let mut values: Vec<_> = values.into_iter().collect();
-        values.sort_by(|(left_key, left_value), (right_key, right_value)| {
-            left_key
-                .cmp(right_key)
-                .then_with(|| left_value.cmp(right_value))
-        });
-        values
-    }
-
     pub fn get_json_path(module_name: &str) -> Arc<std::path::Path> {
         get_json_path(MODULE_DEPS_DIR, module_name)
     }
@@ -173,16 +154,36 @@ impl ModuleDeps {
             }
         }
 
-        let dependency_inputs = serde_json::to_vec(&(
-            self.platform,
-            self.is_ci,
-            &self.store_values,
-            &self.env_values,
-        ))
-        .context(format_context!(
-            "Failed to serialize module dependency inputs for {}",
-            self.module_name
-        ))?;
+        hasher.update(self.checkout_state_digest.as_ref().as_bytes());
+
+        Ok(hasher.finalize().to_string().into())
+    }
+
+    /// Computes a digest from just the evaluation inputs (without file hashes).
+    ///
+    /// This is useful for computing a digest from platform, is_ci, store_values,
+    /// and env_values without needing the file hashes.
+    ///
+    /// # Arguments
+    /// * `platform` - The target platform
+    /// * `is_ci` - Whether running in CI
+    /// * `store_values` - Store key-value pairs (should be sorted)
+    /// * `env_values` - Environment key-value pairs (should be sorted)
+    ///
+    /// # Returns
+    /// A blake3 digest string, or an error if serialization fails.
+    pub fn digest_from_inputs(
+        platform: platform::Platform,
+        is_ci: bool,
+        store_values: &[(Arc<str>, Arc<str>)],
+        env_values: &[(Arc<str>, Arc<str>)],
+    ) -> anyhow::Result<Arc<str>> {
+        let mut hasher = blake3::Hasher::new();
+
+        let dependency_inputs = serde_json::to_vec(&(platform, is_ci, store_values, env_values))
+            .context(format_context!(
+                "Failed to serialize module dependency inputs"
+            ))?;
         hasher.update(&dependency_inputs);
 
         Ok(hasher.finalize().to_string().into())
@@ -197,14 +198,6 @@ impl ModuleDeps {
     pub fn set_loads(&mut self, mut loads: Vec<LoadStatement>) {
         loads.sort_by(|a, b| a.module_id.cmp(&b.module_id));
         self.loads = loads;
-    }
-
-    pub fn set_env_values(&mut self, env_values: HashMap<Arc<str>, Arc<str>>) {
-        self.env_values = Self::sort_values(env_values);
-    }
-
-    pub fn set_store_values(&mut self, store_values: HashMap<Arc<str>, Arc<str>>) {
-        self.store_values = Self::sort_values(store_values);
     }
 
     /// Saves this module evaluation result to the build directory.
@@ -264,6 +257,11 @@ impl ModuleTarget {
             loads: Vec::new(),
             rules: HashMap::new(),
         }
+    }
+
+    /// Adds a load statement to the result.
+    pub fn add_load(&mut self, load: LoadStatement) {
+        self.loads.push(load);
     }
 
     pub fn get_json_path(module_name: &str) -> Arc<std::path::Path> {
@@ -410,41 +408,5 @@ mod tests {
         assert_eq!(deserialized.module_name, result.module_name);
         assert_eq!(deserialized.loads.len(), result.loads.len());
         assert_eq!(deserialized.rules.len(), result.rules.len());
-    }
-
-    #[test]
-    fn test_module_deps_sorts_env_and_store_values() {
-        let mut deps = ModuleDeps {
-            module_name: "test/module.star".into(),
-            loads: Vec::new(),
-            platform: platform::Platform::MacosAarch64,
-            is_ci: false,
-            store_values: Vec::new(),
-            env_values: Vec::new(),
-        };
-
-        deps.set_env_values(HashMap::from([
-            (Arc::from("Z_KEY"), Arc::from("z")),
-            (Arc::from("A_KEY"), Arc::from("a")),
-        ]));
-        deps.set_store_values(HashMap::from([
-            (Arc::from("store-z"), Arc::from("z")),
-            (Arc::from("store-a"), Arc::from("a")),
-        ]));
-
-        assert_eq!(
-            deps.env_values,
-            vec![
-                (Arc::from("A_KEY"), Arc::from("a")),
-                (Arc::from("Z_KEY"), Arc::from("z")),
-            ]
-        );
-        assert_eq!(
-            deps.store_values,
-            vec![
-                (Arc::from("store-a"), Arc::from("a")),
-                (Arc::from("store-z"), Arc::from("z")),
-            ]
-        );
     }
 }

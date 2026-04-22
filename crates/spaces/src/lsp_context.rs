@@ -143,6 +143,7 @@ impl SpacesContext {
             path.to_string_lossy().into(),
             content,
             evaluator::WithRules::Yes,
+            Arc::from(""),
         )?;
 
         Ok(result.frozen_module)
@@ -214,6 +215,7 @@ impl SpacesContext {
             workspace_path.clone(),
             evaluator::WithRules::Yes,
             eval_context,
+            Arc::from(""),
         );
 
         eprintln!("run: {name} - got result");
