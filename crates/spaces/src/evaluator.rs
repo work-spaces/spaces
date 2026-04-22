@@ -28,6 +28,12 @@ enum IsSaveBin {
     Yes,
 }
 
+/// Result of module evaluation
+pub struct EvaluateModuleResult {
+    pub frozen_module: FrozenModule,
+    pub module_deps: Option<mtarget::ModuleDeps>,
+}
+
 fn star_logger(console: console::Console) -> logger::Logger {
     logger::Logger::new(console, "starlark".into())
 }
@@ -170,13 +176,15 @@ pub fn evaluate_loads(
             .map(|p| p.into())
             .unwrap_or_else(|| module_load_path.clone());
 
-        let (frozen_module, module_deps, module_target) = evaluate_module(
+        let result = evaluate_module(
             workspace.clone(),
             workspace_path.clone(),
-            module_load_path.clone(),
+            normalized_path.clone(),
             contents,
             with_rules,
         )?;
+        let frozen_module = result.frozen_module;
+        let module_deps = result.module_deps;
 
         loads.push(LoadResult {
             module_id: load.module_id.to_owned(),
@@ -235,7 +243,7 @@ pub fn evaluate_ast(
 
     let modules: std::collections::HashMap<&str, &FrozenModule> = loads
         .iter()
-        .map(|lr| (lr.module_id.as_str(), &lr.frozen_module))
+        .map(|lr| (lr.module_id.as_ref(), &lr.frozen_module))
         .collect();
     let loader = ReturnFileLoader { modules: &modules };
     let globals_builder = get_globals(with_rules);
@@ -255,7 +263,7 @@ pub fn evaluate_ast(
         }
 
         // Build module result for caching (caller will save if appropriate)
-        let module_result = eval_context
+        let module_target = eval_context
             .as_ref()
             .map(|ctx| build_module_target(ctx.module_name.clone(), ctx))
             .transpose()
@@ -299,7 +307,7 @@ pub fn evaluate_ast(
 
         let frozen_module = module.freeze()?;
 
-        Ok((frozen_module, module_deps, module_result))
+        Ok((frozen_module, module_deps, module_target))
     })
 }
 
@@ -309,11 +317,7 @@ pub fn evaluate_module(
     name: Arc<str>,
     content: String,
     with_rules: WithRules,
-) -> starlark::Result<(
-    FrozenModule,
-    Option<mtarget::ModuleDeps>,
-    Option<mtarget::ModuleTarget>,
-)> {
+) -> starlark::Result<EvaluateModuleResult> {
     // Register the module name so that the global task-graph machinery can
     // track which modules exist, without writing to `latest_starlark_module`
     // (which would race with parallel evaluations).
@@ -338,21 +342,32 @@ pub fn evaluate_module(
         eval_context,
     )?;
 
-    // Save module result for rules modules in Run/Inspect phases
-    if let Some(ref result) = module_target
-        && workspace::is_rules_module(name.as_ref())
+    if workspace::is_rules_module(name.as_ref())
         && matches!(
             singleton::get_execution_phase(),
             task::Phase::Run | task::Phase::Inspect
         )
     {
-        result.save_to_json().context(format_context!(
-            "Internal Error: Failed to save module result for {}",
-            name.as_ref()
-        ))?;
+        // Save module result for rules modules in Run/Inspect phases
+        if let Some(ref result) = module_deps {
+            result.save_to_json().context(format_context!(
+                "Internal Error: Failed to save module deps for {}",
+                name.as_ref()
+            ))?;
+        }
+
+        if let Some(ref target) = module_target {
+            target.save_to_json().context(format_context!(
+                "Internal Error: Failed to save module target for {}",
+                name.as_ref()
+            ))?;
+        }
     }
 
-    Ok((module, module_deps, module_target))
+    Ok(EvaluateModuleResult {
+        frozen_module: module,
+        module_deps,
+    })
 }
 
 /// Attempts to evaluate a module with rcache caching.
@@ -376,7 +391,7 @@ fn try_evaluate_with_cache(
 
     let is_always_evaluate = workspace.read().settings.bin.is_always_evaluate;
     if phase == task::Phase::Checkout || singleton::get_is_rescan() || is_always_evaluate {
-        let (_, _, _) = evaluate_module(Some(workspace), workspace_path, name, content, with_rules)
+        let _ = evaluate_module(Some(workspace), workspace_path, name, content, with_rules)
             .map_err(|e| {
                 format_error!("Failed to evaluate module during checkout {:?} -> {e}", e)
             })?;
@@ -392,7 +407,7 @@ fn try_evaluate_with_cache(
     let Some(module_deps) = module_deps_option else {
         eval_logger
             .debug(format!("Evaluating module {:?} (no module target found)", name).as_str());
-        let (_, _, _) = evaluate_module(Some(workspace), workspace_path, name, content, with_rules)
+        let _ = evaluate_module(Some(workspace), workspace_path, name, content, with_rules)
             .map_err(|e| format_error!("Failed to evaluate module {:?}", e))?;
         return Ok(());
     };
@@ -427,14 +442,15 @@ fn try_evaluate_with_cache(
         module_digest,
         &cache_targets,
         || {
-            evaluate_module(
+            let result = evaluate_module(
                 Some(workspace.clone()),
                 workspace_path.clone(),
                 name.clone(),
                 content.clone(),
                 with_rules,
             )
-            .map_err(|e| format_error!("Failed to evaluate module {:?}", e))
+            .map(|_| ());
+            result.map_err(|e| format_error!("Failed to evaluate module {:?}", e))
         },
         || vec![Arc::from(std::path::Path::new(json_target.as_ref()))],
     );
@@ -654,7 +670,7 @@ pub fn evaluate_starlark_modules(
         && let Some((name, content)) = module_queue.pop_front()
     {
         eval_progress.set_message("env.spaces.star (first module)");
-        let (_, _, _) = evaluate_module(
+        let _ = evaluate_module(
             Some(workspace.clone()),
             workspace_path.clone(),
             name,
@@ -1348,7 +1364,7 @@ pub fn run_starlark_script(name: Arc<str>, script: Arc<str>) -> anyhow::Result<(
         .unwrap_or(".".to_string())
         .into();
 
-    let (_, _, _) = evaluate_module(
+    let _ = evaluate_module(
         None,
         workspace,
         name.clone(),
