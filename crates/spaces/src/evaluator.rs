@@ -124,7 +124,7 @@ fn build_module_deps(
         module_name,
         loads: Vec::new(),
         platform,
-        is_ci: eval_context.is_ci,
+        is_ci: singleton::get_is_ci(),
         store_values: Vec::new(),
         env_values: Vec::new(),
     };
