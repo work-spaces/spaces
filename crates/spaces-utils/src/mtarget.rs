@@ -87,6 +87,16 @@ pub struct ModuleDeps {
 }
 
 impl ModuleDeps {
+    fn sort_values(values: HashMap<Arc<str>, Arc<str>>) -> Vec<(Arc<str>, Arc<str>)> {
+        let mut values: Vec<_> = values.into_iter().collect();
+        values.sort_by(|(left_key, left_value), (right_key, right_value)| {
+            left_key
+                .cmp(right_key)
+                .then_with(|| left_value.cmp(right_value))
+        });
+        values
+    }
+
     pub fn get_json_path(module_name: &str) -> Arc<std::path::Path> {
         get_json_path(MODULE_DEPS_DIR, module_name)
     }
@@ -190,11 +200,11 @@ impl ModuleDeps {
     }
 
     pub fn set_env_values(&mut self, env_values: HashMap<Arc<str>, Arc<str>>) {
-        self.env_values = env_values.into_iter().map(|(k, v)| (k, v)).collect();
+        self.env_values = Self::sort_values(env_values);
     }
 
     pub fn set_store_values(&mut self, store_values: HashMap<Arc<str>, Arc<str>>) {
-        self.store_values = store_values.into_iter().map(|(k, v)| (k, v)).collect();
+        self.store_values = Self::sort_values(store_values);
     }
 
     /// Saves this module evaluation result to the build directory.
@@ -400,5 +410,41 @@ mod tests {
         assert_eq!(deserialized.module_name, result.module_name);
         assert_eq!(deserialized.loads.len(), result.loads.len());
         assert_eq!(deserialized.rules.len(), result.rules.len());
+    }
+
+    #[test]
+    fn test_module_deps_sorts_env_and_store_values() {
+        let mut deps = ModuleDeps {
+            module_name: "test/module.star".into(),
+            loads: Vec::new(),
+            platform: platform::Platform::MacosAarch64,
+            is_ci: false,
+            store_values: Vec::new(),
+            env_values: Vec::new(),
+        };
+
+        deps.set_env_values(HashMap::from([
+            (Arc::from("Z_KEY"), Arc::from("z")),
+            (Arc::from("A_KEY"), Arc::from("a")),
+        ]));
+        deps.set_store_values(HashMap::from([
+            (Arc::from("store-z"), Arc::from("z")),
+            (Arc::from("store-a"), Arc::from("a")),
+        ]));
+
+        assert_eq!(
+            deps.env_values,
+            vec![
+                (Arc::from("A_KEY"), Arc::from("a")),
+                (Arc::from("Z_KEY"), Arc::from("z")),
+            ]
+        );
+        assert_eq!(
+            deps.store_values,
+            vec![
+                (Arc::from("store-a"), Arc::from("a")),
+                (Arc::from("store-z"), Arc::from("z")),
+            ]
+        );
     }
 }

@@ -8,7 +8,7 @@ use starlark::eval::{Evaluator, ReturnFileLoader};
 use starlark::syntax::{AstModule, Dialect};
 use std::collections::HashSet;
 use std::sync::Arc;
-use utils::{inspect, labels, logger, mtarget, query, rcache, rule, targets, ws};
+use utils::{inspect, labels, logger, mtarget, platform, query, rcache, rule, targets, ws};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WithRules {
@@ -108,9 +108,24 @@ fn build_module_target(
 fn build_module_deps(
     module_name: Arc<str>,
     eval_context: &EvalContext,
-    env_values: HashMap<Arc<str>, Arc<str>>,
-    store_values: HashMap<Arc<str>, Arc<str>>,
 ) -> anyhow::Result<mtarget::ModuleDeps> {
+    let platform = platform::Platform::get_platform().context(format_context!(
+        "Failed to get platform while building module deps for '{}'",
+        module_name
+    ))?;
+
+    let mut result = mtarget::ModuleDeps {
+        module_name,
+        loads: Vec::new(),
+        platform,
+        is_ci: eval_context.is_ci,
+        store_values: Vec::new(),
+        env_values: Vec::new(),
+    };
+
+    result.set_loads(eval_context.get_load_statements().to_vec());
+
+    Ok(result)
 }
 
 /// Result of evaluating a single load statement.
@@ -120,7 +135,7 @@ pub struct LoadResult {
     pub module_id: String,
     pub normalized_path: Arc<str>,
     pub frozen_module: FrozenModule,
-    pub module_result: Option<mtarget::ModuleTarget>,
+    pub module_deps: Option<mtarget::ModuleDeps>,
 }
 
 pub fn evaluate_loads(
@@ -155,7 +170,7 @@ pub fn evaluate_loads(
             .map(|p| p.into())
             .unwrap_or_else(|| module_load_path.clone());
 
-        let (frozen_module, module_result) = evaluate_module(
+        let (frozen_module, module_deps, module_target) = evaluate_module(
             workspace.clone(),
             workspace_path.clone(),
             module_load_path.clone(),
@@ -167,7 +182,7 @@ pub fn evaluate_loads(
             module_id: load.module_id.to_owned(),
             normalized_path,
             frozen_module,
-            module_result,
+            module_deps,
         });
     }
     Ok(loads)
@@ -180,7 +195,11 @@ pub fn evaluate_ast(
     workspace_path: Arc<str>,
     with_rules: WithRules,
     mut eval_context: Option<EvalContext>,
-) -> starlark::Result<(FrozenModule, Option<mtarget::ModuleTarget>)> {
+) -> starlark::Result<(
+    FrozenModule,
+    Option<mtarget::ModuleDeps>,
+    Option<mtarget::ModuleTarget>,
+)> {
     let loads = evaluate_loads(
         &ast,
         name.clone(),
@@ -198,7 +217,7 @@ pub fn evaluate_ast(
         ));
 
         // Add transitive loads from the child module (already normalized)
-        if let Some(ref child_result) = load_result.module_result {
+        if let Some(ref child_result) = load_result.module_deps {
             for transitive_load in &child_result.loads {
                 all_loads.push(transitive_load.clone());
             }
@@ -242,6 +261,12 @@ pub fn evaluate_ast(
             .transpose()
             .map_err(|e| format_error!("Failed to build module result: {}", e))?;
 
+        let module_deps = eval_context
+            .as_ref()
+            .map(|ctx| build_module_deps(ctx.module_name.clone(), ctx))
+            .transpose()
+            .map_err(|e| format_error!("Failed to build module deps: {}", e))?;
+
         if let Some(workspace) = workspace
             && singleton::get_inspect_options().stardoc.is_some()
         {
@@ -274,7 +299,7 @@ pub fn evaluate_ast(
 
         let frozen_module = module.freeze()?;
 
-        Ok((frozen_module, module_result))
+        Ok((frozen_module, module_deps, module_result))
     })
 }
 
@@ -284,7 +309,11 @@ pub fn evaluate_module(
     name: Arc<str>,
     content: String,
     with_rules: WithRules,
-) -> starlark::Result<(FrozenModule, Option<mtarget::ModuleTarget>)> {
+) -> starlark::Result<(
+    FrozenModule,
+    Option<mtarget::ModuleDeps>,
+    Option<mtarget::ModuleTarget>,
+)> {
     // Register the module name so that the global task-graph machinery can
     // track which modules exist, without writing to `latest_starlark_module`
     // (which would race with parallel evaluations).
@@ -300,7 +329,7 @@ pub fn evaluate_module(
 
     let dialect = get_dialect();
     let ast = AstModule::parse(name.as_ref(), content, &dialect)?;
-    let (module, module_result) = evaluate_ast(
+    let (module, module_deps, module_target) = evaluate_ast(
         ast,
         name.clone(),
         workspace,
@@ -310,7 +339,7 @@ pub fn evaluate_module(
     )?;
 
     // Save module result for rules modules in Run/Inspect phases
-    if let Some(ref result) = module_result
+    if let Some(ref result) = module_target
         && workspace::is_rules_module(name.as_ref())
         && matches!(
             singleton::get_execution_phase(),
@@ -323,7 +352,7 @@ pub fn evaluate_module(
         ))?;
     }
 
-    Ok((module, module_result))
+    Ok((module, module_deps, module_target))
 }
 
 /// Attempts to evaluate a module with rcache caching.
@@ -347,7 +376,7 @@ fn try_evaluate_with_cache(
 
     let is_always_evaluate = workspace.read().settings.bin.is_always_evaluate;
     if phase == task::Phase::Checkout || singleton::get_is_rescan() || is_always_evaluate {
-        let (_, _) = evaluate_module(Some(workspace), workspace_path, name, content, with_rules)
+        let (_, _, _) = evaluate_module(Some(workspace), workspace_path, name, content, with_rules)
             .map_err(|e| {
                 format_error!("Failed to evaluate module during checkout {:?} -> {e}", e)
             })?;
@@ -363,7 +392,7 @@ fn try_evaluate_with_cache(
     let Some(module_deps) = module_deps_option else {
         eval_logger
             .debug(format!("Evaluating module {:?} (no module target found)", name).as_str());
-        let (_, _) = evaluate_module(Some(workspace), workspace_path, name, content, with_rules)
+        let (_, _, _) = evaluate_module(Some(workspace), workspace_path, name, content, with_rules)
             .map_err(|e| format_error!("Failed to evaluate module {:?}", e))?;
         return Ok(());
     };
@@ -625,7 +654,7 @@ pub fn evaluate_starlark_modules(
         && let Some((name, content)) = module_queue.pop_front()
     {
         eval_progress.set_message("env.spaces.star (first module)");
-        let (_, _) = evaluate_module(
+        let (_, _, _) = evaluate_module(
             Some(workspace.clone()),
             workspace_path.clone(),
             name,
@@ -1319,7 +1348,7 @@ pub fn run_starlark_script(name: Arc<str>, script: Arc<str>) -> anyhow::Result<(
         .unwrap_or(".".to_string())
         .into();
 
-    let (_, _) = evaluate_module(
+    let (_, _, _) = evaluate_module(
         None,
         workspace,
         name.clone(),
