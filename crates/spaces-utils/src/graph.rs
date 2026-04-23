@@ -104,9 +104,11 @@ impl Graph {
     pub fn get_dependencies(&self, rule_name: &str) -> anyhow::Result<Vec<Arc<str>>> {
         let node = self.find_node(rule_name)?;
         let neighbors = self.directed_graph.neighbors(node);
-        Ok(neighbors
+        let mut deps: Vec<Arc<str>> = neighbors
             .map(|idx| self.directed_graph[idx].clone())
-            .collect())
+            .collect();
+        deps.sort();
+        Ok(deps)
     }
 
     /// Finds the node index for a given rule name
