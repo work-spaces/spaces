@@ -1204,7 +1204,11 @@ fn build_query_context(
     }
 
     let relative_invoked_path = workspace.read().relative_invoked_path.clone();
-    let graph = Arc::new(rules::get_graph());
+    let graph = if config.compute_graph {
+        Some(Arc::new(rules::get_graph()))
+    } else {
+        None
+    };
 
     Ok(query::QueryContext {
         checkout_rules,

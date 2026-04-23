@@ -146,6 +146,8 @@ pub struct QueryContextConfig {
     pub compute_expanded_deps: bool,
     /// Whether to compute serialized_yaml/serialized_json for tasks.
     pub compute_serialization: bool,
+    /// Whether to compute the full dependency graph.
+    pub compute_graph: bool,
 }
 
 impl QueryContextConfig {
@@ -154,6 +156,7 @@ impl QueryContextConfig {
         Self {
             compute_expanded_deps: true,
             compute_serialization: true,
+            compute_graph: true,
         }
     }
 
@@ -162,6 +165,7 @@ impl QueryContextConfig {
         Self {
             compute_expanded_deps: false,
             compute_serialization: false,
+            compute_graph: false,
         }
     }
 }
@@ -199,8 +203,8 @@ pub struct QueryContext {
     /// Workspace-relative path where `spaces` was invoked; used to compute a
     /// default filter when none is supplied.
     pub relative_invoked_path: Arc<str>,
-    /// The dependency graph for all rules.
-    pub graph: Arc<graph::Graph>,
+    /// The dependency graph for all rules. Only populated when needed.
+    pub graph: Option<Arc<graph::Graph>>,
 }
 
 impl QueryCommand {
@@ -213,14 +217,17 @@ impl QueryCommand {
                 compute_expanded_deps: *deps,
                 // Need serialization if --raw flag is set
                 compute_serialization: *raw,
+                compute_graph: false,
             },
             QueryCommand::Rule { deps, .. } => QueryContextConfig {
                 compute_expanded_deps: *deps,
                 compute_serialization: true,
+                compute_graph: false,
             },
             QueryCommand::Search { deps, .. } => QueryContextConfig {
                 compute_expanded_deps: *deps,
                 compute_serialization: false,
+                compute_graph: false,
             },
             QueryCommand::Checkout { .. } => {
                 // Checkout only needs git tasks, no expensive rule data
@@ -230,10 +237,12 @@ impl QueryCommand {
                 // Export needs executor_markdown (always computed) but not deps/serialization
                 QueryContextConfig::minimal()
             }
-            QueryCommand::Graph { .. } => {
-                // Graph only needs the graph structure, no expensive rule data
-                QueryContextConfig::minimal()
-            }
+            QueryCommand::Graph { .. } => QueryContextConfig {
+                compute_expanded_deps: false,
+                compute_serialization: false,
+                // Graph command needs the dependency graph
+                compute_graph: true,
+            },
         }
     }
 }
@@ -1137,8 +1146,12 @@ impl QueryCommand {
                 }
 
                 // 3. Build dependency tree
+                let graph = ctx
+                    .graph
+                    .as_ref()
+                    .ok_or_else(|| format_error!("Dependency graph not available"))?;
                 let mut visited = HashSet::new();
-                let tree = build_dependency_tree(&ctx.graph, rule.as_ref(), &mut visited)
+                let tree = build_dependency_tree(graph, rule.as_ref(), &mut visited)
                     .context(format_context!("Failed to build dependency tree"))?;
 
                 // 4. Output in requested format
