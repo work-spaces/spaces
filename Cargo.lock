@@ -3638,6 +3638,7 @@ dependencies = [
  "sublime_fuzzy",
  "symlink",
  "tempfile",
+ "termtree",
  "tokio",
  "toml",
  "url",
@@ -4004,6 +4005,12 @@ checksum = "411c5bf740737c7918b8b1fe232dca4dc9f8e754b8ad5e20966814001ed0ac6b"
 dependencies = [
  "libc",
 ]
+
+[[package]]
+name = "termtree"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f50febec83f5ee1df3015341d8bd429f2d1cc62bcba7ea2076759d315084683"
 
 [[package]]
 name = "termwiz"
