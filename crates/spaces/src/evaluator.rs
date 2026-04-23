@@ -8,7 +8,7 @@ use starlark::eval::{Evaluator, ReturnFileLoader};
 use starlark::syntax::{AstModule, Dialect};
 use std::collections::HashSet;
 use std::sync::Arc;
-use utils::{inspect, labels, logger, mtarget, platform, query, rcache, rule, targets, ws};
+use utils::{inspect, labels, logger, mtarget, query, rcache, rule, targets, ws};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WithRules {
@@ -698,33 +698,7 @@ pub fn evaluate_starlark_modules(
         .map_err(|e| format_error!("Failed to evaluate module {:?}", e))?;
 
         // After env.spaces.star is evaluated, compute the checkout_state_digest
-        let platform = platform::Platform::get_platform().context(format_context!(
-            "Failed to get platform while computing checkout_state_digest"
-        ))?;
-        let is_ci = singleton::get_is_ci();
-
-        // Get store values and env values
-        let store_args = singleton::get_args_store();
-        let mut store_values: Vec<(Arc<str>, Arc<str>)> = store_args
-            .iter()
-            .map(|(k, v)| {
-                (
-                    k.clone(),
-                    Arc::from(serde_json::to_string(v).unwrap_or_default()),
-                )
-            })
-            .collect();
-        store_values.sort_by(|a, b| a.0.cmp(&b.0));
-
-        let env_values: Vec<(Arc<str>, Arc<str>)> =
-            singleton::get_args_env().into_iter().collect::<Vec<_>>();
-        let mut env_values_sorted = env_values;
-        env_values_sorted.sort_by(|a, b| a.0.cmp(&b.0));
-
-        mtarget::ModuleDeps::digest_from_inputs(platform, is_ci, &store_values, &env_values_sorted)
-            .context(format_context!(
-                "Failed to compute checkout_state_digest after evaluating env.spaces.star"
-            ))?
+        workspace.read().compute_checkout_state_digest()?
     } else {
         // During checkout phase, use empty digest for env module
         Arc::from("")

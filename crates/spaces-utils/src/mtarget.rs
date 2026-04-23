@@ -5,7 +5,7 @@
 //! spaces modules to JSON to avoid re-evaluation when the
 //! module and its dependencies haven't changed.
 
-use crate::{platform, rule, ws};
+use crate::{bin_detail, platform, rule};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -128,7 +128,7 @@ impl ModuleDeps {
     /// A blake3 digest string, or an error if required files aren't found in star_files.
     pub fn compute_digest(
         &self,
-        star_files: &HashMap<Arc<str>, ws::BinDetail>,
+        star_files: &HashMap<Arc<str>, bin_detail::BinDetail>,
     ) -> anyhow::Result<Arc<str>> {
         let mut hasher = blake3::Hasher::new();
 
@@ -202,9 +202,9 @@ impl ModuleDeps {
 
     /// Saves this module evaluation result to the build directory.
     ///
-    /// The file is saved to `<workspace_path>/build/spaces-modules/<module_path>.json`
+    /// The file is saved to `<workspace_path>/build/spaces-modules-deps/<module_path>.json`
     /// mirroring the workspace directory structure (e.g., `spaces/spaces.star` becomes
-    /// `build/spaces-modules/spaces/spaces.star.json`).
+    /// `build/spaces-modules-deps/spaces/spaces.star.json`).
     pub fn save_to_json(&self) -> anyhow::Result<()> {
         let file_path = get_json_path(MODULE_DEPS_DIR, self.module_name.as_ref());
 
@@ -597,14 +597,14 @@ mod tests {
         let mut star_files = HashMap::new();
         star_files.insert(
             Arc::from("test/module.star"),
-            ws::BinDetail {
+            bin_detail::BinDetail {
                 hash: [1u8; 32],
                 modified: None,
             },
         );
         star_files.insert(
             Arc::from("lib/common.star"),
-            ws::BinDetail {
+            bin_detail::BinDetail {
                 hash: [2u8; 32],
                 modified: None,
             },
@@ -643,7 +643,7 @@ mod tests {
         let mut star_files = HashMap::new();
         star_files.insert(
             Arc::from("test/module.star"),
-            ws::BinDetail {
+            bin_detail::BinDetail {
                 hash: [1u8; 32],
                 modified: None,
             },
@@ -665,7 +665,7 @@ mod tests {
         let mut star_files1 = HashMap::new();
         star_files1.insert(
             Arc::from("test/module.star"),
-            ws::BinDetail {
+            bin_detail::BinDetail {
                 hash: [1u8; 32],
                 modified: None,
             },
@@ -674,7 +674,7 @@ mod tests {
         let mut star_files2 = HashMap::new();
         star_files2.insert(
             Arc::from("test/module.star"),
-            ws::BinDetail {
+            bin_detail::BinDetail {
                 hash: [2u8; 32],
                 modified: None,
             },
@@ -702,7 +702,7 @@ mod tests {
         let mut star_files = HashMap::new();
         star_files.insert(
             Arc::from("test/module.star"),
-            ws::BinDetail {
+            bin_detail::BinDetail {
                 hash: [1u8; 32],
                 modified: None,
             },

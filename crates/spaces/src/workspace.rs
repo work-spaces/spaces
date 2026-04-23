@@ -4,7 +4,7 @@ use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use utils::{age, environment, inputs, lock, logger, rcache, rule, store, ws};
+use utils::{age, environment, inputs, lock, logger, mtarget, platform, rcache, rule, store, ws};
 
 pub use rcache::CacheStatus;
 
@@ -1154,5 +1154,53 @@ impl Workspace {
     pub fn update_rule_digest(&mut self, rule: &str, digest: Arc<str>) {
         self.is_any_digest_updated = true;
         self.settings.bin.inputs.save_digest(rule, digest);
+    }
+
+    /// Computes a digest representing the checkout state after evaluating env.spaces.star.
+    /// This includes the resolved environment variables (from workspace.set_env + command-line args)
+    /// and all checkout store values (from co.spaces.toml + checkout.store_value + command-line args).
+    pub fn compute_checkout_state_digest(&self) -> anyhow::Result<Arc<str>> {
+        let platform = platform::Platform::get_platform().context(format_context!(
+            "Failed to get platform while computing checkout_state_digest"
+        ))?;
+        let is_ci = singleton::get_is_ci();
+
+        // Get resolved environment and checkout_store from workspace (post-evaluation)
+        let env_json = self.settings.bin.env_json.clone();
+        let checkout_store_clone = self.settings.checkout_store.clone();
+
+        let mut env: utils::environment::AnyEnvironment = serde_json::from_str(&env_json)
+            .context(format_context!("Failed to parse workspace env_json"))?;
+
+        // Merge command-line env args (they may not be in env_json for non-sync phases)
+        let args_env = singleton::get_args_env();
+        env.insert_assign_from_args(&args_env);
+
+        let env_vars = env
+            .get_vars()
+            .context(format_context!("Failed to resolve environment variables"))?;
+        let mut env_values: Vec<(Arc<str>, Arc<str>)> = env_vars.into_iter().collect();
+        env_values.sort_by(|a, b| a.0.cmp(&b.0));
+
+        // Get all store values from checkout_store (post-evaluation)
+        let mut store_values: Vec<(Arc<str>, Arc<str>)> = Vec::new();
+        let mut checkout_store_entries: Vec<_> = checkout_store_clone.entries.iter().collect();
+        checkout_store_entries.sort_by_key(|(label, _)| (*label).clone());
+
+        for (_label, entry) in checkout_store_entries {
+            let mut values: Vec<_> = entry.values.iter().collect();
+            values.sort_by_key(|(k, _)| (*k).clone());
+            for (key, value) in values {
+                store_values.push((
+                    key.clone(),
+                    Arc::from(serde_json::to_string(value).unwrap_or_default()),
+                ));
+            }
+        }
+
+        mtarget::ModuleDeps::digest_from_inputs(platform, is_ci, &store_values, &env_values)
+            .context(format_context!(
+                "Failed to compute checkout_state_digest after evaluating env.spaces.star"
+            ))
     }
 }
