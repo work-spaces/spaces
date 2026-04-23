@@ -137,15 +137,16 @@ impl SpacesContext {
         let content =
             fs::read_to_string(path).context(format_context!("Failed to read {path:?}"))?;
 
-        let (frozen_module, _) = evaluator::evaluate_module(
+        let result = evaluator::evaluate_module(
             None,
             workspace_path,
             path.to_string_lossy().into(),
             content,
             evaluator::WithRules::Yes,
+            Arc::from(""),
         )?;
 
-        Ok(frozen_module)
+        Ok(result.frozen_module)
     }
 
     fn go(&self, file: &str, ast: AstModule) -> EvalResult {
@@ -214,13 +215,14 @@ impl SpacesContext {
             workspace_path.clone(),
             evaluator::WithRules::Yes,
             eval_context,
+            Arc::from(""),
         );
 
         eprintln!("run: {name} - got result");
 
         Self::err(
             name,
-            eval_result.map(|(module, _module_result)| EvalResult {
+            eval_result.map(|(module, _, _module_result)| EvalResult {
                 lsp_eval_result: LspEvalResult {
                     diagnostics: vec![],
                     ast: Some(ast),

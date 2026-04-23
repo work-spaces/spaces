@@ -523,7 +523,7 @@ impl State {
         mtarget: &mtarget::ModuleTarget,
         module_name: &Arc<str>,
     ) -> anyhow::Result<()> {
-        for task_summary in mtarget.tasks.values() {
+        for task_summary in mtarget.rules.values() {
             let task: task::Task = serde_json::from_value(task_summary.task_json.clone()).context(
                 format_context!("Failed to deserialize cached task {}", task_summary.name),
             )?;

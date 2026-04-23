@@ -187,30 +187,41 @@ pub fn is_star_file(path: &str) -> bool {
 }
 
 pub fn get_workspace_path(workspace_path: &str, current_path: &str, target_path: &str) -> Arc<str> {
-    if target_path.starts_with("//") {
-        format!("{workspace_path}/{target_path}").into()
+    if let Some(target_path) = target_path.strip_prefix("//") {
+        // Strip the "//" prefix from workspace-absolute paths and concatenate with workspace_path
+        format!("{}/{}", workspace_path, target_path).into()
     } else {
-        let name_path = std::path::Path::new(current_path);
-        if let Some(parent) = name_path.parent() {
-            let joined = parent.join(target_path);
-            // Normalize the path by resolving `.` and `..` components
-            let normalized: std::path::PathBuf =
-                joined
-                    .components()
-                    .fold(std::path::PathBuf::new(), |mut acc, c| {
-                        match c {
-                            std::path::Component::ParentDir => {
-                                acc.pop();
-                            }
-                            std::path::Component::CurDir => {}
-                            _ => acc.push(c),
+        // Helper closure to normalize a path by resolving `.` and `..` components
+        let normalize_path = |path: &std::path::Path| -> std::path::PathBuf {
+            path.components()
+                .fold(std::path::PathBuf::new(), |mut acc, c| {
+                    match c {
+                        std::path::Component::ParentDir => {
+                            acc.pop();
                         }
-                        acc
-                    });
-            normalized.to_string_lossy().into()
+                        std::path::Component::CurDir => {}
+                        _ => acc.push(c),
+                    }
+                    acc
+                })
+        };
+
+        // First normalize current_path to remove any .. and . components
+        let normalized_current = normalize_path(std::path::Path::new(current_path));
+
+        // Get the parent of the normalized current path
+        let normalized = if let Some(parent) = normalized_current.parent() {
+            let joined = parent.join(target_path);
+            // Normalize the joined path
+            normalize_path(&joined).to_string_lossy().to_string()
         } else {
-            target_path.into()
-        }
+            // If there's no parent, just normalize the target_path
+            normalize_path(std::path::Path::new(target_path))
+                .to_string_lossy()
+                .to_string()
+        };
+
+        normalized.trim_start_matches("/").into()
     }
 }
 
