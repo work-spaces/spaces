@@ -129,9 +129,6 @@ pub enum QueryCommand {
     Graph {
         /// The name of the rule to show dependency tree for (e.g. `//my-pkg:build`)
         rule: Arc<str>,
-        /// Include checkout-phase rules in search
-        #[arg(long)]
-        checkout: bool,
         /// Output format
         #[arg(long, value_enum, default_value_t = console::Format::Pretty)]
         format: console::Format,
@@ -1132,20 +1129,13 @@ impl QueryCommand {
             }
 
             // ------------------------------------------------------------------
-            QueryCommand::Graph {
-                rule,
-                checkout,
-                format,
-            } => {
+            QueryCommand::Graph { rule, format } => {
                 // 1. Build rules map from context
-                let rules: Vec<&QueryRule> = if *checkout {
-                    ctx.checkout_rules
-                        .iter()
-                        .chain(ctx.run_rules.iter())
-                        .collect()
-                } else {
-                    ctx.run_rules.iter().collect()
-                };
+                let rules: Vec<&QueryRule> = ctx
+                    .checkout_rules
+                    .iter()
+                    .chain(ctx.run_rules.iter())
+                    .collect();
 
                 let rules_map: HashMap<Arc<str>, &QueryRule> =
                     rules.iter().map(|r| (r.rule.name.clone(), *r)).collect();
