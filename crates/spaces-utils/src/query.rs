@@ -415,6 +415,10 @@ fn build_dependency_tree(
     // Get dependencies from the graph
     if let Ok(deps) = graph.get_dependencies(rule_name) {
         for dep_name in deps {
+            // Filter out //:setup from the dependency graph
+            if dep_name.as_ref() == "//:setup" {
+                continue;
+            }
             if let Ok(dep_node) =
                 build_dependency_tree(graph, dep_name.as_ref(), rules_map, visited)
             {
@@ -433,14 +437,8 @@ fn build_dependency_tree(
 }
 
 /// Converts a DependencyNode into a termtree Tree for pretty printing
-fn dependency_node_to_tree(node: &DependencyNode) -> Tree<String> {
-    let node_label = if let Some(source) = &node.source {
-        format!("{} ({})", node.name, source)
-    } else {
-        node.name.to_string()
-    };
-
-    let mut tree = Tree::new(node_label);
+fn dependency_node_to_tree(node: &DependencyNode) -> Tree<Arc<str>> {
+    let mut tree = Tree::new(node.name.clone());
 
     for dep in &node.dependencies {
         tree.push(dependency_node_to_tree(dep));
@@ -1177,6 +1175,13 @@ impl QueryCommand {
                         console.write(&format!("{}\n", yaml))?;
                     }
                     console::Format::Pretty => {
+                        // Count total dependencies
+
+                        // Write header
+                        console.write("Dependency Graph\n")?;
+                        console.write("─────\n")?;
+
+                        // Write tree
                         let term_tree = dependency_node_to_tree(&tree);
                         console.write(&format!("{}\n", term_tree))?;
                     }
