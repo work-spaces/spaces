@@ -548,6 +548,9 @@ impl Workspace {
 
         if is_checkout_phase == IsCheckoutPhase::Yes {
             settings.json.scanned_modules = HashSet::default();
+            // Clear store values written by scripts so sync starts fresh.
+            // Command-line --store=KEY=VALUE values are re-applied below.
+            settings.checkout_store.clear_script_values();
         }
 
         settings.json.assets.insert(
@@ -754,9 +757,6 @@ impl Workspace {
             settings
                 .clear_inputs()
                 .context(format_context!("Failed to clear inputs"))?;
-            // Clear store values written by scripts so sync starts fresh.
-            // Command-line --store=KEY=VALUE values are re-applied below.
-            settings.checkout_store.clear_script_values();
         }
 
         // Workspace is assumed to reproducible until a rule is processed
