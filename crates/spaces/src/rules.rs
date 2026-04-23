@@ -515,7 +515,7 @@ impl State {
 
     /// Restores tasks from a cached ModuleEvaluationResult into the task graph.
     ///
-    /// This is the reverse of `build_module_result()` in evaluator.rs - it takes
+    /// This is the reverse of `build_module_target()` in evaluator.rs - it takes
     /// a cached module result and inserts all its tasks into the rules state,
     /// allowing module evaluation to be skipped when the cache is valid.
     fn restore_tasks_from_cache(

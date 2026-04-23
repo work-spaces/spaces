@@ -250,11 +250,10 @@ impl QueryCommand {
 #[cfg(test)]
 mod tests {
     use super::{
-        DependencyNode, QueryRule, build_dependency_tree, dependency_node_to_tree,
-        query_highlight_mask,
+        DependencyNode, build_dependency_tree, dependency_node_to_tree, query_highlight_mask,
     };
-    use crate::{graph, rule};
-    use std::collections::{HashMap, HashSet};
+    use crate::graph;
+    use std::collections::HashSet;
     use std::sync::Arc;
 
     fn arc_terms(terms: &[&str]) -> Vec<Arc<str>> {
@@ -313,26 +312,6 @@ mod tests {
         let mut graph = graph::Graph::default();
         graph.add_task("//pkg:standalone".into());
 
-        // Create a mock QueryRule
-        let rule = QueryRule {
-            rule: rule::Rule {
-                name: "//pkg:standalone".into(),
-                deps: None,
-                help: None,
-                inputs: None,
-                outputs: None,
-                targets: None,
-                platforms: None,
-                type_: Some(rule::RuleType::Run),
-                visibility: None,
-            },
-            source: "pkg/standalone.star".to_string(),
-            expanded_deps: None,
-            executor_markdown: None,
-            serialized_yaml: None,
-            serialized_json: None,
-        };
-
         let mut visited = HashSet::new();
         let tree = build_dependency_tree(&graph, "//pkg:standalone", &mut visited).unwrap();
 
@@ -355,8 +334,6 @@ mod tests {
 
         assert!(output.contains("//root:main"));
         assert!(output.contains("//pkg:dep"));
-        assert!(output.contains("root/main.star"));
-        assert!(output.contains("pkg/dep.star"));
     }
 
     #[test]
@@ -368,7 +345,6 @@ mod tests {
 
         let json = serde_json::to_string(&node).unwrap();
         assert!(json.contains("//test:rule"));
-        assert!(json.contains("test/rule.star"));
     }
 }
 

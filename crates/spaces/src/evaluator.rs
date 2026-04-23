@@ -409,9 +409,8 @@ fn try_evaluate_with_cache(
     }
 
     // Try to load existing module result from build folder
-    let module_deps_option = mtarget::ModuleDeps::new_from_json(name.as_ref()).context(
-        format_context!("Failed to load module target for {:?}", name),
-    )?;
+    let module_deps_option = mtarget::ModuleDeps::new_from_json(name.as_ref())
+        .context(format_context!("Failed to load module deps for {:?}", name))?;
 
     // If no cached result exists, evaluate without rcache
     let Some(module_deps) = module_deps_option else {
