@@ -124,8 +124,7 @@ pub enum QueryCommand {
     #[command(about = r"Show dependency graph for a specific rule.
   - `spaces query graph //my-pkg:build`: show dependency tree for the rule
   - `spaces query graph //my-pkg:build --format=json`: output as JSON
-  - `spaces query graph //my-pkg:build --format=yaml`: output as YAML
-  - `spaces query graph //my-pkg:build --checkout`: include checkout-phase rules")]
+  - `spaces query graph //my-pkg:build --format=yaml`: output as YAML")]
     Graph {
         /// The name of the rule to show dependency tree for (e.g. `//my-pkg:build`)
         rule: Arc<str>,
@@ -325,26 +324,19 @@ mod tests {
             serialized_json: None,
         };
 
-        let mut rules_map = HashMap::new();
-        rules_map.insert("//pkg:standalone".into(), &rule);
-
         let mut visited = HashSet::new();
-        let tree =
-            build_dependency_tree(&graph, "//pkg:standalone", &rules_map, &mut visited).unwrap();
+        let tree = build_dependency_tree(&graph, "//pkg:standalone", &mut visited).unwrap();
 
         assert_eq!(tree.name.as_ref(), "//pkg:standalone");
         assert_eq!(tree.dependencies.len(), 0);
-        assert_eq!(tree.source, Some("pkg/standalone.star".to_string()));
     }
 
     #[test]
     fn test_dependency_node_to_tree_simple() {
         let node = DependencyNode {
             name: "//root:main".into(),
-            source: Some("root/main.star".to_string()),
             dependencies: vec![DependencyNode {
                 name: "//pkg:dep".into(),
-                source: Some("pkg/dep.star".to_string()),
                 dependencies: vec![],
             }],
         };
@@ -362,7 +354,6 @@ mod tests {
     fn test_dependency_node_serialization() {
         let node = DependencyNode {
             name: "//test:rule".into(),
-            source: Some("test/rule.star".to_string()),
             dependencies: vec![],
         };
 
@@ -380,8 +371,6 @@ mod tests {
 #[derive(Debug, Serialize)]
 struct DependencyNode {
     name: Arc<str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    source: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     dependencies: Vec<DependencyNode>,
 }
@@ -390,20 +379,14 @@ struct DependencyNode {
 fn build_dependency_tree(
     graph: &graph::Graph,
     rule_name: &str,
-    rules_map: &HashMap<Arc<str>, &QueryRule>,
     visited: &mut HashSet<Arc<str>>,
 ) -> anyhow::Result<DependencyNode> {
-    let rule = rules_map
-        .get(rule_name)
-        .ok_or_else(|| format_error!("Rule '{}' not found", rule_name))?;
-
     let rule_arc: Arc<str> = rule_name.into();
 
     // Check for cycles
     if visited.contains(&rule_arc) {
         return Ok(DependencyNode {
             name: rule_arc.clone(),
-            source: Some(format!("{} (circular reference)", rule.source)),
             dependencies: vec![],
         });
     }
@@ -419,9 +402,7 @@ fn build_dependency_tree(
             if dep_name.as_ref() == "//:setup" {
                 continue;
             }
-            if let Ok(dep_node) =
-                build_dependency_tree(graph, dep_name.as_ref(), rules_map, visited)
-            {
+            if let Ok(dep_node) = build_dependency_tree(graph, dep_name.as_ref(), visited) {
                 dependencies.push(dep_node);
             }
         }
@@ -431,7 +412,6 @@ fn build_dependency_tree(
 
     Ok(DependencyNode {
         name: rule_arc,
-        source: Some(rule.source.clone()),
         dependencies,
     })
 }
@@ -1158,9 +1138,8 @@ impl QueryCommand {
 
                 // 3. Build dependency tree
                 let mut visited = HashSet::new();
-                let tree =
-                    build_dependency_tree(&ctx.graph, rule.as_ref(), &rules_map, &mut visited)
-                        .context(format_context!("Failed to build dependency tree"))?;
+                let tree = build_dependency_tree(&ctx.graph, rule.as_ref(), &mut visited)
+                    .context(format_context!("Failed to build dependency tree"))?;
 
                 // 4. Output in requested format
                 match format {
