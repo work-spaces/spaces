@@ -1204,12 +1204,14 @@ fn build_query_context(
     }
 
     let relative_invoked_path = workspace.read().relative_invoked_path.clone();
+    let graph = Arc::new(rules::get_graph());
 
     Ok(query::QueryContext {
         checkout_rules,
         run_rules,
         checkout_git_tasks,
         relative_invoked_path,
+        graph,
     })
 }
 

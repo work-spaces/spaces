@@ -1,4 +1,4 @@
-use crate::{changes::glob, inspect, markdown, rule, targets};
+use crate::{changes::glob, graph, inspect, markdown, rule, suggest, targets};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::Subcommand;
@@ -7,6 +7,7 @@ use indexmap::IndexMap;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use termtree::Tree;
 
 // ---------------------------------------------------------------------------
 // Clap types
@@ -120,6 +121,21 @@ pub enum QueryCommand {
         #[arg(long, value_enum)]
         format: Option<ExportFormat>,
     },
+    #[command(about = r"Show dependency graph for a specific rule.
+  - `spaces query graph //my-pkg:build`: show dependency tree for the rule
+  - `spaces query graph //my-pkg:build --format=json`: output as JSON
+  - `spaces query graph //my-pkg:build --format=yaml`: output as YAML
+  - `spaces query graph //my-pkg:build --checkout`: include checkout-phase rules")]
+    Graph {
+        /// The name of the rule to show dependency tree for (e.g. `//my-pkg:build`)
+        rule: Arc<str>,
+        /// Include checkout-phase rules in search
+        #[arg(long)]
+        checkout: bool,
+        /// Output format
+        #[arg(long, value_enum, default_value_t = console::Format::Pretty)]
+        format: console::Format,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -187,6 +203,8 @@ pub struct QueryContext {
     /// Workspace-relative path where `spaces` was invoked; used to compute a
     /// default filter when none is supplied.
     pub relative_invoked_path: Arc<str>,
+    /// The dependency graph for all rules.
+    pub graph: Arc<graph::Graph>,
 }
 
 impl QueryCommand {
@@ -216,13 +234,22 @@ impl QueryCommand {
                 // Export needs executor_markdown (always computed) but not deps/serialization
                 QueryContextConfig::minimal()
             }
+            QueryCommand::Graph { .. } => {
+                // Graph only needs the graph structure, no expensive rule data
+                QueryContextConfig::minimal()
+            }
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::query_highlight_mask;
+    use super::{
+        DependencyNode, QueryRule, build_dependency_tree, dependency_node_to_tree,
+        query_highlight_mask,
+    };
+    use crate::{graph, rule};
+    use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
 
     fn arc_terms(terms: &[&str]) -> Vec<Arc<str>> {
@@ -275,11 +302,155 @@ mod tests {
 
         assert_eq!(highlighted, vec![0, 1, 2, 3, 4, 10, 11, 12, 13]);
     }
+
+    #[test]
+    fn test_build_dependency_tree_no_dependencies() {
+        let mut graph = graph::Graph::default();
+        graph.add_task("//pkg:standalone".into());
+
+        // Create a mock QueryRule
+        let rule = QueryRule {
+            rule: rule::Rule {
+                name: "//pkg:standalone".into(),
+                deps: None,
+                help: None,
+                inputs: None,
+                outputs: None,
+                targets: None,
+                platforms: None,
+                type_: Some(rule::RuleType::Run),
+                visibility: None,
+            },
+            source: "pkg/standalone.star".to_string(),
+            expanded_deps: None,
+            executor_markdown: None,
+            serialized_yaml: None,
+            serialized_json: None,
+        };
+
+        let mut rules_map = HashMap::new();
+        rules_map.insert("//pkg:standalone".into(), &rule);
+
+        let mut visited = HashSet::new();
+        let tree =
+            build_dependency_tree(&graph, "//pkg:standalone", &rules_map, &mut visited).unwrap();
+
+        assert_eq!(tree.name.as_ref(), "//pkg:standalone");
+        assert_eq!(tree.dependencies.len(), 0);
+        assert_eq!(tree.source, Some("pkg/standalone.star".to_string()));
+    }
+
+    #[test]
+    fn test_dependency_node_to_tree_simple() {
+        let node = DependencyNode {
+            name: "//root:main".into(),
+            source: Some("root/main.star".to_string()),
+            dependencies: vec![DependencyNode {
+                name: "//pkg:dep".into(),
+                source: Some("pkg/dep.star".to_string()),
+                dependencies: vec![],
+            }],
+        };
+
+        let tree = dependency_node_to_tree(&node);
+        let output = tree.to_string();
+
+        assert!(output.contains("//root:main"));
+        assert!(output.contains("//pkg:dep"));
+        assert!(output.contains("root/main.star"));
+        assert!(output.contains("pkg/dep.star"));
+    }
+
+    #[test]
+    fn test_dependency_node_serialization() {
+        let node = DependencyNode {
+            name: "//test:rule".into(),
+            source: Some("test/rule.star".to_string()),
+            dependencies: vec![],
+        };
+
+        let json = serde_json::to_string(&node).unwrap();
+        assert!(json.contains("//test:rule"));
+        assert!(json.contains("test/rule.star"));
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+/// A node in the dependency tree used for JSON/YAML serialization
+#[derive(Debug, Serialize)]
+struct DependencyNode {
+    name: Arc<str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    dependencies: Vec<DependencyNode>,
+}
+
+/// Builds a dependency tree starting from a specific rule
+fn build_dependency_tree(
+    graph: &graph::Graph,
+    rule_name: &str,
+    rules_map: &HashMap<Arc<str>, &QueryRule>,
+    visited: &mut HashSet<Arc<str>>,
+) -> anyhow::Result<DependencyNode> {
+    let rule = rules_map
+        .get(rule_name)
+        .ok_or_else(|| format_error!("Rule '{}' not found", rule_name))?;
+
+    let rule_arc: Arc<str> = rule_name.into();
+
+    // Check for cycles
+    if visited.contains(&rule_arc) {
+        return Ok(DependencyNode {
+            name: rule_arc.clone(),
+            source: Some(format!("{} (circular reference)", rule.source)),
+            dependencies: vec![],
+        });
+    }
+
+    visited.insert(rule_arc.clone());
+
+    let mut dependencies = Vec::new();
+
+    // Get dependencies from the graph
+    if let Ok(deps) = graph.get_dependencies(rule_name) {
+        for dep_name in deps {
+            if let Ok(dep_node) =
+                build_dependency_tree(graph, dep_name.as_ref(), rules_map, visited)
+            {
+                dependencies.push(dep_node);
+            }
+        }
+    }
+
+    visited.remove(&rule_arc);
+
+    Ok(DependencyNode {
+        name: rule_arc,
+        source: Some(rule.source.clone()),
+        dependencies,
+    })
+}
+
+/// Converts a DependencyNode into a termtree Tree for pretty printing
+fn dependency_node_to_tree(node: &DependencyNode) -> Tree<String> {
+    let node_label = if let Some(source) = &node.source {
+        format!("{} ({})", node.name, source)
+    } else {
+        node.name.to_string()
+    };
+
+    let mut tree = Tree::new(node_label);
+
+    for dep in &node.dependencies {
+        tree.push(dependency_node_to_tree(dep));
+    }
+
+    tree
+}
 
 /// YAML/JSON-serialisable summary of a single rule for the `rules` list view.
 #[derive(Serialize)]
@@ -958,6 +1129,70 @@ impl QueryCommand {
                         Err(format_error!("Stardoc export is not yet implemented"))
                     }
                 }
+            }
+
+            // ------------------------------------------------------------------
+            QueryCommand::Graph {
+                rule,
+                checkout,
+                format,
+            } => {
+                // 1. Build rules map from context
+                let rules: Vec<&QueryRule> = if *checkout {
+                    ctx.checkout_rules
+                        .iter()
+                        .chain(ctx.run_rules.iter())
+                        .collect()
+                } else {
+                    ctx.run_rules.iter().collect()
+                };
+
+                let rules_map: HashMap<Arc<str>, &QueryRule> =
+                    rules.iter().map(|r| (r.rule.name.clone(), *r)).collect();
+
+                // 2. Verify rule exists
+                if !rules_map.contains_key(rule) {
+                    let available_rules: Vec<Arc<str>> = rules_map.keys().cloned().collect();
+                    let suggestions = suggest::get_suggestions(rule.clone(), &available_rules);
+                    let suggestions_str = suggestions
+                        .iter()
+                        .take(5)
+                        .map(|(_, s)| s.as_ref())
+                        .collect::<Vec<&str>>()
+                        .join(", ");
+
+                    anyhow::bail!(
+                        "Rule '{}' not found. Similar rules: {}",
+                        rule,
+                        suggestions_str
+                    );
+                }
+
+                // 3. Build dependency tree
+                let mut visited = HashSet::new();
+                let tree =
+                    build_dependency_tree(&ctx.graph, rule.as_ref(), &rules_map, &mut visited)
+                        .context(format_context!("Failed to build dependency tree"))?;
+
+                // 4. Output in requested format
+                match format {
+                    console::Format::Json => {
+                        let json = serde_json::to_string_pretty(&tree)
+                            .context(format_context!("Failed to serialize to JSON"))?;
+                        console.write(&format!("{}\n", json))?;
+                    }
+                    console::Format::Yaml => {
+                        let yaml = serde_yaml::to_string(&tree)
+                            .context(format_context!("Failed to serialize to YAML"))?;
+                        console.write(&format!("{}\n", yaml))?;
+                    }
+                    console::Format::Pretty => {
+                        let term_tree = dependency_node_to_tree(&tree);
+                        console.write(&format!("{}\n", term_tree))?;
+                    }
+                }
+
+                Ok(())
             }
         }
     }

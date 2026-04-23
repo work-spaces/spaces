@@ -1447,6 +1447,11 @@ pub fn get_run_rules() -> Vec<task::Task> {
     get_rules_by_phase(task::Phase::Run)
 }
 
+pub fn get_graph() -> graph::Graph {
+    let state = get_state().read();
+    state.graph.clone()
+}
+
 pub fn collect_task_glob_deps(task: &task::Task) -> Vec<rule::Globs> {
     let state = get_state().read();
     let tasks = state.tasks.read();

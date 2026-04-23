@@ -99,4 +99,21 @@ impl Graph {
 
         Ok(sorted_tasks)
     }
+
+    /// Returns the direct dependencies of a given rule
+    pub fn get_dependencies(&self, rule_name: &str) -> anyhow::Result<Vec<Arc<str>>> {
+        let node = self.find_node(rule_name)?;
+        let neighbors = self.directed_graph.neighbors(node);
+        Ok(neighbors
+            .map(|idx| self.directed_graph[idx].clone())
+            .collect())
+    }
+
+    /// Finds the node index for a given rule name
+    pub fn find_node(&self, rule_name: &str) -> anyhow::Result<petgraph::prelude::NodeIndex> {
+        self.directed_graph
+            .node_indices()
+            .find(|&idx| self.directed_graph[idx].as_ref() == rule_name)
+            .ok_or_else(|| format_error!("Rule not found: {}", rule_name))
+    }
 }
