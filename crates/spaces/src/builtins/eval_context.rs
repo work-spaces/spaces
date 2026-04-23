@@ -27,7 +27,7 @@ pub struct EvalContext {
     /// Used for module result caching to track which tasks originated from this module.
     /// Uses RefCell for interior mutability since callers borrow other ctx fields
     /// while recording tasks.
-    created_tasks: RefCell<Vec<Arc<str>>>,
+    created_rules: RefCell<Vec<Arc<str>>>,
 
     /// Load statements captured during evaluation.
     /// Used for module result caching to track module dependencies.
@@ -50,19 +50,19 @@ impl EvalContext {
             is_lsp: singleton::is_lsp_mode(),
             is_ci: singleton::get_is_ci(),
             execution_phase: singleton::get_execution_phase(),
-            created_tasks: RefCell::new(Vec::new()),
+            created_rules: RefCell::new(Vec::new()),
             load_statements: Vec::new(),
         }
     }
 
     /// Records that a task was created during this module's evaluation.
-    pub fn record_task(&self, task_name: Arc<str>) {
-        self.created_tasks.borrow_mut().push(task_name);
+    pub fn record_rule(&self, task_name: Arc<str>) {
+        self.created_rules.borrow_mut().push(task_name);
     }
 
-    /// Returns the list of task names created during this module's evaluation.
-    pub fn get_created_tasks(&self) -> Vec<Arc<str>> {
-        self.created_tasks.borrow().clone()
+    /// Returns the list of rule names created during this module's evaluation.
+    pub fn get_created_rules(&self) -> Vec<Arc<str>> {
+        self.created_rules.borrow().clone()
     }
 
     /// Sets the load statements for this module.

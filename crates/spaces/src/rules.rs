@@ -1301,7 +1301,7 @@ pub fn insert_task_for_module(
     let state = get_state().read();
     let rule_label = state.insert_task_with_context(task, module_name, default_visibility)?;
     if let Some(ctx) = eval_context {
-        ctx.record_task(rule_label);
+        ctx.record_rule(rule_label);
     }
     Ok(())
 }

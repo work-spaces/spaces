@@ -82,32 +82,32 @@ fn build_module_target(
     module_name: Arc<str>,
     eval_context: &EvalContext,
 ) -> anyhow::Result<mtarget::ModuleTarget> {
-    let created_task_names = eval_context.get_created_tasks();
+    let created_rule_names = eval_context.get_created_rules();
 
     // Build task summaries from the task names
-    let mut tasks = std::collections::HashMap::new();
-    for task_name in created_task_names {
-        let task = rules::get_task(task_name.as_ref()).context(format_context!(
+    let mut rules = std::collections::HashMap::new();
+    for rule_name in created_rule_names {
+        let task = rules::get_task(rule_name.as_ref()).context(format_context!(
             "Failed to get task '{}' while building module result for '{}'",
-            task_name,
+            rule_name,
             module_name
         ))?;
         let task_json = serde_json::to_value(&task).context(format_context!(
             "Failed to serialize task '{}' while building module result for '{}'",
-            task_name,
+            rule_name,
             module_name
         ))?;
-        let task_summary = mtarget::Rule::new(
-            task_name.clone(),
+        let module_rule = mtarget::Rule::new(
+            rule_name.clone(),
             task.phase.to_string().into(),
             eval_context.default_module_visibility.clone(),
             task_json,
         );
-        tasks.insert(task_name.clone(), task_summary);
+        rules.insert(rule_name.clone(), module_rule);
     }
 
     let mut result = mtarget::ModuleTarget::new(module_name);
-    result.rules = tasks;
+    result.rules = rules;
     Ok(result)
 }
 
@@ -257,20 +257,25 @@ pub fn evaluate_ast(
             eval.eval_module(ast, &globals)?;
         }
 
-        // Build module result for caching (caller will save if appropriate)
-        let module_target = eval_context
-            .as_ref()
-            .map(|ctx| build_module_target(ctx.module_name.clone(), ctx))
-            .transpose()
-            .map_err(|e| format_error!("Failed to build module result: {}", e))?;
+        let (module_deps, module_target) = if singleton::is_lsp_mode() {
+            (None, None)
+        } else {
+            // Build module result for caching (caller will save if appropriate)
+            let module_target = eval_context
+                .as_ref()
+                .map(|ctx| build_module_target(ctx.module_name.clone(), ctx))
+                .transpose()
+                .map_err(|e| format_error!("Failed to build module result: {}", e))?;
 
-        let module_deps = eval_context
-            .as_ref()
-            .map(|ctx| {
-                build_module_deps(ctx.module_name.clone(), ctx, checkout_state_digest.clone())
-            })
-            .transpose()
-            .map_err(|e| format_error!("Failed to build module deps: {}", e))?;
+            let module_deps = eval_context
+                .as_ref()
+                .map(|ctx| {
+                    build_module_deps(ctx.module_name.clone(), ctx, checkout_state_digest.clone())
+                })
+                .transpose()
+                .map_err(|e| format_error!("Failed to build module deps: {}", e))?;
+            (module_deps, module_target)
+        };
 
         if let Some(workspace) = workspace
             && singleton::get_inspect_options().stardoc.is_some()
@@ -480,7 +485,7 @@ fn try_evaluate_with_cache(
                 .context(format_context!("Failed to load mtarget for cache hit"))?
             else {
                 return Err(format_error!(
-                    "Internal error: mtarget not found for cache hit {name}",
+                    "Internal error: mtarget not found for cache hit {name} - {json_target}",
                 ));
             };
             // Cache hit - restore tasks from mtarget

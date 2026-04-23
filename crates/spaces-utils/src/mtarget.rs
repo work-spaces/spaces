@@ -265,7 +265,7 @@ impl ModuleTarget {
     }
 
     pub fn get_json_path(module_name: &str) -> Arc<std::path::Path> {
-        get_json_path(MODULE_DEPS_DIR, module_name)
+        get_json_path(MODULE_TARGETS_DIR, module_name)
     }
 
     /// Loads a cached ModuleEvaluationResult from the build directory.
