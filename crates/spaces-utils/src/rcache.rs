@@ -304,7 +304,7 @@ pub fn prune(
             match entry {
                 Some(entry) => {
                     let entry_age = entry.last_used.get_current_age();
-                    if entry_age > age as u128 {
+                    if entry_age >= age as u128 {
                         stale_digests.push((digest, entry_age, path));
                     }
                 }
@@ -1229,8 +1229,8 @@ mod tests {
 
         // Exactly at the boundary: age == threshold (30 days).
         // get_current_age returns days as integer division, so 30 * 86400000 ms ago
-        // should report age == 30. The check is entry_age > age, so 30 > 30 is false
-        // → entry should survive.
+        // should report age == 30. The check is entry_age >= age, so 30 >= 30 is true
+        // → entry should be pruned.
         write_digest_entry(
             &cache_path,
             "boundary_d",
@@ -1247,8 +1247,8 @@ mod tests {
 
         let digests_dir = cache_path.join(RULE_DIGEST_CACHE_DIR);
         assert!(
-            digests_dir.join("boundary_d").exists(),
-            "entry at exactly the age threshold should survive (not strictly greater)"
+            !digests_dir.join("boundary_d").exists(),
+            "entry at exactly the age threshold should be pruned (greater than or equal)"
         );
         assert!(
             !digests_dir.join("over_d").exists(),
@@ -1257,12 +1257,70 @@ mod tests {
 
         let artifacts_dir = cache_path.join(ARTIFACT_CACHE_DIR);
         assert!(
-            artifacts_dir.join("art_b").exists(),
-            "boundary artifact should survive"
+            !artifacts_dir.join("art_b").exists(),
+            "boundary artifact should be pruned"
         );
         assert!(
             !artifacts_dir.join("art_o").exists(),
             "over-threshold artifact should be GC'd"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_prune_age_zero_deletes_all_entries() {
+        let root = make_test_dir("prune_age_zero");
+        let cache_path = root.join("cache");
+
+        // Create entries with different ages
+        write_digest_entry(
+            &cache_path,
+            "today_d",
+            &["art_today"],
+            last_used_days_ago(0),
+        );
+        write_digest_entry(
+            &cache_path,
+            "yesterday_d",
+            &["art_yesterday"],
+            last_used_days_ago(1),
+        );
+        write_digest_entry(&cache_path, "old_d", &["art_old"], last_used_days_ago(30));
+
+        write_artifact(&cache_path, "art_today", b"today");
+        write_artifact(&cache_path, "art_yesterday", b"yesterday");
+        write_artifact(&cache_path, "art_old", b"old");
+
+        // Prune with age=0 should remove everything
+        prune(&cache_path, 0, false, null_console(), ci::IsCi::No).unwrap();
+
+        let digests_dir = cache_path.join(RULE_DIGEST_CACHE_DIR);
+        assert!(
+            !digests_dir.join("today_d").exists(),
+            "entry from today should be pruned with age=0"
+        );
+        assert!(
+            !digests_dir.join("yesterday_d").exists(),
+            "entry from yesterday should be pruned with age=0"
+        );
+        assert!(
+            !digests_dir.join("old_d").exists(),
+            "old entry should be pruned with age=0"
+        );
+
+        let artifacts_dir = cache_path.join(ARTIFACT_CACHE_DIR);
+        assert!(
+            !artifacts_dir.join("art_today").exists(),
+            "artifact from today should be GC'd"
+        );
+        assert!(
+            !artifacts_dir.join("art_yesterday").exists(),
+            "artifact from yesterday should be GC'd"
+        );
+        assert!(
+            !artifacts_dir.join("art_old").exists(),
+            "old artifact should be GC'd"
         );
 
         let _ = std::fs::remove_dir_all(&root);

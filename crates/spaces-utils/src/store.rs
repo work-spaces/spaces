@@ -42,9 +42,9 @@ pub enum StoreCommand {
         #[clap(long)]
         dry_run: bool,
     },
-    /// Prune the store by deleting entries that are older the specified age.
+    /// Prune the store by deleting entries that are this age or older (inclusive).
     Prune {
-        /// Delete entries older than this age in days
+        /// Delete entries this age or older in days (inclusive). Use --age=0 to prune all entries.
         #[clap(long, default_value = "30")]
         age: u16,
         /// Show which entries will be deleted without deleting the data
@@ -521,7 +521,7 @@ impl Store {
         for (key, entry) in self.entries.iter() {
             let path = path_to_store.join(key.as_ref());
             let entry_age = entry.get_age(age::get_now());
-            if entry_age > age as u128 {
+            if entry_age >= age as u128 {
                 let bytesize = bytesize::ByteSize(entry.size);
                 total_size_removed += bytesize.as_u64();
                 remove_entries.push((key.clone(), entry_age, bytesize, path.clone()));
