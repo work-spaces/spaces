@@ -10,7 +10,7 @@ use starlark::eval::Evaluator;
 use starlark::values::none::NoneType;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
-use utils::{changes, environment, git, http_archive, logger, platform, rule};
+use utils::{changes, environment, git, http_archive, logger, platform, rule, store};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
@@ -258,16 +258,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let url = repo.url.trim_end_matches('/');
         let url: Arc<str> = url.strip_suffix(".git").unwrap_or(url).into();
 
-        add_git_url_to_workspace_store_queue(
-            workspace_arc.clone(),
-            url.as_ref(),
-            if repo.uses_bare_repository() {
-                "bare/"
-            } else {
-                ""
-            },
-        )
-        .context(format_context!("during checkout add repo"))?;
+        let bare_prefix = format!("{}/", store::SPACES_STORE_BARE);
+        let store_prefix = if repo.uses_bare_repository() {
+            bare_prefix.as_str()
+        } else {
+            ""
+        };
+
+        add_git_url_to_workspace_store_queue(workspace_arc.clone(), url.as_ref(), store_prefix)
+            .context(format_context!("during checkout add repo"))?;
 
         rules::insert_task_for_module(
             task::Task::new(

@@ -168,8 +168,11 @@ impl Git {
                 .context(format_context!("Failed to parse {name} url: {}", self.url))?;
         let store_path = workspace.read().get_store_path();
         let store_repo_name: Arc<str> = name_dot_git.clone();
-        let bare_repo_path: Arc<str> =
-            format!("{store_path}/bare/{relative_bare_store_path}/{store_repo_name}").into();
+        let bare_repo_path: Arc<str> = format!(
+            "{store_path}/{}/{relative_bare_store_path}/{store_repo_name}",
+            utils::store::SPACES_STORE_BARE
+        )
+        .into();
 
         logger(progress.console.clone(), self.url.clone())
             .debug(format!("bare repository in store at {bare_repo_path}").as_str());

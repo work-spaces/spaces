@@ -11,6 +11,7 @@ use std::sync::Arc;
 const MANIFEST_FILE_NAME: &str = "store.spaces.json";
 pub const SPACES_STORE: &str = ".spaces/store";
 pub const SPACES_STORE_RCACHE: &str = "rcache";
+pub const SPACES_STORE_BARE: &str = "bare";
 pub fn logger(console: console::Console) -> logger::Logger {
     logger::Logger::new(console, "store".into())
 }
@@ -308,6 +309,10 @@ impl Store {
 
         crate::rcache::show_info(rcache_path, console.clone(), is_ci, &format)
             .context(format_context!("While showing rcache info"))?;
+
+        let bare_path = self.path_to_store.join(SPACES_STORE_BARE);
+        show_bare_info(&bare_path, console.clone(), is_ci, &format)
+            .context(format_context!("While showing bare repositories info"))?;
 
         Ok(())
     }
@@ -875,7 +880,10 @@ fn get_unmanaged_dir_entries(
                 .filter(|e| e.path().is_dir())
                 .filter(|e| {
                     let name = e.file_name().to_string_lossy().to_string();
-                    name != MANIFEST_FILE_NAME && !managed_top_level_dirs.contains(&name)
+                    name != MANIFEST_FILE_NAME
+                        && name != SPACES_STORE_RCACHE
+                        && name != SPACES_STORE_BARE
+                        && !managed_top_level_dirs.contains(&name)
                 })
                 .collect()
         })
@@ -932,4 +940,96 @@ fn get_size_of_path(path: &std::path::Path) -> anyhow::Result<u64> {
         .map(|m| m.len());
 
     Ok(iter.sum())
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct BareInfoOutput {
+    bare_size_bytes: u64,
+}
+
+fn serialise_bare_info_json(bare_size_bytes: u64) -> anyhow::Result<String> {
+    let output = BareInfoOutput { bare_size_bytes };
+    serde_json::to_string_pretty(&output)
+        .context(format_context!("Failed to serialize bare info as JSON"))
+}
+
+fn serialise_bare_info_yaml(bare_size_bytes: u64) -> anyhow::Result<String> {
+    let output = BareInfoOutput { bare_size_bytes };
+    serde_yaml::to_string(&output).context(format_context!("Failed to serialize bare info as YAML"))
+}
+
+fn bare_separator(console: &console::Console, width: usize) {
+    let mut line = console::Line::default();
+    line.push(console::Span::new_styled_lossy(StyledContent::new(
+        console::key_style(),
+        "─".repeat(width),
+    )));
+    console.emit_line(line);
+}
+
+fn emit_pretty_bare_info(console: &console::Console, bare_size: u64) {
+    bare_separator(console, 56);
+
+    // heading
+    {
+        let mut line = console::Line::default();
+        line.push(console::Span::new_styled_lossy(StyledContent::new(
+            console::total_style(),
+            "Bare Repositories".to_owned(),
+        )));
+        console.emit_line(line);
+    }
+
+    // size row
+    {
+        let mut line = console::Line::default();
+        line.push(console::Span::new_styled_lossy(StyledContent::new(
+            console::key_style(),
+            format!("  {:<14}", "Total Size"),
+        )));
+        line.push(console::Span::new_unstyled_lossy(format!(
+            "{}",
+            ByteSize(bare_size).display()
+        )));
+        console.emit_line(line);
+    }
+
+    bare_separator(console, 56);
+}
+
+fn show_bare_info(
+    bare_path: &std::path::Path,
+    console: console::Console,
+    is_ci: ci::IsCi,
+    format: &console::Format,
+) -> anyhow::Result<()> {
+    if !bare_path.exists() {
+        return Ok(());
+    }
+
+    let group =
+        ci::GithubLogGroup::new_group(console.clone(), is_ci, "Spaces Bare Repositories Info")?;
+
+    let bare_size = get_size_of_path(bare_path).unwrap_or(0);
+
+    match format {
+        console::Format::Pretty => {
+            emit_pretty_bare_info(&console, bare_size);
+        }
+        console::Format::Yaml => {
+            console.write(
+                &serialise_bare_info_yaml(bare_size)
+                    .context(format_context!("Failed to serialize bare info as YAML"))?,
+            )?;
+        }
+        console::Format::Json => {
+            console.write(
+                &serialise_bare_info_json(bare_size)
+                    .context(format_context!("Failed to serialize bare info as JSON"))?,
+            )?;
+        }
+    }
+
+    group.end_group(console.clone(), is_ci)?;
+    Ok(())
 }
