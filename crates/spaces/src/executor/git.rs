@@ -87,7 +87,7 @@ impl Git {
         workspace: workspace::WorkspaceArc,
         name: &str,
         filter: Option<String>,
-    ) -> anyhow::Result<(Arc<str>, lock::FileLock)> {
+    ) -> anyhow::Result<(git::BareRepository, lock::FileLock)> {
         let (relative_bare_store_path, name_dot_git) =
             git::BareRepository::url_to_relative_path_and_name(&self.url)
                 .context(format_context!("Failed to parse {name} url: {}", self.url))?;
@@ -173,7 +173,14 @@ impl Git {
             ))?;
         }
 
-        Ok((bare_repo_path, lock_file))
+        let bare_repo = git::BareRepository {
+            url: self.url.clone(),
+            full_path: bare_repo_path,
+            spaces_key: self.spaces_key.clone(),
+            name_dot_git,
+        };
+
+        Ok((bare_repo, lock_file))
     }
 
     fn execute_worktree_clone(
@@ -185,26 +192,15 @@ impl Git {
         logger::push_deprecation_warning(None, "Support for worktrees will be removed in v0.16");
         logger(progress.console.clone(), self.url.clone()).message("execute worktree clone");
 
-        let (bare_repo_path, _lock_file) =
+        let (bare_repo, _lock_file) =
             self.ensure_bare_repository(progress, workspace.clone(), name, None)?;
-
-        let (_, name_dot_git) = git::BareRepository::url_to_relative_path_and_name(&self.url)
-            .context(format_context!("Failed to parse {name} url: {}", self.url))?;
-
-        // Create bare repository wrapper for worktree operations
-        let bare_repo = git::BareRepository {
-            url: self.url.clone(),
-            full_path: bare_repo_path,
-            spaces_key: self.spaces_key.clone(),
-            name_dot_git: name_dot_git.clone(),
-        };
-
-        let worktree = bare_repo
-            .add_worktree(progress, &self.worktree_path)
-            .context(format_context!("{name} - Failed to add worktree"))?;
 
         match &self.checkout {
             git::Checkout::NewBranch(branch_name) => {
+                let worktree = bare_repo
+                    .add_worktree(progress, &self.worktree_path)
+                    .context(format_context!("{name} - Failed to add worktree"))?;
+
                 let repository = worktree.to_repository();
                 let revision = repository
                     .resolve_revision(progress, branch_name)
@@ -215,14 +211,29 @@ impl Git {
                     .context(format_context!("{name} - Failed to checkout new branch"))?;
             }
             git::Checkout::Revision(revision) => {
-                let repository = worktree.to_repository();
-                let revision = repository
-                    .resolve_revision(progress, revision)
-                    .context(format_context!("failed to resolve revision"))?;
+                // Check if revision is a branch using the bare repository
+                let temp_repo = git::Repository::new(self.url.clone(), bare_repo.full_path.clone());
 
-                worktree
-                    .checkout(progress, &revision.commit)
-                    .context(format_context!("{name} - Failed to switch branch"))?;
+                if temp_repo.is_branch(progress, revision) {
+                    // Create worktree directly on the branch
+                    let _worktree = bare_repo
+                        .add_worktree_on_branch(progress, &self.worktree_path, revision)
+                        .context(format_context!("{name} - Failed to add worktree on branch"))?;
+                } else {
+                    // Create detached worktree and checkout the revision
+                    let worktree = bare_repo
+                        .add_worktree(progress, &self.worktree_path)
+                        .context(format_context!("{name} - Failed to add worktree"))?;
+
+                    let repository = worktree.to_repository();
+                    let revision_result = repository
+                        .resolve_revision(progress, revision)
+                        .context(format_context!("failed to resolve revision"))?;
+
+                    worktree
+                        .checkout(progress, &revision_result.commit)
+                        .context(format_context!("{name} - Failed to checkout revision"))?;
+                }
             }
         };
 
@@ -251,7 +262,7 @@ impl Git {
             return Ok(());
         }
 
-        let (bare_repo_path, _lock_file) =
+        let (bare_repo, _lock_file) =
             self.ensure_bare_repository(progress, workspace.clone(), name, filter.clone())?;
 
         // Step 2: Handle existing workspace
@@ -333,8 +344,11 @@ impl Git {
 
         let workspace_directory = self.get_clone_working_directory(workspace.clone());
 
-        let mut clone_arguments: Vec<Arc<str>> =
-            vec!["clone".into(), "--reference".into(), bare_repo_path.clone()];
+        let mut clone_arguments: Vec<Arc<str>> = vec![
+            "clone".into(),
+            "--reference".into(),
+            bare_repo.full_path.clone(),
+        ];
 
         // Add filter if specified (currently unused - Default and Blobless both use full clones)
         if let Some(ref filter_str) = filter {
@@ -362,7 +376,8 @@ impl Git {
             },
         )
         .context(format_context!(
-            "{name} - Failed to clone with reference from {bare_repo_path}"
+            "{name} - Failed to clone with reference from {}",
+            bare_repo.full_path
         ))?;
 
         // Step 4: Setup sparse checkout if needed
