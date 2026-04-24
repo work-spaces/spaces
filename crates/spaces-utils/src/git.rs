@@ -595,6 +595,20 @@ impl BareRepository {
         Ok(result)
     }
 
+    pub fn add_worktree_on_branch(
+        &self,
+        progress_bar: &mut console::Progress,
+        path: &str,
+        branch: &str,
+    ) -> anyhow::Result<Worktree> {
+        let result =
+            Worktree::new_on_branch(progress_bar, self, path, branch).context(format_context!(
+                "Adding worktree on branch {branch} to {} at {path}",
+                self.url
+            ))?;
+        Ok(result)
+    }
+
     pub fn url_to_relative_path_and_name(url: &str) -> anyhow::Result<(Arc<str>, Arc<str>)> {
         let repo_url = url::Url::parse(url)
             .context(format_context!("Failed to parse bare store url {url}"))?;
@@ -680,6 +694,50 @@ impl Worktree {
         })
     }
 
+    fn new_on_branch(
+        progress_bar: &mut console::Progress,
+        repository: &BareRepository,
+        path: &str,
+        branch: &str,
+    ) -> anyhow::Result<Self> {
+        let mut options = console::ExecuteOptions::default();
+
+        if !std::path::Path::new(&path).is_absolute() {
+            return Err(format_error!(
+                "Path to worktree must be an absolute path: {}",
+                path
+            ));
+        }
+
+        std::fs::create_dir_all(path).context(format_context!("failed to create dir {path}"))?;
+
+        options.working_directory = Some(repository.full_path.clone());
+        options.arguments = vec!["worktree".into(), "prune".into()];
+
+        execute_git_command(progress_bar, &repository.url, options.clone())
+            .context(format_context!("while pruning worktree"))?;
+
+        let full_path: Arc<str> = format!("{}/{}", path, repository.spaces_key).into();
+        if !std::path::Path::new(full_path.as_ref()).exists() {
+            // Create worktree on the existing branch
+            // In a bare repository, branches are stored as refs/heads/branch
+            options.arguments = vec![
+                "worktree".into(),
+                "add".into(),
+                full_path.clone(),
+                branch.into(),
+            ];
+
+            execute_git_command(progress_bar, &repository.url, options)
+                .context(format_context!("while adding worktree on branch {branch}"))?;
+        }
+
+        Ok(Self {
+            full_path,
+            url: repository.url.clone(),
+        })
+    }
+
     pub fn to_repository(&self) -> Repository {
         Repository::new(self.url.clone(), self.full_path.clone())
     }
@@ -736,6 +794,32 @@ impl Worktree {
 
         repo.execute(progress_bar, arguments)
             .context(format_context!("switch new branch"))?;
+
+        Ok(())
+    }
+
+    pub fn switch_to_branch(
+        &self,
+        progress_bar: &mut console::Progress,
+        branch: &str,
+    ) -> anyhow::Result<()> {
+        let repo = self.to_repository();
+
+        // Fetch all refs from origin
+        let arguments = vec!["fetch".into(), "origin".into()];
+        repo.execute(progress_bar, arguments)
+            .context(format_context!("while fetching from origin"))?;
+
+        // Checkout the branch with --track to set up tracking
+        let arguments = vec![
+            "checkout".into(),
+            "--track".into(),
+            "-B".into(),
+            branch.into(),
+            format!("origin/{branch}").into(),
+        ];
+        repo.execute(progress_bar, arguments)
+            .context(format_context!("while switching to branch {branch}"))?;
 
         Ok(())
     }
