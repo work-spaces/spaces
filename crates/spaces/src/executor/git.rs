@@ -81,6 +81,101 @@ impl Git {
         }
     }
 
+    fn ensure_bare_repository(
+        &self,
+        progress: &mut console::Progress,
+        workspace: workspace::WorkspaceArc,
+        name: &str,
+        filter: Option<String>,
+    ) -> anyhow::Result<(Arc<str>, lock::FileLock)> {
+        let (relative_bare_store_path, name_dot_git) =
+            git::BareRepository::url_to_relative_path_and_name(&self.url)
+                .context(format_context!("Failed to parse {name} url: {}", self.url))?;
+        let store_path = workspace.read().get_store_path();
+        let store_repo_name: Arc<str> = name_dot_git.clone();
+        let bare_repo_path: Arc<str> = format!(
+            "{store_path}/{}/{relative_bare_store_path}/{store_repo_name}",
+            utils::store::SPACES_STORE_BARE
+        )
+        .into();
+
+        logger(progress.console.clone(), self.url.clone())
+            .debug(format!("bare repository in store at {bare_repo_path}").as_str());
+
+        // Create parent directory for bare repo
+        if let Some(parent) = std::path::Path::new(bare_repo_path.as_ref()).parent() {
+            std::fs::create_dir_all(parent).context(format_context!(
+                "{name} - Failed to create bare repository parent directory {}",
+                parent.display()
+            ))?;
+        }
+
+        let lock_file_path = format!("{bare_repo_path}.{}", lock::LOCK_FILE_SUFFIX);
+        let mut lock_file = lock::FileLock::new(std::path::Path::new(&lock_file_path).into());
+
+        lock_file
+            .lock(progress.console.clone())
+            .context(format_context!(
+                "{name} - Failed to lock the bare repository {}",
+                self.spaces_key
+            ))?;
+
+        // Ensure bare repository exists and is up to date
+        if !std::path::Path::new(bare_repo_path.as_ref()).exists() {
+            logger(progress.console.clone(), self.url.clone())
+                .debug(format!("Creating bare repository at {bare_repo_path}").as_str());
+
+            let mut clone_arguments: Vec<Arc<str>> = vec!["clone".into(), "--bare".into()];
+
+            if let Some(ref filter_str) = filter {
+                clone_arguments.push(format!("--filter={filter_str}").into());
+            }
+
+            clone_arguments.push(self.url.clone());
+            clone_arguments.push(bare_repo_path.clone());
+
+            git::execute_git_command(
+                progress,
+                &self.url,
+                console::ExecuteOptions {
+                    arguments: clone_arguments,
+                    ..Default::default()
+                },
+            )
+            .context(format_context!(
+                "{name} - Failed to create bare repository at {bare_repo_path}"
+            ))?;
+        } else {
+            logger(progress.console.clone(), self.url.clone())
+                .debug(format!("Bare repository exists at {bare_repo_path}").as_str());
+
+            logger(progress.console.clone(), self.url.clone())
+                .debug("Fetching updates in bare repository");
+
+            // Fetch updates in bare repo (safe - no working tree to corrupt)
+            git::execute_git_command(
+                progress,
+                &self.url,
+                console::ExecuteOptions {
+                    arguments: vec![
+                        "--git-dir".into(),
+                        bare_repo_path.clone(),
+                        "fetch".into(),
+                        "--all".into(),
+                        "--tags".into(),
+                        "--prune".into(),
+                    ],
+                    ..Default::default()
+                },
+            )
+            .context(format_context!(
+                "{name} - Failed to fetch in bare repository {bare_repo_path}"
+            ))?;
+        }
+
+        Ok((bare_repo_path, lock_file))
+    }
+
     fn execute_worktree_clone(
         &self,
         progress: &mut console::Progress,
@@ -90,26 +185,19 @@ impl Git {
         logger::push_deprecation_warning(None, "Support for worktrees will be removed in v0.16");
         logger(progress.console.clone(), self.url.clone()).message("execute worktree clone");
 
-        let (relative_bare_store_path, name_dot_git) =
-            git::BareRepository::url_to_relative_path_and_name(&self.url)
-                .context(format_context!("Failed to parse {name} url: {}", self.url))?;
-        let store_path = workspace.read().get_store_path();
-        let lock_file_path = format!(
-            "{store_path}/{relative_bare_store_path}/{name_dot_git}.{}",
-            lock::LOCK_FILE_SUFFIX
-        );
-        let mut lock_file = lock::FileLock::new(std::path::Path::new(&lock_file_path).into());
+        let (bare_repo_path, _lock_file) =
+            self.ensure_bare_repository(progress, workspace.clone(), name, None)?;
 
-        lock_file
-            .lock(progress.console.clone())
-            .context(format_context!(
-                "{name} - Failed to lock the repository {}",
-                self.spaces_key
-            ))?;
+        let (_, name_dot_git) = git::BareRepository::url_to_relative_path_and_name(&self.url)
+            .context(format_context!("Failed to parse {name} url: {}", self.url))?;
 
-        let bare_repo =
-            git::BareRepository::new(progress, store_path.as_ref(), &self.spaces_key, &self.url)
-                .context(format_context!("Failed to create bare repository"))?;
+        // Create bare repository wrapper for worktree operations
+        let bare_repo = git::BareRepository {
+            url: self.url.clone(),
+            full_path: bare_repo_path,
+            spaces_key: self.spaces_key.clone(),
+            name_dot_git: name_dot_git.clone(),
+        };
 
         let worktree = bare_repo
             .add_worktree(progress, &self.worktree_path)
@@ -163,90 +251,8 @@ impl Git {
             return Ok(());
         }
 
-        let (relative_bare_store_path, name_dot_git) =
-            git::BareRepository::url_to_relative_path_and_name(&self.url)
-                .context(format_context!("Failed to parse {name} url: {}", self.url))?;
-        let store_path = workspace.read().get_store_path();
-        let store_repo_name: Arc<str> = name_dot_git.clone();
-        let bare_repo_path: Arc<str> = format!(
-            "{store_path}/{}/{relative_bare_store_path}/{store_repo_name}",
-            utils::store::SPACES_STORE_BARE
-        )
-        .into();
-
-        logger(progress.console.clone(), self.url.clone())
-            .debug(format!("bare repository in store at {bare_repo_path}").as_str());
-
-        // Create parent directory for bare repo
-        if let Some(parent) = std::path::Path::new(bare_repo_path.as_ref()).parent() {
-            std::fs::create_dir_all(parent).context(format_context!(
-                "{name} - Failed to create bare repository parent directory {}",
-                parent.display()
-            ))?;
-        }
-
-        let lock_file_path = format!("{bare_repo_path}.{}", lock::LOCK_FILE_SUFFIX);
-        let mut lock_file = lock::FileLock::new(std::path::Path::new(&lock_file_path).into());
-
-        lock_file
-            .lock(progress.console.clone())
-            .context(format_context!(
-                "{name} - Failed to lock the bare repository {}",
-                self.spaces_key
-            ))?;
-
-        // Step 1: Ensure bare repository exists and is up to date
-        if !std::path::Path::new(bare_repo_path.as_ref()).exists() {
-            logger(progress.console.clone(), self.url.clone())
-                .debug(format!("Creating bare repository at {bare_repo_path}").as_str());
-
-            let mut clone_arguments: Vec<Arc<str>> = vec!["clone".into(), "--bare".into()];
-
-            if let Some(ref filter_str) = filter {
-                clone_arguments.push(format!("--filter={filter_str}").into());
-            }
-
-            clone_arguments.push(self.url.clone());
-            clone_arguments.push(bare_repo_path.clone());
-
-            git::execute_git_command(
-                progress,
-                &self.url,
-                console::ExecuteOptions {
-                    arguments: clone_arguments,
-                    ..Default::default()
-                },
-            )
-            .context(format_context!(
-                "{name} - Failed to create bare repository at {bare_repo_path}"
-            ))?;
-        } else {
-            logger(progress.console.clone(), self.url.clone())
-                .debug(format!("Bare repository exists at {bare_repo_path}").as_str());
-
-            logger(progress.console.clone(), self.url.clone())
-                .debug("Fetching updates in bare repository");
-
-            // Fetch updates in bare repo (safe - no working tree to corrupt)
-            git::execute_git_command(
-                progress,
-                &self.url,
-                console::ExecuteOptions {
-                    arguments: vec![
-                        "--git-dir".into(),
-                        bare_repo_path.clone(),
-                        "fetch".into(),
-                        "--all".into(),
-                        "--tags".into(),
-                        "--prune".into(),
-                    ],
-                    ..Default::default()
-                },
-            )
-            .context(format_context!(
-                "{name} - Failed to fetch in bare repository {bare_repo_path}"
-            ))?;
-        }
+        let (bare_repo_path, _lock_file) =
+            self.ensure_bare_repository(progress, workspace.clone(), name, filter.clone())?;
 
         // Step 2: Handle existing workspace
         let workspace_path = std::path::Path::new(self.spaces_key.as_ref());
