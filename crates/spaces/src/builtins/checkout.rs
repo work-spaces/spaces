@@ -261,8 +261,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         add_git_url_to_workspace_store_queue(
             workspace_arc.clone(),
             url.as_ref(),
-            &repo.sparse_checkout,
-            if repo.is_cow_semantics() { "cow/" } else { "" },
+            if repo.uses_bare_repository() {
+                "bare/"
+            } else {
+                ""
+            },
         )
         .context(format_context!("during checkout add repo"))?;
 
@@ -1042,16 +1045,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 fn add_git_url_to_workspace_store_queue(
     workspace_arc: WorkspaceArc,
     url: &str,
-    sparse_checkout: &Option<git::SparseCheckout>,
     cow: &str,
 ) -> anyhow::Result<()> {
     let mut workspace = workspace_arc.write();
     if let Ok((store_path, repo_name)) = git::BareRepository::url_to_relative_path_and_name(url) {
-        let suffix: Arc<str> = sparse_checkout
-            .as_ref()
-            .map(|e| e.get_hash_string())
-            .unwrap_or("".into());
-        let store_path = format!("{cow}{store_path}/{repo_name}{suffix}");
+        let store_path = format!("{cow}{store_path}/{repo_name}");
         workspace
             .add_store_entry(store_path.into())
             .context(format_context!("while adding git url to store queue"))?;

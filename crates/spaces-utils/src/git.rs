@@ -72,7 +72,7 @@ impl Repo {
         }
     }
 
-    pub fn is_cow_semantics(&self) -> bool {
+    pub fn uses_bare_repository(&self) -> bool {
         // Returns true for Default or Blobless clone modes.
         // These modes use bare repositories in the store with git --reference
         // to create workspace clones that share objects via git alternates.

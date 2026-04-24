@@ -163,17 +163,11 @@ impl Git {
             return Ok(());
         }
 
-        let suffix: Arc<str> = if let Some(sparse_checkout) = self.sparse_checkout.as_ref() {
-            sparse_checkout.get_hash_string()
-        } else {
-            "".into()
-        };
-
         let (relative_bare_store_path, name_dot_git) =
             git::BareRepository::url_to_relative_path_and_name(&self.url)
                 .context(format_context!("Failed to parse {name} url: {}", self.url))?;
         let store_path = workspace.read().get_store_path();
-        let store_repo_name: Arc<str> = format!("{name_dot_git}{suffix}").into();
+        let store_repo_name: Arc<str> = name_dot_git.clone();
         let bare_repo_path: Arc<str> =
             format!("{store_path}/bare/{relative_bare_store_path}/{store_repo_name}").into();
 
@@ -458,7 +452,7 @@ impl Git {
         workspace: workspace::WorkspaceArc,
         name: &str,
     ) -> anyhow::Result<()> {
-        // The logic in Repo::is_cow_semantics() needs to stay in sync
+        // The logic in Repo::uses_bare_repository() needs to stay in sync
         // with the logic here. Default and Blobless use bare repository
         // with reference clone (shared object store via git alternates).
         //
