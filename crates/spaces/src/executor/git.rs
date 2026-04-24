@@ -381,17 +381,17 @@ impl Git {
             ))?;
 
         // Step 6: If on a branch, reset to origin
-        if let git::Checkout::Revision(rev) = &self.checkout {
-            if workspace_repo.is_branch(progress, rev) {
-                logger(progress.console.clone(), self.url.clone())
-                    .debug(format!("Resetting to origin/{rev}").as_str());
-                workspace_repo
-                    .reset_hard_origin_branch(progress, rev)
-                    .context(format_context!(
-                        "Failed to reset to origin/{rev} in {}",
-                        self.spaces_key
-                    ))?;
-            }
+        if let git::Checkout::Revision(rev) = &self.checkout
+            && workspace_repo.is_branch(progress, rev)
+        {
+            logger(progress.console.clone(), self.url.clone())
+                .debug(format!("Resetting to origin/{rev}").as_str());
+            workspace_repo
+                .reset_hard_origin_branch(progress, rev)
+                .context(format_context!(
+                    "Failed to reset to origin/{rev} in {}",
+                    self.spaces_key
+                ))?;
         }
 
         logger(progress.console.clone(), self.url.clone())
