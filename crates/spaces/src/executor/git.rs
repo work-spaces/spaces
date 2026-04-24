@@ -329,7 +329,7 @@ impl Git {
         let mut clone_arguments: Vec<Arc<str>> =
             vec!["clone".into(), "--reference".into(), bare_repo_path.clone()];
 
-        // Add filter if specified (for blobless clone)
+        // Add filter if specified (currently unused - Default and Blobless both use full clones)
         if let Some(ref filter_str) = filter {
             clone_arguments.push(format!("--filter={filter_str}").into());
         }
@@ -489,6 +489,8 @@ impl Git {
         // The logic in Repo::uses_bare_repository() needs to stay in sync
         // with the logic here. Default and Blobless use bare repository
         // with reference clone (shared object store via git alternates).
+        // Note: Default and Blobless are now equivalent - both create full clones
+        // without filters to avoid "unable to read sha1 file" errors.
         //
         let is_new_branch = if workspace.read().is_dev_branch(name) {
             IsNewBranch::Yes
@@ -500,17 +502,8 @@ impl Git {
             git::Clone::Worktree => self
                 .execute_worktree_clone(progress, workspace.clone(), name)
                 .context(format_context!("spaces clone failed"))?,
-            git::Clone::Default => self
+            git::Clone::Default | git::Clone::Blobless => self
                 .execute_default_clone(progress, workspace.clone(), name, None, is_new_branch)
-                .context(format_context!("default clone failed"))?,
-            git::Clone::Blobless => self
-                .execute_default_clone(
-                    progress,
-                    workspace.clone(),
-                    name,
-                    Some("blob:none".to_string()),
-                    is_new_branch,
-                )
                 .context(format_context!("default clone failed"))?,
             git::Clone::Shallow => self
                 .execute_shallow_clone(progress, workspace.clone(), name)
