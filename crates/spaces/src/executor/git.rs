@@ -237,6 +237,23 @@ impl Git {
             }
         };
 
+        // Track workspace link to bare repository
+        let (relative_bare_store_path, name_dot_git) =
+            git::BareRepository::url_to_relative_path_and_name(&self.url).context(
+                format_context!("Failed to parse url for workspace link tracking"),
+            )?;
+        let store_relative_path = format!(
+            "{}/{}/{}",
+            utils::store::SPACES_STORE_BARE,
+            relative_bare_store_path,
+            name_dot_git
+        );
+        workspace.write().add_store_link(
+            store_relative_path.into(),
+            self.spaces_key.clone(),
+            utils::store::CloneType::Worktree,
+        )?;
+
         Ok(())
     }
 
@@ -416,6 +433,23 @@ impl Git {
 
         logger(progress.console.clone(), self.url.clone())
             .debug("Reference clone completed successfully");
+
+        // Track workspace link to bare repository
+        let (relative_bare_store_path, name_dot_git) =
+            git::BareRepository::url_to_relative_path_and_name(&self.url).context(
+                format_context!("Failed to parse url for workspace link tracking"),
+            )?;
+        let store_relative_path = format!(
+            "{}/{}/{}",
+            utils::store::SPACES_STORE_BARE,
+            relative_bare_store_path,
+            name_dot_git
+        );
+        workspace.write().add_store_link(
+            store_relative_path.into(),
+            self.spaces_key.clone(),
+            utils::store::CloneType::Reference,
+        )?;
 
         Ok(())
     }
