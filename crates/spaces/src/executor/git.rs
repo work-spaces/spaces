@@ -414,17 +414,24 @@ impl Git {
 
         let workspace_directory = self.get_clone_working_directory(workspace.clone());
 
+        let mut clone_arguments: Vec<Arc<str>> = vec![
+            "clone".into(),
+            "--depth".into(),
+            "1".into(),
+            self.url.clone(),
+            self.spaces_key.clone(),
+            "--branch".into(),
+            branch.clone(),
+            "--single-branch".into(),
+        ];
+
+        // Add --no-checkout if sparse checkout is specified
+        if self.sparse_checkout.is_some() {
+            clone_arguments.push("--no-checkout".into());
+        }
+
         let clone_options = console::ExecuteOptions {
-            arguments: vec![
-                "clone".into(),
-                "--depth".into(),
-                "1".into(),
-                self.url.clone(),
-                self.spaces_key.clone(),
-                "--branch".into(),
-                branch.clone(),
-                "--single-branch".into(),
-            ],
+            arguments: clone_arguments,
             working_directory: Some(workspace_directory),
             ..Default::default()
         };
@@ -439,6 +446,30 @@ impl Git {
                 .execute_process("git", clone_options)
                 .context(format_context!(
                     "{name} - Failed to clone repository {}",
+                    self.spaces_key
+                ))?;
+        }
+
+        // Setup sparse checkout if needed
+        if let Some(sparse_checkout) = self.sparse_checkout.as_ref() {
+            let workspace_repo = git::Repository::new(self.url.clone(), self.spaces_key.clone());
+
+            url_logger.debug("Setting up sparse checkout for shallow clone");
+
+            workspace_repo
+                .setup_sparse_checkout(progress, sparse_checkout)
+                .context(format_context!(
+                    "Failed to setup sparse checkout in {}",
+                    self.spaces_key
+                ))?;
+
+            // Checkout the files according to sparse checkout configuration
+            url_logger.debug("Checking out files for sparse checkout");
+
+            workspace_repo
+                .checkout(progress, &self.checkout)
+                .context(format_context!(
+                    "{name} - Failed to checkout files in sparse shallow clone {}",
                     self.spaces_key
                 ))?;
         }
