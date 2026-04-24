@@ -1,4 +1,5 @@
 pub mod age;
+pub mod bin_detail;
 pub mod changes;
 pub mod ci;
 pub mod copy;

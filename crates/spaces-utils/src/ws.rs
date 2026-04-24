@@ -6,6 +6,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+// Re-exports from bin_detail module for backward compatibility
+pub use crate::bin_detail::{BinDetail, Blake3Hash};
+
 pub const SPACES_HOME_NAME: &str = ".spaces/home";
 pub const SPACES_LOGS_NAME: &str = ".spaces/logs";
 pub const METRICS_FILE_NAME: &str = ".spaces/metrics.spaces.json";
@@ -179,14 +182,6 @@ impl Asset {
             hash: hash.to_string().into(),
         }
     }
-}
-
-pub type Blake3Hash = [u8; blake3::OUT_LEN];
-
-#[derive(Debug, Serialize, Deserialize, Default)]
-pub struct BinDetail {
-    pub hash: Blake3Hash,
-    pub modified: Option<std::time::SystemTime>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, strum::Display)]

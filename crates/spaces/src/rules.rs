@@ -515,7 +515,7 @@ impl State {
 
     /// Restores tasks from a cached ModuleEvaluationResult into the task graph.
     ///
-    /// This is the reverse of `build_module_result()` in evaluator.rs - it takes
+    /// This is the reverse of `build_module_target()` in evaluator.rs - it takes
     /// a cached module result and inserts all its tasks into the rules state,
     /// allowing module evaluation to be skipped when the cache is valid.
     fn restore_tasks_from_cache(
@@ -523,7 +523,7 @@ impl State {
         mtarget: &mtarget::ModuleTarget,
         module_name: &Arc<str>,
     ) -> anyhow::Result<()> {
-        for task_summary in mtarget.tasks.values() {
+        for task_summary in mtarget.rules.values() {
             let task: task::Task = serde_json::from_value(task_summary.task_json.clone()).context(
                 format_context!("Failed to deserialize cached task {}", task_summary.name),
             )?;
@@ -1301,7 +1301,7 @@ pub fn insert_task_for_module(
     let state = get_state().read();
     let rule_label = state.insert_task_with_context(task, module_name, default_visibility)?;
     if let Some(ctx) = eval_context {
-        ctx.record_task(rule_label);
+        ctx.record_rule(rule_label);
     }
     Ok(())
 }

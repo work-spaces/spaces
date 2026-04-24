@@ -2,7 +2,7 @@ use crate::{completions, evaluator, executor, rules, task, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use std::sync::Arc;
-use utils::{ci, git, labels, lock, logger, logs, rcache, shell, store, version, ws};
+use utils::{ci, git, labels, lock, logger, logs, mtarget, rcache, shell, store, version, ws};
 
 use crate::{lsp_context, singleton};
 use itertools::Itertools;
@@ -616,6 +616,12 @@ pub fn run_starlark_modules_in_workspace(
         is_create_log_folder,
     )
     .context(format_context!("while getting workspace"))?;
+
+    if phase == task::Phase::Checkout {
+        mtarget::ModuleDeps::clear_deps_dir().context(format_context!(
+            "while clearing module deps directory before checkout/sync"
+        ))?;
+    }
 
     let workspace_arc = workspace::WorkspaceArc::new(lock::StateLock::new(workspace));
     run_starlark_modules_with_workspace(
