@@ -521,7 +521,7 @@ impl Store {
         for (key, entry) in self.entries.iter() {
             let path = path_to_store.join(key.as_ref());
             let entry_age = entry.get_age(age::get_now());
-            if entry_age > age as u128 {
+            if entry_age >= age as u128 {
                 let bytesize = bytesize::ByteSize(entry.size);
                 total_size_removed += bytesize.as_u64();
                 remove_entries.push((key.clone(), entry_age, bytesize, path.clone()));
