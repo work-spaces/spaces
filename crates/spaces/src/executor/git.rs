@@ -185,7 +185,7 @@ impl Git {
             ))?;
         }
 
-        let lock_file_path = format!("{bare_repo_path}.spaces.lock");
+        let lock_file_path = format!("{bare_repo_path}.{}", lock::LOCK_FILE_SUFFIX);
         let mut lock_file = lock::FileLock::new(std::path::Path::new(&lock_file_path).into());
 
         lock_file
@@ -278,7 +278,6 @@ impl Git {
                     return Ok(());
                 }
 
-                // Fetch from the bare repo (fast, local operation)
                 logger(progress.console.clone(), self.url.clone())
                     .debug("Fetching updates in existing workspace");
 
@@ -326,6 +325,8 @@ impl Git {
         logger(progress.console.clone(), self.url.clone())
             .debug(format!("Cloning {} from bare repo with reference", self.spaces_key).as_str());
 
+        let workspace_directory = self.get_clone_working_directory(workspace.clone());
+
         let mut clone_arguments: Vec<Arc<str>> =
             vec!["clone".into(), "--reference".into(), bare_repo_path.clone()];
 
@@ -350,6 +351,7 @@ impl Git {
             &self.url,
             console::ExecuteOptions {
                 arguments: clone_arguments,
+                working_directory: Some(workspace_directory),
                 ..Default::default()
             },
         )
