@@ -10,7 +10,7 @@ use starlark::eval::Evaluator;
 use starlark::values::none::NoneType;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
-use utils::{changes, environment, git, http_archive, logger, platform, rule};
+use utils::{changes, environment, git, http_archive, logger, platform, rule, store};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
@@ -258,13 +258,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let url = repo.url.trim_end_matches('/');
         let url: Arc<str> = url.strip_suffix(".git").unwrap_or(url).into();
 
-        add_git_url_to_workspace_store_queue(
-            workspace_arc.clone(),
-            url.as_ref(),
-            &repo.sparse_checkout,
-            if repo.is_cow_semantics() { "cow/" } else { "" },
-        )
-        .context(format_context!("during checkout add repo"))?;
+        let bare_prefix = format!("{}/", store::SPACES_STORE_BARE);
+        let store_prefix = if repo.uses_bare_repository() {
+            bare_prefix.as_str()
+        } else {
+            ""
+        };
+
+        add_git_url_to_workspace_store_queue(workspace_arc.clone(), url.as_ref(), store_prefix)
+            .context(format_context!("during checkout add repo"))?;
 
         rules::insert_task_for_module(
             task::Task::new(
@@ -1042,16 +1044,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 fn add_git_url_to_workspace_store_queue(
     workspace_arc: WorkspaceArc,
     url: &str,
-    sparse_checkout: &Option<git::SparseCheckout>,
     cow: &str,
 ) -> anyhow::Result<()> {
     let mut workspace = workspace_arc.write();
     if let Ok((store_path, repo_name)) = git::BareRepository::url_to_relative_path_and_name(url) {
-        let suffix: Arc<str> = sparse_checkout
-            .as_ref()
-            .map(|e| e.get_hash_string())
-            .unwrap_or("".into());
-        let store_path = format!("{cow}{store_path}/{repo_name}{suffix}");
+        let store_path = format!("{cow}{store_path}/{repo_name}");
         workspace
             .add_store_entry(store_path.into())
             .context(format_context!("while adding git url to store queue"))?;

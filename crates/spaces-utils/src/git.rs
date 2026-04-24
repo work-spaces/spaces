@@ -72,8 +72,11 @@ impl Repo {
         }
     }
 
-    pub fn is_cow_semantics(&self) -> bool {
-        // return true for Default or Blobless
+    pub fn uses_bare_repository(&self) -> bool {
+        // Returns true for Default or Blobless clone modes.
+        // These modes use bare repositories in the store with git --reference
+        // to create workspace clones that share objects via git alternates.
+        // This is more efficient than COW and works across filesystems.
         if let Some(clone) = &self.clone {
             matches!(clone, Clone::Default | Clone::Blobless)
         } else {
@@ -540,12 +543,7 @@ impl BareRepository {
         if !std::path::Path::new(full_path.as_ref()).exists() {
             options.working_directory = Some(bare_store_path);
 
-            options.arguments = vec![
-                "clone".into(),
-                "--bare".into(),
-                "--filter=blob:none".into(),
-                url.into(),
-            ];
+            options.arguments = vec!["clone".into(), "--bare".into(), url.into()];
 
             execute_git_command(progress_bar, url, options)
                 .context(format_context!("while creating bare repo"))?;
