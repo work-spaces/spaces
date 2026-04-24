@@ -3,7 +3,7 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use utils::{copy, git, lock, logger, ws};
+use utils::{git, lock, logger, ws};
 
 fn logger(console: console::Console, url: Arc<str>) -> logger::Logger {
     logger::Logger::new(console, url)
@@ -151,7 +151,7 @@ impl Git {
     ) -> anyhow::Result<()> {
         logger(progress.console.clone(), self.url.clone()).message(
             format!(
-                "execute default clone with filter {:?}",
+                "execute reference clone with filter {:?}",
                 filter.clone().unwrap_or("None".to_string())
             )
             .as_str(),
@@ -163,12 +163,98 @@ impl Git {
             return Ok(());
         }
 
-        let spaces_name_path = std::path::Path::new(self.spaces_key.as_ref());
-        if std::path::Path::new(spaces_name_path).exists() {
-            // check if the directory is empty
-            // For submodules, the target directory may exist but be empty before initialization.
+        let suffix: Arc<str> = if let Some(sparse_checkout) = self.sparse_checkout.as_ref() {
+            sparse_checkout.get_hash_string()
+        } else {
+            "".into()
+        };
 
-            let entries = std::fs::read_dir(spaces_name_path).context(format_context!(
+        let (relative_bare_store_path, name_dot_git) =
+            git::BareRepository::url_to_relative_path_and_name(&self.url)
+                .context(format_context!("Failed to parse {name} url: {}", self.url))?;
+        let store_path = workspace.read().get_store_path();
+        let store_repo_name: Arc<str> = format!("{name_dot_git}{suffix}").into();
+        let bare_repo_path: Arc<str> =
+            format!("{store_path}/bare/{relative_bare_store_path}/{store_repo_name}").into();
+
+        logger(progress.console.clone(), self.url.clone())
+            .debug(format!("bare repository in store at {bare_repo_path}").as_str());
+
+        // Create parent directory for bare repo
+        if let Some(parent) = std::path::Path::new(bare_repo_path.as_ref()).parent() {
+            std::fs::create_dir_all(parent).context(format_context!(
+                "{name} - Failed to create bare repository parent directory {}",
+                parent.display()
+            ))?;
+        }
+
+        let lock_file_path = format!("{bare_repo_path}.spaces.lock");
+        let mut lock_file = lock::FileLock::new(std::path::Path::new(&lock_file_path).into());
+
+        lock_file
+            .lock(progress.console.clone())
+            .context(format_context!(
+                "{name} - Failed to lock the bare repository {}",
+                self.spaces_key
+            ))?;
+
+        // Step 1: Ensure bare repository exists and is up to date
+        if !std::path::Path::new(bare_repo_path.as_ref()).exists() {
+            logger(progress.console.clone(), self.url.clone())
+                .debug(format!("Creating bare repository at {bare_repo_path}").as_str());
+
+            let mut clone_arguments: Vec<Arc<str>> = vec!["clone".into(), "--bare".into()];
+
+            if let Some(ref filter_str) = filter {
+                clone_arguments.push(format!("--filter={filter_str}").into());
+            }
+
+            clone_arguments.push(self.url.clone());
+            clone_arguments.push(bare_repo_path.clone());
+
+            git::execute_git_command(
+                progress,
+                &self.url,
+                console::ExecuteOptions {
+                    arguments: clone_arguments,
+                    ..Default::default()
+                },
+            )
+            .context(format_context!(
+                "{name} - Failed to create bare repository at {bare_repo_path}"
+            ))?;
+        } else {
+            logger(progress.console.clone(), self.url.clone())
+                .debug(format!("Bare repository exists at {bare_repo_path}").as_str());
+
+            logger(progress.console.clone(), self.url.clone())
+                .debug("Fetching updates in bare repository");
+
+            // Fetch updates in bare repo (safe - no working tree to corrupt)
+            git::execute_git_command(
+                progress,
+                &self.url,
+                console::ExecuteOptions {
+                    arguments: vec![
+                        "--git-dir".into(),
+                        bare_repo_path.clone(),
+                        "fetch".into(),
+                        "--all".into(),
+                        "--tags".into(),
+                        "--prune".into(),
+                    ],
+                    ..Default::default()
+                },
+            )
+            .context(format_context!(
+                "{name} - Failed to fetch in bare repository {bare_repo_path}"
+            ))?;
+        }
+
+        // Step 2: Handle existing workspace
+        let workspace_path = std::path::Path::new(self.spaces_key.as_ref());
+        if workspace_path.exists() {
+            let entries = std::fs::read_dir(workspace_path).context(format_context!(
                 "Internal Error: failed to read directory {}",
                 self.spaces_key
             ))?;
@@ -177,7 +263,7 @@ impl Git {
                 logger(progress.console.clone(), self.url.clone()).debug(
                     format!(
                         "{} already exists and is populated - try to update",
-                        spaces_name_path.display()
+                        workspace_path.display()
                     )
                     .as_str(),
                 );
@@ -195,26 +281,16 @@ impl Git {
                     return Ok(());
                 }
 
-                if existing_repo.is_head_branch(progress) {
-                    // only pull if the remote branch is being tracked
+                // Fetch from the bare repo (fast, local operation)
+                logger(progress.console.clone(), self.url.clone())
+                    .debug("Fetching updates in existing workspace");
 
-                    if existing_repo.is_remote_branch_tracked(progress) {
-                        existing_repo.pull(progress).context(format_context!(
-                            "{name} - Failed to pull repository {}",
-                            self.spaces_key
-                        ))?;
-                    } else {
-                        logger(progress.console.clone(), self.url.clone())
-                            .warning("Remote not tracked - not updating");
-                    }
-                } else {
-                    // fetch to ensure any new tags are made available
-                    existing_repo.fetch(progress).context(format_context!(
-                        "{name} - Failed to fetch repository {}",
-                        self.spaces_key
-                    ))?;
-                }
+                existing_repo.fetch(progress).context(format_context!(
+                    "{name} - Failed to fetch repository {}",
+                    self.spaces_key
+                ))?;
 
+                // Checkout the desired revision
                 existing_repo
                     .checkout(progress, &self.checkout)
                     .context(format_context!(
@@ -222,7 +298,7 @@ impl Git {
                         self.spaces_key
                     ))?;
 
-                // check again if switched to a branch
+                // If on a branch, pull latest
                 if existing_repo.is_head_branch(progress)
                     && existing_repo.is_remote_branch_tracked(progress)
                 {
@@ -238,151 +314,88 @@ impl Git {
             logger(progress.console.clone(), self.url.clone()).debug(
                 format!(
                     "{} already exists, but is not populated, try to clone",
-                    spaces_name_path.display()
+                    workspace_path.display()
                 )
                 .as_str(),
             );
         }
 
-        let suffix: Arc<str> = if let Some(sparse_checkout) = self.sparse_checkout.as_ref() {
-            sparse_checkout.get_hash_string()
-        } else {
-            "".into()
-        };
-
-        let (relative_bare_store_path, name_dot_git) =
-            git::BareRepository::url_to_relative_path_and_name(&self.url)
-                .context(format_context!("Failed to parse {name} url: {}", self.url))?;
-        let store_path = workspace.read().get_store_path();
-        let store_repo_name: Arc<str> = format!("{name_dot_git}{suffix}").into();
-        let working_directory: Arc<str> =
-            format!("{store_path}/cow/{relative_bare_store_path}").into();
+        // Step 3: Clone from bare repo using --reference for object sharing
+        // This creates a new repo with:
+        // - Original URL as remote (not the local bare repo path)
+        // - Objects borrowed from bare repo (fast, no network needed)
+        // - Fully independent git repository
 
         logger(progress.console.clone(), self.url.clone())
-            .debug(format!("cow copy in store at {working_directory}").as_str());
+            .debug(format!("Cloning {} from bare repo with reference", self.spaces_key).as_str());
 
-        std::fs::create_dir_all(working_directory.as_ref()).context(format_context!(
-            "{name} - Failed to create working directory {}",
-            working_directory
+        let mut clone_arguments: Vec<Arc<str>> =
+            vec!["clone".into(), "--reference".into(), bare_repo_path.clone()];
+
+        // Add filter if specified (for blobless clone)
+        if let Some(ref filter_str) = filter {
+            clone_arguments.push(format!("--filter={filter_str}").into());
+        }
+
+        // Handle sparse checkout
+        if self.sparse_checkout.is_some() {
+            clone_arguments.push("--no-checkout".into());
+        }
+
+        // Add the original URL (this becomes the remote)
+        clone_arguments.push(self.url.clone());
+
+        // Add the destination
+        clone_arguments.push(self.spaces_key.clone());
+
+        git::execute_git_command(
+            progress,
+            &self.url,
+            console::ExecuteOptions {
+                arguments: clone_arguments,
+                ..Default::default()
+            },
+        )
+        .context(format_context!(
+            "{name} - Failed to clone with reference from {bare_repo_path}"
         ))?;
 
-        let lock_file_path = format!("{working_directory}/{store_repo_name}.spaces.lock");
-        let mut lock_file = lock::FileLock::new(std::path::Path::new(&lock_file_path).into());
-
-        lock_file
-            .lock(progress.console.clone())
-            .context(format_context!(
-                "{name} - Failed to lock the repository {}",
-                self.spaces_key
-            ))?;
-
-        let repo_path: Arc<str> = format!("{working_directory}/{store_repo_name}").into();
-        let store_repository = if !std::path::Path::new(repo_path.as_ref()).exists() {
-            logger(progress.console.clone(), self.url.clone())
-                .debug(format!("{repo_path} does not exist, cloning for the first time").as_str());
-
-            let mut clone_arguments: Vec<Arc<str>> = vec!["clone".into()];
-            if let Some(filter) = filter {
-                clone_arguments.push(format!("--filter={filter}").into());
-            }
-
-            if self.sparse_checkout.is_some() {
-                clone_arguments.push("--no-checkout".into());
-            }
-
-            clone_arguments.push(self.url.clone());
-            clone_arguments.push(store_repo_name.clone());
-
-            let repository = git::Repository::new_clone(
-                progress,
-                self.url.clone(),
-                working_directory.clone(),
-                store_repo_name.clone(),
-                clone_arguments,
-            )
-            .context(format_context!(
-                "{name} - Failed to clone repository {working_directory}/{store_repo_name}",
-            ))?;
-
-            if let Some(sparse_checkout) = self.sparse_checkout.as_ref() {
-                repository
-                    .setup_sparse_checkout(progress, sparse_checkout)
-                    .context(format_context!(
-                        "Failed to init sparse checkout in {repo_path}"
-                    ))?;
-            }
-
-            repository
-        } else {
-            git::Repository::new(self.url.clone(), repo_path.clone())
-        };
-
-        logger(progress.console.clone(), self.url.clone())
-            .debug(format!("{repo_path} is cloned, fetching latest changes").as_str());
-
-        store_repository.fetch(progress).context(format_context!(
-            "{name} - Failed to fetch repository {working_directory}/{store_repo_name}",
-        ))?;
-
-        logger(progress.console.clone(), self.url.clone())
-            .debug(format!("{repo_path} is fetched, checking out {:?}", self.checkout).as_str());
-
-        store_repository
-            .checkout(progress, &self.checkout)
-            .context(format_context!(
-                "{name} - Failed to checkout repository {}",
-                store_repository.full_path
-            ))?;
-
-        if let git::Checkout::Revision(rev) = &self.checkout
-            && store_repository.is_branch(progress, rev)
-        {
-            logger(progress.console.clone(), self.url.clone()).debug(
-                format!("{repo_path} is on a branch, doing a hard reset to origin/{rev}").as_str(),
-            );
-            store_repository
-                .reset_hard_origin_branch(progress, rev)
+        // Step 4: Setup sparse checkout if needed
+        if let Some(sparse_checkout) = self.sparse_checkout.as_ref() {
+            let workspace_repo = git::Repository::new(self.url.clone(), self.spaces_key.clone());
+            workspace_repo
+                .setup_sparse_checkout(progress, sparse_checkout)
                 .context(format_context!(
-                    "Failed to git reset --hard origin/{rev} for {}",
-                    store_repository.full_path
+                    "Failed to setup sparse checkout in {}",
+                    self.spaces_key
                 ))?;
         }
 
-        let git_lock_file_filter = Box::new(|path: &std::path::Path| {
-            let is_git = path
-                .components()
-                .any(|component| component.as_os_str() == ".git");
-            if !is_git {
-                true // do not filter outside of the .git folder
-            } else {
-                // Don't try to copy .lock files or the gc.pid file in the .git folder
-                // If a file is locked, resetting hard to origin will fix it
-                !(path.ends_with(".lock") || path.ends_with("gc.pid"))
-            }
-        });
-
-        // Copy the store repository to the workspace using copy-on-write semantics
-        copy::copy_with_cow_semantics(
-            progress,
-            &store_repository.full_path,
-            &self.spaces_key,
-            copy::UseCowSemantics::Yes,
-            Some(git_lock_file_filter),
-        )
-        .context(format_context!(
-            "{name} - Failed to copy repository {working_directory}/{store_repo_name} to {}",
-            self.spaces_key,
-        ))?;
-
-        // Reset the workspace to ensure it matches the current HEAD
-        let workspace_repository = git::Repository::new(self.url.clone(), self.spaces_key.clone());
-        let args: Vec<Arc<str>> = vec!["reset".into(), "--hard".into(), "HEAD".into()];
-        workspace_repository
-            .execute(progress, args)
+        // Step 5: Checkout the desired revision
+        let workspace_repo = git::Repository::new(self.url.clone(), self.spaces_key.clone());
+        workspace_repo
+            .checkout(progress, &self.checkout)
             .context(format_context!(
-                "{name} - Failed to reset repository {}",
+                "{name} - Failed to checkout revision in {}",
                 self.spaces_key
             ))?;
+
+        // Step 6: If on a branch, reset to origin
+        if let git::Checkout::Revision(rev) = &self.checkout {
+            if workspace_repo.is_branch(progress, rev) {
+                logger(progress.console.clone(), self.url.clone())
+                    .debug(format!("Resetting to origin/{rev}").as_str());
+                workspace_repo
+                    .reset_hard_origin_branch(progress, rev)
+                    .context(format_context!(
+                        "Failed to reset to origin/{rev} in {}",
+                        self.spaces_key
+                    ))?;
+            }
+        }
+
+        logger(progress.console.clone(), self.url.clone())
+            .debug("Reference clone completed successfully");
 
         Ok(())
     }
@@ -446,7 +459,8 @@ impl Git {
         name: &str,
     ) -> anyhow::Result<()> {
         // The logic in Repo::is_cow_semantics() needs to stay in sync
-        // with the logic here. Default and Blobless use cow semantics.
+        // with the logic here. Default and Blobless use bare repository
+        // with reference clone (shared object store via git alternates).
         //
         let is_new_branch = if workspace.read().is_dev_branch(name) {
             IsNewBranch::Yes

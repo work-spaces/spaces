@@ -73,7 +73,10 @@ impl Repo {
     }
 
     pub fn is_cow_semantics(&self) -> bool {
-        // return true for Default or Blobless
+        // Returns true for Default or Blobless clone modes.
+        // These modes use bare repositories in the store with git --reference
+        // to create workspace clones that share objects via git alternates.
+        // This is more efficient than COW and works across filesystems.
         if let Some(clone) = &self.clone {
             matches!(clone, Clone::Default | Clone::Blobless)
         } else {
