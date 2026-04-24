@@ -231,6 +231,26 @@ impl ModuleDeps {
 
         Ok(())
     }
+
+    /// Deletes all files in the MODULE_DEPS_DIR cache directory.
+    ///
+    /// This clears all cached module dependency information, forcing
+    /// a fresh computation on the next evaluation.
+    ///
+    /// Returns `Ok(())` if the directory was successfully cleared or didn't exist.
+    /// Returns `Err` if the directory exists but couldn't be cleared.
+    pub fn clear_deps_dir() -> anyhow::Result<()> {
+        let module_deps_dir = std::path::Path::new(MODULE_DEPS_DIR);
+
+        if module_deps_dir.exists() {
+            std::fs::remove_dir_all(module_deps_dir).context(format_context!(
+                "Failed to remove modules deps directory at {}",
+                module_deps_dir.display()
+            ))?;
+        }
+
+        Ok(())
+    }
 }
 
 /// Represents the result of evaluating a single Starlark module.

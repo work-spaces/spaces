@@ -257,7 +257,10 @@ pub fn evaluate_ast(
             eval.eval_module(ast, &globals)?;
         }
 
-        let (module_deps, module_target) = if singleton::is_lsp_mode() {
+        let (module_deps, module_target) = if singleton::is_lsp_mode()
+            || singleton::get_is_checkout()
+            || singleton::get_is_sync()
+        {
             (None, None)
         } else {
             // Build module result for caching (caller will save if appropriate)
@@ -394,8 +397,18 @@ fn try_evaluate_with_cache(
     let workspace_path = workspace.read().get_absolute_path();
     let eval_logger = star_logger(console.clone());
 
+    // Try to load existing module result from build folder
+    let module_deps_option = mtarget::ModuleDeps::new_from_json(name.as_ref())
+        .context(format_context!("Failed to load module deps for {:?}", name))?;
+
     let is_always_evaluate = workspace.read().settings.bin.is_always_evaluate;
-    if phase == task::Phase::Checkout || singleton::get_is_rescan() || is_always_evaluate {
+
+    let caching_not_allowed = module_deps_option.is_none()
+        || is_always_evaluate
+        || singleton::get_is_rescan()
+        || phase == task::Phase::Checkout;
+
+    if caching_not_allowed {
         let _ = evaluate_module(
             Some(workspace),
             workspace_path,
@@ -408,24 +421,9 @@ fn try_evaluate_with_cache(
         return Ok(());
     }
 
-    // Try to load existing module result from build folder
-    let module_deps_option = mtarget::ModuleDeps::new_from_json(name.as_ref())
-        .context(format_context!("Failed to load module deps for {:?}", name))?;
-
     // If no cached result exists, evaluate without rcache
     let Some(module_deps) = module_deps_option else {
-        eval_logger
-            .debug(format!("Evaluating module {:?} (no module target found)", name).as_str());
-        let _ = evaluate_module(
-            Some(workspace),
-            workspace_path,
-            name,
-            content,
-            with_rules,
-            checkout_state_digest,
-        )
-        .map_err(|e| format_error!("Failed to evaluate module {:?}", e))?;
-        return Ok(());
+        return Err(format_error!("Internal Error: module_deps is None"));
     };
 
     // Compute digest from mtarget
