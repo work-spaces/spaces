@@ -513,13 +513,10 @@ fn insert_setup_and_all_rules(
     let setup_rule = rule::Rule {
         name: rule::SETUP_RULE_NAME.into(),
         help: Some("Builtin rule to run setup rules first".into()),
-        inputs: None,
-        outputs: None,
-        targets: None,
         type_: Some(rule::RuleType::Run),
-        platforms: None,
         deps: Some(rules::get_setup_rules()),
         visibility: Some(rule::Visibility::Public),
+        ..Default::default()
     };
 
     rules::insert_task(task::Task::new(
@@ -540,13 +537,10 @@ fn insert_setup_and_all_rules(
     let rule = rule::Rule {
         name: rule::ALL_RULE_NAME.into(),
         help: Some("Builtin rule to run default targets and dependencies".into()),
-        inputs: None,
-        outputs: None,
-        targets: None,
         type_: Some(rule::RuleType::Run),
-        platforms: None,
         deps: Some(rule::Deps::Any(deps)),
         visibility: Some(rule::Visibility::Public),
+        ..Default::default()
     };
 
     rules::insert_task(task::Task::new(
@@ -559,13 +553,10 @@ fn insert_setup_and_all_rules(
     let test_rule = rule::Rule {
         name: rule::TEST_RULE_NAME.into(),
         help: Some("Builtin rule to run tests".into()),
-        inputs: None,
-        outputs: None,
-        targets: None,
         type_: Some(rule::RuleType::Test),
-        platforms: None,
         deps: Some(rules::get_test_rules()),
         visibility: Some(rule::Visibility::Public),
+        ..Default::default()
     };
 
     rules::insert_task(task::Task::new(
@@ -578,13 +569,10 @@ fn insert_setup_and_all_rules(
     let pre_commit_rule = rule::Rule {
         name: rule::PRE_COMMIT_RULE_NAME.into(),
         help: Some("Builtin rule to run pre-commit checks".into()),
-        inputs: None,
-        outputs: None,
-        targets: None,
         type_: Some(rule::RuleType::PreCommit),
-        platforms: None,
         deps: Some(rules::get_pre_commit_rules()),
         visibility: Some(rule::Visibility::Public),
+        ..Default::default()
     };
 
     rules::insert_task(task::Task::new(
@@ -597,13 +585,10 @@ fn insert_setup_and_all_rules(
     let clean_rule = rule::Rule {
         name: rule::CLEAN_RULE_NAME.into(),
         help: Some("Builtin rule to cleanup the workspace".into()),
-        inputs: None,
-        outputs: None,
-        targets: None,
         type_: Some(rule::RuleType::Clean),
-        platforms: None,
         deps: Some(rules::get_clean_rules()),
         visibility: Some(rule::Visibility::Public),
+        ..Default::default()
     };
 
     rules::insert_task(task::Task::new(

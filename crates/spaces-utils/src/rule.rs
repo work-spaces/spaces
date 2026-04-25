@@ -42,7 +42,7 @@ pub enum Visibility {
 /// A rule desribes what a task should do.
 /// It specifies named depedencies that must be executed
 /// before the task can run.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct Rule {
     /// workspace unique name of the rule
@@ -64,6 +64,9 @@ pub struct Rule {
     pub type_: Option<RuleType>,
     /// The visibility of the rule
     pub visibility: Option<Visibility>,
+    /// The name of the rule the trailing args should
+    /// be applied to.
+    pub apply_trailing_args_to: Option<Arc<str>>,
 }
 
 type RuleMap = HashMap<Arc<str>, (Rule, Option<String>)>;

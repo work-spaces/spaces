@@ -15,7 +15,7 @@ pub const METRICS_FILE_NAME: &str = ".spaces/metrics.spaces.json";
 pub const SETTINGS_FILE_NAME: &str = ".spaces/settings.spaces.json";
 const CHECKOUT_FILE_NAME: &str = ".spaces/checkout.spaces.json";
 const CHECKOUT_STORE_FILE_NAME: &str = ".spaces/store.spaces.json";
-const BIN_SETTINGS_FILE_NAME: &str = "build/workspace.settings.5.spaces";
+const BIN_SETTINGS_FILE_NAME: &str = "build/workspace.settings.6.spaces";
 pub const SPACES_WORKSPACE_ENV_VAR: &str = "SPACES_WORKSPACE";
 const SPACES_HOME_ENV_VAR: &str = "SPACES_ENV_HOME";
 const SPACES_HOME_LEGACY_ENV_VAR: &str = "SPACES_HOME";
@@ -204,6 +204,7 @@ pub struct BinSettings {
     pub graph: graph::Graph,
     pub is_always_evaluate: bool,
     pub exit_codes: HashMap<Arc<str>, i32>, // persisted exit codes for rules that have run
+    pub trailing_args_rule_map: HashMap<Arc<str>, Arc<str>>,
 }
 
 impl BinSettings {
