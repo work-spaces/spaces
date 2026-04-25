@@ -204,6 +204,7 @@ pub struct BinSettings {
     pub graph: graph::Graph,
     pub is_always_evaluate: bool,
     pub exit_codes: HashMap<Arc<str>, i32>, // persisted exit codes for rules that have run
+    pub trailing_args_rule_map: HashMap<Arc<str>, Arc<str>>,
 }
 
 impl BinSettings {

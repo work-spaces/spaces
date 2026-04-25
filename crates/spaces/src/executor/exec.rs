@@ -189,10 +189,27 @@ impl Exec {
         let command_line_target = workspace.read().target.clone();
 
         let mut log_level = self.log_level;
-        if let Some(target) = command_line_target
-            && target.as_ref() == name
-        {
-            let trailing_args = workspace.read().trailing_args.clone();
+        if let Some(target) = command_line_target {
+            let trailing_args = {
+                let workspace_read = workspace.read();
+                if let Some(mapped_rule) = workspace_read
+                    .settings
+                    .bin
+                    .trailing_args_rule_map
+                    .get(target.as_ref())
+                {
+                    if mapped_rule.as_ref() == name {
+                        workspace_read.trailing_args.clone()
+                    } else {
+                        Vec::new()
+                    }
+                } else if target.as_ref() == name {
+                    workspace_read.trailing_args.clone()
+                } else {
+                    Vec::new()
+                }
+            };
+
             let is_trailing_args_empty = trailing_args.is_empty();
             arguments.extend(trailing_args);
             if log_level.is_none() && !is_trailing_args_empty {

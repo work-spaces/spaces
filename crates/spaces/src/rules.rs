@@ -423,6 +423,7 @@ pub struct State {
     pub default_module_visibility: rule::Visibility,
     pub all_modules: HashSet<Arc<str>>,
     pub log_status: lock::StateLock<Vec<logs::Status>>,
+    pub trailing_args_rule_map: lock::StateLock<HashMap<Arc<str>, Arc<str>>>,
 }
 
 impl State {
@@ -496,10 +497,21 @@ impl State {
             .rule
             .sanitize(
                 rule_label.clone(),
-                module_opt,
+                module_opt.clone(),
                 workspace::SPACES_MODULE_NAME,
             )
             .context(format_context!("while sanitizing rule {rule_label}"))?;
+
+        if let Some(trailing_args_rule) = task_to_insert.rule.apply_trailing_args_to.as_ref() {
+            let sane_trailing_args_label = labels::sanitize_rule(
+                trailing_args_rule.clone(),
+                module_opt,
+                workspace::SPACES_MODULE_NAME,
+                labels::IsDep::No,
+            );
+            let mut trailing_args_rule_map = self.trailing_args_rule_map.write();
+            let _ = trailing_args_rule_map.insert(rule_label.clone(), sane_trailing_args_label);
+        }
 
         let mut tasks = self.tasks.write();
         if let Some(task) = tasks.get(&rule_label) {
@@ -655,6 +667,8 @@ impl State {
             let mut workspace_write = workspace.write();
             logger.debug("cloning graph to workspace bin settings");
             workspace_write.settings.bin.graph = self.graph.clone();
+            workspace_write.settings.bin.trailing_args_rule_map =
+                std::mem::take(&mut *self.trailing_args_rule_map.write());
             workspace_write.is_bin_dirty = true;
         }
 
@@ -1242,6 +1256,7 @@ fn get_state() -> &'static lock::StateLock<State> {
         default_module_visibility: rule::Visibility::Public,
         all_modules: HashSet::new(),
         log_status: lock::StateLock::new(Vec::new()),
+        trailing_args_rule_map: lock::StateLock::new(HashMap::new()),
     }));
     STATE.get()
 }
