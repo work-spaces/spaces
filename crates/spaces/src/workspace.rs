@@ -900,6 +900,28 @@ impl Workspace {
         Ok(())
     }
 
+    /// Called from executor/git.rs after successful clone to track workspace-to-bare-repo links
+    pub fn add_store_link(
+        &mut self,
+        store_path: Arc<str>,
+        repo_path: Arc<str>,
+        clone_type: store::CloneType,
+    ) -> anyhow::Result<()> {
+        let workspace_root = self.get_absolute_path();
+        self.store
+            .add_workspace_link(
+                std::path::Path::new(store_path.as_ref()),
+                workspace_root,
+                repo_path,
+                clone_type,
+            )
+            .context(format_context!(
+                "while adding store link for {}",
+                store_path
+            ))?;
+        Ok(())
+    }
+
     pub fn finalize_store(&self) -> anyhow::Result<()> {
         let store_path = ws::get_checkout_store_path();
         let mut saved_store =

@@ -1,6 +1,6 @@
 use crate::{age, ci, http_archive, logger};
 use anyhow::Context;
-use anyhow_source_location::format_context;
+use anyhow_source_location::{format_context, format_error};
 use bytesize::ByteSize;
 use console::style::{Color, ContentStyle, StyledContent};
 use serde::{Deserialize, Serialize};
@@ -57,10 +57,39 @@ pub enum StoreCommand {
     },
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum CloneType {
+    Reference, // --reference clone (Default/Blobless)
+    Worktree,  // worktree (deprecated)
+    Shallow,   // shallow clone
+}
+
+impl Default for CloneType {
+    fn default() -> Self {
+        CloneType::Reference
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceLink {
+    // Absolute path to the workspace root
+    pub workspace_root: Arc<str>,
+    // Relative path of the repo within the workspace
+    pub repo_path: Arc<str>,
+    // Last time this link was verified/updated
+    pub last_verified: u128,
+    // Clone type used (for information/debugging)
+    pub clone_type: CloneType,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Entry {
     last_used: u128,
     size: u64,
+    // Track which workspaces reference this store entry
+    // Key: absolute workspace path
+    #[serde(default)]
+    workspace_links: HashMap<Arc<str>, WorkspaceLink>,
 }
 
 impl Entry {
@@ -95,6 +124,12 @@ pub struct Store {
     path_to_store: std::path::PathBuf,
 }
 
+#[derive(Debug)]
+pub struct VerifyResult {
+    pub stale_links_removed: usize,
+    pub invalid_workspaces: Vec<Arc<str>>,
+}
+
 impl Store {
     pub fn new(path_to_store: &std::path::Path) -> Self {
         Self {
@@ -126,7 +161,18 @@ impl Store {
 
     pub fn merge(&mut self, other: Store) {
         for (key, value) in other.entries {
-            self.entries.insert(key, value);
+            if let Some(existing_entry) = self.entries.get_mut(&key) {
+                // Merge workspace links from other into existing entry
+                for (ws_root, ws_link) in value.workspace_links {
+                    existing_entry.workspace_links.insert(ws_root, ws_link);
+                }
+                // Update last_used and size to the newer values
+                existing_entry.last_used = value.last_used;
+                existing_entry.size = value.size;
+            } else {
+                // Entry doesn't exist, insert it
+                self.entries.insert(key, value);
+            }
         }
     }
 
@@ -176,12 +222,94 @@ impl Store {
             .or_insert_with(|| Entry {
                 last_used: timestamp,
                 size,
+                workspace_links: HashMap::new(),
             });
 
         map_entry.last_used = timestamp;
         map_entry.size = size;
 
         Ok(())
+    }
+
+    /// Add a workspace link to a store entry
+    pub fn add_workspace_link(
+        &mut self,
+        store_path: &std::path::Path,
+        workspace_root: Arc<str>,
+        repo_path: Arc<str>,
+        clone_type: CloneType,
+    ) -> anyhow::Result<()> {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis())
+            .unwrap_or(0);
+
+        let store_path_str: Arc<str> = store_path.display().to_string().into();
+
+        if let Some(entry) = self.entries.get_mut(&store_path_str) {
+            let link = WorkspaceLink {
+                workspace_root: workspace_root.clone(),
+                repo_path,
+                last_verified: timestamp,
+                clone_type,
+            };
+            entry.workspace_links.insert(workspace_root, link);
+        } else {
+            return Err(format_error!(
+                "Store entry not found for path: {}",
+                store_path.display()
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Remove a specific workspace link from a store entry
+    pub fn remove_workspace_link(
+        &mut self,
+        store_path: &std::path::Path,
+        workspace_root: &str,
+    ) -> anyhow::Result<()> {
+        let store_path_str: Arc<str> = store_path.display().to_string().into();
+
+        if let Some(entry) = self.entries.get_mut(&store_path_str) {
+            entry.workspace_links.remove(workspace_root);
+        }
+
+        Ok(())
+    }
+
+    /// Verify all links and remove stale ones (where workspace no longer exists)
+    pub fn verify_and_clean_links(&mut self) -> anyhow::Result<VerifyResult> {
+        let mut stale_links_removed = 0;
+        let mut invalid_workspaces: Vec<Arc<str>> = Vec::new();
+        let mut seen_invalid: std::collections::HashSet<Arc<str>> =
+            std::collections::HashSet::new();
+
+        for entry in self.entries.values_mut() {
+            let mut stale_keys = Vec::new();
+
+            for (workspace_root, _) in entry.workspace_links.iter() {
+                let workspace_path = std::path::Path::new(workspace_root.as_ref());
+                if !workspace_path.exists() {
+                    stale_keys.push(workspace_root.clone());
+                    if !seen_invalid.contains(workspace_root) {
+                        invalid_workspaces.push(workspace_root.clone());
+                        seen_invalid.insert(workspace_root.clone());
+                    }
+                }
+            }
+
+            for key in stale_keys {
+                entry.workspace_links.remove(&key);
+                stale_links_removed += 1;
+            }
+        }
+
+        Ok(VerifyResult {
+            stale_links_removed,
+            invalid_workspaces,
+        })
     }
 
     pub fn show_info(
@@ -259,12 +387,21 @@ impl Store {
             if path_missing || value.size == 0 {
                 is_fix_needed = true;
             }
+            let workspace_count = value.workspace_links.len();
+            let stale_links = value
+                .workspace_links
+                .values()
+                .filter(|link| !std::path::Path::new(link.workspace_root.as_ref()).exists())
+                .count();
+
             info_entries.push(StoreInfoEntry {
                 path: key.to_string(),
                 size_bytes: value.size,
                 age_days: value.get_age(now),
                 managed: true,
                 path_missing,
+                workspace_count,
+                stale_links,
             });
         }
 
@@ -282,6 +419,8 @@ impl Store {
                 age_days: 0,
                 managed: false,
                 path_missing: false,
+                workspace_count: 0,
+                stale_links: 0,
             });
         }
 
@@ -311,7 +450,20 @@ impl Store {
             .context(format_context!("While showing rcache info"))?;
 
         let bare_path = self.path_to_store.join(SPACES_STORE_BARE);
-        show_bare_info(&bare_path, console.clone(), is_ci, &format)
+
+        // Count unique workspaces linking to bare repositories
+        let mut bare_workspaces = std::collections::HashSet::new();
+        let bare_prefix = format!("{}/", SPACES_STORE_BARE);
+        for (key, entry) in &self.entries {
+            if key.starts_with(&bare_prefix) {
+                for workspace_root in entry.workspace_links.keys() {
+                    bare_workspaces.insert(workspace_root.clone());
+                }
+            }
+        }
+        let workspace_count = bare_workspaces.len();
+
+        show_bare_info(&bare_path, console.clone(), is_ci, &format, workspace_count)
             .context(format_context!("While showing bare repositories info"))?;
 
         Ok(())
@@ -501,6 +653,42 @@ impl Store {
                 progress.increment(1);
             }
         }
+
+        // Clean up stale workspace links
+        log.info("Verifying workspace links");
+
+        if is_dry_run {
+            // Count stale links without removing them
+            let mut stale_count = 0;
+            for entry in self.entries.values() {
+                for workspace_root in entry.workspace_links.keys() {
+                    let workspace_path = std::path::Path::new(workspace_root.as_ref());
+                    if !workspace_path.exists() {
+                        stale_count += 1;
+                    }
+                }
+            }
+
+            if stale_count > 0 {
+                log.info(format!("Would remove {} stale workspace links", stale_count).as_str());
+            }
+        } else {
+            // Actually remove stale links
+            let verify_result = self
+                .verify_and_clean_links()
+                .context(format_context!("While verifying workspace links"))?;
+
+            if verify_result.stale_links_removed > 0 {
+                log.info(
+                    format!(
+                        "Removed {} stale workspace links",
+                        verify_result.stale_links_removed
+                    )
+                    .as_str(),
+                );
+            }
+        }
+
         progress.set_finalize_none();
 
         group.end_group(console.clone(), is_ci)?;
@@ -523,14 +711,44 @@ impl Store {
         }
 
         let mut total_size_removed = ByteSize(0);
+        let mut skipped_due_to_links = 0;
         for (key, entry) in self.entries.iter() {
             let path = path_to_store.join(key.as_ref());
             let entry_age = entry.get_age(age::get_now());
             if entry_age >= age as u128 {
+                // Check for active workspace links
+                let active_links: Vec<_> = entry
+                    .workspace_links
+                    .values()
+                    .filter(|link| std::path::Path::new(link.workspace_root.as_ref()).exists())
+                    .collect();
+
+                if !active_links.is_empty() {
+                    logger(console.clone()).warning(
+                        format!(
+                            "Skipping {key}: {} active workspace(s) still reference this entry",
+                            active_links.len()
+                        )
+                        .as_str(),
+                    );
+                    skipped_due_to_links += 1;
+                    continue;
+                }
+
                 let bytesize = bytesize::ByteSize(entry.size);
                 total_size_removed += bytesize.as_u64();
                 remove_entries.push((key.clone(), entry_age, bytesize, path.clone()));
             }
+        }
+
+        if skipped_due_to_links > 0 {
+            logger(console.clone()).info(
+                format!(
+                    "Skipped {} entries due to active workspace links",
+                    skipped_due_to_links
+                )
+                .as_str(),
+            );
         }
 
         let mut progress = console::Progress::new(
@@ -599,6 +817,8 @@ struct StoreInfoEntry {
     managed: bool,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     path_missing: bool,
+    workspace_count: usize,
+    stale_links: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -705,6 +925,32 @@ fn emit_pretty_summary(
             ByteSize(unmanaged_size).display()
         )));
         console.emit_line(line);
+    }
+
+    // Workspace links row
+    {
+        let entries_with_links = entries.iter().filter(|e| e.workspace_count > 0).count();
+        let total_links: usize = entries.iter().map(|e| e.workspace_count).sum();
+        let entries_with_stale: usize = entries.iter().filter(|e| e.stale_links > 0).count();
+
+        if entries_with_links > 0 || entries_with_stale > 0 {
+            let mut line = console::Line::default();
+            line.push(console::Span::new_styled_lossy(StyledContent::new(
+                console::key_style(),
+                format!("  {:<12}", "Workspaces"),
+            )));
+            line.push(console::Span::new_unstyled_lossy(format!(
+                "{:>4} links across {} entries",
+                total_links, entries_with_links
+            )));
+            if entries_with_stale > 0 {
+                line.push(console::Span::new_styled_lossy(StyledContent::new(
+                    console::warning_style(),
+                    format!("   ({} with stale links)", entries_with_stale),
+                )));
+            }
+            console.emit_line(line);
+        }
     }
 
     // Total row
@@ -945,16 +1191,29 @@ fn get_size_of_path(path: &std::path::Path) -> anyhow::Result<u64> {
 #[derive(serde::Serialize, serde::Deserialize)]
 struct BareInfoOutput {
     bare_size_bytes: u64,
+    workspace_count: usize,
 }
 
-fn serialise_bare_info_json(bare_size_bytes: u64) -> anyhow::Result<String> {
-    let output = BareInfoOutput { bare_size_bytes };
+fn serialise_bare_info_json(
+    bare_size_bytes: u64,
+    workspace_count: usize,
+) -> anyhow::Result<String> {
+    let output = BareInfoOutput {
+        bare_size_bytes,
+        workspace_count,
+    };
     serde_json::to_string_pretty(&output)
         .context(format_context!("Failed to serialize bare info as JSON"))
 }
 
-fn serialise_bare_info_yaml(bare_size_bytes: u64) -> anyhow::Result<String> {
-    let output = BareInfoOutput { bare_size_bytes };
+fn serialise_bare_info_yaml(
+    bare_size_bytes: u64,
+    workspace_count: usize,
+) -> anyhow::Result<String> {
+    let output = BareInfoOutput {
+        bare_size_bytes,
+        workspace_count,
+    };
     serde_yaml::to_string(&output).context(format_context!("Failed to serialize bare info as YAML"))
 }
 
@@ -967,9 +1226,7 @@ fn bare_separator(console: &console::Console, width: usize) {
     console.emit_line(line);
 }
 
-fn emit_pretty_bare_info(console: &console::Console, bare_size: u64) {
-    bare_separator(console, 56);
-
+fn emit_pretty_bare_info(console: &console::Console, bare_size: u64, workspace_count: usize) {
     // heading
     {
         let mut line = console::Line::default();
@@ -994,6 +1251,20 @@ fn emit_pretty_bare_info(console: &console::Console, bare_size: u64) {
         console.emit_line(line);
     }
 
+    // workspace count row
+    {
+        let mut line = console::Line::default();
+        line.push(console::Span::new_styled_lossy(StyledContent::new(
+            console::key_style(),
+            format!("  {:<14}", "Workspaces"),
+        )));
+        line.push(console::Span::new_unstyled_lossy(format!(
+            "{}",
+            workspace_count
+        )));
+        console.emit_line(line);
+    }
+
     bare_separator(console, 56);
 }
 
@@ -1002,6 +1273,7 @@ fn show_bare_info(
     console: console::Console,
     is_ci: ci::IsCi,
     format: &console::Format,
+    workspace_count: usize,
 ) -> anyhow::Result<()> {
     if !bare_path.exists() {
         return Ok(());
@@ -1014,17 +1286,17 @@ fn show_bare_info(
 
     match format {
         console::Format::Pretty => {
-            emit_pretty_bare_info(&console, bare_size);
+            emit_pretty_bare_info(&console, bare_size, workspace_count);
         }
         console::Format::Yaml => {
             console.write(
-                &serialise_bare_info_yaml(bare_size)
+                &serialise_bare_info_yaml(bare_size, workspace_count)
                     .context(format_context!("Failed to serialize bare info as YAML"))?,
             )?;
         }
         console::Format::Json => {
             console.write(
-                &serialise_bare_info_json(bare_size)
+                &serialise_bare_info_json(bare_size, workspace_count)
                     .context(format_context!("Failed to serialize bare info as JSON"))?,
             )?;
         }
