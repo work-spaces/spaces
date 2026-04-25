@@ -3,7 +3,7 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
 use std::{io::IsTerminal, sync::Arc};
-use utils::{ci, git, logs, shell, store, version};
+use utils::{ci, features, git, logs, shell, store, version};
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
 pub enum Level {
@@ -691,6 +691,13 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             runner::run_store_command_in_workspace(effective_console, command)
                 .context(format_context!("Failed to run store command"))?
         }
+        Commands::Features { command } => {
+            if effective_console.get_level() > console::Level::Info {
+                effective_console.set_level(console::Level::Info);
+            }
+            runner::run_features_command_in_workspace(effective_console, command)
+                .context(format_context!("Failed to run features command"))?
+        }
         Commands::Version { command } => {
             if effective_console.get_level() > console::Level::Info {
                 effective_console.set_level(console::Level::Info);
@@ -1051,6 +1058,12 @@ create-lock-file = false # optionally create a lock file
         /// The mode to run the command in.
         #[command(subcommand)]
         command: store::StoreCommand,
+    },
+    /// Commands for managing feature flags.
+    Features {
+        /// The mode to run the command in.
+        #[command(subcommand)]
+        command: features::FeaturesCommand,
     },
     /// Commands for managing the spaces version including checking for updates.
     Version {

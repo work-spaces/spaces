@@ -8,29 +8,43 @@ pub struct Logger {
     label: Arc<str>,
 }
 
-static DEFERRED_WARNINGS: state::InitCell<lock::StateLock<Vec<Arc<str>>>> = state::InitCell::new();
+#[derive(Default, Debug)]
+struct DeprecationWarnings {
+    deprecation_warnings_enabled: bool,
+    warnings: Vec<Arc<str>>,
+}
 
-fn get_deferred_warnings_state() -> &'static lock::StateLock<Vec<Arc<str>>> {
+static DEFERRED_WARNINGS: state::InitCell<lock::StateLock<DeprecationWarnings>> =
+    state::InitCell::new();
+
+fn get_deferred_warnings_state() -> &'static lock::StateLock<DeprecationWarnings> {
     if let Some(state) = DEFERRED_WARNINGS.try_get() {
         return state;
     }
 
-    DEFERRED_WARNINGS.set(lock::StateLock::new(Vec::new()));
+    DEFERRED_WARNINGS.set(lock::StateLock::new(DeprecationWarnings::default()));
     DEFERRED_WARNINGS.get()
 }
 
 fn push_deferred_warning(warning: Arc<str>) {
     let mut state = get_deferred_warnings_state().write();
-    state.push(warning);
+    state.warnings.push(warning);
+}
+
+pub fn enable_deprecation_warnings() {
+    let mut state = get_deferred_warnings_state().write();
+    state.deprecation_warnings_enabled = true;
 }
 
 pub fn push_deprecation_warning<Message: std::fmt::Display>(
     module: Option<Arc<str>>,
     warning: Message,
 ) {
-    if let Ok(warn_deprecation) = std::env::var("SPACES_ENV_WARN_DEPRECATED")
-        && warn_deprecation == "0.16"
-    {
+    let is_deprecation_warning_enabled = {
+        let state = get_deferred_warnings_state().read();
+        state.deprecation_warnings_enabled
+    };
+    if is_deprecation_warning_enabled {
         let module = module.unwrap_or("unknown".into());
         push_deferred_warning(format!("{module} => {warning}").into());
     }
@@ -38,7 +52,7 @@ pub fn push_deprecation_warning<Message: std::fmt::Display>(
 
 pub fn get_deferred_warnings() -> Vec<Arc<str>> {
     let state = get_deferred_warnings_state().read();
-    state.clone()
+    state.warnings.clone()
 }
 
 impl Logger {

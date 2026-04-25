@@ -5,6 +5,7 @@ pub mod ci;
 pub mod copy;
 pub mod deps;
 pub mod environment;
+pub mod features;
 pub mod git;
 pub mod graph;
 pub mod http_archive;
