@@ -445,14 +445,31 @@ impl Git {
         }
 
         // Step 6: Setup sparse checkout if needed
+        // Configure using direct git config and sparse-checkout set (which auto-initializes)
+        // to avoid double initialization
         if let Some(sparse_checkout) = self.sparse_checkout.as_ref() {
-            let workspace_repo = git::Repository::new(self.url.clone(), self.spaces_key.clone());
-            workspace_repo
-                .setup_sparse_checkout(progress, sparse_checkout)
-                .context(format_context!(
-                    "Failed to setup sparse checkout in {}",
-                    self.spaces_key
-                ))?;
+            // Use sparse-checkout set which will initialize if needed
+            let mode_arg = match sparse_checkout.mode {
+                git::SparseCheckoutMode::Cone => "--cone",
+                git::SparseCheckoutMode::NoCone => "--no-cone",
+            };
+
+            let mut arguments = vec!["sparse-checkout".into(), "set".into(), mode_arg.into()];
+            arguments.extend(sparse_checkout.list.iter().cloned());
+
+            git::execute_git_command(
+                progress,
+                &self.url,
+                console::ExecuteOptions {
+                    working_directory: Some(self.spaces_key.clone()),
+                    arguments,
+                    ..Default::default()
+                },
+            )
+            .context(format_context!(
+                "Failed to setup sparse checkout in {}",
+                self.spaces_key
+            ))?;
         }
 
         // Step 7: Checkout the desired revision
