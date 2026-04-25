@@ -507,7 +507,7 @@ impl State {
                 trailing_args_rule.clone(),
                 module_opt,
                 workspace::SPACES_MODULE_NAME,
-                labels::IsDep::No,
+                labels::IsDep::Yes,
             );
             let mut trailing_args_rule_map = self.trailing_args_rule_map.write();
             let _ = trailing_args_rule_map.insert(rule_label.clone(), sane_trailing_args_label);
