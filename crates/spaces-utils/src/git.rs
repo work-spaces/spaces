@@ -1065,6 +1065,11 @@ impl Repository {
         checkout: &Checkout,
     ) -> anyhow::Result<ResolveRevision> {
         let mut checkout_args = Vec::new();
+
+        // Enable parallel checkout for better performance with sparse checkouts
+        checkout_args.push("-c".into());
+        checkout_args.push("checkout.workers=0".into());
+
         let revision = match checkout {
             Checkout::NewBranch(branch_name) => {
                 checkout_args.push("switch".into());
