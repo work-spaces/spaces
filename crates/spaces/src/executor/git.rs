@@ -370,14 +370,12 @@ impl Git {
 
         let mut clone_arguments: Vec<Arc<str>> = vec!["clone".into()];
 
+        // Always use --no-checkout to prevent premature checkout before LFS is configured
+        clone_arguments.push("--no-checkout".into());
+
         // Add filter if specified (currently unused - Default and Blobless both use full clones)
         if let Some(ref filter_str) = filter {
             clone_arguments.push(format!("--filter={filter_str}").into());
-        }
-
-        // Handle sparse checkout
-        if self.sparse_checkout.is_some() {
-            clone_arguments.push("--no-checkout".into());
         }
 
         // Clone from local bare repository (not remote URL)
@@ -422,7 +420,31 @@ impl Git {
             self.spaces_key
         ))?;
 
-        // Step 5: Setup sparse checkout if needed
+        // Step 5: Initialize Git LFS hooks for this repository
+        // This enables LFS to work implicitly during checkout via smudge filters
+        logger(progress.console.clone(), self.url.clone()).debug("Initializing Git LFS hooks");
+
+        // Use git lfs install --local to set up LFS hooks in this repo
+        // LFS will then automatically fetch objects during checkout
+        // This is safe to run even if LFS is not used (will just do nothing)
+        let lfs_result = git::execute_git_command(
+            progress,
+            &self.url,
+            console::ExecuteOptions {
+                working_directory: Some(self.spaces_key.clone()),
+                arguments: vec!["lfs".into(), "install".into(), "--local".into()],
+                ..Default::default()
+            },
+        );
+
+        // Don't fail if git-lfs is not installed or repo doesn't use LFS
+        if let Err(e) = lfs_result {
+            logger(progress.console.clone(), self.url.clone()).debug(
+                format!("Git LFS install skipped (not installed or not used): {e:#}").as_str(),
+            );
+        }
+
+        // Step 6: Setup sparse checkout if needed
         if let Some(sparse_checkout) = self.sparse_checkout.as_ref() {
             let workspace_repo = git::Repository::new(self.url.clone(), self.spaces_key.clone());
             workspace_repo
@@ -433,7 +455,7 @@ impl Git {
                 ))?;
         }
 
-        // Step 6: Checkout the desired revision
+        // Step 7: Checkout the desired revision
         let workspace_repo = git::Repository::new(self.url.clone(), self.spaces_key.clone());
         workspace_repo
             .checkout(progress, &self.checkout)
@@ -442,7 +464,7 @@ impl Git {
                 self.spaces_key
             ))?;
 
-        // Step 7: If on a branch, reset to origin
+        // Step 8: If on a branch, reset to origin
         if let git::Checkout::Revision(rev) = &self.checkout
             && workspace_repo.is_branch(progress, rev)
         {
