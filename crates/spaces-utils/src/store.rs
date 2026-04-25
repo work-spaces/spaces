@@ -1,6 +1,6 @@
 use crate::{age, ci, http_archive, logger};
 use anyhow::Context;
-use anyhow_source_location::format_context;
+use anyhow_source_location::{format_context, format_error};
 use bytesize::ByteSize;
 use console::style::{Color, ContentStyle, StyledContent};
 use serde::{Deserialize, Serialize};
@@ -255,7 +255,7 @@ impl Store {
             };
             entry.workspace_links.insert(workspace_root, link);
         } else {
-            return Err(anyhow::anyhow!(
+            return Err(format_error!(
                 "Store entry not found for path: {}",
                 store_path.display()
             ));

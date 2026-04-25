@@ -908,12 +908,18 @@ impl Workspace {
         clone_type: store::CloneType,
     ) -> anyhow::Result<()> {
         let workspace_root = self.get_absolute_path();
-        self.store.add_workspace_link(
-            std::path::Path::new(store_path.as_ref()),
-            workspace_root,
-            repo_path,
-            clone_type,
-        )
+        self.store
+            .add_workspace_link(
+                std::path::Path::new(store_path.as_ref()),
+                workspace_root,
+                repo_path,
+                clone_type,
+            )
+            .context(format_context!(
+                "while adding store link for {}",
+                store_path
+            ))?;
+        Ok(())
     }
 
     pub fn finalize_store(&self) -> anyhow::Result<()> {

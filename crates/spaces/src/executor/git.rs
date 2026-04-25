@@ -242,14 +242,21 @@ impl Git {
             git::BareRepository::url_to_relative_path_and_name(&self.url).context(
                 format_context!("Failed to parse url for workspace link tracking"),
             )?;
-        let store_relative_path = format!(
+        let store_relative_path: Arc<str> = format!(
             "{}/{}/{}",
             utils::store::SPACES_STORE_BARE,
             relative_bare_store_path,
             name_dot_git
-        );
+        )
+        .into();
+
+        // Ensure store entry exists before adding workspace link
+        workspace
+            .write()
+            .add_store_entry(store_relative_path.clone())?;
+
         workspace.write().add_store_link(
-            store_relative_path.into(),
+            store_relative_path,
             self.spaces_key.clone(),
             utils::store::CloneType::Worktree,
         )?;
@@ -439,17 +446,34 @@ impl Git {
             git::BareRepository::url_to_relative_path_and_name(&self.url).context(
                 format_context!("Failed to parse url for workspace link tracking"),
             )?;
-        let store_relative_path = format!(
+        let store_relative_path: Arc<str> = format!(
             "{}/{}/{}",
             utils::store::SPACES_STORE_BARE,
             relative_bare_store_path,
             name_dot_git
-        );
-        workspace.write().add_store_link(
-            store_relative_path.into(),
-            self.spaces_key.clone(),
-            utils::store::CloneType::Reference,
-        )?;
+        )
+        .into();
+
+        // Ensure store entry exists before adding workspace link
+        workspace
+            .write()
+            .add_store_entry(store_relative_path.clone())
+            .context(format_context!(
+                "while adding store entry for {}",
+                store_relative_path
+            ))?;
+
+        workspace
+            .write()
+            .add_store_link(
+                store_relative_path.clone(),
+                self.spaces_key.clone(),
+                utils::store::CloneType::Reference,
+            )
+            .context(format_context!(
+                "while adding store link for {}",
+                store_relative_path
+            ))?;
 
         Ok(())
     }
