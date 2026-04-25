@@ -57,17 +57,12 @@ pub enum StoreCommand {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum CloneType {
+    #[default]
     Reference, // --reference clone (Default/Blobless)
-    Worktree,  // worktree (deprecated)
-    Shallow,   // shallow clone
-}
-
-impl Default for CloneType {
-    fn default() -> Self {
-        CloneType::Reference
-    }
+    Worktree, // worktree (deprecated)
+    Shallow,  // shallow clone
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

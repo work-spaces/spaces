@@ -357,22 +357,18 @@ impl Git {
             );
         }
 
-        // Step 3: Clone from bare repo using --reference for object sharing
-        // This creates a new repo with:
-        // - Original URL as remote (not the local bare repo path)
-        // - Objects borrowed from bare repo (fast, no network needed)
-        // - Fully independent git repository
+        // Step 3: Clone from local bare repo (no network access)
+        // This is much faster than using --reference with remote URL because:
+        // - All objects and refs come from local filesystem
+        // - No network fetch needed during clone
+        // - Remote URL is updated after clone completes
 
         logger(progress.console.clone(), self.url.clone())
-            .debug(format!("Cloning {} from bare repo with reference", self.spaces_key).as_str());
+            .debug(format!("Cloning {} from local bare repo", self.spaces_key).as_str());
 
         let workspace_directory = self.get_clone_working_directory(workspace.clone());
 
-        let mut clone_arguments: Vec<Arc<str>> = vec![
-            "clone".into(),
-            "--reference".into(),
-            bare_repo.full_path.clone(),
-        ];
+        let mut clone_arguments: Vec<Arc<str>> = vec!["clone".into()];
 
         // Add filter if specified (currently unused - Default and Blobless both use full clones)
         if let Some(ref filter_str) = filter {
@@ -384,8 +380,8 @@ impl Git {
             clone_arguments.push("--no-checkout".into());
         }
 
-        // Add the original URL (this becomes the remote)
-        clone_arguments.push(self.url.clone());
+        // Clone from local bare repository (not remote URL)
+        clone_arguments.push(bare_repo.full_path.clone());
 
         // Add the destination
         clone_arguments.push(self.spaces_key.clone());
@@ -400,11 +396,33 @@ impl Git {
             },
         )
         .context(format_context!(
-            "{name} - Failed to clone with reference from {}",
+            "{name} - Failed to clone from local bare repo {}",
             bare_repo.full_path
         ))?;
 
-        // Step 4: Setup sparse checkout if needed
+        // Step 4: Update remote origin to point to actual remote URL
+        logger(progress.console.clone(), self.url.clone()).debug("Setting remote origin URL");
+
+        git::execute_git_command(
+            progress,
+            &self.url,
+            console::ExecuteOptions {
+                working_directory: Some(self.spaces_key.clone()),
+                arguments: vec![
+                    "remote".into(),
+                    "set-url".into(),
+                    "origin".into(),
+                    self.url.clone(),
+                ],
+                ..Default::default()
+            },
+        )
+        .context(format_context!(
+            "{name} - Failed to set remote URL for {}",
+            self.spaces_key
+        ))?;
+
+        // Step 5: Setup sparse checkout if needed
         if let Some(sparse_checkout) = self.sparse_checkout.as_ref() {
             let workspace_repo = git::Repository::new(self.url.clone(), self.spaces_key.clone());
             workspace_repo
@@ -415,7 +433,7 @@ impl Git {
                 ))?;
         }
 
-        // Step 5: Checkout the desired revision
+        // Step 6: Checkout the desired revision
         let workspace_repo = git::Repository::new(self.url.clone(), self.spaces_key.clone());
         workspace_repo
             .checkout(progress, &self.checkout)
@@ -424,7 +442,7 @@ impl Git {
                 self.spaces_key
             ))?;
 
-        // Step 6: If on a branch, reset to origin
+        // Step 7: If on a branch, reset to origin
         if let git::Checkout::Revision(rev) = &self.checkout
             && workspace_repo.is_branch(progress, rev)
         {
