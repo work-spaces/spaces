@@ -53,7 +53,8 @@ pub enum FeatureSource {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Features {
     /// Map of feature names to their enabled state
-    features: enum_map::EnumMap<Feature, bool>,
+    /// None = not set in manifest (use default), Some(bool) = explicitly set in manifest
+    features: enum_map::EnumMap<Feature, Option<bool>>,
 }
 
 impl Features {
@@ -108,18 +109,18 @@ impl Features {
             return env_value.to_uppercase() == "ON";
         }
 
-        // Check manifest
-        self.features[feature]
+        // Check manifest, default to false if not set
+        self.features[feature].unwrap_or(false)
     }
 
     /// Enable a feature in the manifest
     pub fn enable(&mut self, feature: Feature) {
-        self.features[feature] = true;
+        self.features[feature] = Some(true);
     }
 
     /// Disable a feature in the manifest
     pub fn disable(&mut self, feature: Feature) {
-        self.features[feature] = false;
+        self.features[feature] = Some(false);
     }
 
     /// Get the status of a feature and its source
@@ -131,12 +132,9 @@ impl Features {
         }
 
         // Check manifest
-        let enabled = self.features[feature];
-        if enabled {
-            (enabled, FeatureSource::Manifest)
-        } else {
-            // Default
-            (false, FeatureSource::Default)
+        match self.features[feature] {
+            Some(enabled) => (enabled, FeatureSource::Manifest),
+            None => (false, FeatureSource::Default),
         }
     }
 }
@@ -153,7 +151,7 @@ pub enum FeaturesCommand {
         /// Feature to disable
         feature: Feature,
     },
-    /// Show information about the featurs
+    /// Show information about the features
     Info,
 }
 
@@ -240,68 +238,134 @@ mod tests {
         );
     }
 
+    /// Consolidated test for all functionality that manipulates environment variables.
+    /// This ensures tests can run in parallel without interference from env var mutations.
     #[test]
-    fn test_manifest_default() {
-        // Clean up any env vars that might be set by other parallel tests
+    fn test_features_with_env_vars() {
+        // Clean up all env vars at the start
         unsafe {
             env::remove_var("SPACES_ENV_RULE_CACHE");
             env::remove_var("SPACES_ENV_MODULE_CACHE");
             env::remove_var("SPACES_ENV_DEPRECATION_WARNINGS");
         }
 
-        let manifest = Features::new();
-        assert!(!manifest.is_enabled(Feature::ModuleCache));
-        assert!(!manifest.is_enabled(Feature::DeprecationWarnings));
-    }
+        // Test 1: Manifest default behavior
+        {
+            let manifest = Features::new();
+            assert!(!manifest.is_enabled(Feature::ModuleCache));
+            assert!(!manifest.is_enabled(Feature::DeprecationWarnings));
+        }
 
-    #[test]
-    fn test_manifest_enable_disable() {
-        // Clean up any env vars that might be set by other parallel tests
-        unsafe { env::remove_var("SPACES_ENV_MODULE_CACHE") };
+        // Test 2: Manifest enable/disable
+        {
+            let mut manifest = Features::new();
 
-        let mut manifest = Features::new();
+            manifest.enable(Feature::ModuleCache);
+            assert!(manifest.is_enabled(Feature::ModuleCache));
 
-        manifest.enable(Feature::ModuleCache);
-        assert!(manifest.is_enabled(Feature::ModuleCache));
+            manifest.disable(Feature::ModuleCache);
+            assert!(!manifest.is_enabled(Feature::ModuleCache));
+        }
 
-        manifest.disable(Feature::ModuleCache);
-        assert!(!manifest.is_enabled(Feature::ModuleCache));
-    }
+        // Test 3: Environment variable override
+        {
+            let manifest = Features::new();
 
-    #[test]
-    fn test_env_var_override() {
-        // Clean up first to ensure clean state
-        unsafe { env::remove_var("SPACES_ENV_MODULE_CACHE") };
+            // Set environment variable
+            unsafe { env::set_var("SPACES_ENV_MODULE_CACHE", "ON") };
+            assert!(manifest.is_enabled(Feature::ModuleCache));
 
-        let manifest = Features::new();
+            unsafe { env::set_var("SPACES_ENV_MODULE_CACHE", "OFF") };
+            assert!(!manifest.is_enabled(Feature::ModuleCache));
 
-        // Set environment variable
-        unsafe { env::set_var("SPACES_ENV_MODULE_CACHE", "ON") };
-        assert!(manifest.is_enabled(Feature::ModuleCache));
+            // Clean up
+            unsafe { env::remove_var("SPACES_ENV_MODULE_CACHE") };
+        }
 
-        unsafe { env::set_var("SPACES_ENV_MODULE_CACHE", "OFF") };
-        assert!(!manifest.is_enabled(Feature::ModuleCache));
+        // Test 4: Environment variable priority
+        {
+            let mut manifest = Features::new();
+            manifest.enable(Feature::ModuleCache);
 
-        // Clean up
-        unsafe { env::remove_var("SPACES_ENV_MODULE_CACHE") };
-    }
+            // Manifest says enabled
+            assert!(manifest.is_enabled(Feature::ModuleCache));
 
-    #[test]
-    fn test_env_var_priority() {
-        // Clean up first to ensure clean state
-        unsafe { env::remove_var("SPACES_ENV_MODULE_CACHE") };
+            // Environment variable overrides
+            unsafe { env::set_var("SPACES_ENV_MODULE_CACHE", "OFF") };
+            assert!(!manifest.is_enabled(Feature::ModuleCache));
 
-        let mut manifest = Features::new();
-        manifest.enable(Feature::ModuleCache);
+            // Clean up
+            unsafe { env::remove_var("SPACES_ENV_MODULE_CACHE") };
+        }
 
-        // Manifest says enabled
-        assert!(manifest.is_enabled(Feature::ModuleCache));
+        // Test 5: Feature source tracking
+        {
+            let mut features = Features::new();
 
-        // Environment variable overrides
-        unsafe { env::set_var("SPACES_ENV_MODULE_CACHE", "OFF") };
-        assert!(!manifest.is_enabled(Feature::ModuleCache));
+            // Test 5.1: Unset feature should report Default source
+            let (enabled, source) = features.get_status_with_source(Feature::ModuleCache);
+            assert!(!enabled);
+            assert_eq!(source, FeatureSource::Default);
 
-        // Clean up
-        unsafe { env::remove_var("SPACES_ENV_MODULE_CACHE") };
+            // Test 5.2: Explicitly disabled feature should report Manifest source
+            features.disable(Feature::ModuleCache);
+            let (enabled, source) = features.get_status_with_source(Feature::ModuleCache);
+            assert!(!enabled);
+            assert_eq!(source, FeatureSource::Manifest);
+
+            // Test 5.3: Explicitly enabled feature should report Manifest source
+            features.enable(Feature::ModuleCache);
+            let (enabled, source) = features.get_status_with_source(Feature::ModuleCache);
+            assert!(enabled);
+            assert_eq!(source, FeatureSource::Manifest);
+
+            // Test 5.4: Environment variable should report Environment source
+            unsafe { env::set_var("SPACES_ENV_MODULE_CACHE", "ON") };
+            let (enabled, source) = features.get_status_with_source(Feature::ModuleCache);
+            assert!(enabled);
+            assert_eq!(source, FeatureSource::Environment);
+
+            // Clean up
+            unsafe { env::remove_var("SPACES_ENV_MODULE_CACHE") };
+        }
+
+        // Test 6: JSON serialization with explicit disable
+        {
+            let temp_dir = std::env::temp_dir().join("spaces_test_features");
+            let _ = std::fs::remove_dir_all(&temp_dir);
+            std::fs::create_dir_all(&temp_dir).unwrap();
+
+            // Create features with one enabled and one explicitly disabled
+            let mut features = Features::new();
+            features.enable(Feature::ModuleCache);
+            features.disable(Feature::DeprecationWarnings);
+
+            // Save to disk
+            features.save(&temp_dir).unwrap();
+
+            // Load from disk
+            let loaded_features = Features::new_from_json(&temp_dir).unwrap();
+
+            // Verify enabled feature reports Manifest source
+            let (enabled, source) = loaded_features.get_status_with_source(Feature::ModuleCache);
+            assert!(enabled);
+            assert_eq!(source, FeatureSource::Manifest);
+
+            // Verify explicitly disabled feature reports Manifest source (not Default)
+            let (enabled, source) =
+                loaded_features.get_status_with_source(Feature::DeprecationWarnings);
+            assert!(!enabled);
+            assert_eq!(source, FeatureSource::Manifest);
+
+            // Clean up
+            let _ = std::fs::remove_dir_all(&temp_dir);
+        }
+
+        // Final cleanup of all env vars
+        unsafe {
+            env::remove_var("SPACES_ENV_RULE_CACHE");
+            env::remove_var("SPACES_ENV_MODULE_CACHE");
+            env::remove_var("SPACES_ENV_DEPRECATION_WARNINGS");
+        }
     }
 }
