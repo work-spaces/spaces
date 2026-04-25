@@ -8,7 +8,7 @@ use starlark::eval::{Evaluator, ReturnFileLoader};
 use starlark::syntax::{AstModule, Dialect};
 use std::collections::HashSet;
 use std::sync::Arc;
-use utils::{inspect, labels, logger, mtarget, query, rcache, rule, targets, ws};
+use utils::{features, inspect, labels, logger, mtarget, query, rcache, rule, targets, ws};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WithRules {
@@ -401,12 +401,22 @@ fn try_evaluate_with_cache(
     let module_deps_option = mtarget::ModuleDeps::new_from_json(name.as_ref())
         .context(format_context!("Failed to load module deps for {:?}", name))?;
 
-    let is_always_evaluate = workspace.read().settings.bin.is_always_evaluate;
+    let (is_always_evaluate, is_module_caching_feature_enabled) = {
+        let read_workspace = workspace.read();
+
+        (
+            read_workspace.settings.bin.is_always_evaluate,
+            read_workspace
+                .features
+                .is_enabled(features::Feature::ModuleCache),
+        )
+    };
 
     let caching_not_allowed = module_deps_option.is_none()
         || is_always_evaluate
         || singleton::get_is_rescan()
-        || phase == task::Phase::Checkout;
+        || phase == task::Phase::Checkout
+        || !is_module_caching_feature_enabled;
 
     if caching_not_allowed {
         let _ = evaluate_module(

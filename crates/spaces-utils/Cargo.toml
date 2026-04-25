@@ -26,6 +26,7 @@ chrono = "0.4"
 homedir = "0.3"
 arboard = "3"
 serde_with = "3"
+enum-map = { version = "2", features = ["serde"] }
 
 indexmap.workspace = true
 

@@ -4,7 +4,9 @@ use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use utils::{age, environment, inputs, lock, logger, mtarget, platform, rcache, rule, store, ws};
+use utils::{
+    age, environment, features, inputs, lock, logger, mtarget, platform, rcache, rule, store, ws,
+};
 
 pub use rcache::CacheStatus;
 
@@ -283,6 +285,7 @@ pub struct Workspace {
     pub is_any_digest_updated: bool,
     pub minimum_version: semver::Version,
     pub store: store::Store,
+    pub features: features::Features,
 }
 
 impl Workspace {
@@ -831,6 +834,15 @@ impl Workspace {
 
         let store = store::Store::new(std::path::Path::new(settings.json.store_path.as_ref()));
 
+        let features = features::Features::new_from_json(std::path::Path::new(
+            settings.json.store_path.as_ref(),
+        ))
+        .context(format_context!("Failed to load features manifest"))?;
+
+        if features.is_enabled(features::Feature::DeprecationWarnings) {
+            logger::enable_deprecation_warnings();
+        }
+
         Ok(Self {
             modules,
             absolute_path,
@@ -852,6 +864,7 @@ impl Workspace {
             settings,
             is_any_digest_updated: false,
             store,
+            features,
         })
     }
 

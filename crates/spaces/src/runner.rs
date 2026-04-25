@@ -2,7 +2,9 @@ use crate::{completions, evaluator, executor, rules, task, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use std::sync::Arc;
-use utils::{ci, git, labels, lock, logger, logs, mtarget, rcache, shell, store, version, ws};
+use utils::{
+    ci, features, git, labels, lock, logger, logs, mtarget, rcache, shell, store, version, ws,
+};
 
 use crate::{lsp_context, singleton};
 use itertools::Itertools;
@@ -430,6 +432,31 @@ pub fn run_store_command_in_workspace(
                 .context(format_context!("While pruning rcache"))?;
         }
     }
+
+    Ok(())
+}
+
+pub fn run_features_command_in_workspace(
+    console: console::Console,
+    features_command: features::FeaturesCommand,
+) -> anyhow::Result<()> {
+    let workspace_result = get_workspace(
+        console.clone(),
+        RunWorkspace::Target(None, vec![]),
+        None,
+        workspace::IsClearInputs::No,
+        workspace::IsCheckoutPhase::No,
+        workspace::IsCreateLogFolder::No,
+    );
+    let store_path_str = match workspace_result {
+        Ok(workspace) => workspace.get_store_path(),
+        Err(_) => ws::get_checkout_store_path(),
+    };
+    let store_path = std::path::Path::new(store_path_str.as_ref());
+
+    features_command
+        .execute(&console, store_path)
+        .context(format_context!("Failed to execute features command"))?;
 
     Ok(())
 }
