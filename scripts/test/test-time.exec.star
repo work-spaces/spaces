@@ -67,6 +67,11 @@ time_results["monotonic_time"]["monotonic_non_negative"] = mono_start >= 0
 time_sleep(0.05)  # 50ms
 time_results["sleep_operations"]["sleep_completes"] = True
 
+pre_sleep = time_monotonic()
+time_sleep(0.1)  # 100 ms
+post_sleep = time_monotonic()
+time_results["sleep_operations"]["sleep_duration_at_least_80ms"] = (post_sleep - pre_sleep) >= 80
+
 time_sleep_milliseconds(50)
 time_results["sleep_operations"]["sleep_milliseconds_completes"] = True
 
@@ -98,13 +103,20 @@ time_results["datetime_parsing"]["parse_datetime_positive"] = parsed > 0
 formatted_roundtrip = time_format_datetime(parsed, "%Y-%m-%d")
 time_results["datetime_parsing"]["parse_format_roundtrip"] = "2024-01-15" in formatted_roundtrip
 
+# Round-trip with time component
+parsed_dt = time_parse_datetime("2024-06-01 12:34:56", "%Y-%m-%d %H:%M:%S")
+formatted_dt = time_format_datetime(parsed_dt, "%Y-%m-%d %H:%M:%S")
+time_results["datetime_parsing"]["parse_format_roundtrip_with_time"] = "2024-06-01 12:34:56" in formatted_dt
+
 # Test ISO8601
 iso_time = time_now_iso8601()
 time_results["iso8601"]["iso8601_is_string"] = type(iso_time) == "string"
 time_results["iso8601"]["iso8601_contains_t"] = "T" in iso_time
 
 # Accept Z, +, or - as valid ISO8601 timezone indicators
-time_results["iso8601"]["iso8601_has_timezone"] = "Z" in iso_time or "+" in iso_time or "-" in iso_time
+time_results["iso8601"]["iso8601_has_timezone"] = "Z" in iso_time or "+" in iso_time
+
+time_results["iso8601"]["iso8601_length_reasonable"] = len(iso_time) >= 19
 
 # Test timer operations
 timer = time_timer_start()
@@ -127,7 +139,7 @@ first_elapsed = time_timer_elapsed_ms(timer)
 time_sleep_milliseconds(50)
 time_timer_reset(timer)
 reset_elapsed = time_timer_elapsed_ms(timer)
-time_results["timer_management"]["timer_reset_works"] = reset_elapsed < first_elapsed / 2
+time_results["timer_management"]["timer_reset_works"] = reset_elapsed < 30
 
 # Clean up timer
 time_timer_stop(timer)
