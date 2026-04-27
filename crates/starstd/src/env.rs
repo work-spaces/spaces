@@ -4,6 +4,7 @@ use anyhow_source_location::format_context;
 use starlark::environment::GlobalsBuilder;
 use starlark::eval::Evaluator;
 use starlark::values::Value;
+use starlark::values::none::NoneOr;
 use starlark::values::none::NoneType;
 
 use std::ffi::OsString;
@@ -14,17 +15,23 @@ use std::path::{Path, PathBuf};
 pub fn globals(builder: &mut GlobalsBuilder) {
     /// Gets an environment variable by name.
     ///
+    /// Returns `None` when the variable is absent and no `default` was supplied,
+    /// allowing callers to distinguish "not set" from "set to empty string".
+    /// When a `default` is provided it is returned in place of `None` for missing
+    /// variables. Use `env.has()` as a lighter-weight existence check when the
+    /// value itself is not needed.
+    ///
     /// ```python
-    /// env.get("PATH")                    # -> str | None
-    /// env.get("PATH", default="/usr/bin")
+    /// env.get("PATH")                     # -> str | None
+    /// env.get("PATH", default="/usr/bin") # -> str (never None when default given)
     /// ```
-    fn get(name: &str, default: Option<String>) -> anyhow::Result<String> {
+    fn get(name: &str, default: Option<String>) -> anyhow::Result<NoneOr<String>> {
         if is_lsp_mode() {
-            return Ok(default.unwrap_or_default());
+            return Ok(NoneOr::from_option(default));
         }
         match std::env::var(name) {
-            Ok(value) => Ok(value),
-            Err(std::env::VarError::NotPresent) => Ok(default.unwrap_or_default()),
+            Ok(value) => Ok(NoneOr::Other(value)),
+            Err(std::env::VarError::NotPresent) => Ok(NoneOr::from_option(default)),
             Err(std::env::VarError::NotUnicode(_)) => Err(anyhow::anyhow!(
                 "Environment variable `{name}` is not valid UTF-8"
             ))
@@ -41,9 +48,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         if is_lsp_mode() {
             return Ok(NoneType);
         }
-        // SAFETY:
-        // This crate exposes process-scoped mutability for environment variables by design.
-        // Callers are responsible for not racing env mutation across threads.
+        // SAFETY: std::env::set_var is unsafe in Rust edition 2024 because
+        // concurrent environment reads from other threads (e.g. via getenv in
+        // C libraries) are not thread-safe on POSIX. This is safe here because
+        // the Starlark evaluator runs script execution on a single thread; no
+        // other thread reads or mutates the environment concurrently during
+        // script evaluation.
         unsafe {
             std::env::set_var(name, value);
         }
@@ -59,9 +69,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         if is_lsp_mode() {
             return Ok(NoneType);
         }
-        // SAFETY:
-        // This crate exposes process-scoped mutability for environment variables by design.
-        // Callers are responsible for not racing env mutation across threads.
+        // SAFETY: std::env::remove_var is unsafe in Rust edition 2024 because
+        // concurrent environment reads from other threads (e.g. via getenv in
+        // C libraries) are not thread-safe on POSIX. This is safe here because
+        // the Starlark evaluator runs script execution on a single thread; no
+        // other thread reads or mutates the environment concurrently during
+        // script evaluation.
         unsafe {
             std::env::remove_var(name);
         }
@@ -82,6 +95,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
     /// Returns all environment variables as a dictionary.
     ///
+    /// Non-UTF-8 keys or values are included with invalid bytes replaced by
+    /// the Unicode replacement character (U+FFFD) via lossy conversion.
+    /// This is consistent with the behaviour of `cwd()` and `path_list()`.
+    ///
     /// ```python
     /// vars = env.all()   # -> dict[str, str]
     /// ```
@@ -92,13 +109,18 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         }
         let heap = eval.heap();
         let mut map = serde_json::Map::new();
-        for (k, v) in std::env::vars() {
-            map.insert(k, serde_json::Value::String(v));
+        for (k, v) in std::env::vars_os() {
+            let key = k.to_string_lossy().into_owned();
+            let value = v.to_string_lossy().into_owned();
+            map.insert(key, serde_json::Value::String(value));
         }
         Ok(heap.alloc(serde_json::Value::Object(map)))
     }
 
-    /// Returns current working directory.
+    /// Returns the current working directory.
+    ///
+    /// Non-UTF-8 path components are replaced by the Unicode replacement
+    /// character (U+FFFD) via lossy conversion.
     ///
     /// ```python
     /// env.cwd()
@@ -112,7 +134,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(path_to_string_lossy(&dir))
     }
 
-    /// Changes current working directory.
+    /// Changes the current working directory.
     ///
     /// ```python
     /// env.chdir("subdir")
@@ -127,7 +149,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(NoneType)
     }
 
-    /// Splits PATH into a list of entries.
+    /// Splits PATH into a list of directory entries.
+    ///
+    /// Handles the platform-specific separator (`:` on Unix/macOS, `;` on Windows).
+    /// Non-UTF-8 path components are replaced by the Unicode replacement character
+    /// (U+FFFD) via lossy conversion.
     ///
     /// ```python
     /// env.path_list()
@@ -142,10 +168,48 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .collect())
     }
 
-    /// Finds the first executable in PATH by command name.
+    /// Joins a list of directory paths into a PATH-style string.
+    ///
+    /// Uses the platform separator (`:` on Unix/macOS, `;` on Windows).
+    /// This is the inverse of `path_list()`: use it to rebuild `PATH` after
+    /// modifying the list, avoiding hard-coded platform separators.
+    ///
+    /// Returns an error if any entry contains the platform separator character.
     ///
     /// ```python
-    /// env.which("git")  # -> str | None
+    /// env.path_join_entries(["/usr/bin", "/usr/local/bin"])
+    /// # -> "/usr/bin:/usr/local/bin"  (Unix/macOS)
+    /// ```
+    fn path_join_entries(
+        entries: starlark::values::list::UnpackList<String>,
+    ) -> anyhow::Result<String> {
+        if is_lsp_mode() {
+            return Ok(String::new());
+        }
+        std::env::join_paths(
+            entries
+                .items
+                .iter()
+                .map(|s| std::path::Path::new(s.as_str())),
+        )
+        .map(|s| s.to_string_lossy().into_owned())
+        .context(format_context!(
+            "Failed to join PATH entries \
+                 (an entry may contain the platform path-list separator)"
+        ))
+    }
+
+    /// Finds the first executable matching the given name in PATH.
+    ///
+    /// Returns an empty string when the command is not found.
+    /// On Windows, also checks `PATHEXT` for recognised executable extensions
+    /// (`.COM`, `.EXE`, `.BAT`, `.CMD`).
+    ///
+    /// If `name` contains path separators it is treated as a direct path probe
+    /// rather than a PATH search.
+    ///
+    /// ```python
+    /// env.which("git")  # -> str (empty string if not found)
     /// ```
     fn which(name: &str) -> anyhow::Result<String> {
         if is_lsp_mode() {
@@ -156,7 +220,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .unwrap_or_default())
     }
 
-    /// Finds all executable matches in PATH by command name.
+    /// Finds all executables matching the given name in PATH.
     ///
     /// ```python
     /// env.which_all("python")  # -> list[str]
@@ -169,11 +233,6 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .into_iter()
             .map(|p| path_to_string_lossy(&p))
             .collect())
-    }
-
-    /// Convenience no-op to mirror other modules that expose at least one side-effect-free utility.
-    fn _env_module_loaded() -> anyhow::Result<NoneType> {
-        Ok(NoneType)
     }
 }
 
@@ -274,7 +333,7 @@ fn parse_windows_pathext() -> Vec<String> {
 fn windows_candidates(dir: &Path, name: &str, pathext: &[String]) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let lower_name = name.to_ascii_lowercase();
-    let has_known_ext = pathext.iter().any(|ext| lower_name.ends_with(ext));
+    let has_known_ext = pathext.iter().any(|ext| lower_name.ends_with(ext.as_str()));
 
     if has_known_ext {
         out.push(dir.join(name));
