@@ -39,6 +39,8 @@ string_results = {
     "case_conversion": {},
     "padding": {},
     "table_formatting": {},
+    "unicode": {},
+    "edge_cases": {},
 }
 
 # ============================================================================
@@ -131,6 +133,114 @@ string_results["table_formatting"]["table_generated"] = table_output != None and
 string_results["table_formatting"]["table_contains_separator"] = "+" in table_output
 string_results["table_formatting"]["table_contains_pipe"] = "|" in table_output
 string_results["table_formatting"]["table_contains_name"] = "name" in table_output and "Alice" in table_output
+
+# ============================================================================
+# Edge-case tests
+# ============================================================================
+
+# split_lines: trailing newline must NOT produce a trailing empty string
+trailing_nl = string_split_lines("a\nb\n")
+string_results["edge_cases"]["split_lines_trailing_newline_count"] = len(trailing_nl) == 2
+string_results["edge_cases"]["split_lines_trailing_newline_content"] = trailing_nl[0] == "a" and trailing_nl[1] == "b"
+
+# split_lines: empty string must return empty list
+string_results["edge_cases"]["split_lines_empty"] = len(string_split_lines("")) == 0
+
+# split_lines: single newline returns one empty line
+single_nl = string_split_lines("\n")
+string_results["edge_cases"]["split_lines_single_newline_count"] = len(single_nl) == 1
+string_results["edge_cases"]["split_lines_single_newline_content"] = single_nl[0] == ""
+
+# split_lines: no newline returns one-element list
+string_results["edge_cases"]["split_lines_no_newline"] = string_split_lines("hello") == ["hello"]
+
+# replace: count=0 is a no-op
+string_results["edge_cases"]["replace_count_zero"] = string_replace("aaa", "a", "b", count = 0) == "aaa"
+
+# replace: empty haystack
+string_results["edge_cases"]["replace_empty_haystack"] = string_replace("", "a", "b") == ""
+
+# pad: width smaller than string length is a no-op
+string_results["edge_cases"]["pad_left_noop"] = string_pad_left("hello", 2) == "hello"
+string_results["edge_cases"]["pad_right_noop"] = string_pad_right("hello", 2) == "hello"
+
+# pad: zero width is a no-op
+string_results["edge_cases"]["pad_left_zero_width"] = string_pad_left("x", 0) == "x"
+string_results["edge_cases"]["pad_right_zero_width"] = string_pad_right("x", 0) == "x"
+
+# regex_match: no match returns None
+string_results["edge_cases"]["regex_match_no_match"] = string_regex_match(r"\d+", "no digits here") == None
+
+# regex_find_all: no matches returns empty list
+string_results["edge_cases"]["regex_find_all_empty"] = len(string_regex_find_all(r"\d+", "no digits")) == 0
+
+# regex_captures: no match returns None
+string_results["edge_cases"]["regex_captures_no_match"] = string_regex_captures(r"(?P<d>\d+)", "no digits") == None
+
+# ============================================================================
+# Unicode tests
+# ============================================================================
+
+# Trim with accented characters
+string_results["unicode"]["trim_accented"] = string_trim("  héllo  ") == "héllo"
+string_results["unicode"]["trim_start_accented"] = string_trim_start("  café") == "café"
+string_results["unicode"]["trim_end_accented"] = string_trim_end("thé  ") == "thé"
+
+# Case conversion with accented letters
+string_results["unicode"]["upper_accented"] = string_upper("héllo") == "HÉLLO"
+string_results["unicode"]["lower_accented"] = string_lower("HÉLLO") == "héllo"
+string_results["unicode"]["title_case_accented"] = string_title_case("héllo wörld") == "Héllo Wörld"
+string_results["unicode"]["snake_case_accented"] = string_snake_case("héllo wörld") == "héllo_wörld"
+string_results["unicode"]["kebab_case_accented"] = string_kebab_case("héllo wörld") == "héllo-wörld"
+string_results["unicode"]["camel_case_accented"] = string_camel_case("héllo wörld") == "hélloWörld"
+
+# split_whitespace with accented words
+unicode_words = string_split_whitespace("café thé")
+string_results["unicode"]["split_whitespace_accented"] = len(unicode_words) == 2 and unicode_words[0] == "café" and unicode_words[1] == "thé"
+
+# split_lines with non-ASCII content
+unicode_lines = string_split_lines("café\nthé\nbière")
+string_results["unicode"]["split_lines_accented_count"] = len(unicode_lines) == 3
+string_results["unicode"]["split_lines_accented_content"] = unicode_lines[0] == "café" and unicode_lines[1] == "thé"
+
+# contains with accented characters
+string_results["unicode"]["contains_accented"] = string_contains("héllo wörld", "wörld")
+string_results["unicode"]["contains_accented_ci"] = string_contains("HÉLLO", "héllo", ignore_case = True)
+
+# starts_with / ends_with with multi-byte chars
+string_results["unicode"]["starts_with_unicode"] = string_starts_with("héllo", "hé")
+string_results["unicode"]["ends_with_unicode"] = string_ends_with("café", "fé")
+
+# replace with accented characters (literal replacement)
+string_results["unicode"]["replace_accented"] = string_replace("café café", "café", "tea") == "tea tea"
+string_results["unicode"]["replace_ci_accented"] = string_replace("Café CAFÉ café", "café", "tea", ignore_case = True) == "tea tea tea"
+
+# Padding uses char count, not byte count (é is 2 bytes, 1 char)
+padded_left = string_pad_left("é", 4)
+string_results["unicode"]["pad_left_multibyte"] = len(padded_left) == 4 and padded_left == "   é"
+padded_right = string_pad_right("é", 4)
+string_results["unicode"]["pad_right_multibyte"] = len(padded_right) == 4 and padded_right == "é   "
+
+# regex match: start/end must be char offsets, not byte offsets
+# "café 42": é is 2 bytes so byte offset of "42" is 6, but char offset is 5
+unicode_match = string_regex_match(r"\d+", "café 42")
+string_results["unicode"]["regex_match_unicode_found"] = unicode_match != None
+if unicode_match:
+    string_results["unicode"]["regex_match_unicode_value"] = unicode_match["match"] == "42"
+
+    # char offset: c(0) a(1) f(2) é(3) space(4) → "42" starts at char 5
+    string_results["unicode"]["regex_match_char_start"] = unicode_match["start"] == 5
+    string_results["unicode"]["regex_match_char_end"] = unicode_match["end"] == 7
+
+# regex find_all: char offsets for all matches in a non-ASCII string
+unicode_all = string_regex_find_all(r"\d+", "à1b2")
+string_results["unicode"]["regex_find_all_unicode_count"] = len(unicode_all) == 2
+if len(unicode_all) == 2:
+    # 'à' is 1 char (2 bytes); "1" starts at char offset 1
+    string_results["unicode"]["regex_find_all_first_char_start"] = unicode_all[0]["start"] == 1
+
+    # "2" starts at char offset 3
+    string_results["unicode"]["regex_find_all_second_char_start"] = unicode_all[1]["start"] == 3
 
 # ============================================================================
 # Output Results

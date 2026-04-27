@@ -47,7 +47,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             }
         }
 
-        if start <= s.len() {
+        if start < s.len() {
             out.push(s[start..].to_string());
         }
 
@@ -301,32 +301,20 @@ fn replace_case_insensitive(s: &str, from: &str, to: &str, n: i32) -> anyhow::Re
     if from.is_empty() {
         return Ok(s.to_string());
     }
-
-    let hay_lower = s.to_lowercase();
-    let needle_lower = from.to_lowercase();
-
-    let mut out = String::with_capacity(s.len());
-    let mut start = 0usize;
-    let mut replaced = 0usize;
-    let limit = if n < 0 { usize::MAX } else { n as usize };
-
-    while replaced < limit {
-        let slice_lower = &hay_lower[start..];
-        let Some(pos) = slice_lower.find(&needle_lower) else {
-            break;
-        };
-        let abs = start + pos;
-        out.push_str(&s[start..abs]);
-        out.push_str(to);
-        start = abs + from.len();
-        replaced += 1;
-        if start > s.len() {
-            break;
-        }
+    // Escape `from` so it is treated as a literal string, then prepend (?i)
+    // for Unicode-aware case-insensitive matching via the regex engine.
+    // This avoids the byte-offset mismatch that arises when to_lowercase()
+    // changes the byte length of non-ASCII characters (e.g. Turkish İ → i + ◌̇).
+    let escaped = regex::escape(from);
+    let pattern = format!("(?i){escaped}");
+    let re = Regex::new(&pattern).context(format_context!(
+        "invalid pattern for case-insensitive replace"
+    ))?;
+    if n < 0 {
+        Ok(re.replace_all(s, to).to_string())
+    } else {
+        Ok(re.replacen(s, n as usize, to).to_string())
     }
-
-    out.push_str(&s[start..]);
-    Ok(out)
 }
 
 fn split_words(s: &str) -> Vec<String> {
@@ -418,8 +406,12 @@ fn build_match_map<'v>(
 
     if let Some(m) = caps.get(0) {
         out.insert("match".to_string(), heap.alloc(m.as_str().to_string()));
-        out.insert("start".to_string(), heap.alloc(m.start() as i32));
-        out.insert("end".to_string(), heap.alloc(m.end() as i32));
+        // Convert byte offsets (from the regex crate) to Unicode scalar (char) offsets
+        // so callers can use start/end directly as character-level indices.
+        let char_start = source[..m.start()].chars().count();
+        let char_end = source[..m.end()].chars().count();
+        out.insert("start".to_string(), heap.alloc(char_start as i32));
+        out.insert("end".to_string(), heap.alloc(char_end as i32));
     }
 
     let groups = (1..caps.len())
