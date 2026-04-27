@@ -28,6 +28,26 @@ pub struct ParserSpec {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ParserOptions {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub options: Option<Vec<OptionSpec>>,
+    pub positional: Option<Vec<PositionalSpec>>,
+}
+
+impl From<ParserOptions> for ParserSpec {
+    fn from(opts: ParserOptions) -> Self {
+        ParserSpec {
+            name: opts.name,
+            description: opts.description,
+            options: opts.options,
+            positional: opts.positional,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct OptionSpec {
     pub kind: String, // "flag" | "opt" | "list"
     pub long: String,
@@ -137,15 +157,32 @@ fn json_int(n: i64) -> serde_json::Value {
 fn default_for_opt(
     value_type: ValueType,
     user_default: Option<&serde_json::Value>,
-) -> serde_json::Value {
+    display: &str,
+) -> Result<serde_json::Value, String> {
     if let Some(v) = user_default {
-        return v.clone();
+        let type_ok = match (value_type, v) {
+            (ValueType::Int, serde_json::Value::Number(_))
+            | (ValueType::Bool, serde_json::Value::Bool(_))
+            | (ValueType::Str, serde_json::Value::String(_)) => true,
+            _ => false,
+        };
+        if !type_ok {
+            return Err(format!(
+                "Default value for `{display}` does not match its declared type `{}`",
+                match value_type {
+                    ValueType::Int => "int",
+                    ValueType::Bool => "bool",
+                    ValueType::Str => "str",
+                }
+            ));
+        }
+        return Ok(v.clone());
     }
-    match value_type {
+    Ok(match value_type {
         ValueType::Int => json_int(0),
         ValueType::Bool => serde_json::Value::Bool(false),
         ValueType::Str => serde_json::Value::String(String::new()),
-    }
+    })
 }
 
 fn convert_typed(
@@ -211,7 +248,10 @@ fn build_command(spec: &ParserSpec) -> anyhow::Result<(Command, Vec<ArgMeta>)> {
         }
 
         let short_char = if let Some(ref short) = opt.short {
-            let c = short.chars().nth(1).expect("validated short has 1 char");
+            let c = short
+                .chars()
+                .nth(1)
+                .ok_or_else(|| anyhow::anyhow!("Short option must be like `-x`, got `{short}`"))?;
             if !seen_shorts.insert(c) {
                 anyhow::bail!("Duplicate short option `-{c}`");
             }
@@ -246,7 +286,8 @@ fn build_command(spec: &ParserSpec) -> anyhow::Result<(Command, Vec<ArgMeta>)> {
                 {
                     arg = arg.value_parser(PossibleValuesParser::new(choices));
                 }
-                let default = default_for_opt(value_type, opt.default.as_ref());
+                let default = default_for_opt(value_type, opt.default.as_ref(), &opt.long)
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
                 ArgKind::Opt {
                     value_type,
                     default,
@@ -446,35 +487,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// spec = args.parser(name="deploy", options=[...], positional=[...])
     /// ```
     fn parser<'v>(
-        name: Option<String>,
-        description: Option<String>,
-        options: Option<Value>,
-        positional: Option<Value>,
+        options: starlark::values::Value,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<Value<'v>> {
-        let options_vec = if let Some(opts) = options {
-            opts.to_json_value()?
-        } else {
-            serde_json::Value::Array(Vec::new())
-        };
-
-        let positional_vec = if let Some(pos) = positional {
-            pos.to_json_value()?
-        } else {
-            serde_json::Value::Array(Vec::new())
-        };
-
-        let options_parsed: Option<Vec<OptionSpec>> = serde_json::from_value(options_vec).ok();
-        let positional_parsed: Option<Vec<PositionalSpec>> =
-            serde_json::from_value(positional_vec).ok();
-
-        let spec = ParserSpec {
-            name,
-            description,
-            options: options_parsed,
-            positional: positional_parsed,
-        };
-
+        let opts: ParserOptions = serde_json::from_value(options.to_json_value()?)
+            .context(format_context!("Invalid parser options"))?;
+        let spec: ParserSpec = opts.into();
         let json_value = serde_json::to_value(&spec)
             .context(format_context!("Failed to serialize parser spec"))?;
         Ok(eval.heap().alloc(json_value))
@@ -666,5 +684,105 @@ mod tests {
         }));
         let v = parsed(parse(spec, &["--", "--not-a-flag", "x"]));
         assert_eq!(v["rest"], serde_json::json!(["--not-a-flag", "x"]));
+    }
+
+    #[test]
+    fn short_opt_bare_dash_errors() {
+        // A short option of just "-" (no letter) must not panic; it should error.
+        let spec = make_spec(serde_json::json!({
+            "name": "p",
+            "options": [{"kind": "flag", "long": "--foo", "short": "-"}],
+        }));
+        let out = parse(spec, &[]);
+        assert!(matches!(out, ParseOutcome::Error(_)));
+    }
+
+    #[test]
+    fn duplicate_normalized_key_errors() {
+        // --dry-run and --dry_run both normalize to `dry_run`
+        let spec = make_spec(serde_json::json!({
+            "name": "p",
+            "options": [
+                {"kind": "flag", "long": "--dry-run"},
+                {"kind": "flag", "long": "--dry_run"},
+            ],
+        }));
+        let out = parse(spec, &[]);
+        assert!(matches!(out, ParseOutcome::Error(_)));
+    }
+
+    #[test]
+    fn bool_type_values() {
+        let spec = make_spec(serde_json::json!({
+            "name": "p",
+            "options": [{"kind": "opt", "long": "--flag", "type": "bool", "default": false}],
+        }));
+        for truthy in ["true", "1", "yes", "on"] {
+            let v = parsed(parse(spec.clone(), &["--flag", truthy]));
+            assert_eq!(
+                v["flag"],
+                serde_json::Value::Bool(true),
+                "expected true for `{truthy}`"
+            );
+        }
+        for falsy in ["false", "0", "no", "off"] {
+            let v = parsed(parse(spec.clone(), &["--flag", falsy]));
+            assert_eq!(
+                v["flag"],
+                serde_json::Value::Bool(false),
+                "expected false for `{falsy}`"
+            );
+        }
+        let bad = parse(spec, &["--flag", "maybe"]);
+        assert!(matches!(bad, ParseOutcome::Error(_)));
+    }
+
+    #[test]
+    fn optional_positional_returns_null() {
+        let spec = make_spec(serde_json::json!({
+            "name": "p",
+            "positional": [{"name": "output"}],
+        }));
+        let v = parsed(parse(spec.clone(), &[]));
+        assert_eq!(v["output"], serde_json::Value::Null);
+
+        let v = parsed(parse(spec, &["file.txt"]));
+        assert_eq!(v["output"], serde_json::Value::String("file.txt".into()));
+    }
+
+    #[test]
+    fn invalid_option_kind_errors() {
+        let spec = make_spec(serde_json::json!({
+            "name": "p",
+            "options": [{"kind": "foobar", "long": "--foo"}],
+        }));
+        let out = parse(spec, &[]);
+        assert!(matches!(out, ParseOutcome::Error(_)));
+    }
+
+    #[test]
+    fn choices_on_list_with_non_str_type_errors() {
+        let spec = make_spec(serde_json::json!({
+            "name": "p",
+            "options": [{
+                "kind": "list",
+                "long": "--level",
+                "type": "int",
+                "choices": ["1", "2"],
+            }],
+        }));
+        let out = parse(spec, &[]);
+        assert!(matches!(out, ParseOutcome::Error(_)));
+    }
+
+    #[test]
+    fn mismatched_default_type_errors() {
+        // type="int" but default is a string — should produce an error, not silently use wrong type.
+        let spec = make_spec(serde_json::json!({
+            "name": "p",
+            "options": [{"kind": "opt", "long": "--count", "type": "int", "default": "oops"}],
+        }));
+        let out = parse(spec, &[]);
+        assert!(matches!(out, ParseOutcome::Error(_)));
     }
 }

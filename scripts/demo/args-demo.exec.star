@@ -133,7 +133,7 @@ print("")
 
 print("Positional Arguments:")
 
-#print("  Service: {}".format(parsed["service"]))
+print("  Service: {}".format(parsed.get("service")))
 print("  Targets: {}".format(parsed.get("targets")))
 print("")
 
