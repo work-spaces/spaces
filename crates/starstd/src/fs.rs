@@ -48,9 +48,6 @@ fn system_time_to_epoch_seconds(t: std::time::SystemTime) -> anyhow::Result<f64>
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
     /// Writes a string to a file at the specified path relative to the workspace root.
-    ///
-    /// If the file already exists, its contents will be truncated (overwritten).
-    /// If the file does not exist, it will be created.
     fn write_string_to_file(
         #[starlark(require = named)] path: &str,
         #[starlark(require = named)] content: &str,
@@ -136,7 +133,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(std::path::Path::new(path).is_symlink())
     }
 
-    /// Returns true if the given path is a text file.
+    /// Returns true if the given path is a text file (valid UTF-8 with no NUL bytes).
     fn is_text_file(path: &str) -> anyhow::Result<bool> {
         if is_lsp_mode() {
             return Ok(false);
@@ -146,13 +143,16 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             return Ok(false);
         }
 
-        let contents = std::fs::read_to_string(file_path).context(format_context!(
-            "Failed to read file {} all paths must be relative to the workspace root",
+        let bytes = std::fs::read(file_path).context(format_context!(
+            "Failed to read file {} for text detection",
             path
         ))?;
 
-        let is_text = contents.is_char_boundary(contents.len());
-        Ok(is_text)
+        // A file is considered text if it is valid UTF-8 and contains no NUL bytes.
+        if bytes.contains(&0u8) {
+            return Ok(false);
+        }
+        Ok(std::str::from_utf8(&bytes).is_ok())
     }
 
     /// Reads a TOML file and returns its contents as a dictionary.
@@ -235,11 +235,17 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         ))?;
 
         let mut result = Vec::new();
-        for entry in entries.flatten() {
+        for entry in entries {
+            let entry = entry.context(format_context!(
+                "Failed to read directory entry in {}",
+                path
+            ))?;
             let p = entry.path();
-            let s = p
-                .to_str()
-                .context(format_context!("Failed to convert path to string"))?;
+            let s = p.to_str().context(format_context!(
+                "Non-UTF-8 directory entry in {}: {}",
+                path,
+                p.display()
+            ))?;
             result.push(s.to_string());
         }
 
@@ -333,6 +339,46 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                         dst.display()
                     ))?;
                 }
+            }
+
+            // When not following symlinks and source is a symlink, recreate it.
+            if !follow_symlinks && md.file_type().is_symlink() {
+                let link_target = std::fs::read_link(src).context(format_context!(
+                    "Failed to read symlink target of {}",
+                    src.display()
+                ))?;
+                #[cfg(unix)]
+                {
+                    std::os::unix::fs::symlink(&link_target, dst).context(format_context!(
+                        "Failed to create symlink {} -> {}",
+                        dst.display(),
+                        link_target.display()
+                    ))?;
+                    return Ok(());
+                }
+                #[cfg(windows)]
+                {
+                    if link_target.is_dir() {
+                        std::os::windows::fs::symlink_dir(&link_target, dst).context(
+                            format_context!(
+                                "Failed to create dir symlink {} -> {}",
+                                dst.display(),
+                                link_target.display()
+                            ),
+                        )?;
+                    } else {
+                        std::os::windows::fs::symlink_file(&link_target, dst).context(
+                            format_context!(
+                                "Failed to create file symlink {} -> {}",
+                                dst.display(),
+                                link_target.display()
+                            ),
+                        )?;
+                    }
+                    return Ok(());
+                }
+                #[allow(unreachable_code)]
+                return Ok(());
             }
 
             std::fs::copy(src, dst).context(format_context!(
@@ -442,11 +488,40 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             ))?;
         }
 
-        std::fs::rename(src_path, dst_path).context(format_context!(
-            "Failed to move {} -> {}",
-            src,
-            dst
-        ))?;
+        match std::fs::rename(src_path, dst_path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => {
+                // Cross-device move: fall back to copy then delete.
+                let src_md = std::fs::symlink_metadata(src_path).context(format_context!(
+                    "Failed to stat source {} for cross-device move",
+                    src
+                ))?;
+                if src_md.is_dir() {
+                    copy_dir_all(src_path, dst_path).context(format_context!(
+                        "Failed to copy directory {} -> {} for cross-device move",
+                        src,
+                        dst
+                    ))?;
+                    std::fs::remove_dir_all(src_path).context(format_context!(
+                        "Failed to remove source directory {} after cross-device move",
+                        src
+                    ))?;
+                } else {
+                    std::fs::copy(src_path, dst_path).context(format_context!(
+                        "Failed to copy {} -> {} for cross-device move",
+                        src,
+                        dst
+                    ))?;
+                    std::fs::remove_file(src_path).context(format_context!(
+                        "Failed to remove source {} after cross-device move",
+                        src
+                    ))?;
+                }
+            }
+            Err(e) => {
+                return Err(e).context(format_context!("Failed to move {} -> {}", src, dst));
+            }
+        }
         Ok(NoneType)
     }
 
@@ -544,33 +619,28 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         if is_lsp_mode() {
             return Ok(NoneType);
         }
-        use std::io::Write;
-        use std::time::SystemTime;
 
         let p = std::path::Path::new(path);
 
         if !p.exists() {
             if !create {
-                anyhow::bail!("Path does not exist and create=False: {}", path);
+                return Ok(NoneType);
             }
             std::fs::File::create(p).context(format_context!("Failed to create file {}", path))?;
             return Ok(NoneType);
         }
 
         if update_mtime {
-            let mut opts = std::fs::OpenOptions::new();
-            opts.append(true);
-            let mut f = opts
+            let f = std::fs::OpenOptions::new()
+                .write(true)
                 .open(p)
                 .context(format_context!("Failed to open file for touch {}", path))?;
-            f.write_all(&[])
-                .context(format_context!("Failed to touch file {}", path))?;
-
-            // best effort to update via set_len round-trip for some FS
-            let md = std::fs::metadata(p).context(format_context!("Failed to stat {}", path))?;
-            let len = md.len();
-            let _ = f.set_len(len);
-            let _ = SystemTime::now();
+            let now = std::time::SystemTime::now();
+            let times = std::fs::FileTimes::new()
+                .set_accessed(now)
+                .set_modified(now);
+            f.set_times(times)
+                .context(format_context!("Failed to set file times for {}", path))?;
         }
 
         Ok(NoneType)
@@ -589,22 +659,45 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             obj.insert("mode".to_string(), serde_json::json!(0));
             return Ok(eval.heap().alloc(serde_json::Value::Object(obj)));
         }
-        let md = std::fs::symlink_metadata(path)
-            .context(format_context!("Failed to stat path {}", path))?;
 
-        let modified = md
-            .modified()
-            .ok()
-            .and_then(|t| system_time_to_epoch_seconds(t).ok());
-        let created = md
-            .created()
-            .ok()
-            .and_then(|t| system_time_to_epoch_seconds(t).ok());
+        // symlink_metadata sees the link itself; used for is_symlink and Unix mode bits.
+        let lmd = std::fs::symlink_metadata(path)
+            .context(format_context!("Failed to stat path {}", path))?;
+        let is_symlink = lmd.file_type().is_symlink();
+
+        // metadata follows symlinks; used for is_file/is_dir/size/timestamps so they
+        // agree with fs_is_file, fs_is_directory, fs_size, and fs_modified.
+        // For a dangling symlink metadata() will fail; fall back to lmd values.
+        let (is_file, is_dir, size, modified, created) = match std::fs::metadata(path) {
+            Ok(md) => {
+                let modified = md
+                    .modified()
+                    .ok()
+                    .and_then(|t| system_time_to_epoch_seconds(t).ok());
+                let created = md
+                    .created()
+                    .ok()
+                    .and_then(|t| system_time_to_epoch_seconds(t).ok());
+                (md.is_file(), md.is_dir(), md.len(), modified, created)
+            }
+            Err(_) => {
+                // dangling symlink or unresolvable path
+                let modified = lmd
+                    .modified()
+                    .ok()
+                    .and_then(|t| system_time_to_epoch_seconds(t).ok());
+                let created = lmd
+                    .created()
+                    .ok()
+                    .and_then(|t| system_time_to_epoch_seconds(t).ok());
+                (false, false, lmd.len(), modified, created)
+            }
+        };
 
         #[cfg(unix)]
-        let mode: u32 = md.mode() & 0o7777;
+        let mode: u32 = lmd.mode() & 0o7777;
         #[cfg(not(unix))]
-        let mode: u32 = if md.permissions().readonly() {
+        let mode: u32 = if lmd.permissions().readonly() {
             0o444
         } else {
             0o666
@@ -613,15 +706,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let permissions = mode_to_permissions_string(mode & 0o777);
 
         let mut obj = serde_json::Map::new();
-        obj.insert("size".to_string(), serde_json::json!(md.len()));
+        obj.insert("size".to_string(), serde_json::json!(size));
         obj.insert("modified".to_string(), serde_json::json!(modified));
         obj.insert("created".to_string(), serde_json::json!(created));
-        obj.insert("is_dir".to_string(), serde_json::json!(md.is_dir()));
-        obj.insert("is_file".to_string(), serde_json::json!(md.is_file()));
-        obj.insert(
-            "is_symlink".to_string(),
-            serde_json::json!(md.file_type().is_symlink()),
-        );
+        obj.insert("is_dir".to_string(), serde_json::json!(is_dir));
+        obj.insert("is_file".to_string(), serde_json::json!(is_file));
+        obj.insert("is_symlink".to_string(), serde_json::json!(is_symlink));
         obj.insert("permissions".to_string(), serde_json::json!(permissions));
         obj.insert("mode".to_string(), serde_json::json!(mode));
 
@@ -688,6 +778,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             let md = std::fs::metadata(path).context(format_context!("Failed to stat {}", path))?;
             let mut mode = md.mode() & 0o7777;
 
+            if spec.len() < 3 {
+                anyhow::bail!("Invalid chmod spec '{}': must be [ugoa][+-=][rwx]+", spec);
+            }
             let mut chars = spec.chars();
             let who = chars
                 .next()
@@ -695,27 +788,29 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             let op = chars
                 .next()
                 .context(format_context!("Invalid chmod spec '{}'", spec))?;
-            let perm = chars
-                .next()
-                .context(format_context!("Invalid chmod spec '{}'", spec))?;
-            if chars.next().is_some() {
-                anyhow::bail!("Invalid chmod spec '{}'", spec);
+            let perm_chars: String = chars.collect();
+            if perm_chars.is_empty() {
+                anyhow::bail!("Invalid chmod spec '{}': no permission characters", spec);
             }
 
             let scope = match who {
-                'u' => 0o700,
-                'g' => 0o070,
-                'o' => 0o007,
-                'a' => 0o777,
-                _ => anyhow::bail!("Invalid chmod subject '{}'", who),
+                'u' => 0o700u32,
+                'g' => 0o070u32,
+                'o' => 0o007u32,
+                'a' => 0o777u32,
+                _ => anyhow::bail!("Invalid chmod subject '{}' in spec '{}'", who, spec),
             };
 
-            let perm_mask = match perm {
-                'r' => 0o444,
-                'w' => 0o222,
-                'x' => 0o111,
-                _ => anyhow::bail!("Invalid chmod permission '{}'", perm),
-            } & scope;
+            let mut perm_mask = 0u32;
+            for perm in perm_chars.chars() {
+                let bits = match perm {
+                    'r' => 0o444u32,
+                    'w' => 0o222u32,
+                    'x' => 0o111u32,
+                    _ => anyhow::bail!("Invalid chmod permission '{}' in spec '{}'", perm, spec),
+                };
+                perm_mask |= bits & scope;
+            }
 
             match op {
                 '+' => mode |= perm_mask,
@@ -724,7 +819,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                     mode &= !scope;
                     mode |= perm_mask;
                 }
-                _ => anyhow::bail!("Invalid chmod operator '{}'", op),
+                _ => anyhow::bail!("Invalid chmod operator '{}' in spec '{}'", op, spec),
             }
 
             let perms = std::fs::Permissions::from_mode(mode);
@@ -755,6 +850,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             use std::process::Command;
             let status = Command::new("chown")
                 .arg(format!("{user}:{group}"))
+                .arg("--")
                 .arg(path)
                 .status()
                 .context(format_context!("Failed to run chown for {}", path))?;
@@ -847,7 +943,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             out.push(s.to_owned());
         }
 
-        let content = out.join("\n");
+        let content = if out.is_empty() {
+            String::new()
+        } else {
+            out.join("\n") + "\n"
+        };
         std::fs::write(path, content)
             .context(format_context!("Failed to write lines to {}", path))?;
         Ok(NoneType)
@@ -861,10 +961,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             "Failed to convert Starlark value to JSON for {}",
             path
         ))?;
-        let yaml_value: serde_yaml::Value = serde_json::from_str(&json_text).context(
+        let json_value: serde_json::Value = serde_json::from_str(&json_text).context(
             format_context!("Failed to parse JSON representation for {}", path),
         )?;
-        let s = toml::to_string_pretty(&yaml_value)
+        let s = toml::to_string_pretty(&json_value)
             .context(format_context!("Failed to serialize TOML for {}", path))?;
         std::fs::write(path, s).context(format_context!("Failed to write TOML file {}", path))?;
         Ok(NoneType)
@@ -878,11 +978,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             "Failed to convert Starlark value to JSON for {}",
             path
         ))?;
-        let json: serde_json::Value = serde_json::from_str(&json_text).context(format_context!(
-            "Failed to parse JSON representation for {}",
-            path
-        ))?;
-        let s = serde_yaml::to_string(&json)
+        let yaml_value: serde_yaml::Value = serde_yaml::from_str(&json_text).context(
+            format_context!("Failed to convert JSON to YAML value for {}", path),
+        )?;
+        let s = serde_yaml::to_string(&yaml_value)
             .context(format_context!("Failed to serialize YAML for {}", path))?;
         std::fs::write(path, s).context(format_context!("Failed to write YAML file {}", path))?;
         Ok(NoneType)
@@ -979,4 +1078,34 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         Ok(NoneType)
     }
+}
+
+fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> anyhow::Result<()> {
+    std::fs::create_dir_all(dst).context(format_context!(
+        "Failed to create directory {}",
+        dst.display()
+    ))?;
+    for entry in std::fs::read_dir(src).context(format_context!(
+        "Failed to read directory {}",
+        src.display()
+    ))? {
+        let entry = entry.context(format_context!(
+            "Failed to read directory entry in {}",
+            src.display()
+        ))?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        let md = std::fs::symlink_metadata(&from)
+            .context(format_context!("Failed to stat {}", from.display()))?;
+        if md.is_dir() {
+            copy_dir_all(&from, &to)?;
+        } else {
+            std::fs::copy(&from, &to).context(format_context!(
+                "Failed to copy {} -> {}",
+                from.display(),
+                to.display()
+            ))?;
+        }
+    }
+    Ok(())
 }
