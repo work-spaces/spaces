@@ -74,6 +74,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// sys.cpu_count()
     /// ```
     fn cpu_count() -> anyhow::Result<u64> {
+        if is_lsp_mode() {
+            return Ok(0);
+        }
         Ok(num_cpus::get() as u64)
     }
 
@@ -97,11 +100,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// sys.endianness()  # "little" | "big"
     /// ```
     fn endianness() -> anyhow::Result<&'static str> {
-        let bytes = 1u16.to_ne_bytes();
-        if bytes[0] == 1 {
-            Ok("little")
-        } else {
+        if cfg!(target_endian = "big") {
             Ok("big")
+        } else {
+            Ok("little")
         }
     }
 
