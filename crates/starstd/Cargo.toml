@@ -7,6 +7,24 @@ edition = "2024"
 [dependencies]
 
 sha256 = "1"
+sha1 = "0.10"
+sha2 = "0.10"
+md5 = "0.7"
+crc32fast = "1"
+hex = "0.4"
+base64 = "0.22"
+dirs = "5"
+hostname = "0.4"
+num_cpus = "1"
+sysinfo = "0.30"
+whoami = "1"
+reqwest = { version = "0.12", features = ["blocking", "json", "rustls-tls"] }
+urlencoding = "2"
+chrono = "0.4"
+regex = "1"
+log = "0.4"
+env_logger = "0.11"
+clap = { version = "4", features = ["string", "wrap_help"] }
 
 starlark.workspace = true
 anyhow-source-location.workspace = true

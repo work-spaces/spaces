@@ -2,8 +2,7 @@ use crate::{evaluator, stardoc};
 
 pub fn show(console: console::Console) -> anyhow::Result<()> {
     let markdown = utils::markdown::Markdown::new(console);
-
-    let globals = evaluator::get_globals(evaluator::WithRules::Yes).build();
+    let globals = evaluator::get_globals(evaluator::GlobalsConfig::All).build();
 
     let mut builtin_docs = Vec::new();
 

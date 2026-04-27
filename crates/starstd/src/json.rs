@@ -99,4 +99,35 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     fn is_string_json(value: &str) -> anyhow::Result<bool> {
         Ok(serde_json::from_str::<serde_json::Value>(value).is_ok())
     }
+
+    /// Tries to convert a JSON formatted string into a Starlark dictionary/value.
+    /// Returns a Starlark None value if parsing fails instead of an error.
+    ///
+    /// ```python
+    /// raw_data = '{"id": 101, "status": "active"}'
+    /// result = json.try_string_to_dict(raw_data)
+    /// if result != None:
+    ///     print(result["status"])
+    /// else:
+    ///     print("Failed to parse JSON")
+    /// ```
+    ///
+    /// # Arguments
+    /// * `content`: The JSON-formatted string to be converted.
+    ///
+    /// # Returns
+    /// * `dict | None`: A dictionary representation of the JSON data, or None if parsing fails.
+    fn try_string_to_dict<'v>(
+        content: &str,
+        eval: &mut Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<Value<'v>> {
+        let heap = eval.heap();
+        match serde_json::from_str::<serde_json::Value>(content) {
+            Ok(json_value) => {
+                let alloc_value = heap.alloc(json_value);
+                Ok(alloc_value)
+            }
+            Err(_) => Ok(heap.alloc(serde_json::Value::Null)),
+        }
+    }
 }

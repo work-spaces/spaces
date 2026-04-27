@@ -182,6 +182,12 @@ run_add_exec(
 )
 
 run_add_exec(
+    "script_tests",
+    command = "./run-all.exec.star",
+    working_directory = "scripts",
+)
+
+run_add_exec(
     "check_rust_clippy",
     command = "cargo",
     args = ["clippy"],

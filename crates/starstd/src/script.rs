@@ -1,3 +1,4 @@
+use crate::is_lsp_mode;
 use starlark::environment::GlobalsBuilder;
 use starlark::eval::Evaluator;
 use starlark::values::Value;
@@ -33,6 +34,11 @@ pub fn get_exit_code() -> i32 {
     state.exit_code
 }
 
+pub fn get_args_vec() -> Vec<String> {
+    let state = get_state().read().unwrap();
+    state.args.clone()
+}
+
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
     /// Aborts execution immediately.
@@ -47,6 +53,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Arguments
     /// * `message`: The error message to display upon termination.
     fn abort(message: &str) -> anyhow::Result<NoneType> {
+        if is_lsp_mode() {
+            return Err(anyhow::anyhow!(format!("Aborting: {message}")));
+        }
         Err(anyhow::anyhow!(format!("Aborting: {message}")))
     }
 
@@ -62,6 +71,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Arguments
     /// * `content`: The message to print.
     fn print(content: &str) -> anyhow::Result<NoneType> {
+        if is_lsp_mode() {
+            return Ok(NoneType);
+        }
         println!("{content}");
         Ok(NoneType)
     }
@@ -140,6 +152,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Arguments
     /// * `exit_code`: The integer exit code to be returned upon completion.
     fn set_exit_code(exit_code: i32) -> anyhow::Result<NoneType> {
+        if is_lsp_mode() {
+            return Ok(NoneType);
+        }
         let mut state = get_state().write().unwrap();
         state.exit_code = exit_code;
         Ok(NoneType)

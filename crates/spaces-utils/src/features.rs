@@ -27,6 +27,7 @@ const MANIFEST_FILE_NAME: &str = "features.spaces.json";
 pub enum Feature {
     ModuleCache,
     DeprecationWarnings,
+    NoStarStdWithRules,
 }
 
 impl Feature {

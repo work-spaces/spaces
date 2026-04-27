@@ -438,6 +438,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             }
 
             singleton::enable_lsp_mode();
+            starstd::enable_lsp_mode();
 
             runner::run_lsp(effective_console).context(format_context!("during runner sync"))?;
         }
