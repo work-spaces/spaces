@@ -995,12 +995,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         if is_lsp_mode() {
             return Ok(NoneType);
         }
-        let json_text = value.to_json().context(format_context!(
+        let json = value.to_json_value().context(format_context!(
             "Failed to convert Starlark value to JSON for {}",
-            path
-        ))?;
-        let json: serde_json::Value = serde_json::from_str(&json_text).context(format_context!(
-            "Failed to parse JSON representation for {}",
             path
         ))?;
         let s = if pretty {
