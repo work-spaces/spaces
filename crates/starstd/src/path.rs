@@ -218,8 +218,17 @@ fn normalize_lexical(path: &Path) -> PathBuf {
         match comp {
             Component::CurDir => {}
             Component::ParentDir => {
-                if !out.pop() {
-                    out.push("..");
+                match out.components().last() {
+                    // A real segment: consume it
+                    Some(Component::Normal(_)) => {
+                        out.pop();
+                    }
+                    // At a root or drive prefix: clamp — can't go above the filesystem root
+                    Some(Component::RootDir) | Some(Component::Prefix(_)) => {}
+                    // Output is empty or ends with `..` already: keep ascending
+                    _ => {
+                        out.push("..");
+                    }
                 }
             }
             Component::RootDir | Component::Prefix(_) => out.push(comp.as_os_str()),
@@ -303,8 +312,13 @@ fn expand_env_vars(input: &str) -> String {
 
     while i < bytes.len() {
         if bytes[i] != b'$' {
-            out.push(bytes[i] as char);
-            i += 1;
+            // Bulk-copy the non-$ span as a UTF-8 substring to avoid
+            // byte-cast corruption of multi-byte characters.
+            let start = i;
+            while i < bytes.len() && bytes[i] != b'$' {
+                i += 1;
+            }
+            out.push_str(&input[start..i]);
             continue;
         }
 
