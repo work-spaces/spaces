@@ -28,7 +28,7 @@ for test in tests:
     options = process_options(
         command = test,
         stdout = process_stdout_capture(),
-        stderr = process_stdout_capture(),
+        stderr = process_stderr_capture(),
     )
     result = process_run(options)
     status = result.get("status")
