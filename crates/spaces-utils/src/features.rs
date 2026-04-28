@@ -1,7 +1,9 @@
 use anyhow::Context;
 use anyhow_source_location::format_context;
+use clap::ValueEnum as _;
 use console::{Console, style};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -33,7 +35,7 @@ impl Feature {
         format!("SPACES_ENV_{}", self.to_string().to_uppercase())
     }
 
-    fn into_kebab_case(self) -> Arc<str> {
+    pub fn into_kebab_case(self) -> Arc<str> {
         self.to_string().replace("_", "-").into()
     }
 }
@@ -49,12 +51,17 @@ pub enum FeatureSource {
     Default,
 }
 
-/// Features manifest containing the enabled/disabled state of features
+/// Features manifest containing the enabled/disabled state of features.
+///
+/// Backed by a `HashMap<String, bool>` so that adding or removing a variant
+/// from `Feature` never causes a deserialization error: unknown keys are simply
+/// ignored, and absent keys fall back to the default (disabled).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Features {
-    /// Map of feature names to their enabled state
-    /// None = not set in manifest (use default), Some(bool) = explicitly set in manifest
-    features: enum_map::EnumMap<Feature, Option<bool>>,
+    /// Map of feature names (snake_case) to their explicitly-set enabled state.
+    /// A key that is absent means "not set in manifest – use default".
+    #[serde(default)]
+    features: HashMap<String, bool>,
 }
 
 impl Features {
@@ -110,17 +117,20 @@ impl Features {
         }
 
         // Check manifest, default to false if not set
-        self.features[feature].unwrap_or(false)
+        self.features
+            .get(&feature.to_string())
+            .copied()
+            .unwrap_or(false)
     }
 
     /// Enable a feature in the manifest
     pub fn enable(&mut self, feature: Feature) {
-        self.features[feature] = Some(true);
+        self.features.insert(feature.to_string(), true);
     }
 
     /// Disable a feature in the manifest
     pub fn disable(&mut self, feature: Feature) {
-        self.features[feature] = Some(false);
+        self.features.insert(feature.to_string(), false);
     }
 
     /// Get the status of a feature and its source
@@ -132,7 +142,7 @@ impl Features {
         }
 
         // Check manifest
-        match self.features[feature] {
+        match self.features.get(&feature.to_string()).copied() {
             Some(enabled) => (enabled, FeatureSource::Manifest),
             None => (false, FeatureSource::Default),
         }
@@ -167,7 +177,7 @@ impl FeaturesCommand {
                     .context(format_context!("while saving features to store"))?;
                 let styled_message = style::StyledContent::new(
                     console::name_style(),
-                    format!("Enabled feature: {}", feature),
+                    format!("Enabled feature: {}", feature.into_kebab_case()),
                 );
                 console.info("Status", styled_message)?;
                 Ok(())
@@ -180,7 +190,7 @@ impl FeaturesCommand {
                     .context(format_context!("while saving features to store"))?;
                 let styled_message = style::StyledContent::new(
                     console::name_style(),
-                    format!("Disabled feature: {}", feature),
+                    format!("Disabled feature: {}", feature.into_kebab_case()),
                 );
                 console.info("Status", styled_message)?;
                 Ok(())
@@ -192,7 +202,9 @@ impl FeaturesCommand {
                 console.raw(format!("{}\n", title))?;
                 console.raw("---------------\n")?;
 
-                for (feature, _enabled) in &features.features {
+                // Iterate over all currently-known variants so the output is
+                // always complete, regardless of what is stored on disk.
+                for &feature in Feature::value_variants() {
                     let (enabled, source) = features.get_status_with_source(feature);
                     let feature_name = style::StyledContent::new(
                         console::name_style(),
@@ -356,6 +368,26 @@ mod tests {
                 loaded_features.get_status_with_source(Feature::DeprecationWarnings);
             assert!(!enabled);
             assert_eq!(source, FeatureSource::Manifest);
+
+            // Clean up
+            let _ = std::fs::remove_dir_all(&temp_dir);
+        }
+
+        // Test 7: Unknown keys in JSON are silently ignored (simulates a removed Feature variant)
+        {
+            let temp_dir = std::env::temp_dir().join("spaces_test_features_unknown");
+            let _ = std::fs::remove_dir_all(&temp_dir);
+            std::fs::create_dir_all(&temp_dir).unwrap();
+
+            // Write a JSON file that contains a feature name that no longer exists
+            let json = r#"{"features":{"module_cache":true,"removed_old_feature":true}}"#;
+            let path = temp_dir.join("features.spaces.json");
+            std::fs::write(&path, json).unwrap();
+
+            // Loading must succeed and known features must be correct
+            let loaded = Features::new_from_json(&temp_dir).unwrap();
+            assert!(loaded.is_enabled(Feature::ModuleCache));
+            assert!(!loaded.is_enabled(Feature::DeprecationWarnings));
 
             // Clean up
             let _ = std::fs::remove_dir_all(&temp_dir);
