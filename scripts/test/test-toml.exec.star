@@ -10,6 +10,7 @@ load(
     "toml_encode",
     "toml_encode_compact",
     "toml_encode_pretty",
+    "toml_is_valid",
     "toml_merge",
     "toml_parse_string",
     "toml_to_string",
@@ -24,8 +25,13 @@ toml_results = {
     "encoding": {},
     "pretty_formatting": {},
     "error_handling": {},
+    "invalid_input": {},
     "merging": {},
     "backward_compatibility": {},
+    "datetime_handling": {},
+    "float_handling": {},
+    "arrays_of_tables": {},
+    "toml_is_valid": {},
 }
 
 # ============================================================================
@@ -127,9 +133,7 @@ decoded_round = toml_decode(encoded_round)
 toml_results["encoding"]["roundtrip_success"] = type(decoded_round) == "dict"
 toml_results["encoding"]["roundtrip_name"] = decoded_round["name"] == original["name"]
 toml_results["encoding"]["roundtrip_bool"] = decoded_round["enabled"] == original["enabled"]
-
-# Check that numeric fields survive the roundtrip (exact value preservation varies with JSON conversion)
-toml_results["encoding"]["roundtrip_number"] = "count" in decoded_round and decoded_round["count"] != None
+toml_results["encoding"]["roundtrip_number"] = decoded_round["count"] == 42
 
 # Test decoding with valid data
 valid_toml_data = 'name = "Test"\nvalue = 123'
@@ -137,7 +141,117 @@ safe_decode_valid = toml_try_decode(valid_toml_data)
 toml_results["error_handling"]["try_decode_valid_returns_data"] = safe_decode_valid["name"] == "Test"
 toml_results["error_handling"]["try_decode_with_default_works"] = toml_try_decode(valid_toml_data, default = {})["name"] == "Test"
 
-# Test merging dictionaries
+# ============================================================================
+# Invalid input / error handling
+# ============================================================================
+
+# toml_try_decode should return None for invalid TOML
+bad_toml_1 = "this is not = = valid toml"
+toml_results["invalid_input"]["try_decode_bad_returns_none"] = toml_try_decode(bad_toml_1) == None
+
+# toml_try_decode with custom default on bad input
+toml_results["invalid_input"]["try_decode_bad_returns_default_dict"] = toml_try_decode(bad_toml_1, default = {}) == {}
+toml_results["invalid_input"]["try_decode_bad_returns_default_string"] = toml_try_decode("= broken", default = "fallback") == "fallback"
+
+# Bare key without value is invalid
+toml_results["invalid_input"]["try_decode_bare_key_no_value"] = toml_try_decode("key_only") == None
+
+# toml_try_decode returns actual data for valid input even when default is given
+toml_results["invalid_input"]["try_decode_valid_ignores_default"] = toml_try_decode("x = 1", default = {})["x"] == 1
+
+# ============================================================================
+# Float handling
+# ============================================================================
+
+float_toml = """
+pi = 3.14159
+negative = -2.71828
+zero_float = 0.0
+scientific = 6.626e-34
+"""
+
+float_parsed = toml_decode(float_toml)
+toml_results["float_handling"]["parse_positive_float"] = float_parsed["pi"] > 3.14 and float_parsed["pi"] < 3.15
+toml_results["float_handling"]["parse_negative_float"] = float_parsed["negative"] < -2.7 and float_parsed["negative"] > -2.8
+toml_results["float_handling"]["parse_zero_float"] = float_parsed["zero_float"] == 0.0
+toml_results["float_handling"]["parse_scientific"] = float_parsed["scientific"] > 0.0
+
+# Float roundtrip
+float_dict = {"ratio": 0.5, "scale": 1.25}
+float_encoded = toml_encode(float_dict)
+float_decoded = toml_decode(float_encoded)
+toml_results["float_handling"]["float_roundtrip"] = float_decoded["ratio"] == 0.5 and float_decoded["scale"] == 1.25
+
+# ============================================================================
+# Datetime handling
+# TOML has native datetime types; they are converted to ISO 8601 strings
+# after going through the JSON intermediary layer.
+# ============================================================================
+
+datetime_toml = """
+created_at = 1979-05-27T07:32:00Z
+local_date = 1979-05-27
+local_time = 07:32:00
+offset_dt = 1979-05-27T00:32:00-07:00
+"""
+
+datetime_parsed = toml_decode(datetime_toml)
+
+# All datetime types come back as strings after the TOML -> JSON -> Starlark conversion
+toml_results["datetime_handling"]["offset_datetime_is_string"] = type(datetime_parsed["created_at"]) == "string"
+toml_results["datetime_handling"]["local_date_is_string"] = type(datetime_parsed["local_date"]) == "string"
+toml_results["datetime_handling"]["local_time_is_string"] = type(datetime_parsed["local_time"]) == "string"
+toml_results["datetime_handling"]["offset_dt_contains_date"] = "1979" in datetime_parsed["created_at"]
+toml_results["datetime_handling"]["offset_dt_contains_time"] = "07:32:00" in datetime_parsed["created_at"]
+
+# ============================================================================
+# Arrays of tables (AoT)
+# ============================================================================
+
+aot_toml = '''
+[[servers]]
+name = "alpha"
+ip = "10.0.0.1"
+role = "primary"
+
+[[servers]]
+name = "beta"
+ip = "10.0.0.2"
+role = "replica"
+
+[[servers]]
+name = "gamma"
+ip = "10.0.0.3"
+role = "replica"
+'''
+
+aot_parsed = toml_decode(aot_toml)
+toml_results["arrays_of_tables"]["aot_is_list"] = type(aot_parsed["servers"]) == "list"
+toml_results["arrays_of_tables"]["aot_length"] = len(aot_parsed["servers"]) == 3
+toml_results["arrays_of_tables"]["aot_first_name"] = aot_parsed["servers"][0]["name"] == "alpha"
+toml_results["arrays_of_tables"]["aot_last_role"] = aot_parsed["servers"][2]["role"] == "replica"
+
+# AoT round-trip: encode back to TOML and decode again
+aot_reencoded = toml_encode({"servers": aot_parsed["servers"]})
+aot_redecoded = toml_decode(aot_reencoded)
+toml_results["arrays_of_tables"]["aot_roundtrip_length"] = len(aot_redecoded["servers"]) == 3
+toml_results["arrays_of_tables"]["aot_roundtrip_name"] = aot_redecoded["servers"][1]["name"] == "beta"
+
+# ============================================================================
+# toml_is_valid
+# ============================================================================
+
+toml_results["toml_is_valid"]["valid_simple"] = toml_is_valid('key = "value"') == True
+toml_results["toml_is_valid"]["valid_table"] = toml_is_valid("[section]\nkey = 1") == True
+toml_results["toml_is_valid"]["valid_empty_string"] = toml_is_valid("") == True
+toml_results["toml_is_valid"]["invalid_missing_value"] = toml_is_valid("key =") == False
+toml_results["toml_is_valid"]["invalid_duplicate_equals"] = toml_is_valid("a = = 1") == False
+toml_results["toml_is_valid"]["invalid_unclosed_string"] = toml_is_valid('name = "unclosed') == False
+
+# ============================================================================
+# Merging
+# ============================================================================
+
 base_config = {
     "server": "localhost",
     "port": 8080,
@@ -156,7 +270,10 @@ toml_results["merging"]["merge_overrides_values"] = merged["port"] == 9000
 toml_results["merging"]["merge_adds_override"] = merged["debug"] == True
 toml_results["merging"]["merge_keeps_non_overridden"] = merged["workers"] == 4
 
-# Test backward compatibility - original function names
+# ============================================================================
+# Backward compatibility — original function names
+# ============================================================================
+
 compat_toml = 'app = "MyApp"\nversion = "1.0"'
 compat_parsed = toml_parse_string(compat_toml)
 toml_results["backward_compatibility"]["parse_string_works"] = compat_parsed["app"] == "MyApp"
