@@ -343,9 +343,7 @@ mod tests {
 
         // Test 6: JSON serialization with explicit disable
         {
-            let temp_dir = std::env::temp_dir().join("spaces_test_features");
-            let _ = std::fs::remove_dir_all(&temp_dir);
-            std::fs::create_dir_all(&temp_dir).unwrap();
+            let temp_dir = tempfile::tempdir().unwrap();
 
             // Create features with one enabled and one explicitly disabled
             let mut features = Features::new();
@@ -353,10 +351,10 @@ mod tests {
             features.disable(Feature::DeprecationWarnings);
 
             // Save to disk
-            features.save(&temp_dir).unwrap();
+            features.save(temp_dir.path()).unwrap();
 
             // Load from disk
-            let loaded_features = Features::new_from_json(&temp_dir).unwrap();
+            let loaded_features = Features::new_from_json(temp_dir.path()).unwrap();
 
             // Verify enabled feature reports Manifest source
             let (enabled, source) = loaded_features.get_status_with_source(Feature::ModuleCache);
@@ -368,29 +366,23 @@ mod tests {
                 loaded_features.get_status_with_source(Feature::DeprecationWarnings);
             assert!(!enabled);
             assert_eq!(source, FeatureSource::Manifest);
-
-            // Clean up
-            let _ = std::fs::remove_dir_all(&temp_dir);
+            // temp_dir dropped here → automatic cleanup
         }
 
         // Test 7: Unknown keys in JSON are silently ignored (simulates a removed Feature variant)
         {
-            let temp_dir = std::env::temp_dir().join("spaces_test_features_unknown");
-            let _ = std::fs::remove_dir_all(&temp_dir);
-            std::fs::create_dir_all(&temp_dir).unwrap();
+            let temp_dir = tempfile::tempdir().unwrap();
 
             // Write a JSON file that contains a feature name that no longer exists
             let json = r#"{"features":{"module_cache":true,"removed_old_feature":true}}"#;
-            let path = temp_dir.join("features.spaces.json");
+            let path = temp_dir.path().join("features.spaces.json");
             std::fs::write(&path, json).unwrap();
 
             // Loading must succeed and known features must be correct
-            let loaded = Features::new_from_json(&temp_dir).unwrap();
+            let loaded = Features::new_from_json(temp_dir.path()).unwrap();
             assert!(loaded.is_enabled(Feature::ModuleCache));
             assert!(!loaded.is_enabled(Feature::DeprecationWarnings));
-
-            // Clean up
-            let _ = std::fs::remove_dir_all(&temp_dir);
+            // temp_dir dropped here → automatic cleanup
         }
 
         // Final cleanup of all env vars
