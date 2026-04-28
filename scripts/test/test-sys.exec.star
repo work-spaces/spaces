@@ -138,19 +138,19 @@ sys_results["system_info"]["info_has_is_ci"] = "is_ci" in info
 # Cross-validate: sys_info() values must be consistent with individual calls
 # (stable fields only — memory is excluded because total_memory_bytes() creates a
 #  fresh sysinfo::System snapshot each time and could differ by a few bytes).
-sys_results["system_info"]["info_os_matches_individual"] = info["os"] == os_name
-sys_results["system_info"]["info_arch_matches_individual"] = info["arch"] == arch_name
-sys_results["system_info"]["info_cpu_count_matches_individual"] = info["cpu_count"] == cpu_count
-sys_results["system_info"]["info_endianness_matches_individual"] = info["endianness"] == endianness
+sys_results["system_info"]["info_os_matches_individual"] = info.get("os") == os_name
+sys_results["system_info"]["info_arch_matches_individual"] = info.get("arch") == arch_name
+sys_results["system_info"]["info_cpu_count_matches_individual"] = info.get("cpu_count") == cpu_count
+sys_results["system_info"]["info_endianness_matches_individual"] = info.get("endianness") == endianness
 
 # Type checks: verify the returned types are correct, not just that keys exist
-sys_results["system_info"]["info_os_is_nonempty_string"] = type(info["os"]) == "string" and len(info["os"]) > 0
-sys_results["system_info"]["info_arch_is_nonempty_string"] = type(info["arch"]) == "string" and len(info["arch"]) > 0
-sys_results["system_info"]["info_cpu_count_is_positive_int"] = type(info["cpu_count"]) == "int" and info["cpu_count"] > 0
-sys_results["system_info"]["info_memory_bytes_is_positive_int"] = type(info["total_memory_bytes"]) == "int" and info["total_memory_bytes"] > 0
-sys_results["system_info"]["info_memory_gb_is_positive_float"] = info["total_memory_gb"] > 0.0
-sys_results["system_info"]["info_is_ci_is_bool"] = type(info["is_ci"]) == "bool"
-sys_results["system_info"]["info_endianness_is_valid"] = info["endianness"] in ["little", "big"]
+sys_results["system_info"]["info_os_is_nonempty_string"] = type(info.get("os")) == "string" and len(info.get("os")) > 0
+sys_results["system_info"]["info_arch_is_nonempty_string"] = type(info.get("arch")) == "string" and len(info.get("arch")) > 0
+sys_results["system_info"]["info_cpu_count_is_positive_int"] = type(info.get("cpu_count")) == "int" and info.get("cpu_count") > 0
+sys_results["system_info"]["info_memory_bytes_is_positive_int"] = type(info.get("total_memory_bytes")) == "int" and info.get("total_memory_bytes") > 0
+sys_results["system_info"]["info_memory_gb_is_positive_float"] = info.get("total_memory_gb") > 0.0
+sys_results["system_info"]["info_is_ci_is_bool"] = type(info.get("is_ci")) == "bool"
+sys_results["system_info"]["info_endianness_is_valid"] = info.get("endianness") in ["little", "big"]
 
 # ============================================================================
 # Output Results

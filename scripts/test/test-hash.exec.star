@@ -26,6 +26,10 @@ load(
     "//@star/sdk/star/std/json.star",
     "json_dumps",
 )
+load(
+    "//@star/sdk/star/std/sys.star",
+    "sys_exit",
+)
 
 # ============================================================================
 # Assertion helper
@@ -33,12 +37,11 @@ load(
 
 def assert_eq(label, actual, expected):
     """Fail loudly if actual != expected."""
-    if actual != expected:
-        fail("ASSERTION FAILED [{}]\n  expected: {}\n  actual:   {}".format(
-            label,
-            expected,
-            actual,
-        ))
+    assert_on(actual == expected, "ASSERTION FAILED [{}]\n  expected: {}\n  actual:   {}".format(
+        label,
+        expected,
+        actual,
+    ))
 
 # ============================================================================
 # Fixture setup
@@ -94,21 +97,21 @@ KNOWN = {
 # String hashing — assert against known values
 # ============================================================================
 
-assert_eq("sha256(string)", hash_sha256(test_string), KNOWN["str_sha256"])
-assert_eq("sha512(string)", hash_sha512(test_string), KNOWN["str_sha512"])
-assert_eq("sha1(string)", hash_sha1(test_string), KNOWN["str_sha1"])
-assert_eq("md5(string)", hash_md5(test_string), KNOWN["str_md5"])
-assert_eq("crc32(string)", hash_crc32(test_string), KNOWN["str_crc32"])
+assert_eq("sha256(string)", hash_sha256(test_string), KNOWN.get("str_sha256"))
+assert_eq("sha512(string)", hash_sha512(test_string), KNOWN.get("str_sha512"))
+assert_eq("sha1(string)", hash_sha1(test_string), KNOWN.get("str_sha1"))
+assert_eq("md5(string)", hash_md5(test_string), KNOWN.get("str_md5"))
+assert_eq("crc32(string)", hash_crc32(test_string), KNOWN.get("str_crc32"))
 
 # ============================================================================
 # File hashing — assert against known values
 # ============================================================================
 
-assert_eq("sha256(file)", hash_sha256_file(test_file), KNOWN["file_sha256"])
-assert_eq("sha512(file)", hash_sha512_file(test_file), KNOWN["file_sha512"])
-assert_eq("sha1(file)", hash_sha1_file(test_file), KNOWN["file_sha1"])
-assert_eq("md5(file)", hash_md5_file(test_file), KNOWN["file_md5"])
-assert_eq("crc32(file)", hash_crc32_file(test_file), KNOWN["file_crc32"])
+assert_eq("sha256(file)", hash_sha256_file(test_file), KNOWN.get("file_sha256"))
+assert_eq("sha512(file)", hash_sha512_file(test_file), KNOWN.get("file_sha512"))
+assert_eq("sha1(file)", hash_sha1_file(test_file), KNOWN.get("file_sha1"))
+assert_eq("md5(file)", hash_md5_file(test_file), KNOWN.get("file_md5"))
+assert_eq("crc32(file)", hash_crc32_file(test_file), KNOWN.get("file_crc32"))
 
 # ============================================================================
 # BLAKE3 — string and file
@@ -121,16 +124,13 @@ assert_eq("crc32(file)", hash_crc32_file(test_file), KNOWN["file_crc32"])
 blake3_str = hash_blake3(test_string)
 blake3_file = hash_blake3_file(test_file)
 
-assert_eq("blake3(string)", blake3_str, KNOWN["str_blake3"])
-assert_eq("blake3(file)", blake3_file, KNOWN["file_blake3"])
+assert_eq("blake3(string)", blake3_str, KNOWN.get("str_blake3"))
+assert_eq("blake3(file)", blake3_file, KNOWN.get("file_blake3"))
 
 # Structural checks independent of exact digest value (length + uniqueness):
-if len(blake3_str) != 64:
-    fail("BLAKE3 string digest should be 64 hex chars, got: {}".format(len(blake3_str)))
-if len(blake3_file) != 64:
-    fail("BLAKE3 file digest should be 64 hex chars, got: {}".format(len(blake3_file)))
-if blake3_str == blake3_file:
-    fail("BLAKE3 digest for string and file should differ (different inputs)")
+assert_on(len(blake3_str) == 64, "BLAKE3 string digest should be 64 hex chars, got: {}".format(len(blake3_str)))
+assert_on(len(blake3_file) == 64, "BLAKE3 file digest should be 64 hex chars, got: {}".format(len(blake3_file)))
+assert_on(blake3_str != blake3_file, "BLAKE3 digest for string and file should differ (different inputs)")
 
 # ============================================================================
 # Encoding / decoding — roundtrip and known-value checks
@@ -139,13 +139,13 @@ if blake3_str == blake3_file:
 hex_encoded = hash_hex_encode("Hello")
 hex_decoded = hash_hex_decode(hex_encoded)
 
-assert_eq("hex_encode(Hello)", hex_encoded, KNOWN["hex_hello"])
+assert_eq("hex_encode(Hello)", hex_encoded, KNOWN.get("hex_hello"))
 assert_eq("hex_decode roundtrip", hex_decoded, "Hello")
 
 b64_encoded = hash_base64_encode("Hello")
 b64_decoded = hash_base64_decode(b64_encoded)
 
-assert_eq("base64_encode(Hello)", b64_encoded, KNOWN["b64_hello"])
+assert_eq("base64_encode(Hello)", b64_encoded, KNOWN.get("b64_hello"))
 assert_eq("base64_decode roundtrip", b64_decoded, "Hello")
 
 # Additional roundtrip over a richer string to catch off-by-one padding issues.
@@ -168,12 +168,12 @@ assert_eq(
 assert_eq(
     "compute_sha256_from_string == sha256(string)",
     hash_compute_sha256_from_string(test_string),
-    KNOWN["str_sha256"],
+    KNOWN.get("str_sha256"),
 )
 assert_eq(
     "compute_sha256_from_file == sha256(file)",
     hash_compute_sha256_from_file(test_file),
-    KNOWN["file_sha256"],
+    KNOWN.get("file_sha256"),
 )
 
 # ============================================================================

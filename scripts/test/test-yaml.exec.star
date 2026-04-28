@@ -50,9 +50,9 @@ simple_yaml = """app:
   debug: false
 """
 parsed = yaml_decode(simple_yaml)
-yaml_results["basic_decoding"]["simple_parse"] = parsed["app"]["name"] == "TestApp"
-yaml_results["basic_decoding"]["parse_version"] = parsed["app"]["version"] == "1.0.0"
-yaml_results["basic_decoding"]["parse_bool"] = parsed["app"]["debug"] == False
+yaml_results["basic_decoding"]["simple_parse"] = parsed.get("app").get("name") == "TestApp"
+yaml_results["basic_decoding"]["parse_version"] = parsed.get("app").get("version") == "1.0.0"
+yaml_results["basic_decoding"]["parse_bool"] = parsed.get("app").get("debug") == False
 
 # Test YAML with lists
 list_yaml = """title: Configuration
@@ -66,9 +66,9 @@ features:
   - cache
 """
 list_parsed = yaml_decode(list_yaml)
-yaml_results["basic_decoding"]["parse_lists"] = list_parsed["ports"] == [80, 8080, 8443]
-yaml_results["basic_decoding"]["parse_string_lists"] = len(list_parsed["features"]) == 3
-yaml_results["basic_decoding"]["list_first_element"] = list_parsed["features"][0] == "auth"
+yaml_results["basic_decoding"]["parse_lists"] = list_parsed.get("ports") == [80, 8080, 8443]
+yaml_results["basic_decoding"]["parse_string_lists"] = len(list_parsed.get("features")) == 3
+yaml_results["basic_decoding"]["list_first_element"] = list_parsed.get("features")[0] == "auth"
 
 # Test complex nested YAML
 complex_yaml = """project:
@@ -85,9 +85,9 @@ complex_yaml = """project:
     timeout: 60
 """
 complex_parsed = yaml_decode(complex_yaml)
-yaml_results["complex_structures"]["nested_access"] = complex_parsed["project"]["database"]["host"] == "localhost"
-yaml_results["complex_structures"]["deep_nested_access"] = complex_parsed["project"]["database"]["connection"]["timeout"] == 30
-yaml_results["complex_structures"]["multiple_sections"] = complex_parsed["project"]["server"]["workers"] == 4
+yaml_results["complex_structures"]["nested_access"] = complex_parsed.get("project").get("database").get("host") == "localhost"
+yaml_results["complex_structures"]["deep_nested_access"] = complex_parsed.get("project").get("database").get("connection").get("timeout") == 30
+yaml_results["complex_structures"]["multiple_sections"] = complex_parsed.get("project").get("server").get("workers") == 4
 
 # Test YAML encoding
 data_to_encode = {
@@ -131,10 +131,10 @@ original = {
 encoded_round = yaml_encode(original)
 decoded_round = yaml_decode(encoded_round)
 yaml_results["encoding"]["roundtrip_success"] = type(decoded_round) == "dict"
-yaml_results["encoding"]["roundtrip_name"] = decoded_round["name"] == original["name"]
-yaml_results["encoding"]["roundtrip_bool"] = decoded_round["enabled"] == original["enabled"]
-yaml_results["encoding"]["roundtrip_number"] = decoded_round["count"] == 42
-yaml_results["encoding"]["roundtrip_list"] = "items" in decoded_round and len(decoded_round["items"]) == 3
+yaml_results["encoding"]["roundtrip_name"] = decoded_round.get("name") == original.get("name")
+yaml_results["encoding"]["roundtrip_bool"] = decoded_round.get("enabled") == original.get("enabled")
+yaml_results["encoding"]["roundtrip_number"] = decoded_round.get("count") == 42
+yaml_results["encoding"]["roundtrip_list"] = "items" in decoded_round and len(decoded_round.get("items")) == 3
 
 # Test decoding with valid data
 valid_yaml_data = """name: Test
@@ -142,8 +142,8 @@ value: 123
 active: true
 """
 safe_decode_valid = yaml_try_decode(valid_yaml_data)
-yaml_results["error_handling"]["try_decode_valid_returns_data"] = safe_decode_valid["name"] == "Test"
-yaml_results["error_handling"]["try_decode_with_default_works"] = yaml_try_decode(valid_yaml_data, default = {})["name"] == "Test"
+yaml_results["error_handling"]["try_decode_valid_returns_data"] = safe_decode_valid.get("name") == "Test"
+yaml_results["error_handling"]["try_decode_with_default_works"] = yaml_try_decode(valid_yaml_data, default = {}).get("name") == "Test"
 
 # ============================================================================
 # Invalid input / error handling
@@ -163,7 +163,7 @@ yaml_results["invalid_input"]["try_decode_null_doc_returns_none"] = yaml_try_dec
 yaml_results["invalid_input"]["try_decode_null_doc_ignores_default"] = yaml_try_decode("~", default = {}) == None
 
 # yaml_try_decode returns actual data for valid input even when default is given
-yaml_results["invalid_input"]["try_decode_valid_ignores_default"] = yaml_try_decode("x: 1", default = {})["x"] == 1
+yaml_results["invalid_input"]["try_decode_valid_ignores_default"] = yaml_try_decode("x: 1", default = {}).get("x") == 1
 
 # ============================================================================
 # Anchors and aliases
@@ -182,8 +182,8 @@ scalar_anchor_yaml = """canonical: &canon "hello world"
 copy: *canon
 """
 scalar_parsed = yaml_decode(scalar_anchor_yaml)
-yaml_results["anchors_aliases"]["scalar_alias_resolved"] = scalar_parsed["copy"] == "hello world"
-yaml_results["anchors_aliases"]["scalar_anchor_original"] = scalar_parsed["canonical"] == "hello world"
+yaml_results["anchors_aliases"]["scalar_alias_resolved"] = scalar_parsed.get("copy") == "hello world"
+yaml_results["anchors_aliases"]["scalar_anchor_original"] = scalar_parsed.get("canonical") == "hello world"
 
 # Mapping alias: *ref resolves to a full copy of the anchored mapping.
 mapping_anchor_yaml = """defaults: &defaults
@@ -193,9 +193,9 @@ mapping_anchor_yaml = """defaults: &defaults
 replica: *defaults
 """
 mapping_parsed = yaml_decode(mapping_anchor_yaml)
-yaml_results["anchors_aliases"]["mapping_anchor_port"] = mapping_parsed["defaults"]["port"] == 8080
-yaml_results["anchors_aliases"]["mapping_alias_port"] = mapping_parsed["replica"]["port"] == 8080
-yaml_results["anchors_aliases"]["mapping_alias_debug"] = mapping_parsed["replica"]["debug"] == False
+yaml_results["anchors_aliases"]["mapping_anchor_port"] = mapping_parsed.get("defaults").get("port") == 8080
+yaml_results["anchors_aliases"]["mapping_alias_port"] = mapping_parsed.get("replica").get("port") == 8080
+yaml_results["anchors_aliases"]["mapping_alias_debug"] = mapping_parsed.get("replica").get("debug") == False
 
 # Sequence alias
 seq_anchor_yaml = """base_tags: &tags
@@ -207,7 +207,7 @@ service:
   tags: *tags
 """
 seq_parsed = yaml_decode(seq_anchor_yaml)
-yaml_results["anchors_aliases"]["sequence_alias_resolved"] = seq_parsed["service"]["tags"] == ["prod", "critical"]
+yaml_results["anchors_aliases"]["sequence_alias_resolved"] = seq_parsed.get("service").get("tags") == ["prod", "critical"]
 
 # <<: merge key is treated as a literal key (YAML 1.1 feature, not supported in YAML 1.2 / serde_yaml 0.9)
 merge_key_yaml = """defaults: &defaults
@@ -220,9 +220,9 @@ server:
 merge_key_parsed = yaml_decode(merge_key_yaml)
 
 # "<<" is a literal key — port is NOT merged into server
-yaml_results["anchors_aliases"]["merge_key_not_expanded"] = "port" not in merge_key_parsed["server"]
-yaml_results["anchors_aliases"]["merge_key_literal_key_present"] = "<<" in merge_key_parsed["server"]
-yaml_results["anchors_aliases"]["merge_key_own_key_preserved"] = merge_key_parsed["server"]["host"] == "localhost"
+yaml_results["anchors_aliases"]["merge_key_not_expanded"] = "port" not in merge_key_parsed.get("server")
+yaml_results["anchors_aliases"]["merge_key_literal_key_present"] = "<<" in merge_key_parsed.get("server")
+yaml_results["anchors_aliases"]["merge_key_own_key_preserved"] = merge_key_parsed.get("server").get("host") == "localhost"
 
 # ============================================================================
 # Multi-document YAML
@@ -256,8 +256,8 @@ key: only_doc
 value: 42
 """
 single_doc_parsed = yaml_decode(single_doc_with_marker)
-yaml_results["multi_document"]["single_doc_with_marker_ok"] = single_doc_parsed["key"] == "only_doc"
-yaml_results["multi_document"]["single_doc_with_marker_value"] = single_doc_parsed["value"] == 42
+yaml_results["multi_document"]["single_doc_with_marker_ok"] = single_doc_parsed.get("key") == "only_doc"
+yaml_results["multi_document"]["single_doc_with_marker_value"] = single_doc_parsed.get("value") == 42
 
 # ============================================================================
 # yaml_is_valid
@@ -287,11 +287,12 @@ fs_write_text("build/yaml-roundtrip-test.yaml", roundtrip_yaml_str)
 roundtrip_read_back = fs_read_text("build/yaml-roundtrip-test.yaml")
 roundtrip_decoded = yaml_decode(roundtrip_read_back)
 
-yaml_results["encoding"]["file_roundtrip_service"] = roundtrip_decoded["service"] == "yaml-test"
-yaml_results["encoding"]["file_roundtrip_version"] = roundtrip_decoded["version"] == "2.0"
-yaml_results["encoding"]["file_roundtrip_bool"] = roundtrip_decoded["enabled"] == True
-yaml_results["encoding"]["file_roundtrip_int"] = roundtrip_decoded["replicas"] == 3
-yaml_results["encoding"]["file_roundtrip_list"] = roundtrip_decoded["tags"] == ["prod", "critical"]
+if roundtrip_decoded != None:
+    yaml_results["encoding"]["file_roundtrip_service"] = roundtrip_decoded.get("service") == "yaml-test"
+    yaml_results["encoding"]["file_roundtrip_version"] = roundtrip_decoded.get("version") == "2.0"
+    yaml_results["encoding"]["file_roundtrip_bool"] = roundtrip_decoded.get("enabled") == True
+    yaml_results["encoding"]["file_roundtrip_int"] = roundtrip_decoded.get("replicas") == 3
+    yaml_results["encoding"]["file_roundtrip_list"] = roundtrip_decoded.get("tags") == ["prod", "critical"]
 
 # ============================================================================
 # Merging
@@ -310,10 +311,10 @@ override_yaml_config = {
 }
 
 yaml_merged = yaml_merge(base_yaml_config, override_yaml_config)
-yaml_results["merging"]["merge_preserves_base"] = yaml_merged["server"] == "localhost"
-yaml_results["merging"]["merge_overrides_values"] = yaml_merged["port"] == 9000
-yaml_results["merging"]["merge_adds_override"] = yaml_merged["debug"] == True
-yaml_results["merging"]["merge_keeps_non_overridden"] = yaml_merged["workers"] == 4
+yaml_results["merging"]["merge_preserves_base"] = yaml_merged.get("server") == "localhost"
+yaml_results["merging"]["merge_overrides_values"] = yaml_merged.get("port") == 9000
+yaml_results["merging"]["merge_adds_override"] = yaml_merged.get("debug") == True
+yaml_results["merging"]["merge_keeps_non_overridden"] = yaml_merged.get("workers") == 4
 
 # ============================================================================
 # Backward compatibility - original function names
@@ -323,7 +324,7 @@ compat_yaml = """app: MyApp
 version: 1.0
 """
 compat_yaml_parsed = yaml_parse_string(compat_yaml)
-yaml_results["backward_compatibility"]["parse_string_works"] = compat_yaml_parsed["app"] == "MyApp"
+yaml_results["backward_compatibility"]["parse_string_works"] = compat_yaml_parsed.get("app") == "MyApp"
 
 compat_yaml_dict = {"title": "Test", "enabled": True}
 compat_yaml_encoded = yaml_to_string(compat_yaml_dict)
@@ -335,7 +336,7 @@ loads_yaml = """config:
   port: 3000
 """
 loaded = yaml_loads(loads_yaml)
-yaml_results["backward_compatibility"]["loads_works"] = loaded["config"]["name"] == "LoadTest"
+yaml_results["backward_compatibility"]["loads_works"] = loaded.get("config").get("name") == "LoadTest"
 
 dumped = yaml_dumps({"test": "value", "number": 99})
 yaml_results["backward_compatibility"]["dumps_works"] = "test" in dumped

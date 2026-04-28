@@ -44,9 +44,9 @@ json_results = {
 simple_json = '{"name": "Alice", "age": 30, "active": true}'
 decoded_simple = json_decode(simple_json)
 json_results["decode"]["simple_object"] = decoded_simple
-json_results["decode"]["access_name"] = decoded_simple["name"]
-json_results["decode"]["access_age"] = decoded_simple["age"]
-json_results["decode"]["access_active"] = decoded_simple["active"]
+json_results["decode"]["access_name"] = decoded_simple.get("name")
+json_results["decode"]["access_age"] = decoded_simple.get("age")
+json_results["decode"]["access_active"] = decoded_simple.get("active")
 
 # Test nested JSON
 nested_json = '''
@@ -62,9 +62,9 @@ nested_json = '''
 }
 '''
 decoded_nested = json_decode(nested_json)
-json_results["decode"]["nested_user_id"] = decoded_nested["user"]["id"]
-json_results["decode"]["nested_email"] = decoded_nested["user"]["profile"]["email"]
-json_results["decode"]["nested_first_tag"] = decoded_nested["user"]["profile"]["tags"][0]
+json_results["decode"]["nested_user_id"] = decoded_nested.get("user").get("id")
+json_results["decode"]["nested_email"] = decoded_nested.get("user").get("profile").get("email")
+json_results["decode"]["nested_first_tag"] = decoded_nested.get("user").get("profile").get("tags")[0]
 
 # Test JSON array
 array_json = '[1, 2, 3, "four", 5.5]'
@@ -74,7 +74,7 @@ json_results["decode"]["array_third"] = decoded_array[2]
 json_results["decode"]["array_string"] = decoded_array[3]
 
 # Test json_loads alias
-json_results["decode"]["json_loads_alias"] = json_loads(simple_json)["name"]
+json_results["decode"]["json_loads_alias"] = json_loads(simple_json).get("name")
 
 # Test compact encoding
 data_to_encode = {
@@ -127,10 +127,10 @@ original_data = {
 }
 encoded_roundtrip = json_encode(original_data)
 decoded_roundtrip = json_decode(encoded_roundtrip)
-json_results["encode"]["roundtrip_project"] = decoded_roundtrip["project"]
-json_results["encode"]["roundtrip_version"] = decoded_roundtrip["version"]
-json_results["encode"]["roundtrip_first_feature"] = decoded_roundtrip["features"][0]
-json_results["encode"]["roundtrip_created"] = decoded_roundtrip["metadata"]["created"]
+json_results["encode"]["roundtrip_project"] = decoded_roundtrip.get("project")
+json_results["encode"]["roundtrip_version"] = decoded_roundtrip.get("version")
+json_results["encode"]["roundtrip_first_feature"] = decoded_roundtrip.get("features")[0]
+json_results["encode"]["roundtrip_created"] = decoded_roundtrip.get("metadata").get("created")
 
 # Test json_dumps alias with pretty flag (backwards compatible parameter name)
 dumped_compact = json_dumps(data_to_encode, is_pretty = False)
@@ -145,15 +145,15 @@ json_results["encode"]["dumps_pretty_matches"] = dumped_pretty == pretty_encoded
 # JSON integers must stay integers, floats must stay floats after round-trip
 typed_json = '{"int_val": 42, "float_val": 3.14, "neg_int": -7, "zero": 0}'
 typed_decoded = json_decode(typed_json)
-json_results["type_preservation"]["int_is_int"] = typed_decoded["int_val"] == 42
-json_results["type_preservation"]["float_is_float"] = typed_decoded["float_val"] == 3.14
-json_results["type_preservation"]["neg_int"] = typed_decoded["neg_int"] == -7
-json_results["type_preservation"]["zero"] = typed_decoded["zero"] == 0
+json_results["type_preservation"]["int_is_int"] = typed_decoded.get("int_val") == 42
+json_results["type_preservation"]["float_is_float"] = typed_decoded.get("float_val") == 3.14
+json_results["type_preservation"]["neg_int"] = typed_decoded.get("neg_int") == -7
+json_results["type_preservation"]["zero"] = typed_decoded.get("zero") == 0
 
 # Verify integer and float round-trip without precision loss
 rt_typed = json_decode(json_encode(typed_decoded))
-json_results["type_preservation"]["roundtrip_int"] = rt_typed["int_val"] == 42
-json_results["type_preservation"]["roundtrip_float"] = rt_typed["float_val"] == 3.14
+json_results["type_preservation"]["roundtrip_int"] = rt_typed.get("int_val") == 42
+json_results["type_preservation"]["roundtrip_float"] = rt_typed.get("float_val") == 3.14
 
 # Array mixed types preserved
 mixed_arr = json_decode('[1, 2.5, "text", true, null]')
@@ -170,14 +170,14 @@ json_results["type_preservation"]["arr_null"] = mixed_arr[4] == None
 # Basic Latin-1 supplement / accented characters
 unicode_json = '{"greeting": "Héllo Wörld", "emoji": "\\u2603", "cjk": "\\u4e2d\\u6587"}'
 unicode_decoded = json_decode(unicode_json)
-json_results["unicode"]["accented_chars"] = "H" in unicode_decoded["greeting"]
-json_results["unicode"]["snowman_decoded"] = unicode_decoded["emoji"] == "\u2603"
-json_results["unicode"]["cjk_decoded"] = unicode_decoded["cjk"] == "\u4e2d\u6587"
+json_results["unicode"]["accented_chars"] = "H" in unicode_decoded.get("greeting")
+json_results["unicode"]["snowman_decoded"] = unicode_decoded.get("emoji") == "\u2603"
+json_results["unicode"]["cjk_decoded"] = unicode_decoded.get("cjk") == "\u4e2d\u6587"
 
 # Round-trip unicode
 unicode_rt = json_decode(json_encode(unicode_decoded))
-json_results["unicode"]["roundtrip_accented"] = unicode_rt["greeting"] == unicode_decoded["greeting"]
-json_results["unicode"]["roundtrip_cjk"] = unicode_rt["cjk"] == unicode_decoded["cjk"]
+json_results["unicode"]["roundtrip_accented"] = unicode_rt.get("greeting") == unicode_decoded.get("greeting")
+json_results["unicode"]["roundtrip_cjk"] = unicode_rt.get("cjk") == unicode_decoded.get("cjk")
 
 # ============================================================================
 # Large Integer Tests
@@ -186,22 +186,22 @@ json_results["unicode"]["roundtrip_cjk"] = unicode_rt["cjk"] == unicode_decoded[
 # i64-range large integers
 large_int_json = '{"big": 9223372036854775807, "neg_big": -9223372036854775808}'
 large_int_decoded = json_decode(large_int_json)
-json_results["large_integers"]["i64_max"] = large_int_decoded["big"] == 9223372036854775807
-json_results["large_integers"]["i64_min"] = large_int_decoded["neg_big"] == -9223372036854775808
+json_results["large_integers"]["i64_max"] = large_int_decoded.get("big") == 9223372036854775807
+json_results["large_integers"]["i64_min"] = large_int_decoded.get("neg_big") == -9223372036854775808
 
 # u64 boundary (larger than i64::MAX)
 u64_json = '{"u64_max": 18446744073709551615}'
 u64_decoded = json_decode(u64_json)
-json_results["large_integers"]["u64_max"] = u64_decoded["u64_max"] == 18446744073709551615
+json_results["large_integers"]["u64_max"] = u64_decoded.get("u64_max") == 18446744073709551615
 
 # BigInt (beyond u64)
 bigint_json = '{"big": 123456789123456789123456789}'
 bigint_decoded = json_decode(bigint_json)
-json_results["large_integers"]["bigint_decoded"] = bigint_decoded["big"] == 123456789123456789123456789
+json_results["large_integers"]["bigint_decoded"] = bigint_decoded.get("big") == 123456789123456789123456789
 
 # Round-trip large integer
 json_results["large_integers"]["bigint_roundtrip"] = (
-    json_decode(json_encode({"n": 123456789123456789123456789}))["n"] == 123456789123456789123456789
+    json_decode(json_encode({"n": 123456789123456789123456789})).get("n") == 123456789123456789123456789
 )
 
 # ============================================================================
@@ -213,11 +213,11 @@ json_results["null_handling"]["decode_null_literal"] = json_decode("null") == No
 
 # Null inside object
 obj_with_null = json_decode('{"key": null, "other": 1}')
-json_results["null_handling"]["null_in_object"] = obj_with_null["key"] == None
-json_results["null_handling"]["non_null_in_object"] = obj_with_null["other"] == 1
+json_results["null_handling"]["null_in_object"] = obj_with_null.get("key") == None
+json_results["null_handling"]["non_null_in_object"] = obj_with_null.get("other") == 1
 
 # Round-trip null
-json_results["null_handling"]["roundtrip_null"] = json_decode(json_encode({"x": None}))["x"] == None
+json_results["null_handling"]["roundtrip_null"] = json_decode(json_encode({"x": None})).get("x") == None
 
 # ============================================================================
 # json_try_decode Tests
@@ -225,7 +225,7 @@ json_results["null_handling"]["roundtrip_null"] = json_decode(json_encode({"x": 
 
 # Valid JSON returns parsed value
 try_valid = json_try_decode('{"x": 99}')
-json_results["try_decode"]["valid_returns_dict"] = try_valid["x"] == 99
+json_results["try_decode"]["valid_returns_dict"] = try_valid.get("x") == 99
 
 # Invalid JSON returns default (None by default)
 json_results["try_decode"]["invalid_returns_none"] = json_try_decode("not json") == None
@@ -271,8 +271,8 @@ json_results["indented_encoding"]["zero_space_has_newlines"] = "\n" in _indent_0
 
 # Round-trip: indented output decodes back to the same structure
 _indent_rt = json_decode(_indent_4)
-json_results["indented_encoding"]["roundtrip_beta"] = _indent_rt["beta"] == True
-json_results["indented_encoding"]["roundtrip_alpha_first"] = _indent_rt["alpha"][0] == 1
+json_results["indented_encoding"]["roundtrip_beta"] = _indent_rt.get("beta") == True
+json_results["indented_encoding"]["roundtrip_alpha_first"] = _indent_rt.get("alpha")[0] == 1
 
 # ============================================================================
 # json_merge Tests
@@ -282,20 +282,20 @@ base_cfg = {"host": "localhost", "port": 8080, "debug": False}
 override_cfg = {"port": 9000, "debug": True}
 merged = json_merge(base_cfg, override_cfg)
 
-json_results["merge"]["host_preserved"] = merged["host"] == "localhost"
-json_results["merge"]["port_overridden"] = merged["port"] == 9000
-json_results["merge"]["debug_overridden"] = merged["debug"] == True
+json_results["merge"]["host_preserved"] = merged.get("host") == "localhost"
+json_results["merge"]["port_overridden"] = merged.get("port") == 9000
+json_results["merge"]["debug_overridden"] = merged.get("debug") == True
 
 # Original dicts must not be mutated
-json_results["merge"]["base_unchanged"] = base_cfg["port"] == 8080
+json_results["merge"]["base_unchanged"] = base_cfg.get("port") == 8080
 json_results["merge"]["override_unchanged"] = "host" not in override_cfg
 
 # Merge adds new keys from dict2
 d1 = {"a": 1}
 d2 = {"b": 2}
 merged2 = json_merge(d1, d2)
-json_results["merge"]["new_key_added"] = merged2["b"] == 2
-json_results["merge"]["old_key_kept"] = merged2["a"] == 1
+json_results["merge"]["new_key_added"] = merged2.get("b") == 2
+json_results["merge"]["old_key_kept"] = merged2.get("a") == 1
 
 # ============================================================================
 # Key Ordering Tests
@@ -317,9 +317,9 @@ json_results["key_ordering"]["keys_sorted_alphabetically"] = (
 # Round-trip through encode/decode preserves all keys and values
 rt_unordered = json_decode(encoded_unordered)
 json_results["key_ordering"]["values_preserved"] = (
-    rt_unordered["zebra"] == 1 and
-    rt_unordered["apple"] == 2 and
-    rt_unordered["mango"] == 3
+    rt_unordered.get("zebra") == 1 and
+    rt_unordered.get("apple") == 2 and
+    rt_unordered.get("mango") == 3
 )
 
 # ============================================================================
@@ -342,17 +342,17 @@ _json_tmp_path = "/tmp/spaces-test-json-roundtrip.json"
 # Write pretty JSON, read back, and verify
 json_write_file(_json_tmp_path, file_data, pretty = True)
 file_rt = json_read_file(_json_tmp_path)
-json_results["file_roundtrip"]["project"] = file_rt["project"] == "spaces-test"
-json_results["file_roundtrip"]["version"] = file_rt["version"] == "2.0.0"
-json_results["file_roundtrip"]["first_tag"] = file_rt["tags"][0] == "json"
-json_results["file_roundtrip"]["nested_count"] = file_rt["meta"]["count"] == 3
-json_results["file_roundtrip"]["nested_active"] = file_rt["meta"]["active"] == True
-json_results["file_roundtrip"]["nested_score"] = file_rt["meta"]["score"] == 9.5
+json_results["file_roundtrip"]["project"] = file_rt.get("project") == "spaces-test"
+json_results["file_roundtrip"]["version"] = file_rt.get("version") == "2.0.0"
+json_results["file_roundtrip"]["first_tag"] = file_rt.get("tags", ["tag"])[0] == "json"
+json_results["file_roundtrip"]["nested_count"] = file_rt.get("meta", {}).get("count") == 3
+json_results["file_roundtrip"]["nested_active"] = file_rt.get("meta", {}).get("active") == True
+json_results["file_roundtrip"]["nested_score"] = file_rt.get("meta", {}).get("score") == 9.5
 
 # Write compact JSON, read back
 json_write_file(_json_tmp_path, file_data, pretty = False)
 file_compact_rt = json_read_file(_json_tmp_path)
-json_results["file_roundtrip"]["compact_project"] = file_compact_rt["project"] == "spaces-test"
+json_results["file_roundtrip"]["compact_project"] = file_compact_rt.get("project") == "spaces-test"
 
 # ============================================================================
 # Backwards Compatibility Tests

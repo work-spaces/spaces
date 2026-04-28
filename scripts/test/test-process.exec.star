@@ -51,7 +51,7 @@ nonzero_result = process_run(process_options(
     stdout = process_stdout_capture(),
     stderr = process_stderr_capture(),
 ))
-process_results["basic_execution"]["nonzero_exit_code"] = nonzero_result["status"] == 2
+process_results["basic_execution"]["nonzero_exit_code"] = nonzero_result.get("status") == 2
 
 # Test: check=True on a successful command (exit 0) must NOT raise.
 # NOTE: Starlark has no try/except, so we cannot directly test that check=True
@@ -65,8 +65,8 @@ check_success = process_run(process_options(
     check = True,
 ))
 process_results["basic_execution"]["check_true_success"] = (
-    check_success["status"] == 0 and
-    "check ok" in check_success["stdout"]
+    check_success.get("status") == 0 and
+    "check ok" in check_success.get("stdout")
 )
 
 # ============================================================================
@@ -85,8 +85,8 @@ run_result = process_run({
     "stderr": "capture",
 })
 process_results["output_capture"]["run_capture"] = (
-    run_result["status"] == 0 and
-    "test output" in run_result["stdout"]
+    run_result.get("status") == 0 and
+    "test output" in run_result.get("stdout")
 )
 
 # Test: stderr capture — command writes only to stderr; verify it is captured
@@ -97,8 +97,8 @@ stderr_result = process_run(process_options(
     stderr = process_stderr_capture(),
 ))
 process_results["output_capture"]["stderr_captured"] = (
-    "error_message" in stderr_result["stderr"] and
-    stderr_result["status"] == 0
+    "error_message" in stderr_result.get("stderr") and
+    stderr_result.get("status") == 0
 )
 
 # ============================================================================
@@ -113,8 +113,8 @@ stdin_result = process_run(process_options(
     stderr = process_stderr_capture(),
 ))
 process_results["stdin_handling"]["stdin_fed_to_process"] = (
-    "hello from stdin" in stdin_result["stdout"] and
-    stdin_result["status"] == 0
+    "hello from stdin" in stdin_result.get("stdout") and
+    stdin_result.get("status") == 0
 )
 
 # ============================================================================
@@ -130,8 +130,8 @@ env_result = process_run(process_options(
     stderr = process_stderr_capture(),
 ))
 process_results["environment_variables"]["env_var_passed"] = (
-    "spaces_env_value_42" in env_result["stdout"] and
-    env_result["status"] == 0
+    "spaces_env_value_42" in env_result.get("stdout") and
+    env_result.get("status") == 0
 )
 
 # ============================================================================
@@ -149,8 +149,8 @@ cwd_result = process_run(process_options(
     stderr = process_stderr_capture(),
 ))
 process_results["working_directory"]["cwd_respected"] = (
-    cwd_result["status"] == 0 and
-    "tmp" in cwd_result["stdout"]
+    cwd_result.get("status") == 0 and
+    "tmp" in cwd_result.get("stdout")
 )
 
 # ============================================================================
@@ -172,9 +172,9 @@ process_results["background_processes"]["wait_has_status"] = "status" in wait_re
 process_results["background_processes"]["wait_has_stdout"] = "stdout" in wait_result
 process_results["background_processes"]["wait_has_stderr"] = "stderr" in wait_result
 process_results["background_processes"]["wait_has_duration_ms"] = "duration_ms" in wait_result
-process_results["background_processes"]["wait_status_zero"] = wait_result["status"] == 0
+process_results["background_processes"]["wait_status_zero"] = wait_result.get("status") == 0
 process_results["background_processes"]["wait_stdout_content"] = (
-    "spawned process" in wait_result["stdout"]
+    "spawned process" in wait_result.get("stdout")
 )
 
 # ============================================================================
@@ -202,7 +202,7 @@ process_results["process_management"]["kill_returns_true"] = kill_ok == True
 # Wait for the killed process — status must be non-zero (signal termination)
 kill_wait_result = process_wait(long_handle)
 process_results["process_management"]["kill_and_wait_nonzero_status"] = (
-    kill_wait_result["status"] != 0
+    kill_wait_result.get("status") != 0
 )
 
 # ============================================================================
@@ -215,8 +215,8 @@ pipeline_result = process_pipeline([
     {"command": "grep", "args": ["line2"]},
 ])
 process_results["pipelines"]["basic_pipeline"] = (
-    "line2" in pipeline_result["stdout"] and
-    pipeline_result["status"] == 0
+    "line2" in pipeline_result.get("stdout") and
+    pipeline_result.get("status") == 0
 )
 
 # ============================================================================
@@ -303,7 +303,7 @@ merge_result = process_run(process_options(
     stderr = process_stderr_merge(),
 ))
 process_results["stderr_helpers"]["stderr_merge_into_stdout"] = (
-    "merged_error_content" in merge_result["stdout"]
+    "merged_error_content" in merge_result.get("stdout")
 )
 
 # ============================================================================
@@ -313,17 +313,17 @@ process_results["stderr_helpers"]["stderr_merge_into_stdout"] = (
 # Test process_options builder — simple case
 opts_simple = process_options("echo", args = ["hello"])
 process_results["options_builder"]["simple_options"] = (
-    opts_simple["command"] == "echo" and
-    opts_simple["args"] == ["hello"]
+    opts_simple.get("command") == "echo" and
+    opts_simple.get("args") == ["hello"]
 )
 
 # Test process_options builder — with stdout helper
 opts_capture = process_options("echo", args = ["test"], stdout = process_stdout_capture())
-process_results["options_builder"]["options_with_stdout"] = opts_capture["stdout"] == "capture"
+process_results["options_builder"]["options_with_stdout"] = opts_capture.get("stdout") == "capture"
 
 # Test process_options builder — with stderr helper
 opts_stderr = process_options("echo", args = ["test"], stderr = process_stderr_merge())
-process_results["options_builder"]["options_with_stderr"] = opts_stderr["stderr"] == "merge"
+process_results["options_builder"]["options_with_stderr"] = opts_stderr.get("stderr") == "merge"
 
 # Test process_options builder — full options with all fields set
 opts_full = process_options(
@@ -338,15 +338,15 @@ opts_full = process_options(
     check = True,
 )
 process_results["options_builder"]["full_options"] = (
-    opts_full["command"] == "echo" and
-    opts_full["args"] == ["test"] and
-    opts_full["env"] == {"VAR": "value"} and
-    opts_full["cwd"] == "/tmp" and
-    opts_full["stdin"] == "input" and
-    opts_full["stdout"] == "capture" and
-    opts_full["stderr"] == "capture" and
-    opts_full["timeout_ms"] == 5000 and
-    opts_full["check"] == True
+    opts_full.get("command") == "echo" and
+    opts_full.get("args") == ["test"] and
+    opts_full.get("env") == {"VAR": "value"} and
+    opts_full.get("cwd") == "/tmp" and
+    opts_full.get("stdin") == "input" and
+    opts_full.get("stdout") == "capture" and
+    opts_full.get("stderr") == "capture" and
+    opts_full.get("timeout_ms") == 5000 and
+    opts_full.get("check") == True
 )
 
 # Test process_options builder — default values are NOT included in the dict
@@ -371,8 +371,8 @@ opts_for_run = process_options(
 )
 run_with_builder = process_run(opts_for_run)
 process_results["options_builder"]["run_with_built_options"] = (
-    "output from builder" in run_with_builder["stdout"] and
-    run_with_builder["status"] == 0
+    "output from builder" in run_with_builder.get("stdout") and
+    run_with_builder.get("status") == 0
 )
 
 # ============================================================================

@@ -127,21 +127,21 @@ results["lines_io"]["empty_write"] = fs_read_text(p("empty_lines.txt")) == ""
 json_data = {"name": "spaces", "version": 1, "enabled": True}
 fs_write_json(p("data.json"), json_data)
 json_back = fs_read_json(p("data.json"))
-results["format_io"]["json_roundtrip_name"] = json_back["name"] == "spaces"
-results["format_io"]["json_roundtrip_version"] = json_back["version"] == 1
-results["format_io"]["json_roundtrip_enabled"] = json_back["enabled"] == True
+results["format_io"]["json_roundtrip_name"] = json_back.get("name") == "spaces"
+results["format_io"]["json_roundtrip_version"] = json_back.get("version") == 1
+results["format_io"]["json_roundtrip_enabled"] = json_back.get("enabled") == True
 
 yaml_data = {"project": "test", "count": 42}
 fs_write_yaml(p("data.yaml"), yaml_data)
 yaml_back = fs_read_yaml(p("data.yaml"))
-results["format_io"]["yaml_roundtrip_project"] = yaml_back["project"] == "test"
-results["format_io"]["yaml_roundtrip_count"] = yaml_back["count"] == 42
+results["format_io"]["yaml_roundtrip_project"] = yaml_back.get("project") == "test"
+results["format_io"]["yaml_roundtrip_count"] = yaml_back.get("count") == 42
 
 toml_data = {"package": {"name": "myapp", "version": "0.1.0"}}
 fs_write_toml(p("data.toml"), toml_data)
 toml_back = fs_read_toml(p("data.toml"))
-results["format_io"]["toml_roundtrip_name"] = toml_back["package"]["name"] == "myapp"
-results["format_io"]["toml_roundtrip_version"] = toml_back["package"]["version"] == "0.1.0"
+results["format_io"]["toml_roundtrip_name"] = toml_back.get("package", {}).get("name") == "myapp"
+results["format_io"]["toml_roundtrip_version"] = toml_back.get("package", {}).get("version") == "0.1.0"
 
 # ============================================================================
 # Existence / type checks
@@ -264,21 +264,21 @@ results["symlinks"]["is_file_through_symlink"] = fs_is_file(p("my_link.txt"))
 
 fs_write_text(p("meta.txt"), "metadata test")
 meta = fs_metadata(p("meta.txt"))
-results["metadata"]["is_file"] = meta["is_file"] == True
-results["metadata"]["is_dir"] = meta["is_dir"] == False
-results["metadata"]["is_symlink"] = meta["is_symlink"] == False
-results["metadata"]["size_positive"] = meta["size"] > 0
-results["metadata"]["modified_set"] = meta["modified"] != None
-results["metadata"]["permissions_string"] = type(meta["permissions"]) == "string" and len(meta["permissions"]) == 9
+results["metadata"]["is_file"] = meta.get("is_file") == True
+results["metadata"]["is_dir"] = meta.get("is_dir") == False
+results["metadata"]["is_symlink"] = meta.get("is_symlink") == False
+results["metadata"]["size_positive"] = meta.get("size") > 0
+results["metadata"]["modified_set"] = meta.get("modified") != None
+results["metadata"]["permissions_string"] = type(meta.get("permissions")) == "string" and len(meta.get("permissions")) == 9
 
 # metadata on a symlink-to-file: is_file should be True (follows symlink)
 meta_link = fs_metadata(p("my_link.txt"))
-results["metadata"]["symlink_is_file_true"] = meta_link["is_file"] == True
-results["metadata"]["symlink_is_symlink_true"] = meta_link["is_symlink"] == True
+results["metadata"]["symlink_is_file_true"] = meta_link.get("is_file") == True
+results["metadata"]["symlink_is_symlink_true"] = meta_link.get("is_symlink") == True
 
 # size and modified
 sz = fs_size(p("meta.txt"))
-results["metadata"]["size_matches_meta"] = sz == meta["size"]
+results["metadata"]["size_matches_meta"] = sz == meta.get("size")
 mtime = fs_modified(p("meta.txt"))
 results["metadata"]["modified_is_float"] = type(mtime) == "float" or type(mtime) == "int"
 
@@ -334,21 +334,21 @@ results["touch"]["no_create_respects_flag"] = not fs_exists(p("no_create.txt"))
 fs_write_text(p("perms.txt"), "permissions test")
 fs_set_permissions(p("perms.txt"), 0o600)
 meta_p = fs_metadata(p("perms.txt"))
-results["permissions"]["set_permissions_mode"] = (meta_p["mode"] & 0o777) == 0o600
+results["permissions"]["set_permissions_mode"] = (meta_p.get("mode") & 0o777) == 0o600
 
 fs_chmod(p("perms.txt"), "u+x")
 meta_p2 = fs_metadata(p("perms.txt"))
-results["permissions"]["chmod_add_exec"] = (meta_p2["mode"] & 0o100) != 0
+results["permissions"]["chmod_add_exec"] = (meta_p2.get("mode") & 0o100) != 0
 
 # Multi-perm chmod (u+rx)
 fs_set_permissions(p("perms.txt"), 0o600)
 fs_chmod(p("perms.txt"), "u+rx")
 meta_p3 = fs_metadata(p("perms.txt"))
-results["permissions"]["chmod_multi_perm"] = (meta_p3["mode"] & 0o500) == 0o500
+results["permissions"]["chmod_multi_perm"] = (meta_p3.get("mode") & 0o500) == 0o500
 
 fs_chmod(p("perms.txt"), "u-x")
 meta_p4 = fs_metadata(p("perms.txt"))
-results["permissions"]["chmod_remove_exec"] = (meta_p4["mode"] & 0o100) == 0
+results["permissions"]["chmod_remove_exec"] = (meta_p4.get("mode") & 0o100) == 0
 
 # ============================================================================
 # Cleanup and output

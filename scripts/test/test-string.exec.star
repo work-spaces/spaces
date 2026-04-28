@@ -84,21 +84,21 @@ string_results["replacement"]["replace_regex"] = string_replace("abc123def456", 
 match = string_regex_match(r"\d+", "version 42")
 string_results["regex"]["regex_match_found"] = match != None
 if match:
-    string_results["regex"]["regex_match_value"] = match["match"] == "42"
+    string_results["regex"]["regex_match_value"] = match.get("match") == "42"
     string_results["regex"]["regex_match_has_start"] = "start" in match
     string_results["regex"]["regex_match_has_end"] = "end" in match
 
 matches = string_regex_find_all(r"\d+", "I have 2 apples and 3 oranges")
 string_results["regex"]["regex_find_all_count"] = len(matches) == 2
 if len(matches) >= 2:
-    string_results["regex"]["regex_find_all_first"] = matches[0]["match"] == "2"
-    string_results["regex"]["regex_find_all_second"] = matches[1]["match"] == "3"
+    string_results["regex"]["regex_find_all_first"] = matches[0].get("match") == "2"
+    string_results["regex"]["regex_find_all_second"] = matches[1].get("match") == "3"
 
 captures = string_regex_captures(r"(?P<year>\d{4})-(?P<month>\d{2})", "2024-03-15")
 string_results["regex"]["regex_captures_found"] = captures != None
 if captures:
-    string_results["regex"]["regex_captures_year"] = captures["year"] == "2024"
-    string_results["regex"]["regex_captures_month"] = captures["month"] == "03"
+    string_results["regex"]["regex_captures_year"] = captures.get("year") == "2024"
+    string_results["regex"]["regex_captures_month"] = captures.get("month") == "03"
 
 # Test case conversion functions
 string_results["case_conversion"]["upper"] = string_upper("hello") == "HELLO"
@@ -226,21 +226,21 @@ string_results["unicode"]["pad_right_multibyte"] = len(padded_right) == 4 and pa
 unicode_match = string_regex_match(r"\d+", "café 42")
 string_results["unicode"]["regex_match_unicode_found"] = unicode_match != None
 if unicode_match:
-    string_results["unicode"]["regex_match_unicode_value"] = unicode_match["match"] == "42"
+    string_results["unicode"]["regex_match_unicode_value"] = unicode_match.get("match") == "42"
 
     # char offset: c(0) a(1) f(2) é(3) space(4) → "42" starts at char 5
-    string_results["unicode"]["regex_match_char_start"] = unicode_match["start"] == 5
-    string_results["unicode"]["regex_match_char_end"] = unicode_match["end"] == 7
+    string_results["unicode"]["regex_match_char_start"] = unicode_match.get("start") == 5
+    string_results["unicode"]["regex_match_char_end"] = unicode_match.get("end") == 7
 
 # regex find_all: char offsets for all matches in a non-ASCII string
 unicode_all = string_regex_find_all(r"\d+", "à1b2")
 string_results["unicode"]["regex_find_all_unicode_count"] = len(unicode_all) == 2
 if len(unicode_all) == 2:
     # 'à' is 1 char (2 bytes); "1" starts at char offset 1
-    string_results["unicode"]["regex_find_all_first_char_start"] = unicode_all[0]["start"] == 1
+    string_results["unicode"]["regex_find_all_first_char_start"] = unicode_all[0].get("start") == 1
 
     # "2" starts at char offset 3
-    string_results["unicode"]["regex_find_all_second_char_start"] = unicode_all[1]["start"] == 3
+    string_results["unicode"]["regex_find_all_second_char_start"] = unicode_all[1].get("start") == 3
 
 # ============================================================================
 # Output Results
