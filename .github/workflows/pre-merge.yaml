@@ -12,5 +12,5 @@ jobs:
     steps:
       - uses: work-spaces/spaces-checkout-run@015a2962707cc35c3936a52c4193bf546357dad7
         with:
-          checkout: --url=https://github.com/work-spaces/spaces --rev=${{ github.head_ref }}
+          checkout: --locked --url=https://github.com/work-spaces/spaces --rev=${{ github.head_ref }}
           run: //spaces:check_rust_clippy
