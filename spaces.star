@@ -181,7 +181,7 @@ run_add_exec(
     visibility = visibility_private(),
 )
 
-DEBUG_BINARY = "spaces/target/debug/spaces"
+DEBUG_BINARY = "build/target/debug/spaces"
 
 run_add_exec(
     "script_tests",
