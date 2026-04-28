@@ -701,10 +701,10 @@ pub fn evaluate_starlark_modules(
     let logger = star_logger(console.clone());
     logger.message("--Run Starlark Modules--");
     let workspace_path = workspace.read().absolute_path.to_owned();
-    let is_no_star_std_with_rules = workspace
+    let rules_only_starlark = workspace
         .read()
         .features
-        .is_enabled(features::Feature::NoStarStdWithRules);
+        .is_enabled(features::Feature::RulesOnlyStarlark);
     let mut known_modules = HashSet::new();
 
     let mut eval_progress =
@@ -730,10 +730,10 @@ pub fn evaluate_starlark_modules(
 
     logger.trace(format!("Input module queue:{module_queue:?}").as_str());
 
-    let globals_config = if is_no_star_std_with_rules {
-        GlobalsConfig::RulesLegacy
-    } else {
+    let globals_config = if rules_only_starlark {
         GlobalsConfig::Rules
+    } else {
+        GlobalsConfig::RulesLegacy
     };
 
     // first module is the env module. It is always evaluated first.
