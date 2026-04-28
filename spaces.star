@@ -181,10 +181,24 @@ run_add_exec(
     visibility = visibility_private(),
 )
 
+DEBUG_BINARY = "spaces/target/debug/spaces"
+
 run_add_exec(
     "script_tests",
-    command = "./run-all.exec.star",
-    working_directory = "scripts",
+    command = DEBUG_BINARY,
+    args = [
+        "./spaces/scripts/run-all.exec.star",
+        "--spaces={}".format(DEBUG_BINARY),
+    ],
+    visibility = visibility_private(),
+    deps = deps(
+        rules = [":build"],
+        files = [
+            "scripts/test/**/*.exec.star",
+            "scripts/run-all.exec.star",
+            "//@star/sdk/star/std/**/*.star",
+        ],
+    ),
 )
 
 run_add_exec(
@@ -192,5 +206,10 @@ run_add_exec(
     command = "cargo",
     args = ["clippy"],
     visibility = visibility_private(),
-    deps = [":check_rust_fmt", ":check_starlark", ":rustup_update"],
+    deps = [
+        ":check_rust_fmt",
+        ":check_starlark",
+        ":rustup_update",
+        ":script_tests",
+    ],
 )

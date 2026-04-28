@@ -30,6 +30,7 @@ load(
     "//@star/sdk/star/std/sys.star",
     "sys_exit",
 )
+load("//@star/sdk/star/std/tmp.star", "tmp_cleanup", "tmp_file")
 
 # ============================================================================
 # Assertion helper
@@ -48,9 +49,10 @@ def assert_eq(label, actual, expected):
 # ============================================================================
 
 # The fixture file is written fresh every run so the expected hashes are always
-# tied to exactly this content string.
-test_file = "test-hash-data.txt"
+# tied to exactly this content string.  A temporary file is used so that the
+# test never writes into the working tree and cannot dirty the git index.
 test_content = "Hello, World! This is test data for hashing."
+test_file = tmp_file(suffix = ".txt")
 fs_write_text(test_file, test_content)
 
 test_string = "hello world"
@@ -219,3 +221,6 @@ print("")
 print(json_dumps(results, is_pretty = True))
 print("")
 print("All assertions passed!")
+
+# Remove the temporary fixture so no artifacts are left behind.
+tmp_cleanup(test_file)
