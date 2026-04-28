@@ -7,7 +7,6 @@ use starlark::values::none::NoneType;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 #[derive(Debug, Clone)]
@@ -23,50 +22,55 @@ struct TempEntry {
     keep: bool,
 }
 
-static TMP_REGISTRY: OnceLock<Mutex<HashMap<u64, TempEntry>>> = OnceLock::new();
-static NEXT_TMP_ID: AtomicU64 = AtomicU64::new(1);
+// Registry is keyed by the canonical path string so that cleanup(path) works
+// without ever exposing an opaque integer handle to callers.
+static TMP_REGISTRY: OnceLock<Mutex<HashMap<String, TempEntry>>> = OnceLock::new();
 
-fn tmp_registry() -> &'static Mutex<HashMap<u64, TempEntry>> {
+fn tmp_registry() -> &'static Mutex<HashMap<String, TempEntry>> {
     TMP_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn register_temp(path: PathBuf, kind: TempKind, keep: bool) -> anyhow::Result<u64> {
-    let id = NEXT_TMP_ID.fetch_add(1, Ordering::Relaxed);
+fn register_temp(path: PathBuf, kind: TempKind, keep: bool) -> anyhow::Result<()> {
+    let key = path.to_string_lossy().to_string();
     let entry = TempEntry { path, kind, keep };
-
-    let mut map = tmp_registry()
+    tmp_registry()
         .lock()
-        .map_err(|_| anyhow::anyhow!("temp registry lock poisoned"))?;
-    map.insert(id, entry);
-    Ok(id)
+        .map_err(|_| anyhow::anyhow!("temp registry lock poisoned"))?
+        .insert(key, entry);
+    Ok(())
 }
 
-fn cleanup_path(path: &PathBuf, kind: &TempKind) -> anyhow::Result<NoneType> {
-    match kind {
+fn cleanup_entry(entry: &TempEntry) -> anyhow::Result<()> {
+    match entry.kind {
         TempKind::File => {
-            if path.exists() {
-                std::fs::remove_file(path).context(format_context!(
+            if entry.path.exists() {
+                std::fs::remove_file(&entry.path).context(format_context!(
                     "Failed to remove temporary file {}",
-                    path.display()
+                    entry.path.display()
                 ))?;
             }
         }
         TempKind::Dir => {
-            if path.exists() {
-                std::fs::remove_dir_all(path).context(format_context!(
+            if entry.path.exists() {
+                std::fs::remove_dir_all(&entry.path).context(format_context!(
                     "Failed to remove temporary directory {}",
-                    path.display()
+                    entry.path.display()
                 ))?;
             }
         }
     }
-    Ok(NoneType)
+    Ok(())
 }
 
 // This defines the function that is visible to Starlark
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
-    /// Create a temporary directory path and register it for later cleanup.
+    /// Create a temporary directory and register it for later cleanup.
+    ///
+    /// The directory is created in the system's default temp location using
+    /// cryptographically random bytes for the unique part of its name, so
+    /// collisions are not possible in practice.  On Unix the directory is
+    /// created with mode 0700 (owner-only access).
     ///
     /// Returns the created directory path as a string.
     ///
@@ -79,21 +83,28 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             return Ok(String::new());
         }
 
-        let base = std::env::temp_dir();
-        let unique = NEXT_TMP_ID.load(Ordering::Relaxed);
-        let dirname = format!("{}{}", prefix, unique);
-        let path = base.join(dirname);
+        // tempfile::Builder creates with mode 0700 on Unix, using OS-level
+        // random bytes, giving far stronger uniqueness than a counter.
+        let tmp_dir =
+            tempfile::Builder::new()
+                .prefix(&prefix)
+                .tempdir()
+                .context(format_context!(
+                    "Failed to create temporary directory with prefix {:?}",
+                    prefix
+                ))?;
 
-        std::fs::create_dir_all(&path).context(format_context!(
-            "Failed to create temporary directory {}",
-            path.display()
-        ))?;
-
-        let _ = register_temp(path.clone(), TempKind::Dir, false)?;
+        // Cancel RAII cleanup — our registry owns cleanup from here on.
+        let path = tmp_dir.keep();
+        register_temp(path.clone(), TempKind::Dir, false)?;
         Ok(path.to_string_lossy().to_string())
     }
 
-    /// Create a temporary directory path and do not register cleanup.
+    /// Create a temporary directory that will NOT be automatically cleaned up.
+    ///
+    /// Identical to `tmp.dir` except that `tmp.cleanup_all()` will leave this
+    /// directory in place.  Useful for caches or artefacts that must survive
+    /// the script.
     ///
     /// Returns the created directory path as a string.
     ///
@@ -106,21 +117,25 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             return Ok(String::new());
         }
 
-        let base = std::env::temp_dir();
-        let unique = NEXT_TMP_ID.fetch_add(1, Ordering::Relaxed);
-        let dirname = format!("{}{}", prefix, unique);
-        let path = base.join(dirname);
+        let tmp_dir =
+            tempfile::Builder::new()
+                .prefix(&prefix)
+                .tempdir()
+                .context(format_context!(
+                    "Failed to create temporary directory with prefix {:?}",
+                    prefix
+                ))?;
 
-        std::fs::create_dir_all(&path).context(format_context!(
-            "Failed to create temporary directory {}",
-            path.display()
-        ))?;
-
-        let _ = register_temp(path.clone(), TempKind::Dir, true)?;
+        let path = tmp_dir.keep();
+        register_temp(path.clone(), TempKind::Dir, true)?;
         Ok(path.to_string_lossy().to_string())
     }
 
     /// Create a temporary file and register it for later cleanup.
+    ///
+    /// The file is created in the system's default temp location with a
+    /// randomly generated name.  On Unix the file is created with mode 0600
+    /// (owner-only access).  The file starts empty.
     ///
     /// Returns the created file path as a string.
     ///
@@ -133,24 +148,41 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             return Ok(String::new());
         }
 
-        let base = std::env::temp_dir();
-        let unique = NEXT_TMP_ID.fetch_add(1, Ordering::Relaxed);
-        let filename = format!("tmp-{}{}", unique, suffix);
-        let path = base.join(filename);
+        // tempfile creates with mode 0600 on Unix and uses random bytes for
+        // the name, eliminating both the permission and collision concerns.
+        let named = tempfile::Builder::new()
+            .prefix("tmp-")
+            .suffix(&suffix)
+            .tempfile()
+            .context(format_context!(
+                "Failed to create temporary file with suffix {:?}",
+                suffix
+            ))?;
 
-        let _f = std::fs::File::create(&path).context(format_context!(
-            "Failed to create temporary file {}",
-            path.display()
-        ))?;
+        // Persist the file so it survives beyond the NamedTempFile drop;
+        // our registry is responsible for cleanup from this point on.
+        let (_, path) = named.keep().map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to persist temporary file with suffix {:?}: {}",
+                suffix,
+                e
+            )
+        })?;
 
-        let _ = register_temp(path.clone(), TempKind::File, false)?;
+        register_temp(path.clone(), TempKind::File, false)?;
         Ok(path.to_string_lossy().to_string())
     }
 
-    /// Cleanup a tracked temp resource by id.
+    /// Immediately clean up a single tracked temporary resource.
     ///
-    /// Useful for explicit cleanup of long-lived temps.
-    fn cleanup(id: u64) -> anyhow::Result<NoneType> {
+    /// Pass the path string that was returned by `tmp.dir`, `tmp.dir_keep`,
+    /// or `tmp.file`.  Raises an error if the path is not tracked.
+    ///
+    /// Example:
+    ///   f = tmp.file(suffix = ".txt")
+    ///   # ... use f ...
+    ///   tmp.cleanup(f)
+    fn cleanup(path: &str) -> anyhow::Result<NoneType> {
         if is_lsp_mode() {
             return Ok(NoneType);
         }
@@ -159,36 +191,59 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             let mut map = tmp_registry()
                 .lock()
                 .map_err(|_| anyhow::anyhow!("temp registry lock poisoned"))?;
-            map.remove(&id)
-                .context(format_context!("Invalid temp handle: {}", id))?
+            map.remove(path)
+                .context(format_context!("Unknown temp path (not tracked): {}", path))?
         };
 
-        cleanup_path(&entry.path, &entry.kind)
+        cleanup_entry(&entry)?;
+        Ok(NoneType)
     }
 
-    /// Cleanup all tracked temporary resources that are not marked keep=true.
+    /// Clean up all tracked temporary resources that are not marked keep=true.
     ///
-    /// Call this at script end to emulate "auto cleanup at exit".
+    /// Resources created with `tmp.dir_keep` are skipped.  All other tracked
+    /// resources are removed from the registry and deleted from disk before
+    /// this function returns.
+    ///
+    /// Unlike a fail-fast approach, cleanup continues for every entry even if
+    /// an individual deletion fails; all errors are then reported together so
+    /// that no entry is silently leaked.
+    ///
+    /// Example:
+    ///   tmp.cleanup_all()
     fn cleanup_all() -> anyhow::Result<NoneType> {
         if is_lsp_mode() {
             return Ok(NoneType);
         }
 
-        let entries = {
+        // Atomically drain all non-keep entries from the registry in a single
+        // lock acquisition, then clean up without holding the lock so that
+        // Starlark callbacks (if any) can still reach the registry.
+        let to_clean: Vec<TempEntry> = {
             let mut map = tmp_registry()
                 .lock()
                 .map_err(|_| anyhow::anyhow!("temp registry lock poisoned"))?;
-            let values: Vec<TempEntry> = map.values().cloned().collect();
+            let to_clean: Vec<TempEntry> = map.values().filter(|v| !v.keep).cloned().collect();
             map.retain(|_, v| v.keep);
-            values
+            to_clean
         };
 
-        for entry in entries {
-            if !entry.keep {
-                cleanup_path(&entry.path, &entry.kind)?;
+        // Best-effort: attempt every deletion and collect all failures.
+        let mut errors: Vec<String> = Vec::new();
+        for entry in &to_clean {
+            if let Err(e) = cleanup_entry(entry) {
+                errors.push(format!("{}: {}", entry.path.display(), e));
             }
         }
 
-        Ok(NoneType)
+        if errors.is_empty() {
+            Ok(NoneType)
+        } else {
+            Err(anyhow::anyhow!(
+                "cleanup_all encountered {} error(s):\n{}",
+                errors.len(),
+                errors.join("\n")
+            ))
+        }
     }
 }
