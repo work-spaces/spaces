@@ -164,13 +164,13 @@ fn execute_run(opts: RunOptions) -> anyhow::Result<RunOutcome> {
     // DEFECT 3 FIX: Use take() so child_stdin is dropped immediately after write_all(),
     // sending EOF to the child. Without this, in the timeout polling loop the child never
     // receives EOF and try_wait() never returns Some for programs that read until EOF.
-    if let Some(input) = opts.stdin {
-        if let Some(mut child_stdin) = child.stdin.take() {
-            child_stdin
-                .write_all(input.as_bytes())
-                .context(format_context!("Failed to write to stdin"))?;
-            // child_stdin dropped here → EOF sent to child
-        }
+    if let Some(input) = opts.stdin
+        && let Some(mut child_stdin) = child.stdin.take()
+    {
+        child_stdin
+            .write_all(input.as_bytes())
+            .context(format_context!("Failed to write to stdin"))?;
+        // child_stdin dropped here → EOF sent to child
     }
 
     let output = if let Some(limit_ms) = opts.timeout_ms {
@@ -556,13 +556,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         // DEFECT 4 FIX: Use take() so child_stdin is dropped immediately after write_all(),
         // sending EOF to the spawned process. Without this, the process never gets EOF on stdin.
-        if let Some(input) = stdin_payload {
-            if let Some(mut child_stdin) = child.stdin.take() {
-                child_stdin
-                    .write_all(input.as_bytes())
-                    .context(format_context!("Failed to write to stdin"))?;
-                // child_stdin dropped here → EOF sent to child
-            }
+        if let Some(input) = stdin_payload
+            && let Some(mut child_stdin) = child.stdin.take()
+        {
+            child_stdin
+                .write_all(input.as_bytes())
+                .context(format_context!("Failed to write to stdin"))?;
+            // child_stdin dropped here → EOF sent to child
         }
 
         let handle = NEXT_HANDLE_ID.fetch_add(1, Ordering::Relaxed);

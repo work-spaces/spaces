@@ -160,12 +160,12 @@ fn default_for_opt(
     display: &str,
 ) -> Result<serde_json::Value, String> {
     if let Some(v) = user_default {
-        let type_ok = match (value_type, v) {
+        let type_ok = matches!(
+            (value_type, v),
             (ValueType::Int, serde_json::Value::Number(_))
-            | (ValueType::Bool, serde_json::Value::Bool(_))
-            | (ValueType::Str, serde_json::Value::String(_)) => true,
-            _ => false,
-        };
+                | (ValueType::Bool, serde_json::Value::Bool(_))
+                | (ValueType::Str, serde_json::Value::String(_))
+        );
         if !type_ok {
             return Err(format!(
                 "Default value for `{display}` does not match its declared type `{}`",

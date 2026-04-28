@@ -31,7 +31,7 @@ for test in tests:
         stderr = process_stderr_capture(),
     )
     result = process_run(options)
-    status = result.get("status")
+    status = result.get("status", 1)
     if status != 0:
         log_error("{} => {}".format(test, status))
         print("=====================")

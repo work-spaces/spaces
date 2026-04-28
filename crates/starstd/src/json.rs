@@ -111,7 +111,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         value: starlark::values::Value,
         #[starlark(require = named)] indent: i32,
     ) -> anyhow::Result<String> {
-        if indent < 0 || indent > 16 {
+        if !(0..=16).contains(&indent) {
             return Err(anyhow::anyhow!(
                 "indent must be between 0 and 16, got {}",
                 indent

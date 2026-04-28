@@ -218,7 +218,7 @@ fn normalize_lexical(path: &Path) -> PathBuf {
         match comp {
             Component::CurDir => {}
             Component::ParentDir => {
-                match out.components().last() {
+                match out.components().next_back() {
                     // A real segment: consume it
                     Some(Component::Normal(_)) => {
                         out.pop();
