@@ -99,7 +99,7 @@ impl SpacesContext {
     ) -> anyhow::Result<Self> {
         let mut builtin_docs: HashMap<LspUrl, String> = HashMap::new();
         let mut builtin_symbols: HashMap<String, LspUrl> = HashMap::new();
-        let globals = evaluator::get_globals(evaluator::WithRules::Yes).build();
+        let globals = evaluator::get_globals(evaluator::GlobalsConfig::All).build();
         let workspace_path = workspace.read().get_absolute_path();
 
         for (name, item) in globals.documentation().members {
@@ -142,7 +142,7 @@ impl SpacesContext {
             workspace_path,
             path.to_string_lossy().into(),
             content,
-            evaluator::WithRules::Yes,
+            evaluator::GlobalsConfig::All,
             Arc::from(""),
         )?;
 
@@ -208,12 +208,13 @@ impl SpacesContext {
 
         let eval_context = Some(EvalContext::new(Some(self.workspace.clone()), name.into()));
 
+        eprintln!("run: evaluate_ast => {name}");
         let eval_result = evaluator::evaluate_ast(
             ast.clone(),
             name.into(),
             Some(self.workspace.clone()),
             workspace_path.clone(),
-            evaluator::WithRules::Yes,
+            evaluator::GlobalsConfig::All,
             eval_context,
             Arc::from(""),
         );

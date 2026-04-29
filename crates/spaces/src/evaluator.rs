@@ -11,9 +11,11 @@ use std::sync::Arc;
 use utils::{features, inspect, labels, logger, mtarget, query, rcache, rule, targets, ws};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum WithRules {
-    No,
-    Yes,
+pub enum GlobalsConfig {
+    All,
+    Rules,
+    StarStd,
+    RulesLegacy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -53,22 +55,72 @@ pub fn get_dialect() -> Dialect {
     }
 }
 
-pub fn get_globals(with_rules: WithRules) -> GlobalsBuilder {
-    let mut builder = GlobalsBuilder::standard()
-        .with(starstd::globals)
-        .with_namespace("fs", starstd::fs::globals)
-        .with_namespace("json", starstd::json::globals)
-        .with_namespace("hash", starstd::hash::globals)
-        .with_namespace("process", starstd::process::globals)
-        .with_namespace("script", starstd::script::globals)
-        .with_namespace("time", starstd::time::globals)
-        .with_namespace("info", builtins::info::globals);
+pub fn get_globals(config: GlobalsConfig) -> GlobalsBuilder {
+    let mut builder = GlobalsBuilder::standard().with_namespace("info", builtins::info::globals);
 
-    if with_rules == WithRules::Yes {
-        builder = builder
-            .with_namespace("workspace", builtins::workspace::globals)
-            .with_namespace("checkout", builtins::checkout::globals)
-            .with_namespace("run", builtins::run::globals);
+    match config {
+        GlobalsConfig::All => {
+            builder = builder
+                .with(starstd::globals)
+                .with_namespace("args", starstd::args::globals)
+                .with_namespace("env", starstd::env::globals)
+                .with_namespace("fs", starstd::fs::globals)
+                .with_namespace("json", starstd::json::globals)
+                .with_namespace("hash", starstd::hash::globals)
+                .with_namespace("log", starstd::log::globals)
+                .with_namespace("process", starstd::process::globals)
+                .with_namespace("script", starstd::script::globals)
+                .with_namespace("path", starstd::path::globals)
+                .with_namespace("sh", starstd::sh::globals)
+                .with_namespace("string", starstd::string::globals)
+                .with_namespace("sys", starstd::sys::globals)
+                .with_namespace("time", starstd::time::globals)
+                .with_namespace("tmp", starstd::tmp::globals)
+                .with_namespace("toml", starstd::toml::globals)
+                .with_namespace("yaml", starstd::yaml::globals)
+                .with_namespace("workspace", builtins::workspace::globals)
+                .with_namespace("checkout", builtins::checkout::globals)
+                .with_namespace("run", builtins::run::globals);
+        }
+        GlobalsConfig::StarStd => {
+            builder = builder
+                .with(starstd::globals)
+                .with_namespace("args", starstd::args::globals)
+                .with_namespace("env", starstd::env::globals)
+                .with_namespace("fs", starstd::fs::globals)
+                .with_namespace("json", starstd::json::globals)
+                .with_namespace("hash", starstd::hash::globals)
+                .with_namespace("log", starstd::log::globals)
+                .with_namespace("process", starstd::process::globals)
+                .with_namespace("script", starstd::script::globals)
+                .with_namespace("path", starstd::path::globals)
+                .with_namespace("sh", starstd::sh::globals)
+                .with_namespace("string", starstd::string::globals)
+                .with_namespace("sys", starstd::sys::globals)
+                .with_namespace("time", starstd::time::globals)
+                .with_namespace("tmp", starstd::tmp::globals)
+                .with_namespace("toml", starstd::toml::globals)
+                .with_namespace("yaml", starstd::yaml::globals);
+        }
+        GlobalsConfig::Rules => {
+            builder = builder
+                .with_namespace("workspace", builtins::workspace::globals)
+                .with_namespace("checkout", builtins::checkout::globals)
+                .with_namespace("run", builtins::run::globals);
+        }
+        GlobalsConfig::RulesLegacy => {
+            builder = builder
+                .with(starstd::globals)
+                .with_namespace("fs", starstd::fs::globals)
+                .with_namespace("json", starstd::json::globals)
+                .with_namespace("hash", starstd::hash::globals)
+                .with_namespace("process", starstd::process::globals)
+                .with_namespace("script", starstd::script::globals)
+                .with_namespace("time", starstd::time::globals)
+                .with_namespace("workspace", builtins::workspace::globals)
+                .with_namespace("checkout", builtins::checkout::globals)
+                .with_namespace("run", builtins::run::globals);
+        }
     }
 
     builder
@@ -142,7 +194,7 @@ pub fn evaluate_loads(
     name: Arc<str>,
     workspace: Option<WorkspaceArc>,
     workspace_path: Arc<str>,
-    with_rules: WithRules,
+    globals_config: GlobalsConfig,
 ) -> starlark::Result<Vec<LoadResult>> {
     // We can get the loaded modules from `ast.loads`.
     // And ultimately produce a `loader` capable of giving those modules to Starlark.
@@ -174,7 +226,7 @@ pub fn evaluate_loads(
             workspace_path.clone(),
             normalized_path.clone(),
             contents,
-            with_rules,
+            globals_config,
             Arc::from(""),
         )?;
         let frozen_module = result.frozen_module;
@@ -195,7 +247,7 @@ pub fn evaluate_ast(
     name: Arc<str>,
     workspace: Option<WorkspaceArc>,
     workspace_path: Arc<str>,
-    with_rules: WithRules,
+    globals_config: GlobalsConfig,
     mut eval_context: Option<EvalContext>,
     checkout_state_digest: Arc<str>,
 ) -> starlark::Result<(
@@ -208,7 +260,7 @@ pub fn evaluate_ast(
         name.clone(),
         workspace.clone(),
         workspace_path.clone(),
-        with_rules,
+        globals_config,
     )?;
 
     // Collect all load statements: direct loads (normalized) + transitive loads from children
@@ -241,7 +293,7 @@ pub fn evaluate_ast(
         .map(|lr| (lr.module_id.as_ref(), &lr.frozen_module))
         .collect();
     let loader = ReturnFileLoader { modules: &modules };
-    let globals_builder = get_globals(with_rules);
+    let globals_builder = get_globals(globals_config);
     let globals = globals_builder.build();
 
     Module::with_temp_heap(move |module| {
@@ -321,7 +373,7 @@ pub fn evaluate_module(
     workspace_path: Arc<str>,
     name: Arc<str>,
     content: String,
-    with_rules: WithRules,
+    globals_config: GlobalsConfig,
     checkout_state_digest: Arc<str>,
 ) -> starlark::Result<EvaluateModuleResult> {
     // Register the module name so that the global task-graph machinery can
@@ -344,7 +396,7 @@ pub fn evaluate_module(
         name.clone(),
         workspace,
         workspace_path.clone(),
-        with_rules,
+        globals_config,
         eval_context,
         checkout_state_digest,
     )?;
@@ -389,7 +441,7 @@ fn try_evaluate_with_cache(
     console: console::Console,
     workspace: WorkspaceArc,
     phase: task::Phase,
-    with_rules: WithRules,
+    globals_config: GlobalsConfig,
     name: Arc<str>,
     content: String,
     checkout_state_digest: Arc<str>,
@@ -424,7 +476,7 @@ fn try_evaluate_with_cache(
             workspace_path,
             name,
             content,
-            with_rules,
+            globals_config,
             checkout_state_digest,
         )
         .map_err(|e| format_error!("Failed to evaluate module during checkout {:?} -> {e}", e))?;
@@ -471,7 +523,7 @@ fn try_evaluate_with_cache(
                 workspace_path.clone(),
                 name.clone(),
                 content.clone(),
-                with_rules,
+                globals_config,
                 checkout_state_digest.clone(),
             )
             .map(|_| ());
@@ -649,6 +701,10 @@ pub fn evaluate_starlark_modules(
     let logger = star_logger(console.clone());
     logger.message("--Run Starlark Modules--");
     let workspace_path = workspace.read().absolute_path.to_owned();
+    let rules_only_starlark = workspace
+        .read()
+        .features
+        .is_enabled(features::Feature::RulesOnlyStarlark);
     let mut known_modules = HashSet::new();
 
     let mut eval_progress =
@@ -674,6 +730,12 @@ pub fn evaluate_starlark_modules(
 
     logger.trace(format!("Input module queue:{module_queue:?}").as_str());
 
+    let globals_config = if rules_only_starlark {
+        GlobalsConfig::Rules
+    } else {
+        GlobalsConfig::RulesLegacy
+    };
+
     // first module is the env module. It is always evaluated first.
     // It can't be evaluated in parallel with other modules.
     let checkout_state_digest = if phase != task::Phase::Checkout
@@ -685,7 +747,7 @@ pub fn evaluate_starlark_modules(
             workspace_path.clone(),
             name.clone(),
             content.to_string(),
-            WithRules::Yes,
+            globals_config,
             Arc::from(""),
         )
         .map_err(|e| format_error!("Failed to evaluate module {:?}", e))?;
@@ -719,7 +781,7 @@ pub fn evaluate_starlark_modules(
                     eval_console,
                     eval_workspace,
                     phase,
-                    WithRules::Yes,
+                    globals_config,
                     eval_name.clone(),
                     content.to_string(),
                     eval_digest,
@@ -1394,7 +1456,7 @@ pub fn run_starlark_script(name: Arc<str>, script: Arc<str>) -> anyhow::Result<(
         workspace,
         name.clone(),
         script.to_string(),
-        WithRules::No,
+        GlobalsConfig::StarStd,
         Arc::from(""),
     )
     .map_err(|e| format_error!("Failed to evaluate module {name}: {e}"))?;
