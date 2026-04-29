@@ -274,7 +274,7 @@ impl Git {
     ) -> anyhow::Result<()> {
         logger(progress.console.clone(), self.url.clone()).message(
             format!(
-                "execute reference clone with filter {:?}",
+                "execute dissociated reference clone with filter {:?}",
                 filter.clone().unwrap_or("None".to_string())
             )
             .as_str(),
@@ -357,14 +357,19 @@ impl Git {
             );
         }
 
-        // Step 3: Clone from bare repo using --reference for object sharing
+        // Step 3: Clone from bare repo using --reference --dissociate
         // This creates a new repo with:
         // - Original URL as remote (not the local bare repo path)
-        // - Objects borrowed from bare repo (fast, no network needed)
-        // - Fully independent git repository
+        // - Objects copied from bare repo (fast, no network needed)
+        // - No alternates file left behind — fully self-contained
 
-        logger(progress.console.clone(), self.url.clone())
-            .debug(format!("Cloning {} from bare repo with reference", self.spaces_key).as_str());
+        logger(progress.console.clone(), self.url.clone()).debug(
+            format!(
+                "Cloning {} from bare repo with --reference --dissociate",
+                self.spaces_key
+            )
+            .as_str(),
+        );
 
         let workspace_directory = self.get_clone_working_directory(workspace.clone());
 
@@ -372,6 +377,7 @@ impl Git {
             "clone".into(),
             "--reference".into(),
             bare_repo.full_path.clone(),
+            "--dissociate".into(),
         ];
 
         // Add filter if specified (currently unused - Default and Blobless both use full clones)
@@ -569,7 +575,9 @@ impl Git {
     ) -> anyhow::Result<()> {
         // The logic in Repo::uses_bare_repository() needs to stay in sync
         // with the logic here. Default and Blobless use bare repository
-        // with reference clone (shared object store via git alternates).
+        // with reference clone (--reference --dissociate): objects are copied
+        // locally from the bare repo cache (fast, no network), and the alternates
+        // file is removed so the workspace clone is fully self-contained.
         // Note: Default and Blobless are now equivalent - both create full clones
         // without filters to avoid "unable to read sha1 file" errors.
         //
