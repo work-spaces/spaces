@@ -284,12 +284,17 @@ impl Exec {
                             std::fs::read_to_string(log_file_path.as_ref()).context(
                                 format_context!("Failed to read log file {}", log_file_path),
                             )?;
-                        if log_contents.len() > 10 * 1024 * 1024 {
+                        let (summary_lines, body) =
+                            console::format_log_file_summary(&log_contents, log_file_path.as_ref());
+                        for line in summary_lines {
+                            progress.console.emit_line(line);
+                        }
+                        if body.len() > 10 * 1024 * 1024 {
                             logger(progress.console.clone(), name).error(
                                 format!("See log file {log_file_path} for details").as_str(),
                             );
                         } else {
-                            logger(progress.console.clone(), name).error(log_contents.as_str());
+                            logger(progress.console.clone(), name).error(body.as_str());
                         }
                     }
                 } else {

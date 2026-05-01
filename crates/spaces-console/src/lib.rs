@@ -132,6 +132,69 @@ pub fn make_finalize_line(
     vec![line]
 }
 
+/// Parses `log_contents` (a log file produced by [`create_log_file`]) and returns a pair of
+/// `(summary_lines, body)` ready to emit.
+///
+/// On success the summary is two pretty-printed [`Line`]s:
+/// - `command:` label in [`key_style`] + command + args in [`name_style`]
+/// - `working directory:` label in [`key_style`] + path in [`keyword_style`]
+///
+/// On parse failure a single unstyled fallback line is returned that directs the user to the
+/// log file, and `body` is the full raw `log_contents`.
+pub fn format_log_file_summary(log_contents: &str, log_file_path: &str) -> (Vec<Line>, String) {
+    match process::parse_log_file(log_contents) {
+        Ok((header, body)) => {
+            let args = header.arguments.join(" ");
+            let working_dir = header.working_directory.as_deref().unwrap_or("(default)");
+
+            // ═══ Failed ═══ banner – the first thing the user sees.
+            let mut title_line = Line::default();
+            title_line.push(Span::new_unstyled_lossy(format!("{}  ", "═".repeat(25))));
+            title_line.push(Span::new_styled_lossy(style::StyledContent::new(
+                warning_style(),
+                "Failed".to_owned(),
+            )));
+            title_line.push(Span::new_unstyled_lossy(format!("  {}", "═".repeat(25))));
+
+            // Build a two-span `key: value` line without repeating the StyledContent boilerplate.
+            let labeled_line = |label: &str, value_style: style::ContentStyle, value: String| {
+                let styled = |s, t: String| Span::new_styled_lossy(style::StyledContent::new(s, t));
+                let mut line = Line::default();
+                line.push(styled(key_style(), label.to_owned()));
+                line.push(styled(value_style, value));
+                line
+            };
+
+            let cmd_line = labeled_line(
+                "command: ",
+                name_style(),
+                format!("{} {}", header.command, args),
+            );
+            let dir_line = labeled_line(
+                "working directory: ",
+                keyword_style(),
+                working_dir.to_owned(),
+            );
+
+            // Divider that visually separates the metadata above from the log body below.
+            let mut divider_line = Line::default();
+            divider_line.push(Span::new_unstyled_lossy("═".repeat(60)));
+
+            (
+                vec![title_line, cmd_line, dir_line, divider_line],
+                body.to_owned(),
+            )
+        }
+        Err(_) => {
+            let mut line = Line::default();
+            line.push(Span::new_unstyled_lossy(format!(
+                "See log file {log_file_path} for details"
+            )));
+            (vec![line], log_contents.to_owned())
+        }
+    }
+}
+
 mod sealed {
     use super::*;
     pub struct State {
