@@ -507,6 +507,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// parsed = args.parse(spec)
     /// ```
     fn parse<'v>(spec: Value, eval: &mut Evaluator<'v, '_, '_>) -> anyhow::Result<Value<'v>> {
+        // In LSP mode there are no real command-line arguments, so parsing would
+        // succeed with all-empty-string defaults and propagate those into user
+        // code (e.g. `http_releases[""]`), causing spurious "Key \"\" was not
+        // found" diagnostics.  Return an empty dict so that callers receive
+        // `None` from `.get("name")` instead of `""`.
+        if is_lsp_mode() {
+            return Ok(eval.heap().alloc(serde_json::json!({})));
+        }
+
         let parser_spec: ParserSpec = serde_json::from_value(spec.to_json_value()?)
             .context(format_context!("Invalid parser spec"))?;
 

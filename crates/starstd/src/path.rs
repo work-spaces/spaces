@@ -123,6 +123,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// path.relative_to("a/b/c", "a/d")  # "../b/c"
     /// ```
     fn relative_to(target: &str, base: &str) -> anyhow::Result<String> {
+        if is_lsp_mode() {
+            return Ok(String::new());
+        }
         let target_abs = make_absolute(Path::new(target))?;
         let base_abs = make_absolute(Path::new(base))?;
         let rel = diff_paths(&target_abs, &base_abs);
@@ -138,6 +141,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
     /// Expands leading `~` to home directory.
     fn expand_user(path: &str) -> anyhow::Result<String> {
+        if is_lsp_mode() {
+            return Ok(path.to_string());
+        }
         if path == "~" || path.starts_with("~/") || path.starts_with("~\\") {
             let home = home_dir().context(format_context!(
                 "Cannot expand `~`: home directory is not available"

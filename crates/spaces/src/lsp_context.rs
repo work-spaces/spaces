@@ -169,9 +169,50 @@ impl SpacesContext {
             Err(e) => {
                 eprintln!("{name}: Eval Result error: {e}");
                 let message = EvalMessage::from_error(std::path::Path::new(name), &e);
+
+                // If the error's span belongs to a different file (e.g. a loaded
+                // module), `eval_message_to_lsp_diagnostic` would discard the path
+                // and keep only the raw line/column numbers.  Those numbers would
+                // then be published against the *current* file's URI, producing a
+                // squiggle at the wrong location (same line number, wrong file).
+                // Detect that case and remap: clear the span so the diagnostic
+                // lands at position 0:0 of the current file and fold the real
+                // origin into the description text.
+                let diagnostic = if !message.path.is_empty() && message.path != name {
+                    let origin_line = message.span.map(|s| s.begin.line + 1).unwrap_or(0);
+                    eprintln!(
+                        "{name}: error originates in a different file: {}:{}",
+                        message.path, origin_line
+                    );
+                    // Paths stored in the codemap are workspace-relative (the
+                    // leading workspace prefix and slashes are stripped in
+                    // evaluate_loads).  Re-attach the `//` workspace-root
+                    // prefix that spaces uses so the path is recognisable.
+                    // Absolute paths (starting with '/') are kept as-is.
+                    let display_path = if message.path.starts_with('/') {
+                        message.path.clone()
+                    } else {
+                        format!("//{}", message.path)
+                    };
+                    eval_message_to_lsp_diagnostic(EvalMessage {
+                        description: format!(
+                            "{} (in {}:{})",
+                            message.description, display_path, origin_line
+                        ),
+                        // Clear the span so the diagnostic is pinned to the
+                        // top of the current file rather than to the line
+                        // number that belongs to the loaded module.
+                        span: None,
+                        path: name.to_owned(),
+                        ..message
+                    })
+                } else {
+                    eval_message_to_lsp_diagnostic(message)
+                };
+
                 EvalResult {
                     lsp_eval_result: LspEvalResult {
-                        diagnostics: vec![eval_message_to_lsp_diagnostic(message)],
+                        diagnostics: vec![diagnostic],
                         ast: None,
                     },
                     module: None,

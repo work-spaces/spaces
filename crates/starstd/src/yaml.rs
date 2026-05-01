@@ -97,6 +97,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         content: &str,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<Value<'v>> {
+        if crate::is_lsp_mode() {
+            return Ok(eval.heap().alloc(serde_json::json!({})));
+        }
         let heap = eval.heap();
         let yaml_value: serde_yaml::Value =
             serde_yaml::from_str(content).context(format_context!("bad yaml string"))?;

@@ -54,7 +54,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// * `message`: The error message to display upon termination.
     fn abort(message: &str) -> anyhow::Result<NoneType> {
         if is_lsp_mode() {
-            return Err(anyhow::anyhow!(format!("Aborting: {message}")));
+            return Ok(NoneType);
         }
         Err(anyhow::anyhow!(format!("Aborting: {message}")))
     }
@@ -93,6 +93,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `str`: The argument value or an empty string.
     fn get_arg(offset: i32) -> anyhow::Result<String> {
+        if is_lsp_mode() {
+            return Ok(String::new());
+        }
         let state = get_state().read().unwrap();
         let offset = offset as usize;
         if offset >= state.args.len() {
@@ -116,6 +119,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// * `dict`: A dictionary containing `ordered` (`list[str]`) and `named` (`dict`).
     #[allow(clippy::needless_lifetimes)]
     fn get_args<'v>(eval: &mut Evaluator<'v, '_, '_>) -> anyhow::Result<Value<'v>> {
+        if is_lsp_mode() {
+            let heap = eval.heap();
+            let mut result = serde_json::Value::Object(serde_json::Map::new());
+            result["ordered"] = serde_json::json!([]);
+            result["named"] = serde_json::json!({});
+            return Ok(heap.alloc(result));
+        }
         let heap = eval.heap();
         let mut result = serde_json::Value::Object(serde_json::Map::new());
 

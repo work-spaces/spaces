@@ -104,6 +104,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         content: &str,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<Value<'v>> {
+        if crate::is_lsp_mode() {
+            return Ok(eval.heap().alloc(serde_json::json!({})));
+        }
         let heap = eval.heap();
         let toml_value: toml::Value =
             toml::from_str(content).context(format_context!("bad toml string"))?;
