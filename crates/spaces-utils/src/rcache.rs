@@ -397,13 +397,21 @@ pub fn prune(
             }
         }
 
-        for (hash, size, _path) in &stale_artifacts {
+        for (hash, size, path) in &stale_artifacts {
             let short_hash = &hash[..hash.len().min(8)];
             let artifact_size = bytesize::ByteSize(*size);
-            total_size_removed += *size;
             progress.set_message(&format!(
                 "pruning artifact {short_hash} with {artifact_size}"
             ));
+            if is_dry_run {
+                total_size_removed += *size;
+            } else {
+                match std::fs::remove_file(path) {
+                    Ok(()) => total_size_removed += *size,
+                    Err(e) => logger(console.clone())
+                        .error(format!("Failed to remove artifact {short_hash}: {e}").as_str()),
+                }
+            }
         }
     }
 
