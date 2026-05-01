@@ -706,7 +706,6 @@ impl Store {
         }
 
         let mut total_size_removed = ByteSize(0);
-        let mut skipped_due_to_links = 0;
         for (key, entry) in self.entries.iter() {
             let path = path_to_store.join(key.as_ref());
             let entry_age = entry.get_age(age::get_now());
@@ -726,7 +725,6 @@ impl Store {
                         )
                         .as_str(),
                     );
-                    skipped_due_to_links += 1;
                     continue;
                 }
 
@@ -734,16 +732,6 @@ impl Store {
                 total_size_removed += bytesize.as_u64();
                 remove_entries.push((key.clone(), entry_age, bytesize, path.clone()));
             }
-        }
-
-        if skipped_due_to_links > 0 {
-            logger(console.clone()).info(
-                format!(
-                    "Skipped {} entries due to active workspace links",
-                    skipped_due_to_links
-                )
-                .as_str(),
-            );
         }
 
         let mut progress = console::Progress::new(
@@ -754,9 +742,9 @@ impl Store {
         );
 
         for (key, age, size, path) in remove_entries {
-            logger(console.clone()).info(format!("Pruning {key}: {size}").as_str());
-            logger(console.clone()).info(format!("- Age: {age} days").as_str());
-            logger(console.clone()).info(format!("- Size: {size}").as_str());
+            let mut item_progress =
+                console::Progress::new(console.clone(), key.as_ref(), None, None);
+            item_progress.set_message(&format!("{size}, age {age} days"));
             progress.set_message(&format!("pruning {key} with {size}"));
             if !is_dry_run {
                 self.entries.remove(&key);
@@ -768,25 +756,32 @@ impl Store {
                 if let Err(e) = remove_result {
                     logger(console.clone())
                         .error(format!("Failed to remove entry: {key}, error: {e}").as_str());
+                    item_progress.set_finalize_lines(logger::make_finalize_line(
+                        logger::FinalType::Failed,
+                        item_progress.elapsed(),
+                        format!("failed to remove {key}: {e}").as_str(),
+                    ));
                 } else {
-                    logger(console.clone()).info("- Removed.");
+                    item_progress.set_finalize_lines(logger::make_finalize_line(
+                        logger::FinalType::Completed,
+                        item_progress.elapsed(),
+                        format!("{key}: {size}").as_str(),
+                    ));
                 }
             } else {
-                logger(console.clone()).info("- Dry run. Not removed.");
+                item_progress.set_finalize_lines(logger::make_finalize_line(
+                    logger::FinalType::Cancelled,
+                    item_progress.elapsed(),
+                    format!("dry run: {key} ({size})").as_str(),
+                ));
             }
             progress.increment(1);
         }
 
-        let total_removed_message = if is_dry_run {
-            format!("Total to remove in dry run: {total_size_removed}")
-        } else {
-            format!("Total removed: {total_size_removed}")
-        };
-        logger(console.clone()).info(total_removed_message.as_str());
         let finalize_message = if is_dry_run {
-            format!("dry run: would prune {total_size_removed}")
+            format!("dry run: would prune {total_size_removed} from store")
         } else {
-            format!("pruned {total_size_removed}")
+            format!("pruned {total_size_removed} from store")
         };
         progress.set_finalize_lines(logger::make_finalize_line(
             logger::FinalType::Finished,
@@ -794,6 +789,7 @@ impl Store {
             finalize_message.as_str(),
         ));
 
+        logger(console.clone()).message(finalize_message.as_str());
         group.end_group(console.clone(), is_ci)?;
 
         Ok(())
