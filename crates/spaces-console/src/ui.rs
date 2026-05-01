@@ -26,8 +26,9 @@ pub struct ActiveProgress {
 /// e.g. `[1.23s] `, `[12.3s] `, or `[ 123s] `.
 pub fn format_duration(secs: f64) -> String {
     if secs > 100.0 {
-        let secs_str = format!("{}s", secs as u64);
-        format!("{:>5}", secs_str)
+        let mins = secs as u64 / 60;
+        let remaining_secs = secs as u64 % 60;
+        format!("{mins}m{remaining_secs:02}s")
     } else if secs > 10.0 {
         format!("{secs:.1}s")
     } else {
