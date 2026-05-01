@@ -448,6 +448,7 @@ pub fn prune(
         finalize_message.as_str(),
     ));
 
+    logger(console.clone()).message(finalize_message.as_str());
     group.end_group(console.clone(), is_ci)?;
     Ok(())
 }
