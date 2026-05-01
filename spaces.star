@@ -126,6 +126,14 @@ run_add_exec(
 )
 
 run_add_exec(
+    "wait",
+    command = "sleep",
+    args = ["200"],
+    help = "Wait for 200 seconds",
+    visibility = visibility_private(),
+)
+
+run_add_exec(
     "install_dev",
     command = "bash",
     args = ["-c", "cargo install --force --path=spaces/crates/spaces --profile=dev --root={}".format(root)],
