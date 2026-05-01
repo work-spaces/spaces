@@ -22,8 +22,7 @@ pub struct ActiveProgress {
     pub start_time: std::time::Instant,
 }
 
-/// Formats a duration in seconds into a fixed-width bracketed string,
-/// e.g. `[1.23s] `, `[12.3s] `, or `[ 123s] `.
+/// Formats a duration in minutes and seconds, e.g. `1m30s` or `2.5s`.
 pub fn format_duration(secs: f64) -> String {
     if secs > 100.0 {
         let mins = secs as u64 / 60;
