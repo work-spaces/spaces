@@ -21,11 +21,7 @@ pub fn get_log_divider() -> Arc<str> {
 /// Splits a log file into its YAML header and the process output body.
 /// The header and body are separated by the 80-character `=` divider line.
 pub(crate) fn parse_log_file(content: &str) -> anyhow::Result<(LogHeader, &str)> {
-    let divider = format!(
-        "{}
-",
-        get_log_divider()
-    );
+    let divider = format!("{}", get_log_divider());
     match content.find(divider.as_str()) {
         Some(idx) => {
             let header_str = &content[..idx];

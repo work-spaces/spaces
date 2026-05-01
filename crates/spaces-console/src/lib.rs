@@ -132,15 +132,6 @@ pub fn make_finalize_line(
     vec![line]
 }
 
-/// Parses `log_contents` (a log file produced by [`create_log_file`]) and returns a pair of
-/// `(summary_lines, body)` ready to emit.
-///
-/// On success the summary is two pretty-printed [`Line`]s:
-/// - `command:` label in [`key_style`] + command + args in [`name_style`]
-/// - `working directory:` label in [`key_style`] + path in [`keyword_style`]
-///
-/// On parse failure a single unstyled fallback line is returned that directs the user to the
-/// log file, and `body` is the full raw `log_contents`.
 pub fn format_log_file_summary(log_contents: &str, log_file_path: &str) -> (Vec<Line>, String) {
     match process::parse_log_file(log_contents) {
         Ok((header, body)) => {
@@ -190,7 +181,7 @@ pub fn format_log_file_summary(log_contents: &str, log_file_path: &str) -> (Vec<
             line.push(Span::new_unstyled_lossy(format!(
                 "See log file {log_file_path} for details"
             )));
-            (vec![line], log_contents.to_owned())
+            (vec![line], String::new())
         }
     }
 }
