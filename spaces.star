@@ -7,7 +7,6 @@ load("//@star/sdk/star/deps.star", "deps")
 load("//@star/sdk/star/glob.star", "glob")
 load(
     "//@star/sdk/star/run.star",
-    "run_add",
     "run_add_exec",
     "run_add_exec_test",
 )
@@ -165,12 +164,6 @@ run_add_exec(
     deps = deps(files = STARLARK_FILES),
     visibility = visibility_private(),
     working_directory = ".",
-)
-
-run_add(
-    "check_starlark_post",
-    deps = [":cargo_test"],
-    # apply_trailing_args_to = ":cargo_test",
 )
 
 run_add_exec(

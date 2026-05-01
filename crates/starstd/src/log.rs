@@ -227,7 +227,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// ```
     fn fatal(message: &str) -> anyhow::Result<NoneType> {
         if is_lsp_mode() {
-            return Err(anyhow::anyhow!("Fatal: {}", message));
+            return Ok(NoneType);
         }
         ensure_initialized();
         log::error!("{}", message);
