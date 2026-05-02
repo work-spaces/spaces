@@ -29,10 +29,17 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         content: &str,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<Value<'v>> {
-        if crate::is_lsp_mode() {
-            return Ok(eval.heap().alloc(serde_json::json!({})));
-        }
         let heap = eval.heap();
+        if crate::is_lsp_mode() {
+            // In LSP mode behave like try_string_to_dict: attempt the parse and
+            // return the real value on success so that the LSP gets accurate type
+            // information.  Fall back to an empty dict on any failure instead of
+            // propagating an error.
+            return Ok(match serde_json::from_str::<serde_json::Value>(content) {
+                Ok(json_value) => heap.alloc(json_value),
+                Err(_) => heap.alloc(serde_json::json!({})),
+            });
+        }
         let json_value: serde_json::Value =
             serde_json::from_str(content).context(format_context!("bad json string"))?;
 
