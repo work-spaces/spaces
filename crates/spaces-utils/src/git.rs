@@ -73,14 +73,18 @@ impl Repo {
     }
 
     pub fn uses_bare_repository(&self) -> bool {
-        // Returns true for Default or Blobless clone modes.
+        // Returns true for Default or Blobless clone modes (or when unspecified,
+        // since the executor defaults to Clone::Default).
         // These modes use bare repositories in the store with git --reference
         // to create workspace clones that share objects via git alternates.
         // This is more efficient than COW and works across filesystems.
-        if let Some(clone) = &self.clone {
-            matches!(clone, Clone::Default | Clone::Blobless)
-        } else {
-            false
+        //
+        // NOTE: This logic must stay in sync with the `match self.clone` in
+        // executor/git.rs `execute()`. When clone is None the executor picks
+        // Clone::Default, so we must treat None the same way here.
+        match &self.clone {
+            None | Some(Clone::Default) | Some(Clone::Blobless) => true,
+            _ => false,
         }
     }
 }
@@ -467,6 +471,24 @@ pub fn is_bare_repo_healthy(progress_bar: &mut console::Progress, path: &str) ->
     let options = console::ExecuteOptions {
         working_directory: Some(path.into()),
         arguments: vec!["fsck".into(), "--no-progress".into()],
+        ..Default::default()
+    };
+    execute_git_command(progress_bar, path, options).is_ok()
+}
+
+pub fn run_bare_repo_maintenance(progress_bar: &mut console::Progress, path: &str) -> bool {
+    let options = console::ExecuteOptions {
+        working_directory: Some(path.into()),
+        arguments: vec!["gc".into()],
+        ..Default::default()
+    };
+    execute_git_command(progress_bar, path, options).is_ok()
+}
+
+pub fn fetch_bare_repo(progress_bar: &mut console::Progress, path: &str) -> bool {
+    let options = console::ExecuteOptions {
+        working_directory: Some(path.into()),
+        arguments: vec!["fetch".into(), "--prune".into()],
         ..Default::default()
     };
     execute_git_command(progress_bar, path, options).is_ok()

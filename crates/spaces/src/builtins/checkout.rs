@@ -1046,9 +1046,18 @@ fn add_git_url_to_workspace_store_queue(
     url: &str,
     cow: &str,
 ) -> anyhow::Result<()> {
+    // Non-store clone modes (e.g. Shallow) have an empty cow prefix.
+    // Those repos are cloned directly into the workspace and have no
+    // presence inside the store directory, so there is nothing to track.
+    if cow.is_empty() {
+        return Ok(());
+    }
     let mut workspace = workspace_arc.write();
     if let Ok((store_path, repo_name)) = git::BareRepository::url_to_relative_path_and_name(url) {
-        let store_path = format!("{cow}{store_path}/{repo_name}");
+        // `store_path` from url_to_relative_path_and_name already ends with '/'
+        // (e.g. "https/github.com/BurntSushi/"). Do NOT add another '/' before
+        // repo_name or the manifest key will contain a double-slash.
+        let store_path = format!("{cow}{store_path}{repo_name}");
         workspace
             .add_store_entry(store_path.into())
             .context(format_context!("while adding git url to store queue"))?;

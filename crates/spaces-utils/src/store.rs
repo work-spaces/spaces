@@ -161,9 +161,16 @@ impl Store {
                 for (ws_root, ws_link) in value.workspace_links {
                     existing_entry.workspace_links.insert(ws_root, ws_link);
                 }
-                // Update last_used and size to the newer values
+                // Update last_used unconditionally.
                 existing_entry.last_used = value.last_used;
-                existing_entry.size = value.size;
+                // Only update size if the incoming value is non-zero.
+                // `add_store_entry` is called at parse time (before archives are
+                // downloaded), so the in-memory size is 0 for entries that don't
+                // exist on disk yet. Blindly overwriting would clobber a valid
+                // non-zero size that was recorded in a previous run.
+                if value.size > 0 {
+                    existing_entry.size = value.size;
+                }
             } else {
                 // Entry doesn't exist, insert it
                 self.entries.insert(key, value);
@@ -318,18 +325,19 @@ impl Store {
         // Collect unmanaged directory sizes before printing anything, with progress indicator.
         let managed_top_level_dirs = self.get_managed_top_level_dirs();
 
+        let mut progress = console::Progress::new(
+            console.clone(),
+            "Scanning managed store directories",
+            None,
+            None,
+        );
+
         let mut unmanaged: Vec<(String, u64, std::time::SystemTime)> = Vec::new();
         {
             let candidates =
                 get_unmanaged_dir_entries(&self.path_to_store, &managed_top_level_dirs);
 
             if !candidates.is_empty() {
-                let mut progress = console::Progress::new(
-                    console.clone(),
-                    "Scanning unmanaged store directories",
-                    None,
-                    None,
-                );
                 for entry in candidates {
                     let name = entry.file_name().to_string_lossy().to_string();
                     progress.set_message(name.as_str());
@@ -355,7 +363,6 @@ impl Store {
                     };
                     unmanaged.push((name, size, dir_modified));
                 }
-                progress.set_finalize_none();
             }
         }
 
@@ -462,13 +469,18 @@ impl Store {
 
         show_bare_info(
             &bare_path,
-            console.clone(),
-            is_ci,
+            &mut progress,
             &format,
             workspace_count,
             &bare_repo_paths,
         )
         .context(format_context!("While showing bare repositories info"))?;
+
+        progress.set_finalize_lines(logger::make_finalize_line(
+            logger::FinalType::Finished,
+            progress.elapsed(),
+            "gathering store info",
+        ));
 
         Ok(())
     }
@@ -523,12 +535,12 @@ impl Store {
             {
                 let display = relative_path.display();
                 if is_dry_run {
-                    logger(console.clone()).info(
+                    logger(console.clone()).message(
                         format!("Unlisted Entry (not removing, dry run): {display}",).as_str(),
                     );
                 } else {
                     logger(console.clone())
-                        .info(format!("Unlisted Entry (removing): {display}").as_str());
+                        .message(format!("Unlisted Entry (removing): {display}").as_str());
 
                     if entry_path.starts_with(&path_to_store) {
                         match std::fs::remove_dir_all(entry_path) {
@@ -562,6 +574,86 @@ impl Store {
         let group = ci::GithubLogGroup::new_group(console.clone(), is_ci, "Spaces Store Fix")?;
         let log = logger(console.clone());
 
+        // Counters accumulated across all fix phases for the finalize summary.
+        let keys_normalised: usize;
+        let entries_removed: usize;
+        let stale_links_cleaned: usize;
+        let mut bare_repos_repaired: usize = 0;
+
+        // ----------------------------------------------------------------
+        // Phase 0: normalise manifest keys that contain double slashes.
+        //
+        // Earlier versions of spaces built manifest keys with a redundant '/'
+        // separator, producing paths such as
+        //   "bare/https/github.com/BurntSushi//ripgrep.git"
+        // because `url_to_relative_path_and_name` returns a path that already
+        // ends in '/' and the caller appended another one.
+        //
+        // `std::path::Path::components()` silently collapses consecutive
+        // separators, so collecting them back into a PathBuf yields the
+        // canonical form.  We rename the entry in the manifest and merge any
+        // duplicate that may already exist under the canonical key.
+        // ----------------------------------------------------------------
+        {
+            let bad_keys: Vec<Arc<str>> = self
+                .entries
+                .keys()
+                .filter(|k| {
+                    // A key with "//" (or more) in it needs normalisation.
+                    let canonical: std::path::PathBuf =
+                        std::path::Path::new(k.as_ref()).components().collect();
+                    canonical.display().to_string() != k.as_ref()
+                })
+                .cloned()
+                .collect();
+
+            if !bad_keys.is_empty() {
+                if is_dry_run {
+                    for key in &bad_keys {
+                        let canonical: std::path::PathBuf =
+                            std::path::Path::new(key.as_ref()).components().collect();
+                        log.message(
+                            format!(
+                                "Would normalise manifest key: {key} → {}",
+                                canonical.display()
+                            )
+                            .as_str(),
+                        );
+                    }
+                } else {
+                    for key in &bad_keys {
+                        let canonical: std::path::PathBuf =
+                            std::path::Path::new(key.as_ref()).components().collect();
+                        let canonical_str: Arc<str> = canonical.display().to_string().into();
+
+                        // Remove the malformed entry; keep its data for merging.
+                        if let Some(old_entry) = self.entries.remove(key) {
+                            log.message(
+                                format!("Normalised manifest key: {key} → {canonical_str}")
+                                    .as_str(),
+                            );
+                            let canonical_entry = self
+                                .entries
+                                .entry(canonical_str.clone())
+                                .or_insert_with(|| old_entry.clone());
+                            // Merge workspace links from the old entry.
+                            for (ws_root, ws_link) in old_entry.workspace_links {
+                                canonical_entry.workspace_links.insert(ws_root, ws_link);
+                            }
+                            // Preserve the larger / more-recent size.
+                            if old_entry.size > canonical_entry.size {
+                                canonical_entry.size = old_entry.size;
+                            }
+                            if old_entry.last_used > canonical_entry.last_used {
+                                canonical_entry.last_used = old_entry.last_used;
+                            }
+                        }
+                    }
+                }
+            }
+            keys_normalised = bad_keys.len();
+        }
+
         let mut remove_entries = Vec::new();
         let mut delete_directories = Vec::new();
         let path_to_store = self.path_to_store.clone();
@@ -574,7 +666,7 @@ impl Store {
         let mut progress = console::Progress::new(console.clone(), "scanning", Some(total), None);
 
         for (key, value) in self.entries.iter_mut() {
-            log.info(format!("Checking {key}").as_str());
+            log.message(format!("Checking {key}").as_str());
             progress.set_message(key.as_ref());
             let path = path_to_store.join(key.as_ref());
             if !path.exists() {
@@ -585,11 +677,11 @@ impl Store {
             if updated_size != value.size {
                 if !is_dry_run {
                     let bytesize = bytesize::ByteSize(updated_size);
-                    log.info(format!(" Updated size {}", bytesize.display()).as_str());
+                    log.message(format!(" Updated size {}", bytesize.display()).as_str());
                     value.size = updated_size;
                 } else {
                     let bytesize = bytesize::ByteSize(updated_size);
-                    log.info(format!(" Updating size {}", bytesize.display()).as_str());
+                    log.message(format!(" Updating size {}", bytesize.display()).as_str());
                 }
             }
 
@@ -610,17 +702,19 @@ impl Store {
             progress.increment(1);
         }
 
+        entries_removed = remove_entries.len();
+
         if !is_dry_run {
             make_path_dirs_user_writable(path_to_store.as_path());
 
             for key in remove_entries {
-                log.info(format!("Removing entry: {key}").as_str());
+                log.message(format!("Removing entry: {key}").as_str());
                 self.entries.remove(&key);
             }
 
             for path in delete_directories {
                 if path.starts_with(path_to_store.as_path()) {
-                    log.info(format!("Deleting directory: {}", path.display()).as_str());
+                    log.message(format!("Deleting directory: {}", path.display()).as_str());
                     std::fs::remove_dir_all(path.as_path()).unwrap_or_else(|err| {
                         log.warning(
                             format!("Failed to delete directory {}: {err}", path.display())
@@ -643,7 +737,7 @@ impl Store {
         if !unmanaged_candidates.is_empty() {
             for entry in unmanaged_candidates {
                 let name = entry.file_name().to_string_lossy().to_string();
-                log.info(format!("Checking {name} (unmanaged)").as_str());
+                log.message(format!("Checking {name} (unmanaged)").as_str());
                 progress.set_message(name.as_str());
                 let size = get_size_of_path(&entry.path()).unwrap_or(0);
                 let dir_modified = get_dir_modified_system_time(&entry.path());
@@ -659,7 +753,7 @@ impl Store {
         }
 
         // Clean up stale workspace links
-        log.info("Verifying workspace links");
+        log.message("Verifying workspace links");
 
         if is_dry_run {
             // Count stale links without removing them
@@ -674,8 +768,9 @@ impl Store {
             }
 
             if stale_count > 0 {
-                log.info(format!("Would remove {} stale workspace links", stale_count).as_str());
+                log.message(format!("Would remove {} stale workspace links", stale_count).as_str());
             }
+            stale_links_cleaned = stale_count;
         } else {
             // Actually remove stale links
             let verify_result = self
@@ -683,7 +778,7 @@ impl Store {
                 .context(format_context!("While verifying workspace links"))?;
 
             if verify_result.stale_links_removed > 0 {
-                log.info(
+                log.message(
                     format!(
                         "Removed {} stale workspace links",
                         verify_result.stale_links_removed
@@ -691,9 +786,171 @@ impl Store {
                     .as_str(),
                 );
             }
+            stale_links_cleaned = verify_result.stale_links_removed;
         }
 
-        progress.set_finalize_none();
+        // Bare repo maintenance and repair
+        {
+            let bare_prefix = format!("{}/", SPACES_STORE_BARE);
+            let bare_repo_paths: Vec<std::path::PathBuf> = self
+                .entries
+                .keys()
+                .filter(|key| key.starts_with(&bare_prefix))
+                .map(|key| path_to_store.join(key.as_ref()))
+                .collect();
+
+            if !bare_repo_paths.is_empty() {
+                if is_dry_run {
+                    let mut repos_needing_repair = Vec::new();
+                    for repo_path in &bare_repo_paths {
+                        let path_str = repo_path.to_string_lossy();
+                        progress.set_message(path_str.as_ref());
+                        if !crate::git::is_bare_repo_healthy(&mut progress, path_str.as_ref()) {
+                            log.warning(
+                                format!(
+                                    "Bare repo has problems (would attempt repair): {path_str}"
+                                )
+                                .as_str(),
+                            );
+                            repos_needing_repair.push(repo_path.clone());
+                        }
+                        progress.increment(1);
+                    }
+                    log.message(
+                        format!("Would run gc on {} bare repos", bare_repo_paths.len()).as_str(),
+                    );
+                    if !repos_needing_repair.is_empty() {
+                        log.message(
+                            format!(
+                                "Would attempt fetch repair on {} bare repos",
+                                repos_needing_repair.len()
+                            )
+                            .as_str(),
+                        );
+                    }
+                    bare_repos_repaired = repos_needing_repair.len();
+                } else {
+                    // Phase 1: maintenance
+                    {
+                        for repo_path in &bare_repo_paths {
+                            let path_str = repo_path.to_string_lossy();
+                            progress.set_message(path_str.as_ref());
+                            if !crate::git::run_bare_repo_maintenance(
+                                &mut progress,
+                                path_str.as_ref(),
+                            ) {
+                                log.warning(
+                                    format!("gc failed for bare repo: {path_str}").as_str(),
+                                );
+                            }
+                            progress.increment(1);
+                        }
+                    }
+
+                    // Phase 2: detection
+                    let mut repos_needing_repair = Vec::new();
+                    {
+                        for repo_path in &bare_repo_paths {
+                            let path_str = repo_path.to_string_lossy();
+                            progress.set_message(path_str.as_ref());
+                            if !crate::git::is_bare_repo_healthy(&mut progress, path_str.as_ref()) {
+                                repos_needing_repair.push(repo_path.clone());
+                            }
+                            progress.increment(1);
+                        }
+                    }
+
+                    // Phase 3: repair
+                    if !repos_needing_repair.is_empty() {
+                        for repo_path in &repos_needing_repair {
+                            let path_str = repo_path.to_string_lossy();
+                            progress.set_message(path_str.as_ref());
+                            if crate::git::fetch_bare_repo(&mut progress, path_str.as_ref()) {
+                                if crate::git::is_bare_repo_healthy(
+                                    &mut progress,
+                                    path_str.as_ref(),
+                                ) {
+                                    bare_repos_repaired += 1;
+                                    log.info(format!("Repaired bare repo: {path_str}").as_str());
+                                } else {
+                                    log.warning(
+                                        format!(
+                                            "Bare repo still has problems after repair: {path_str} - consider re-cloning"
+                                        )
+                                        .as_str(),
+                                    );
+                                }
+                            } else {
+                                log.warning(
+                                    format!(
+                                        "Failed to fetch bare repo: {path_str} - consider re-cloning"
+                                    )
+                                    .as_str(),
+                                );
+                            }
+                            progress.increment(1);
+                        }
+                    }
+                }
+            }
+            let finalize_message = {
+                let parts: Vec<String> = [
+                    (
+                        keys_normalised,
+                        if is_dry_run {
+                            "key(s) to normalise"
+                        } else {
+                            "key(s) normalised"
+                        },
+                    ),
+                    (
+                        entries_removed,
+                        if is_dry_run {
+                            "entr(ies) to remove"
+                        } else {
+                            "entr(ies) removed"
+                        },
+                    ),
+                    (
+                        stale_links_cleaned,
+                        if is_dry_run {
+                            "stale link(s) to clean"
+                        } else {
+                            "stale link(s) cleaned"
+                        },
+                    ),
+                    (
+                        bare_repos_repaired,
+                        if is_dry_run {
+                            "bare repo(s) to repair"
+                        } else {
+                            "bare repo(s) repaired"
+                        },
+                    ),
+                ]
+                .into_iter()
+                .filter(|(n, _)| *n > 0)
+                .map(|(n, label)| format!("{n} {label}"))
+                .collect();
+
+                if parts.is_empty() {
+                    if is_dry_run {
+                        "dry run: store is healthy".to_string()
+                    } else {
+                        "store is healthy".to_string()
+                    }
+                } else if is_dry_run {
+                    format!("dry run: {}", parts.join(", "))
+                } else {
+                    format!("fixed: {}", parts.join(", "))
+                }
+            };
+            progress.set_finalize_lines(logger::make_finalize_line(
+                logger::FinalType::Finished,
+                progress.elapsed(),
+                finalize_message.as_str(),
+            ));
+        }
 
         group.end_group(console.clone(), is_ci)?;
         Ok(())
@@ -1321,8 +1578,7 @@ fn emit_pretty_bare_info(
 
 fn show_bare_info(
     bare_path: &std::path::Path,
-    console: console::Console,
-    is_ci: ci::IsCi,
+    progress: &mut console::Progress,
     format: &console::Format,
     workspace_count: usize,
     bare_repo_paths: &[std::path::PathBuf],
@@ -1331,36 +1587,26 @@ fn show_bare_info(
         return Ok(());
     }
 
-    let group =
-        ci::GithubLogGroup::new_group(console.clone(), is_ci, "Spaces Bare Repositories Info")?;
-
     let bare_size = get_size_of_path(bare_path).unwrap_or(0);
 
     let repos_checked = bare_repo_paths.len();
     let mut repos_with_problems = 0usize;
 
     if !bare_repo_paths.is_empty() {
-        let mut progress = console::Progress::new(
-            console.clone(),
-            "Checking bare repo health",
-            Some(repos_checked as u64),
-            None,
-        );
         for repo_path in bare_repo_paths {
             let path_str = repo_path.to_string_lossy();
             progress.set_message(path_str.as_ref());
-            if !crate::git::is_bare_repo_healthy(&mut progress, path_str.as_ref()) {
+            if !crate::git::is_bare_repo_healthy(progress, path_str.as_ref()) {
                 repos_with_problems += 1;
             }
             progress.increment(1);
         }
-        progress.set_finalize_none();
     }
 
     match format {
         console::Format::Pretty => {
             emit_pretty_bare_info(
-                &console,
+                &progress.console,
                 bare_size,
                 workspace_count,
                 repos_checked,
@@ -1368,7 +1614,7 @@ fn show_bare_info(
             );
         }
         console::Format::Yaml => {
-            console.write(
+            progress.console.write(
                 &serialise_bare_info_yaml(
                     bare_size,
                     workspace_count,
@@ -1379,7 +1625,7 @@ fn show_bare_info(
             )?;
         }
         console::Format::Json => {
-            console.write(
+            progress.console.write(
                 &serialise_bare_info_json(
                     bare_size,
                     workspace_count,
@@ -1391,6 +1637,5 @@ fn show_bare_info(
         }
     }
 
-    group.end_group(console.clone(), is_ci)?;
     Ok(())
 }
