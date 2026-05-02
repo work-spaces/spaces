@@ -155,6 +155,11 @@ pub fn update_latest_symlink(log_folder_name: &str) -> anyhow::Result<()> {
         "Failed to create temp symlink in {}",
         ws::SPACES_LOGS_NAME
     ))?;
+    // On Windows `rename` (MoveFileW without REPLACE_EXISTING) fails when the
+    // destination already exists, so remove it first.  On Unix the rename(2)
+    // syscall atomically replaces the destination, giving a zero-gap swap.
+    #[cfg(windows)]
+    let _ = symlink::remove_symlink_auto(latest_path);
     std::fs::rename(temp_path, latest_path).context(format_context!(
         "Failed to atomically update latest symlink in {}",
         ws::SPACES_LOGS_NAME

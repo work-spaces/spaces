@@ -645,10 +645,6 @@ pub fn run_starlark_modules_in_workspace(
     .context(format_context!("while getting workspace"))?;
 
     let workspace_lock = if phase == task::Phase::Checkout {
-        mtarget::ModuleDeps::clear_deps_dir().context(format_context!(
-            "while clearing module deps directory before checkout/sync"
-        ))?;
-
         let lock_file_name = format!("checkout.{}", lock::LOCK_FILE_SUFFIX);
         let mut workspace_lock = lock::FileLock::new(
             std::path::Path::new(".spaces")
@@ -657,11 +653,18 @@ pub fn run_starlark_modules_in_workspace(
                 .into(),
         );
 
-        if let Ok(lock::LockStatus::Busy) = workspace_lock.try_lock() {
+        let try_lock_result = workspace_lock.try_lock().context(format_context!(
+            "Failed to create the checkout workspace lock"
+        ))?;
+        if lock::LockStatus::Busy == try_lock_result {
             return Err(format_error!(
                 "Cannot checkout/sync on this workspace. Another sync is in progress."
             ));
-        };
+        }
+
+        mtarget::ModuleDeps::clear_deps_dir().context(format_context!(
+            "while clearing module deps directory before checkout/sync"
+        ))?;
 
         Some(workspace_lock)
     } else {
