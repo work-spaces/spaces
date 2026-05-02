@@ -463,6 +463,15 @@ pub fn get_commit_tag(
     }
 }
 
+pub fn is_bare_repo_healthy(progress_bar: &mut console::Progress, path: &str) -> bool {
+    let options = console::ExecuteOptions {
+        working_directory: Some(path.into()),
+        arguments: vec!["fsck".into(), "--no-progress".into()],
+        ..Default::default()
+    };
+    execute_git_command(progress_bar, path, options).is_ok()
+}
+
 fn get_branch_log(
     progress_bar: &mut console::Progress,
     url: &str,

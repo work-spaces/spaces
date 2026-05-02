@@ -448,18 +448,27 @@ impl Store {
 
         // Count unique workspaces linking to bare repositories
         let mut bare_workspaces = std::collections::HashSet::new();
+        let mut bare_repo_paths: Vec<std::path::PathBuf> = Vec::new();
         let bare_prefix = format!("{}/", SPACES_STORE_BARE);
         for (key, entry) in &self.entries {
             if key.starts_with(&bare_prefix) {
                 for workspace_root in entry.workspace_links.keys() {
                     bare_workspaces.insert(workspace_root.clone());
                 }
+                bare_repo_paths.push(self.get_path_in_store(std::path::Path::new(key.as_ref())));
             }
         }
         let workspace_count = bare_workspaces.len();
 
-        show_bare_info(&bare_path, console.clone(), is_ci, &format, workspace_count)
-            .context(format_context!("While showing bare repositories info"))?;
+        show_bare_info(
+            &bare_path,
+            console.clone(),
+            is_ci,
+            &format,
+            workspace_count,
+            &bare_repo_paths,
+        )
+        .context(format_context!("While showing bare repositories info"))?;
 
         Ok(())
     }
@@ -1183,15 +1192,21 @@ fn get_size_of_path(path: &std::path::Path) -> anyhow::Result<u64> {
 struct BareInfoOutput {
     bare_size_bytes: u64,
     workspace_count: usize,
+    repos_checked: usize,
+    repos_with_problems: usize,
 }
 
 fn serialise_bare_info_json(
     bare_size_bytes: u64,
     workspace_count: usize,
+    repos_checked: usize,
+    repos_with_problems: usize,
 ) -> anyhow::Result<String> {
     let output = BareInfoOutput {
         bare_size_bytes,
         workspace_count,
+        repos_checked,
+        repos_with_problems,
     };
     serde_json::to_string_pretty(&output)
         .context(format_context!("Failed to serialize bare info as JSON"))
@@ -1200,10 +1215,14 @@ fn serialise_bare_info_json(
 fn serialise_bare_info_yaml(
     bare_size_bytes: u64,
     workspace_count: usize,
+    repos_checked: usize,
+    repos_with_problems: usize,
 ) -> anyhow::Result<String> {
     let output = BareInfoOutput {
         bare_size_bytes,
         workspace_count,
+        repos_checked,
+        repos_with_problems,
     };
     serde_yaml::to_string(&output).context(format_context!("Failed to serialize bare info as YAML"))
 }
@@ -1217,7 +1236,13 @@ fn bare_separator(console: &console::Console, width: usize) {
     console.emit_line(line);
 }
 
-fn emit_pretty_bare_info(console: &console::Console, bare_size: u64, workspace_count: usize) {
+fn emit_pretty_bare_info(
+    console: &console::Console,
+    bare_size: u64,
+    workspace_count: usize,
+    repos_checked: usize,
+    repos_with_problems: usize,
+) {
     // heading
     {
         let mut line = console::Line::default();
@@ -1256,6 +1281,41 @@ fn emit_pretty_bare_info(console: &console::Console, bare_size: u64, workspace_c
         console.emit_line(line);
     }
 
+    // repos checked row
+    {
+        let mut line = console::Line::default();
+        line.push(console::Span::new_styled_lossy(StyledContent::new(
+            console::key_style(),
+            format!("  {:<14}", "Repos Checked"),
+        )));
+        line.push(console::Span::new_unstyled_lossy(format!(
+            "{}",
+            repos_checked
+        )));
+        console.emit_line(line);
+    }
+
+    // health row
+    {
+        let mut line = console::Line::default();
+        line.push(console::Span::new_styled_lossy(StyledContent::new(
+            console::key_style(),
+            format!("  {:<14}", "Health"),
+        )));
+        if repos_with_problems == 0 {
+            line.push(console::Span::new_unstyled_lossy("ok"));
+        } else {
+            line.push(console::Span::new_styled_lossy(StyledContent::new(
+                console::warning_style(),
+                format!(
+                    "{} repos have problems   !! re-clone affected repos",
+                    repos_with_problems
+                ),
+            )));
+        }
+        console.emit_line(line);
+    }
+
     bare_separator(console, 56);
 }
 
@@ -1265,6 +1325,7 @@ fn show_bare_info(
     is_ci: ci::IsCi,
     format: &console::Format,
     workspace_count: usize,
+    bare_repo_paths: &[std::path::PathBuf],
 ) -> anyhow::Result<()> {
     if !bare_path.exists() {
         return Ok(());
@@ -1275,20 +1336,57 @@ fn show_bare_info(
 
     let bare_size = get_size_of_path(bare_path).unwrap_or(0);
 
+    let repos_checked = bare_repo_paths.len();
+    let mut repos_with_problems = 0usize;
+
+    if !bare_repo_paths.is_empty() {
+        let mut progress = console::Progress::new(
+            console.clone(),
+            "Checking bare repo health",
+            Some(repos_checked as u64),
+            None,
+        );
+        for repo_path in bare_repo_paths {
+            let path_str = repo_path.to_string_lossy();
+            progress.set_message(path_str.as_ref());
+            if !crate::git::is_bare_repo_healthy(&mut progress, path_str.as_ref()) {
+                repos_with_problems += 1;
+            }
+            progress.increment(1);
+        }
+        progress.set_finalize_none();
+    }
+
     match format {
         console::Format::Pretty => {
-            emit_pretty_bare_info(&console, bare_size, workspace_count);
+            emit_pretty_bare_info(
+                &console,
+                bare_size,
+                workspace_count,
+                repos_checked,
+                repos_with_problems,
+            );
         }
         console::Format::Yaml => {
             console.write(
-                &serialise_bare_info_yaml(bare_size, workspace_count)
-                    .context(format_context!("Failed to serialize bare info as YAML"))?,
+                &serialise_bare_info_yaml(
+                    bare_size,
+                    workspace_count,
+                    repos_checked,
+                    repos_with_problems,
+                )
+                .context(format_context!("Failed to serialize bare info as YAML"))?,
             )?;
         }
         console::Format::Json => {
             console.write(
-                &serialise_bare_info_json(bare_size, workspace_count)
-                    .context(format_context!("Failed to serialize bare info as JSON"))?,
+                &serialise_bare_info_json(
+                    bare_size,
+                    workspace_count,
+                    repos_checked,
+                    repos_with_problems,
+                )
+                .context(format_context!("Failed to serialize bare info as JSON"))?,
             )?;
         }
     }
