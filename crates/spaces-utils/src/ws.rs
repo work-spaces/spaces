@@ -1,4 +1,4 @@
-use crate::{changes, graph, inputs, logger, store};
+use crate::{changes, fs_mutex, graph, inputs, logger, store};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 
@@ -151,18 +151,12 @@ impl CheckoutStore {
     }
 
     pub fn save(&self) -> anyhow::Result<()> {
-        let path = std::path::Path::new(CHECKOUT_STORE_FILE_NAME);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).context(format_context!(
-                "Failed to create parent directory {}",
-                parent.display()
-            ))?;
-        }
         let content = serde_json::to_string_pretty(self)
             .context(format_context!("Failed to serialize checkout store"))?;
-        std::fs::write(path, content.as_str()).context(format_context!(
-            "Failed to save checkout store file {}",
-            path.display()
+        let path: Arc<std::path::Path> = std::path::Path::new(CHECKOUT_STORE_FILE_NAME).into();
+        let mut mutex = fs_mutex::FsMutex::new(path);
+        mutex.write_str(content.as_str()).context(format_context!(
+            "Failed to save checkout store file {CHECKOUT_STORE_FILE_NAME}"
         ))?;
         Ok(())
     }
@@ -215,7 +209,11 @@ impl BinSettings {
     fn save(&self, path: &str) -> anyhow::Result<()> {
         let encoded =
             postcard::to_stdvec(self).context(format_context!("Failed to encode bin settings"))?;
-        std::fs::write(path, encoded).context(format_context!("Failed to write to {path:?}"))?;
+        let path: Arc<std::path::Path> = std::path::Path::new(path).into();
+        let mut mutex = fs_mutex::FsMutex::new(path);
+        mutex
+            .write_bytes(&encoded)
+            .context(format_context!("Failed to write bin settings"))?;
         Ok(())
     }
 
@@ -353,20 +351,13 @@ impl JsonSettings {
     }
 
     pub fn save(&self, path: &str) -> anyhow::Result<()> {
-        let path = std::path::Path::new(path);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).context(format_context!(
-                "Failed to create parent directory {}",
-                parent.display()
-            ))?;
-        }
-
         let content = serde_json::to_string_pretty(&self)
             .context(format_context!("Failed to serialize load order"))?;
-        std::fs::write(path, content.as_str()).context(format_context!(
-            "Failed to save settings file {}",
-            path.display()
-        ))?;
+        let arc_path: Arc<std::path::Path> = std::path::Path::new(path).into();
+        let mut mutex = fs_mutex::FsMutex::new(arc_path);
+        mutex
+            .write_str(content.as_str())
+            .context(format_context!("Failed to save settings file {path}"))?;
         Ok(())
     }
 
@@ -441,20 +432,13 @@ impl CheckoutSettings {
     }
 
     pub fn save(&self, path: &str) -> anyhow::Result<()> {
-        let path = std::path::Path::new(path);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).context(format_context!(
-                "Failed to create parent directory {}",
-                parent.display()
-            ))?;
-        }
-
         let content = serde_json::to_string_pretty(&self)
             .context(format_context!("Failed to serialize checkout settings"))?;
-        std::fs::write(path, content.as_str()).context(format_context!(
-            "Failed to save settings file {}",
-            path.display()
-        ))?;
+        let arc_path: Arc<std::path::Path> = std::path::Path::new(path).into();
+        let mut mutex = fs_mutex::FsMutex::new(arc_path);
+        mutex
+            .write_str(content.as_str())
+            .context(format_context!("Failed to save settings file {path}"))?;
         Ok(())
     }
 

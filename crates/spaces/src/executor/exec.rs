@@ -243,6 +243,17 @@ impl Exec {
             allow_failure: true,
         };
 
+        let rule_name_for_file = name.replace(['/', ':'], "_");
+        let lock_file_path = format!(
+            ".spaces/locks/{}.{}",
+            rule_name_for_file,
+            lock::LOCK_FILE_SUFFIX
+        );
+        let mut file_lock = lock::FileLock::new(std::path::Path::new(&lock_file_path).into());
+        file_lock
+            .lock(progress.console.clone())
+            .context(format_context!("Failed to acquire lock for rule {name}"))?;
+
         logger(progress.console.clone(), name).info(
             format!(
                 "Executing: {} {}",

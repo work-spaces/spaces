@@ -136,6 +136,37 @@ pub enum LogsCommand {
     },
 }
 
+/// Atomically update the `latest` symlink inside the logs directory to point
+/// to `log_folder_name` (a bare folder name such as `logs_20250101-12-00-00-000`,
+/// **not** a full path).
+///
+/// Uses a create-temp-then-rename approach so that:
+/// - `latest` is never absent (no gap between delete and create)
+/// - two concurrent processes both succeed (the last `rename` wins, and both
+///   targets are valid log folders)
+pub fn update_latest_symlink(log_folder_name: &str) -> anyhow::Result<()> {
+    let latest_symlink = format!("{}/latest", ws::SPACES_LOGS_NAME);
+    let latest_path = std::path::Path::new(latest_symlink.as_str());
+    let temp_symlink = format!("{}/latest.tmp.{}", ws::SPACES_LOGS_NAME, std::process::id());
+    let temp_path = std::path::Path::new(temp_symlink.as_str());
+    // Remove any leftover temp symlink from a previous crash of this PID.
+    let _ = symlink::remove_symlink_auto(temp_path);
+    symlink::symlink_dir(log_folder_name, temp_path).context(format_context!(
+        "Failed to create temp symlink in {}",
+        ws::SPACES_LOGS_NAME
+    ))?;
+    // On Windows `rename` (MoveFileW without REPLACE_EXISTING) fails when the
+    // destination already exists, so remove it first.  On Unix the rename(2)
+    // syscall atomically replaces the destination, giving a zero-gap swap.
+    #[cfg(windows)]
+    let _ = symlink::remove_symlink_auto(latest_path);
+    std::fs::rename(temp_path, latest_path).context(format_context!(
+        "Failed to atomically update latest symlink in {}",
+        ws::SPACES_LOGS_NAME
+    ))?;
+    Ok(())
+}
+
 pub fn execute(
     console: console::Console,
     workspace_path: &std::path::Path,
