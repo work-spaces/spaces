@@ -391,7 +391,7 @@ pub fn evaluate_module(
 
     let dialect = get_dialect();
     let ast = AstModule::parse(name.as_ref(), content, &dialect)?;
-    let (module, module_deps, module_target) = evaluate_ast(
+    let evaluate_ast_result = evaluate_ast(
         ast,
         name.clone(),
         workspace,
@@ -399,7 +399,13 @@ pub fn evaluate_module(
         globals_config,
         eval_context,
         checkout_state_digest,
-    )?;
+    );
+
+    if evaluate_ast_result.is_err() {
+        singleton::set_evaluation_failure();
+    }
+
+    let (module, module_deps, module_target) = evaluate_ast_result?;
 
     if workspace::is_rules_module(name.as_ref())
         && matches!(
