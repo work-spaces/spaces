@@ -377,6 +377,8 @@ impl Git {
 
         let mut clone_arguments: Vec<Arc<str>> = vec![
             "clone".into(),
+            "-c".into(),
+            "core.commitGraph=false".into(),
             "--reference".into(),
             bare_repo.full_path.clone(),
             "--dissociate".into(),

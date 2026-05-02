@@ -39,48 +39,6 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         }
     }
 
-    /// Sets an environment variable.
-    ///
-    /// ```python
-    /// env.set("FOO", "bar")
-    /// ```
-    fn set(name: &str, value: &str) -> anyhow::Result<NoneType> {
-        if is_lsp_mode() {
-            return Ok(NoneType);
-        }
-        // SAFETY: std::env::set_var is unsafe in Rust edition 2024 because
-        // concurrent environment reads from other threads (e.g. via getenv in
-        // C libraries) are not thread-safe on POSIX. This is safe here because
-        // the Starlark evaluator runs script execution on a single thread; no
-        // other thread reads or mutates the environment concurrently during
-        // script evaluation.
-        unsafe {
-            std::env::set_var(name, value);
-        }
-        Ok(NoneType)
-    }
-
-    /// Unsets (removes) an environment variable.
-    ///
-    /// ```python
-    /// env.unset("FOO")
-    /// ```
-    fn unset(name: &str) -> anyhow::Result<NoneType> {
-        if is_lsp_mode() {
-            return Ok(NoneType);
-        }
-        // SAFETY: std::env::remove_var is unsafe in Rust edition 2024 because
-        // concurrent environment reads from other threads (e.g. via getenv in
-        // C libraries) are not thread-safe on POSIX. This is safe here because
-        // the Starlark evaluator runs script execution on a single thread; no
-        // other thread reads or mutates the environment concurrently during
-        // script evaluation.
-        unsafe {
-            std::env::remove_var(name);
-        }
-        Ok(NoneType)
-    }
-
     /// Returns whether an environment variable is present.
     ///
     /// ```python
