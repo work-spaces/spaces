@@ -730,7 +730,11 @@ pub fn evaluate_starlark_modules(
 
     logger.trace(format!("Input module queue:{module_queue:?}").as_str());
 
-    let globals_config = if rules_only_starlark {
+    let globals_config = if singleton::get_inspect_options().stardoc.is_some() {
+        // When generating stardoc, expose every builtin so that the full API
+        // surface is reflected in the generated documentation.
+        GlobalsConfig::All
+    } else if rules_only_starlark {
         GlobalsConfig::Rules
     } else {
         GlobalsConfig::RulesLegacy

@@ -401,6 +401,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             completions,
             all_targets,
         } => {
+            singleton::set_execution_phase(task::Phase::Inspect);
             if shell::is_spaces_shell() {
                 return Err(format_error!("Already running in a `spaces shell`"));
             }
