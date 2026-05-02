@@ -213,14 +213,13 @@ impl QueryCommand {
     /// export, otherwise returns `None`. Used by the argument handler to wire
     /// the stardoc collection pipeline before module evaluation.
     pub fn export_stardoc_path(&self) -> Option<Arc<str>> {
-        if let QueryCommand::Export { path, format, .. } = self {
-            let effective_format = match format {
-                Some(f) => f.clone(),
-                None => ExportFormat::infer_from_path(path.as_ref()),
-            };
-            if matches!(effective_format, ExportFormat::Stardoc) {
-                return Some(path.clone());
-            }
+        if let QueryCommand::Export {
+            path,
+            format: Some(ExportFormat::Stardoc),
+            ..
+        } = self
+        {
+            return Some(path.clone());
         }
         None
     }
