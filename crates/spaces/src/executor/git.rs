@@ -3,7 +3,7 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use utils::{git, lock, logger, ws};
+use utils::{features, git, lock, logger, ws};
 
 fn logger(console: console::Console, url: Arc<str>) -> logger::Logger {
     logger::Logger::new(console, url)
@@ -375,14 +375,28 @@ impl Git {
 
         let workspace_directory = self.get_clone_working_directory(workspace.clone());
 
-        let mut clone_arguments: Vec<Arc<str>> = vec![
-            "clone".into(),
-            "-c".into(),
-            "core.commitGraph=false".into(),
+        let mut clone_arguments: Vec<Arc<str>> = vec!["clone".into()];
+
+        if workspace
+            .read()
+            .features
+            .is_enabled(features::Feature::CloneWithoutCommitGraph)
+        {
+            clone_arguments.extend(vec![
+                "-c".into(),
+                "core.commitGraph=false".into(),
+                "-c".into(),
+                "fetch.writeCommitGraph=false".into(),
+                "-c".into(),
+                "gc.writeCommitGraph=false".into(),
+            ]);
+        }
+
+        clone_arguments.extend(vec![
             "--reference".into(),
             bare_repo.full_path.clone(),
             "--dissociate".into(),
-        ];
+        ]);
 
         // Add filter if specified (currently unused - Default and Blobless both use full clones)
         if let Some(ref filter_str) = filter {
