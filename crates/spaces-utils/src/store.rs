@@ -576,8 +576,7 @@ impl Store {
 
         // Counters accumulated across all fix phases for the finalize summary.
         let keys_normalised: usize;
-        let entries_removed: usize;
-        let stale_links_cleaned: usize;
+
         let mut bare_repos_repaired: usize = 0;
 
         // ----------------------------------------------------------------
@@ -702,7 +701,7 @@ impl Store {
             progress.increment(1);
         }
 
-        entries_removed = remove_entries.len();
+        let entries_removed: usize = remove_entries.len();
 
         if !is_dry_run {
             make_path_dirs_user_writable(path_to_store.as_path());
@@ -755,7 +754,7 @@ impl Store {
         // Clean up stale workspace links
         log.message("Verifying workspace links");
 
-        if is_dry_run {
+        let stale_links_cleaned = if is_dry_run {
             // Count stale links without removing them
             let mut stale_count = 0;
             for entry in self.entries.values() {
@@ -770,7 +769,7 @@ impl Store {
             if stale_count > 0 {
                 log.message(format!("Would remove {} stale workspace links", stale_count).as_str());
             }
-            stale_links_cleaned = stale_count;
+            stale_count
         } else {
             // Actually remove stale links
             let verify_result = self
@@ -786,8 +785,8 @@ impl Store {
                     .as_str(),
                 );
             }
-            stale_links_cleaned = verify_result.stale_links_removed;
-        }
+            verify_result.stale_links_removed
+        };
 
         // Bare repo maintenance and repair
         {
