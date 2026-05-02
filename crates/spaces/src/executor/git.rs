@@ -94,7 +94,7 @@ impl Git {
         let store_path = workspace.read().get_store_path();
         let store_repo_name: Arc<str> = name_dot_git.clone();
         let bare_repo_path: Arc<str> = format!(
-            "{store_path}/{}/{relative_bare_store_path}/{store_repo_name}",
+            "{store_path}/{}/{relative_bare_store_path}{store_repo_name}",
             utils::store::SPACES_STORE_BARE
         )
         .into();
@@ -242,8 +242,10 @@ impl Git {
             git::BareRepository::url_to_relative_path_and_name(&self.url).context(
                 format_context!("Failed to parse url for workspace link tracking"),
             )?;
+        // `relative_bare_store_path` already ends with '/' so do NOT add
+        // another separator before `name_dot_git` to avoid double-slash paths.
         let store_relative_path: Arc<str> = format!(
-            "{}/{}/{}",
+            "{}/{}{}",
             utils::store::SPACES_STORE_BARE,
             relative_bare_store_path,
             name_dot_git
@@ -452,8 +454,10 @@ impl Git {
             git::BareRepository::url_to_relative_path_and_name(&self.url).context(
                 format_context!("Failed to parse url for workspace link tracking"),
             )?;
+        // `relative_bare_store_path` already ends with '/' so do NOT add
+        // another separator before `name_dot_git` to avoid double-slash paths.
         let store_relative_path: Arc<str> = format!(
-            "{}/{}/{}",
+            "{}/{}{}",
             utils::store::SPACES_STORE_BARE,
             relative_bare_store_path,
             name_dot_git
