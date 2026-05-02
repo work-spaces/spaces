@@ -97,10 +97,20 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         content: &str,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<Value<'v>> {
-        if crate::is_lsp_mode() {
-            return Ok(eval.heap().alloc(serde_json::json!({})));
-        }
         let heap = eval.heap();
+        if crate::is_lsp_mode() {
+            // In LSP mode behave like try_string_to_dict: attempt the parse and
+            // return the real value on success so that the LSP gets accurate type
+            // information.  Fall back to an empty dict on any failure instead of
+            // propagating an error.
+            return Ok(match serde_yaml::from_str::<serde_yaml::Value>(content) {
+                Ok(yaml_value) => match serde_json::to_value(yaml_value) {
+                    Ok(json_value) => heap.alloc(json_value),
+                    Err(_) => heap.alloc(serde_json::json!({})),
+                },
+                Err(_) => heap.alloc(serde_json::json!({})),
+            });
+        }
         let yaml_value: serde_yaml::Value =
             serde_yaml::from_str(content).context(format_context!("bad yaml string"))?;
 
