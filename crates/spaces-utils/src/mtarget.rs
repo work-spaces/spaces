@@ -206,28 +206,31 @@ impl ModuleDeps {
     /// mirroring the workspace directory structure (e.g., `spaces/spaces.star` becomes
     /// `build/spaces-modules-deps/spaces/spaces.star.json`).
     pub fn save_to_json(&self) -> anyhow::Result<()> {
-        let file_path = get_json_path(MODULE_DEPS_DIR, self.module_name.as_ref());
-
-        // Create parent directories to mirror workspace structure
-        if let Some(parent) = std::path::Path::new(file_path.as_ref()).parent() {
-            std::fs::create_dir_all(parent).context(format_context!(
-                "Failed to create module results directory at {}",
-                parent.display()
-            ))?;
-        }
-
+        // Serialize before acquiring the lock to minimise the time spent holding it.
         let content = serde_json::to_string_pretty(&self)
             .context(format_context!("Failed to serialize module result"))?;
 
-        // rcache links files in as read-only - remove to replace the file
-        // this does not run exclusively under rcache so rcache
-        // cannot manage the file removal
-        let _ = std::fs::remove_file(&file_path);
+        let file_path = get_json_path(MODULE_DEPS_DIR, self.module_name.as_ref());
+        let mut mutex = crate::fs_mutex::FsMutex::new(file_path);
+        mutex.with_lock(|path| {
+            // Create parent directories to mirror workspace structure.
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).context(format_context!(
+                    "Failed to create module results directory at {}",
+                    parent.display()
+                ))?;
+            }
 
-        std::fs::write(&file_path, content).context(format_context!(
-            "Failed to write module result to {}",
-            file_path.display()
-        ))?;
+            // rcache links files in as read-only - remove to replace the file.
+            // This does not run exclusively under rcache so rcache
+            // cannot manage the file removal.
+            let _ = std::fs::remove_file(path);
+
+            std::fs::write(path, content.as_bytes()).context(format_context!(
+                "Failed to write module result to {}",
+                path.display()
+            ))
+        })?;
 
         Ok(())
     }
@@ -327,28 +330,31 @@ impl ModuleTarget {
     /// mirroring the workspace directory structure (e.g., `spaces/spaces.star` becomes
     /// `build/spaces-modules/spaces/spaces.star.json`).
     pub fn save_to_json(&self) -> anyhow::Result<()> {
-        let file_path = get_json_path(MODULE_TARGETS_DIR, self.module_name.as_ref());
-
-        // Create parent directories to mirror workspace structure
-        if let Some(parent) = std::path::Path::new(file_path.as_ref()).parent() {
-            std::fs::create_dir_all(parent).context(format_context!(
-                "Failed to create module results directory at {}",
-                parent.display()
-            ))?;
-        }
-
+        // Serialize before acquiring the lock to minimise the time spent holding it.
         let content = serde_json::to_string_pretty(&self)
             .context(format_context!("Failed to serialize module result"))?;
 
-        // rcache links files in as read-only - remove to replace the file
-        // this does not run exclusively under rcache so rcache
-        // cannot manage the file removal
-        let _ = std::fs::remove_file(&file_path);
+        let file_path = get_json_path(MODULE_TARGETS_DIR, self.module_name.as_ref());
+        let mut mutex = crate::fs_mutex::FsMutex::new(file_path);
+        mutex.with_lock(|path| {
+            // Create parent directories to mirror workspace structure.
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).context(format_context!(
+                    "Failed to create module results directory at {}",
+                    parent.display()
+                ))?;
+            }
 
-        std::fs::write(&file_path, content).context(format_context!(
-            "Failed to write module result to {}",
-            file_path.display()
-        ))?;
+            // rcache links files in as read-only - remove to replace the file.
+            // This does not run exclusively under rcache so rcache
+            // cannot manage the file removal.
+            let _ = std::fs::remove_file(path);
+
+            std::fs::write(path, content.as_bytes()).context(format_context!(
+                "Failed to write module result to {}",
+                path.display()
+            ))
+        })?;
 
         Ok(())
     }

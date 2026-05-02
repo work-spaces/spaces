@@ -6,6 +6,7 @@ pub mod copy;
 pub mod deps;
 pub mod environment;
 pub mod features;
+pub mod fs_mutex;
 pub mod git;
 pub mod graph;
 pub mod http_archive;

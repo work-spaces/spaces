@@ -176,6 +176,7 @@ impl FileLock {
         {
             let mut progress =
                 console::Progress::new(console.clone(), self.path.display(), None, None);
+            progress.set_prefix("file locked resource");
             self.wait(&mut progress)
                 .context(format_context!("failed to wait for lock"))?;
         }
@@ -185,6 +186,9 @@ impl FileLock {
     pub fn unlock(&mut self) -> anyhow::Result<()> {
         {
             let mut is_locked_write = self.is_locked.write();
+            if !*is_locked_write {
+                return Ok(());
+            }
             *is_locked_write = false;
         }
 

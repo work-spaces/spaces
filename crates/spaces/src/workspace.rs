@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use utils::{
-    age, environment, features, inputs, lock, logger, mtarget, platform, rcache, rule, store, ws,
+    age, environment, features, fs_mutex, inputs, lock, logger, logs, mtarget, platform, rcache,
+    rule, store, ws,
 };
 
 pub use rcache::CacheStatus;
@@ -78,7 +79,7 @@ pub struct RuleMetrics {
     cache_status: CacheStatus,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RuleMetricsFile {
     metrics: Vec<HashMap<Arc<str>, RuleMetrics>>,
 }
@@ -88,29 +89,32 @@ impl RuleMetricsFile {
         let workspace_path = workspace.read().get_absolute_path();
         let metric_entry = workspace.read().rule_metrics.clone();
         let metrics_file = format!("{workspace_path}/{}", ws::METRICS_FILE_NAME);
-        let metrics_path = std::path::Path::new(metrics_file.as_str());
-        let metrics = if metrics_path.exists() {
-            let content = std::fs::read_to_string(metrics_file.as_str()).context(
-                format_context!("Failed to read metrics file {metrics_file}"),
-            )?;
-            let mut metrics_content: RuleMetricsFile = serde_json::from_str(content.as_str())
-                .context(format_context!(
-                    "Failed to parse metrics file {metrics_file}"
+        let metrics_path: Arc<std::path::Path> = std::path::Path::new(metrics_file.as_str()).into();
+        let mut mutex = fs_mutex::FsMutex::new(metrics_path);
+        mutex.with_lock(|path| {
+            let metrics = if path.exists() {
+                let content = std::fs::read_to_string(path).context(format_context!(
+                    "Failed to read metrics file {}",
+                    path.display()
                 ))?;
-            metrics_content.metrics.push(metric_entry);
-            metrics_content
-        } else {
-            RuleMetricsFile {
-                metrics: vec![metric_entry],
-            }
-        };
+                let mut metrics_content: RuleMetricsFile =
+                    serde_json::from_str(content.as_str()).unwrap_or_default();
+                metrics_content.metrics.push(metric_entry);
+                metrics_content
+            } else {
+                RuleMetricsFile {
+                    metrics: vec![metric_entry],
+                }
+            };
 
-        let content = serde_json::to_string_pretty(&metrics)
-            .context(format_context!("Failed to serialize metrics"))?;
+            let content = serde_json::to_string_pretty(&metrics)
+                .context(format_context!("Failed to serialize metrics"))?;
 
-        std::fs::write(metrics_file.as_str(), content.as_str()).context(format_context!(
-            "Failed to write metrics file {metrics_file}"
-        ))?;
+            std::fs::write(path, content.as_str()).context(format_context!(
+                "Failed to write metrics file {}",
+                path.display()
+            ))
+        })?;
 
         Ok(())
     }
@@ -619,7 +623,7 @@ impl Workspace {
             logger(progress.console.clone()).debug(format!("Digesting {name}").as_str());
         }
 
-        let log_folder_name = format!("logs_{}", date.format("%Y%m%d-%H-%M-%S"));
+        let log_folder_name = format!("logs_{}", date.format("%Y%m%d-%H-%M-%S-%3f"));
         let log_directory: Arc<str> = format!("{}/{log_folder_name}", ws::SPACES_LOGS_NAME).into();
 
         if is_create_log_folder == IsCreateLogFolder::Yes {
@@ -627,14 +631,8 @@ impl Workspace {
                 "Failed to create log folder {log_directory}",
             ))?;
 
-            // Create or update a "latest" symlink pointing to the new log directory
-            let latest_symlink = format!("{}/latest", ws::SPACES_LOGS_NAME);
-            let latest_path = std::path::Path::new(latest_symlink.as_str());
-            // Remove existing symlink if it exists (ignore errors if it doesn't)
-            let _ = symlink::remove_symlink_auto(latest_path);
-            symlink::symlink_dir(&log_folder_name, latest_path).context(format_context!(
-                "Failed to create latest symlink in {}",
-                ws::SPACES_LOGS_NAME
+            logs::update_latest_symlink(&log_folder_name).context(format_context!(
+                "Failed to update latest symlink for log folder {log_folder_name}"
             ))?;
         }
 
