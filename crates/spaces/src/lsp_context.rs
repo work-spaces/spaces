@@ -168,51 +168,68 @@ impl SpacesContext {
         match result {
             Err(e) => {
                 eprintln!("{name}: Eval Result error: {e}");
-                let message = EvalMessage::from_error(std::path::Path::new(name), &e);
+                let mut message = EvalMessage::from_error(std::path::Path::new(name), &e);
 
-                // If the error's span belongs to a different file (e.g. a loaded
-                // module), `eval_message_to_lsp_diagnostic` would discard the path
-                // and keep only the raw line/column numbers.  Those numbers would
-                // then be published against the *current* file's URI, producing a
-                // squiggle at the wrong location (same line number, wrong file).
-                // Detect that case and remap: clear the span so the diagnostic
-                // lands at position 0:0 of the current file and fold the real
-                // origin into the description text.
-                let diagnostic = if !message.path.is_empty() && message.path != name {
-                    let origin_line = message.span.map(|s| s.begin.line + 1).unwrap_or(0);
-                    eprintln!(
-                        "{name}: error originates in a different file: {}:{}",
-                        message.path, origin_line
-                    );
-                    // Paths stored in the codemap are workspace-relative (the
-                    // leading workspace prefix and slashes are stripped in
-                    // evaluate_loads).  Re-attach the `//` workspace-root
-                    // prefix that spaces uses so the path is recognisable.
-                    // Absolute paths (starting with '/') are kept as-is.
-                    let display_path = if message.path.starts_with('/') {
-                        message.path.clone()
-                    } else {
-                        format!("//{}", message.path)
-                    };
-                    eval_message_to_lsp_diagnostic(EvalMessage {
-                        description: format!(
-                            "{} (in {}:{})",
-                            message.description, display_path, origin_line
-                        ),
-                        // Clear the span so the diagnostic is pinned to the
-                        // top of the current file rather than to the line
-                        // number that belongs to the loaded module.
-                        span: None,
-                        path: name.to_owned(),
-                        ..message
-                    })
-                } else {
-                    eval_message_to_lsp_diagnostic(message)
+                // The LSP server publishes diagnostics against the URI of the
+                // file that was just parsed (`name`). However, when an error
+                // originates inside a `load(...)`-ed module, `EvalMessage`'s
+                // span/path point at that other module. The result is a
+                // diagnostic whose range gets applied to the wrong file (the
+                // currently-open one), at a line number that only makes sense
+                // for the loaded module.
+                //
+                // To avoid this, detect when the error originated in a
+                // different file. If so, re-anchor the diagnostic onto the
+                // call site within the currently-open file by walking the
+                // call stack to find the deepest frame whose file matches
+                // `name`. That gives us the exact line/column where the
+                // user's code invoked the failing function. We also prefix
+                // the real `path:line:col` into the description so the user
+                // can navigate to the true error location.
+                let paths_match = |a: &str, b: &str| -> bool {
+                    let ap = std::path::Path::new(a);
+                    let bp = std::path::Path::new(b);
+                    match (ap.canonicalize(), bp.canonicalize()) {
+                        (Ok(a_can), Ok(b_can)) => a_can == b_can,
+                        _ => a == b,
+                    }
                 };
+
+                let originates_elsewhere = !paths_match(&message.path, name);
+
+                if originates_elsewhere {
+                    let original_location = match message.span {
+                        Some(span) => format!(
+                            "{}:{}:{}",
+                            message.path,
+                            span.begin.line + 1,
+                            span.begin.column + 1,
+                        ),
+                        None => message.path.clone(),
+                    };
+
+                    // Walk the call stack from innermost (closest to the
+                    // error) outwards, looking for a frame located in the
+                    // file we're currently parsing. That frame's span is the
+                    // call site we want to highlight.
+                    let call_site = e.call_stack().frames.iter().rev().find_map(|frame| {
+                        let loc = frame.location.as_ref()?;
+                        if paths_match(loc.filename(), name) {
+                            Some(loc.resolve_span())
+                        } else {
+                            None
+                        }
+                    });
+
+                    message.description =
+                        format!("[from {original_location}] {}", message.description);
+                    message.path = name.to_owned();
+                    message.span = call_site;
+                }
 
                 EvalResult {
                     lsp_eval_result: LspEvalResult {
-                        diagnostics: vec![diagnostic],
+                        diagnostics: vec![eval_message_to_lsp_diagnostic(message)],
                         ast: None,
                     },
                     module: None,
