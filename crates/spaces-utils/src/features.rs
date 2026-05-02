@@ -28,6 +28,7 @@ pub enum Feature {
     ModuleCache,
     DeprecationWarnings,
     RulesOnlyStarlark,
+    CloneWithoutCommitGraph,
 }
 
 impl Feature {
