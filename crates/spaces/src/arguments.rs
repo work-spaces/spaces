@@ -180,8 +180,16 @@ pub fn execute() -> anyhow::Result<()> {
     }
 
     let result = if let Err(error) = result {
-        if let Some(logs) = singleton::get_logs_for_failed_rules() {
-            let _ = effective_console.error("see also", format!("\n  {}", logs.join("\n  ")));
+        let verbosity_level = effective_console.get_level();
+        if let Some(logs) = singleton::get_logs_for_failed_rules()
+            && verbosity_level > console::Level::Message
+        {
+            if !logs.is_empty() {
+                let _ = effective_console.error("see also", format!("\n  {}", logs.join("\n  ")));
+            } else {
+                singleton::process_anyhow_error(error);
+                singleton::show_latest_error(effective_console.clone());
+            }
         } else {
             singleton::process_anyhow_error(error);
             singleton::show_error_chain(effective_console.clone());

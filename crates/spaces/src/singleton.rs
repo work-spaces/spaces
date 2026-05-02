@@ -98,6 +98,22 @@ pub fn show_error_chain(console: console::Console) {
     }
 }
 
+pub fn show_latest_error(console: console::Console) {
+    let mut state = get_state().write();
+    let args = std::env::args().collect::<Vec<String>>();
+    let _ = console.error("While executing", args.join(" "));
+    state.error_chain.reverse();
+    if let Some(last_error) = state.error_chain.last() {
+        let show_error = last_error.to_string().replace('\n', "\n    ");
+        let _ = console.write(&show_error.to_string());
+    }
+}
+
+pub fn set_evaluation_failure() {
+    let mut state = get_state().write();
+    state.logs_for_failed_rules = Some(Vec::new());
+}
+
 pub fn set_rule_failure(log_files: Vec<Arc<str>>) {
     let mut state = get_state().write();
     state.logs_for_failed_rules = Some(log_files);
