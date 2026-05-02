@@ -105,7 +105,7 @@ pub fn show_latest_error(console: console::Console) {
     state.error_chain.reverse();
     if let Some(last_error) = state.error_chain.last() {
         let show_error = last_error.to_string().replace('\n', "\n    ");
-        let _ = console.write(&format!("{show_error}"));
+        let _ = console.write(&show_error.to_string());
     }
 }
 
