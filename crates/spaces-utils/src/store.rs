@@ -588,20 +588,38 @@ impl Store {
         // because `url_to_relative_path_and_name` returns a path that already
         // ends in '/' and the caller appended another one.
         //
-        // `std::path::Path::components()` silently collapses consecutive
-        // separators, so collecting them back into a PathBuf yields the
-        // canonical form.  We rename the entry in the manifest and merge any
-        // duplicate that may already exist under the canonical key.
+        // We collapse runs of '/' into a single '/' with a pure string
+        // operation so that the result is OS-independent (PathBuf::display()
+        // would use '\' on Windows and misidentify every key as malformed).
         // ----------------------------------------------------------------
+
+        /// Collapse any run of consecutive '/' characters in `s` into a
+        /// single '/'.  The result always uses '/' as the separator,
+        /// regardless of the host OS.
+        fn collapse_slashes(s: &str) -> String {
+            let mut out = String::with_capacity(s.len());
+            let mut last_was_slash = false;
+            for ch in s.chars() {
+                if ch == '/' {
+                    if !last_was_slash {
+                        out.push('/');
+                    }
+                    last_was_slash = true;
+                } else {
+                    out.push(ch);
+                    last_was_slash = false;
+                }
+            }
+            out
+        }
+
         {
             let bad_keys: Vec<Arc<str>> = self
                 .entries
                 .keys()
                 .filter(|k| {
                     // A key with "//" (or more) in it needs normalisation.
-                    let canonical: std::path::PathBuf =
-                        std::path::Path::new(k.as_ref()).components().collect();
-                    canonical.display().to_string() != k.as_ref()
+                    k.contains("//")
                 })
                 .cloned()
                 .collect();
@@ -609,21 +627,15 @@ impl Store {
             if !bad_keys.is_empty() {
                 if is_dry_run {
                     for key in &bad_keys {
-                        let canonical: std::path::PathBuf =
-                            std::path::Path::new(key.as_ref()).components().collect();
+                        let canonical_str = collapse_slashes(key.as_ref());
                         log.message(
-                            format!(
-                                "Would normalise manifest key: {key} → {}",
-                                canonical.display()
-                            )
-                            .as_str(),
+                            format!("Would normalise manifest key: {key} → {canonical_str}")
+                                .as_str(),
                         );
                     }
                 } else {
                     for key in &bad_keys {
-                        let canonical: std::path::PathBuf =
-                            std::path::Path::new(key.as_ref()).components().collect();
-                        let canonical_str: Arc<str> = canonical.display().to_string().into();
+                        let canonical_str: Arc<str> = collapse_slashes(key.as_ref()).into();
 
                         // Remove the malformed entry; keep its data for merging.
                         if let Some(old_entry) = self.entries.remove(key) {
@@ -661,7 +673,24 @@ impl Store {
         let unmanaged_candidates =
             get_unmanaged_dir_entries(&path_to_store, &managed_top_level_dirs);
 
-        let total = (unmanaged_candidates.len() + self.entries.len()) as u64;
+        // Compute bare-repo paths before creating the progress bar so that
+        // their ticks can be included in the initial total, keeping a single
+        // progress bar for the entire fix run.
+        let bare_prefix = format!("{}/", SPACES_STORE_BARE);
+        let bare_repo_paths: Vec<std::path::PathBuf> = self
+            .entries
+            .keys()
+            .filter(|key| key.starts_with(&bare_prefix))
+            .map(|key| path_to_store.join(key.as_ref()))
+            .collect();
+
+        // dry-run: 1 pass over bare_repo_paths (health check)
+        // live:    2 passes over bare_repo_paths (gc + fsck), plus a repair
+        //          pass whose size is unknown until after phase 2 – it is
+        //          added via set_total once repos_needing_repair is known.
+        let bare_passes = if is_dry_run { 1u64 } else { 2u64 };
+        let mut total = (unmanaged_candidates.len() + self.entries.len()) as u64
+            + bare_repo_paths.len() as u64 * bare_passes;
         let mut progress = console::Progress::new(console.clone(), "scanning", Some(total), None);
 
         for (key, value) in self.entries.iter_mut() {
@@ -790,14 +819,6 @@ impl Store {
 
         // Bare repo maintenance and repair
         {
-            let bare_prefix = format!("{}/", SPACES_STORE_BARE);
-            let bare_repo_paths: Vec<std::path::PathBuf> = self
-                .entries
-                .keys()
-                .filter(|key| key.starts_with(&bare_prefix))
-                .map(|key| path_to_store.join(key.as_ref()))
-                .collect();
-
             if !bare_repo_paths.is_empty() {
                 if is_dry_run {
                     let mut repos_needing_repair = Vec::new();
@@ -829,38 +850,33 @@ impl Store {
                     }
                     bare_repos_repaired = repos_needing_repair.len();
                 } else {
-                    // Phase 1: maintenance
-                    {
-                        for repo_path in &bare_repo_paths {
-                            let path_str = repo_path.to_string_lossy();
-                            progress.set_message(path_str.as_ref());
-                            if !crate::git::run_bare_repo_maintenance(
-                                &mut progress,
-                                path_str.as_ref(),
-                            ) {
-                                log.warning(
-                                    format!("gc failed for bare repo: {path_str}").as_str(),
-                                );
-                            }
-                            progress.increment(1);
+                    // Phase 1: maintenance (gc)
+                    for repo_path in &bare_repo_paths {
+                        let path_str = repo_path.to_string_lossy();
+                        progress.set_message(path_str.as_ref());
+                        if !crate::git::run_bare_repo_maintenance(&mut progress, path_str.as_ref())
+                        {
+                            log.warning(format!("gc failed for bare repo: {path_str}").as_str());
                         }
+                        progress.increment(1);
                     }
 
-                    // Phase 2: detection
+                    // Phase 2: detection (fsck)
                     let mut repos_needing_repair = Vec::new();
-                    {
-                        for repo_path in &bare_repo_paths {
-                            let path_str = repo_path.to_string_lossy();
-                            progress.set_message(path_str.as_ref());
-                            if !crate::git::is_bare_repo_healthy(&mut progress, path_str.as_ref()) {
-                                repos_needing_repair.push(repo_path.clone());
-                            }
-                            progress.increment(1);
+                    for repo_path in &bare_repo_paths {
+                        let path_str = repo_path.to_string_lossy();
+                        progress.set_message(path_str.as_ref());
+                        if !crate::git::is_bare_repo_healthy(&mut progress, path_str.as_ref()) {
+                            repos_needing_repair.push(repo_path.clone());
                         }
+                        progress.increment(1);
                     }
 
-                    // Phase 3: repair
+                    // Phase 3: repair (fetch) – extend the declared total now
+                    // that we know how many repos need repair.
                     if !repos_needing_repair.is_empty() {
+                        total += repos_needing_repair.len() as u64;
+                        progress.set_total(Some(total));
                         for repo_path in &repos_needing_repair {
                             let path_str = repo_path.to_string_lossy();
                             progress.set_message(path_str.as_ref());

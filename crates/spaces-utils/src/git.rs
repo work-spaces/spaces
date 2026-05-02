@@ -73,15 +73,6 @@ impl Repo {
     }
 
     pub fn uses_bare_repository(&self) -> bool {
-        // Returns true for Default or Blobless clone modes (or when unspecified,
-        // since the executor defaults to Clone::Default).
-        // These modes use bare repositories in the store with git --reference
-        // to create workspace clones that share objects via git alternates.
-        // This is more efficient than COW and works across filesystems.
-        //
-        // NOTE: This logic must stay in sync with the `match self.clone` in
-        // executor/git.rs `execute()`. When clone is None the executor picks
-        // Clone::Default, so we must treat None the same way here.
         matches!(
             &self.clone,
             None | Some(Clone::Default) | Some(Clone::Blobless)
