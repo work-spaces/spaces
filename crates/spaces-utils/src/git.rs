@@ -82,10 +82,10 @@ impl Repo {
         // NOTE: This logic must stay in sync with the `match self.clone` in
         // executor/git.rs `execute()`. When clone is None the executor picks
         // Clone::Default, so we must treat None the same way here.
-        match &self.clone {
-            None | Some(Clone::Default) | Some(Clone::Blobless) => true,
-            _ => false,
-        }
+        matches!(
+            &self.clone,
+            None | Some(Clone::Default) | Some(Clone::Blobless)
+        )
     }
 }
 
