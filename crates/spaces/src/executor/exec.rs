@@ -243,7 +243,7 @@ impl Exec {
             allow_failure: true,
         };
 
-        let rule_name_for_file = name.replace('/', "_").replace(':', "_");
+        let rule_name_for_file = name.replace(['/', ':'], "_");
         let lock_file_path = format!(
             ".spaces/locks/{}.{}",
             rule_name_for_file,
