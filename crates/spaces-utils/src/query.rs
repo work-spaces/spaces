@@ -106,10 +106,11 @@ pub enum QueryCommand {
         #[arg(long)]
         force: bool,
     },
-    #[command(about = r"Export workspace documentation to a file.
-  - `spaces query export ./docs/rules.md`: export as markdown
-  - `spaces query export ./api.star --format=stardoc`: export as stardoc
-  - `spaces query export ./docs/rules.md --checkout`: include checkout-phase rules
+    #[command(about = r"Export workspace documentation.
+  - `spaces query export ./docs/rules.md`: export rules as a markdown file
+  - `spaces query export ./docs/rules.md --checkout`: include checkout-phase rules in markdown
+  - `spaces query export ./docs/api --format=stardoc`: export starlark module docs to a directory
+  - For stardoc, PATH is a base directory; one .md file is written per .star module (mirrors `spaces inspect --stardoc`)
   - Format is inferred from the file extension when not specified (.md → markdown, .star/.bzl → stardoc)")]
     Export {
         /// Output file path
@@ -208,6 +209,22 @@ pub struct QueryContext {
 }
 
 impl QueryCommand {
+    /// Returns the stardoc base-directory path if this command is a stardoc
+    /// export, otherwise returns `None`. Used by the argument handler to wire
+    /// the stardoc collection pipeline before module evaluation.
+    pub fn export_stardoc_path(&self) -> Option<Arc<str>> {
+        if let QueryCommand::Export { path, format, .. } = self {
+            let effective_format = match format {
+                Some(f) => f.clone(),
+                None => ExportFormat::infer_from_path(path.as_ref()),
+            };
+            if matches!(effective_format, ExportFormat::Stardoc) {
+                return Some(path.clone());
+            }
+        }
+        None
+    }
+
     /// Returns the configuration specifying which expensive fields are needed
     /// for this particular command variant.
     pub fn required_config(&self) -> QueryContextConfig {
@@ -1086,7 +1103,11 @@ impl QueryCommand {
                         Ok(())
                     }
                     ExportFormat::Stardoc => {
-                        Err(format_error!("Stardoc export is not yet implemented"))
+                        // Documentation was already written to disk during module
+                        // evaluation via workspace.stardoc.generate() inside
+                        // evaluate_starlark_modules (triggered by setting
+                        // inspect_options.stardoc in the arguments handler).
+                        Ok(())
                     }
                 }
             }

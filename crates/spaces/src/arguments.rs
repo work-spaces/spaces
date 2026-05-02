@@ -622,6 +622,18 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             singleton::set_execution_phase(task::Phase::Inspect);
             singleton::set_query_command(command.clone());
 
+            // When exporting stardoc, reuse the inspect --stardoc pipeline:
+            // set_rescan forces re-evaluation (clears cached hashes → is_dirty=true)
+            // so evaluate_starlark_modules runs and collects per-module docs, then
+            // calls workspace.stardoc.generate(path) before execute_tasks returns.
+            if let Some(stardoc_path) = command.export_stardoc_path() {
+                singleton::set_rescan(true);
+                singleton::set_inspect_options(utils::inspect::Options {
+                    stardoc: Some(stardoc_path),
+                    ..Default::default()
+                });
+            }
+
             if effective_console.get_level() > console::Level::Info {
                 effective_console.set_level(console::Level::Info);
             }
