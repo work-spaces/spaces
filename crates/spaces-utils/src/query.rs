@@ -20,12 +20,8 @@ pub enum ExportFormat {
 }
 
 impl ExportFormat {
-    fn infer_from_path(path: &str) -> Self {
-        if path.ends_with(".star") || path.ends_with(".bzl") {
-            ExportFormat::Stardoc
-        } else {
-            ExportFormat::Markdown
-        }
+    fn infer_from_path(_path: &str) -> Self {
+        ExportFormat::Markdown
     }
 }
 
@@ -111,14 +107,14 @@ pub enum QueryCommand {
   - `spaces query export ./docs/rules.md --checkout`: include checkout-phase rules in markdown
   - `spaces query export ./docs/api --format=stardoc`: export starlark module docs to a directory
   - For stardoc, PATH is a base directory; one .md file is written per .star module (mirrors `spaces inspect --stardoc`)
-  - Format is inferred from the file extension when not specified (.md → markdown, .star/.bzl → stardoc)")]
+  - Stardoc always requires --format=stardoc; omitting --format defaults to markdown")]
     Export {
         /// Output file path
         path: Arc<str>,
-        /// Include checkout-phase rules in export
+        /// Include checkout-phase rules in export (markdown format only; rejected for stardoc)
         #[arg(long)]
         checkout: bool,
-        /// Export format (inferred from file extension when omitted)
+        /// Export format (defaults to markdown when omitted; stardoc always requires --format=stardoc)
         #[arg(long, value_enum)]
         format: Option<ExportFormat>,
     },
@@ -1066,6 +1062,12 @@ impl QueryCommand {
                     Some(f) => f.clone(),
                     None => ExportFormat::infer_from_path(path.as_ref()),
                 };
+
+                if *checkout && matches!(effective_format, ExportFormat::Stardoc) {
+                    return Err(format_error!(
+                        "--checkout is not applicable to stardoc export"
+                    ));
+                }
 
                 match effective_format {
                     ExportFormat::Markdown => {
