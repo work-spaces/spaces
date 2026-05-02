@@ -592,7 +592,7 @@ fn run_starlark_modules_with_workspace(
 
             workspace.write().is_create_lock_file = is_create_lock_file.into();
 
-            evaluator::run_starlark_modules(
+            let eval_result = evaluator::run_starlark_modules(
                 console.clone(),
                 workspace.clone(),
                 scripts,
@@ -600,7 +600,17 @@ fn run_starlark_modules_with_workspace(
                 None,
                 is_execute_tasks,
             )
-            .context(format_context!("while evaluating starlark modules"))?;
+            .context(format_context!("while evaluating starlark modules"));
+
+            if eval_result.is_err() && phase == task::Phase::Checkout {
+                // Save settings so .spaces/settings.spaces.json is written with the
+                // "order" and "dev-branches" entries when --keep-workspace-on-failure
+                // is used. If the workspace is being cleaned up, the file will be
+                // removed as part of that cleanup anyway.
+                let _ = workspace.read().settings.save_json();
+            }
+
+            eval_result?;
 
             workspace
                 .read()
