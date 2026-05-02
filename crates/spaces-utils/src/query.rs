@@ -20,12 +20,8 @@ pub enum ExportFormat {
 }
 
 impl ExportFormat {
-    fn infer_from_path(path: &str) -> Self {
-        if path.ends_with(".star") || path.ends_with(".bzl") {
-            ExportFormat::Stardoc
-        } else {
-            ExportFormat::Markdown
-        }
+    fn infer_from_path(_path: &str) -> Self {
+        ExportFormat::Markdown
     }
 }
 
@@ -106,18 +102,19 @@ pub enum QueryCommand {
         #[arg(long)]
         force: bool,
     },
-    #[command(about = r"Export workspace documentation to a file.
-  - `spaces query export ./docs/rules.md`: export as markdown
-  - `spaces query export ./api.star --format=stardoc`: export as stardoc
-  - `spaces query export ./docs/rules.md --checkout`: include checkout-phase rules
-  - Format is inferred from the file extension when not specified (.md → markdown, .star/.bzl → stardoc)")]
+    #[command(about = r"Export workspace documentation.
+  - `spaces query export ./docs/rules.md`: export rules as a markdown file
+  - `spaces query export ./docs/rules.md --checkout`: include checkout-phase rules in markdown
+  - `spaces query export ./docs/api --format=stardoc`: export starlark module docs to a directory
+  - For stardoc, PATH is a base directory; one .md file is written per .star module (mirrors `spaces inspect --stardoc`)
+  - Stardoc always requires --format=stardoc; omitting --format defaults to markdown")]
     Export {
         /// Output file path
         path: Arc<str>,
-        /// Include checkout-phase rules in export
+        /// Include checkout-phase rules in export (markdown format only; rejected for stardoc)
         #[arg(long)]
         checkout: bool,
-        /// Export format (inferred from file extension when omitted)
+        /// Export format (defaults to markdown when omitted; stardoc always requires --format=stardoc)
         #[arg(long, value_enum)]
         format: Option<ExportFormat>,
     },
@@ -208,6 +205,21 @@ pub struct QueryContext {
 }
 
 impl QueryCommand {
+    /// Returns the stardoc base-directory path if this command is a stardoc
+    /// export, otherwise returns `None`. Used by the argument handler to wire
+    /// the stardoc collection pipeline before module evaluation.
+    pub fn export_stardoc_path(&self) -> Option<Arc<str>> {
+        if let QueryCommand::Export {
+            path,
+            format: Some(ExportFormat::Stardoc),
+            ..
+        } = self
+        {
+            return Some(path.clone());
+        }
+        None
+    }
+
     /// Returns the configuration specifying which expensive fields are needed
     /// for this particular command variant.
     pub fn required_config(&self) -> QueryContextConfig {
@@ -1051,6 +1063,12 @@ impl QueryCommand {
                     None => ExportFormat::infer_from_path(path.as_ref()),
                 };
 
+                if *checkout && matches!(effective_format, ExportFormat::Stardoc) {
+                    return Err(format_error!(
+                        "--checkout is not applicable to stardoc export"
+                    ));
+                }
+
                 match effective_format {
                     ExportFormat::Markdown => {
                         let run_pairs: Vec<(&rule::Rule, Option<String>)> = ctx
@@ -1086,7 +1104,11 @@ impl QueryCommand {
                         Ok(())
                     }
                     ExportFormat::Stardoc => {
-                        Err(format_error!("Stardoc export is not yet implemented"))
+                        // Documentation was already written to disk during module
+                        // evaluation via workspace.stardoc.generate() inside
+                        // evaluate_starlark_modules (triggered by setting
+                        // inspect_options.stardoc in the arguments handler).
+                        Ok(())
                     }
                 }
             }
