@@ -1,14 +1,10 @@
-use crate::{http_archive, logger, platform, store, ws};
+use crate::logger;
 use anyhow::Context;
-use anyhow_source_location::{format_context, format_error};
+use anyhow_source_location::format_context;
 use std::sync::Arc;
 
 mod config;
 mod manifest;
-
-use serde::{Deserialize, Serialize};
-
-const VERSION_FILE_NAME: &str = "spaces.version.json";
 
 pub fn logger(console: console::Console) -> logger::Logger {
     logger::Logger::new(console, "version".into())
@@ -35,36 +31,6 @@ pub enum IncludePrerelease {
     Yes,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct GithubAsset {
-    url: Option<Arc<str>>,
-    name: Arc<str>,
-    digest: Option<Arc<str>>,
-    browser_download_url: Arc<str>,
-}
-
-impl GithubAsset {
-    fn get_digest(&self) -> Option<Arc<str>> {
-        if let Some(digest) = &self.digest {
-            if let Some((_, digest)) = digest.split_once(':') {
-                Some(digest.into())
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct GithubRelease {
-    tag_name: Arc<str>,
-    #[serde(default)]
-    prerelease: bool,
-    assets: Vec<GithubAsset>,
-}
-
 pub struct Manager {
     path_to_store: Arc<std::path::Path>,
 }
@@ -76,186 +42,64 @@ impl Manager {
         }
     }
 
-    fn load_from_store(
+    fn populate_manifest_from_source(
         &self,
         progress_bar: &mut console::Progress,
-    ) -> anyhow::Result<Vec<GithubRelease>> {
-        let save_path = self.path_to_store.join(VERSION_FILE_NAME);
-        if save_path.exists() {
-            progress_bar.set_message("loading manifest");
-            let json = std::fs::read_to_string(save_path)
-                .context(format_context!("Failed to load from store"))?;
-            let releases: Vec<GithubRelease> = serde_json::from_str(&json)
-                .context(format_context!("Failed to parse JSON from store"))?;
-            Ok(releases)
-        } else {
-            self.fetch_latest(progress_bar)
-        }
-    }
+    ) -> anyhow::Result<manifest::Manifest> {
+        let mut manifest = manifest::Manifest::new(self.path_to_store.as_ref());
 
-    fn fetch_latest(
-        &self,
-        progress_bar: &mut console::Progress,
-    ) -> anyhow::Result<Vec<GithubRelease>> {
-        let options = console::ExecuteOptions {
-            arguments: vec!["api".into(), "repos/work-spaces/spaces/releases".into()],
-            is_return_stdout: true,
-            environment: vec![("GH_HOST".into(), "github.com".into())],
-            ..Default::default()
-        };
-
-        progress_bar.set_message("getting latest version using gh");
-
-        let gh_command =
-            ws::get_spaces_tools_path_to_sysroot_bin(self.path_to_store.as_ref()).join("gh");
-
-        if let Some(stdout) = progress_bar
-            .execute_process(gh_command.to_string_lossy().as_ref(), options)
-            .context(format_context!("Failed to execute gh api to get releases"))?
-            .stdout
+        if let Some(config) = config::Config::new_from_toml(self.path_to_store.as_ref())
+            .context(format_context!("Failed to load version manifest config"))?
         {
-            let releases: Vec<GithubRelease> = serde_json::from_str(stdout.as_str()).context(
-                format_context!("Failed to parse JSON response ```\n{stdout}```\n"),
-            )?;
-
-            let save_path = self.path_to_store.join(VERSION_FILE_NAME);
-            let json = serde_json::to_string_pretty(&releases).context(format_context!(
-                "Internal error: failed to serialize releases"
-            ))?;
-            std::fs::write(&save_path, json).context(format_context!(
-                "Failed to write releases to file {}",
-                save_path.display()
-            ))?;
-
-            Ok(releases)
+            config
+                .populate_manifest(&mut manifest, progress_bar)
+                .context(format_context!(
+                    "Failed to populate manifest from custom version config"
+                ))?;
         } else {
-            Err(format_error!("Failed to fetch latest release"))
+            manifest
+                .populate_using_gh(progress_bar)
+                .context(format_context!("Failed to populate manifest using gh"))?;
         }
+
+        Ok(manifest)
     }
 
-    fn get_store_path_to_release(
+    fn load_manifest(
         &self,
-        console: console::Console,
-        asset: &GithubAsset,
-    ) -> Option<Arc<std::path::Path>> {
-        match http_archive::HttpArchive::url_to_relative_path(&asset.browser_download_url, &None) {
-            Ok(relative_path) => {
-                let path_in_store = self.path_to_store.join(relative_path);
-                Some(path_in_store.into())
-            }
-            Err(err) => {
-                logger(console.clone())
-                    .error(format!("Failed to convert URL to relative path: {err}").as_str());
-                None
-            }
-        }
-    }
-
-    fn get_store_path_to_store_binary(
-        &self,
-        console: console::Console,
-        asset: &GithubAsset,
-    ) -> Option<Arc<std::path::Path>> {
-        let store_path_to_release = self.get_store_path_to_release(console, asset);
-
-        if let (Some(store_path), Some(digest)) = (store_path_to_release, asset.get_digest()) {
-            Some(
-                store_path
-                    .join(format!("{digest}.zip_files"))
-                    .join("spaces")
-                    .into(),
-            )
+        progress_bar: &mut console::Progress,
+    ) -> anyhow::Result<manifest::Manifest> {
+        let save_path = self.path_to_store.join(manifest::VERSION_FILE_NAME);
+        if save_path.exists() {
+            manifest::Manifest::load_from_store(self.path_to_store.as_ref(), progress_bar)
+                .context(format_context!("Failed to load manifest from store"))
         } else {
-            None
+            self.populate_manifest_from_source(progress_bar)
+                .context(format_context!("Failed to fetch manifest from source"))
         }
-    }
-
-    fn get_tools_path_to_binary(&self, tag: &str) -> Arc<std::path::Path> {
-        ws::get_spaces_tools_path_to_sysroot_bin(&self.path_to_store)
-            .join(format!("spaces-{tag}"))
-            .into()
-    }
-
-    fn create_hard_links_to_tools(
-        &self,
-        console: console::Console,
-        releases: &Vec<GithubRelease>,
-    ) -> anyhow::Result<()> {
-        for release in releases {
-            for asset in release.assets.iter() {
-                if let Some(current_platform) = platform::Platform::get_platform() {
-                    if asset
-                        .browser_download_url
-                        .contains(current_platform.to_string().as_str())
-                    {
-                        let binary_path = self.get_tools_path_to_binary(&release.tag_name);
-                        if binary_path.exists() {
-                            logger(console.clone()).trace(
-                                format!("Not linking {} already exists", binary_path.display())
-                                    .as_str(),
-                            );
-                            continue;
-                        }
-                        if let Some(source_path) =
-                            self.get_store_path_to_store_binary(console.clone(), asset)
-                        {
-                            if source_path.exists() {
-                                logger(console.clone()).debug(
-                                    format!(
-                                        "Creating hard link from {} to {}",
-                                        source_path.display(),
-                                        binary_path.display()
-                                    )
-                                    .as_str(),
-                                );
-                                std::fs::hard_link(&source_path, &binary_path).context(
-                                    format_context!(
-                                        "failed to link {} to {}",
-                                        source_path.display(),
-                                        binary_path.display()
-                                    ),
-                                )?;
-                            } else {
-                                logger(console.clone()).debug(
-                                    format!("Not linking {} does not exist", source_path.display())
-                                        .as_str(),
-                                );
-                            }
-                        }
-                    } else {
-                        logger(console.clone()).debug(
-                            format!("Not linking. No binary for platform {current_platform}",)
-                                .as_str(),
-                        );
-                    }
-                } else {
-                    logger(console.clone()).debug("Internal error: unknown platform");
-                }
-            }
-        }
-        Ok(())
     }
 
     pub fn list(&self, console: console::Console) -> anyhow::Result<()> {
         let mut progress_bar = console::Progress::new(console.clone(), "version-list", None, None);
 
-        let releases = self
-            .load_from_store(&mut progress_bar)
+        let manifest = self
+            .load_manifest(&mut progress_bar)
             .context(format_context!("Failed to load/fetch available releases"))?;
 
-        self.create_hard_links_to_tools(console.clone(), &releases)
+        manifest
+            .create_hard_links_to_tools(console.clone())
             .context(format_context!("Failed to create hard links to tools"))?;
 
-        for release in releases {
+        for release in manifest.releases() {
             logger(console.clone()).info(format!("{}", release.tag_name).as_str());
-            for asset in release.assets {
+            for asset in &release.assets {
                 logger(console.clone()).info(format!("  {}", asset.name).as_str());
                 logger(console.clone())
                     .info(format!("    {}", asset.browser_download_url).as_str());
                 if let Some(digest) = asset.digest.as_ref() {
                     logger(console.clone()).info(format!("    {digest}").as_str());
                 }
-                if let Some(path) = self.get_store_path_to_release(console.clone(), &asset) {
+                if let Some(path) = manifest.get_store_path_to_release(console.clone(), asset) {
                     if path.exists() {
                         logger(console.clone()).info("    Is Available in the store");
                     } else {
@@ -263,24 +107,20 @@ impl Manager {
                     }
                 }
             }
-            let binary_path = self.get_tools_path_to_binary(release.tag_name.as_ref());
+
+            let binary_path = manifest.get_tools_path_to_binary(release.tag_name.as_ref());
             if binary_path.exists() {
-                logger(console.clone()).info(
-                    format!(
-                        "    tools path: {}",
-                        self.get_tools_path_to_binary(release.tag_name.as_ref())
-                            .display(),
-                    )
-                    .as_str(),
-                );
+                logger(console.clone())
+                    .info(format!("    tools path: {}", binary_path.display(),).as_str());
             } else {
                 logger(console.clone()).info("    Is NOT Available in the store tools path");
             }
         }
+
         progress_bar.set_finalize_lines(logger::make_finalize_line(
             logger::FinalType::Finished,
             None,
-            "fetch latest version",
+            "version list",
         ));
 
         Ok(())
@@ -294,123 +134,44 @@ impl Manager {
     ) -> Result<(), anyhow::Error> {
         let mut progress_bar = console::Progress::new(console.clone(), "fetch", None, None);
 
-        let releases = self
-            .fetch_latest(&mut progress_bar)
+        let manifest = self
+            .populate_manifest_from_source(&mut progress_bar)
             .context(format_context!("Failed to fetch latest releases"))?;
 
-        let release = if let Some(tag) = tag.clone() {
-            releases.iter().find(|release| release.tag_name == tag)
-        } else if include_prerelease == IncludePrerelease::Yes {
-            releases.first()
-        } else {
-            releases.iter().find(|release| !release.prerelease)
-        };
+        let release = manifest.find_release(
+            tag.as_deref(),
+            matches!(include_prerelease, IncludePrerelease::Yes),
+        );
 
         if let Some(release) = release {
-            logger(console.clone()).debug("analyzing {tag:?} (None = latest)");
-            let current_platform = platform::Platform::get_platform()
-                .context(format_context!("Internal Error: Unknown Platform"))?;
+            logger(console.clone()).debug(format!("analyzing {tag:?} (None = latest)").as_str());
 
-            let asset = release
-                .assets
-                .iter()
-                .find(|asset| asset.name.contains(current_platform.to_string().as_str()))
+            let binary_path = manifest
+                .sync_release_to_store(console.clone(), &mut progress_bar, release)
                 .context(format_context!(
-                    "No asset found for the current platform for {}",
+                    "Failed to download release {}",
                     release.tag_name
                 ))?;
 
-            if let Some(path) = self.get_store_path_to_release(console.clone(), asset) {
-                if path.exists() {
-                    logger(console.clone())
-                        .info(format!("store path: {}", path.display()).as_str());
-                } else {
-                    let digest = asset
-                        .get_digest()
-                        .context(format_context!("No digest available for asset"))?;
-
-                    let archive = http_archive::Archive {
-                        url: asset.browser_download_url.clone(),
-                        sha256: digest.clone(),
-                        link: http_archive::ArchiveLink::Hard,
-                        ..Default::default()
-                    };
-
-                    let http_archive = http_archive::HttpArchive::new(
-                        &self.path_to_store.to_string_lossy(),
-                        format!("spaces-{}", release.tag_name).as_str(),
-                        &archive,
-                        &ws::get_spaces_tools_path_to_sysroot_bin(&self.path_to_store)
-                            .to_string_lossy(),
-                    )
-                    .context(format_context!(
-                        "Failed to create http_archive to download spaces {}",
-                        release.tag_name
-                    ))?;
-
-                    progress_bar.set_message(&format!("downloading {}", release.tag_name));
-                    http_archive.sync(console.clone()).context(format_context!(
-                        "Failed to download spaces {}",
-                        release.tag_name
-                    ))?;
-                }
-
-                // Update the store manifest so this entry is tracked for pruning/info
-                let relative_path = http_archive::HttpArchive::url_to_relative_path(
-                    &asset.browser_download_url,
-                    &None,
+            logger(console.clone()).info(format!("tools path: {}", binary_path.display()).as_str());
+            let exec_path = std::env::current_exe()
+                .context(format_context!("Failed to get current executable path"))?;
+            let command = format!("cp -lf {} {}", binary_path.display(), exec_path.display());
+            logger(console.clone()).info(
+                format!(
+                    "You need to execute the following command to install the fetched tag:\n\n{command}\n",
                 )
-                .context(format_context!(
-                    "Failed to get relative path for {}",
-                    asset.browser_download_url
-                ))?;
-                let mut manifest_store = store::Store::new_from_store_path(&self.path_to_store)
-                    .context(format_context!("Failed to load store manifest"))?;
-                manifest_store
-                    .add_entry(std::path::Path::new(&relative_path))
-                    .context(format_context!("Failed to add version to store manifest"))?;
-                manifest_store
-                    .save(&self.path_to_store)
-                    .context(format_context!("Failed to save store manifest"))?;
-
-                let binary_path = self.get_tools_path_to_binary(release.tag_name.as_ref());
-
-                if !binary_path.exists() {
-                    self.create_hard_links_to_tools(console.clone(), &releases)
-                        .context(format_context!("Failed to update tools to store links"))?;
-                }
-
-                if binary_path.exists() {
-                    logger(console.clone())
-                        .info(format!("tools path: {}", binary_path.display()).as_str());
-                    let exec_path = std::env::current_exe()
-                        .context(format_context!("Failed to get current executable path"))?;
-                    let command =
-                        format!("cp -lf {} {}", binary_path.display(), exec_path.display());
-                    logger(console.clone()).info(
-                        format!(
-                            "You need to execute the following command to install the fetched tag:\n\n{command}\n",
-                        )
-                        .as_str(),
-                    );
-                    if let Ok(mut clipboard) = arboard::Clipboard::new()
-                        && clipboard
-                            .set_text(command)
-                            .context(format_context!("Failed to copy command to clipboard"))
-                            .is_ok()
-                    {
-                        logger(console.clone()).info("Command above was copied to the clipboard");
-                    }
-                } else {
-                    logger(console.clone()).error(
-                        format!(
-                            "Internal error: tools binary is not found: {}",
-                            binary_path.display()
-                        )
-                        .as_str(),
-                    );
-                }
+                .as_str(),
+            );
+            if let Ok(mut clipboard) = arboard::Clipboard::new()
+                && clipboard
+                    .set_text(command)
+                    .context(format_context!("Failed to copy command to clipboard"))
+                    .is_ok()
+            {
+                logger(console.clone()).info("Command above was copied to the clipboard");
             }
+
             progress_bar.set_finalize_lines(logger::make_finalize_line(
                 logger::FinalType::Finished,
                 None,
@@ -420,7 +181,7 @@ impl Manager {
             logger(console.clone()).error(
                 format!(
                     "Release for {} is not available",
-                    tag.unwrap_or("latest".into())
+                    tag.as_deref().unwrap_or("latest")
                 )
                 .as_str(),
             );
