@@ -1,0 +1,157 @@
+[
+  {
+    "tag_name": "v0.15.40",
+    "prerelease": false,
+    "assets": {
+      "macos-aarch64": {
+        "name": "spaces-macos-aarch64-v0.15.40.zip",
+        "sha256": "5f6f638d684cc02c033f6fd8c2dc6fdc6b586c6cc53ac3d5aa211ecb6b918175",
+        "url": "https://github.com/work-spaces/spaces/releases/download/v0.15.40/spaces-macos-aarch64-v0.15.40.zip"
+      },
+      "macos-x86_64": {
+        "name": "spaces-macos-x86_64-v0.15.40.zip",
+        "sha256": "1a73c7a3b5b26b54aac63bd0b26a98ef4e5cc015a6461488b38f7b13fc7e57b0",
+        "url": "https://github.com/work-spaces/spaces/releases/download/v0.15.40/spaces-macos-x86_64-v0.15.40.zip"
+      },
+      "linux-x86_64": {
+        "name": "spaces-linux-x86_64-v0.15.40.zip",
+        "sha256": "791b71ed8bd58a19abdcb10f6dbffa21549b78be0c53b15a27e61a918175359d",
+        "url": "https://github.com/work-spaces/spaces/releases/download/v0.15.40/spaces-linux-x86_64-v0.15.40.zip"
+      },
+      "linux-aarch64": {
+        "name": "spaces-linux-aarch64-v0.15.40.zip",
+        "sha256": "8f66a4f400ea54c99f4995072f751be8c55ed9bfd077102375c5d2bde367d08c",
+        "url": "https://github.com/work-spaces/spaces/releases/download/v0.15.40/spaces-linux-aarch64-v0.15.40.zip"
+      },
+      "windows-x86_64": {
+        "name": "spaces-windows-x86_64-v0.15.40.zip",
+        "sha256": "d0262d24439ea09a5e63d62f7b3d3f361e15ca3c0547a7be0d52a9249e1277a0",
+        "url": "https://github.com/work-spaces/spaces/releases/download/v0.15.40/spaces-windows-x86_64-v0.15.40.zip"
+      }
+    }
+  },
+  {
+    "tag_name": "v0.15.39",
+    "prerelease": true,
+    "assets": {
+      "macos-aarch64": {
+        "name": "spaces-macos-aarch64-v0.15.39.zip",
+        "sha256": "98f48b3326746c78c8836249682d09606ac7591160b29e68e3fcc56f51d2fda7",
+        "url": "https://github.com/work-spaces/spaces/releases/download/v0.15.39/spaces-macos-aarch64-v0.15.39.zip"
+      },
+      "macos-x86_64": {
+        "name": "spaces-macos-x86_64-v0.15.39.zip",
+        "sha256": "7dd965119d414771b335c1ec8dd75d362d6454a955550db9db3e85e024af5474",
+        "url": "https://github.com/work-spaces/spaces/releases/download/v0.15.39/spaces-macos-x86_64-v0.15.39.zip"
+      },
+      "linux-x86_64": {
+        "name": "spaces-linux-x86_64-v0.15.39.zip",
+        "sha256": "a2f935a0047deb468997e69036eaf0ec5edadedafb495996ed5fb8d21b9c5aee",
+        "url": "https://github.com/work-spaces/spaces/releases/download/v0.15.39/spaces-linux-x86_64-v0.15.39.zip"
+      },
+      "linux-aarch64": {
+        "name": "spaces-linux-aarch64-v0.15.39.zip",
+        "sha256": "6a1e7fd975b0c95e2255ae7ff0a0765872a397385ee4c245c649de3d6c0215d1",
+        "url": "https://github.com/work-spaces/spaces/releases/download/v0.15.39/spaces-linux-aarch64-v0.15.39.zip"
+      },
+      "windows-x86_64": {
+        "name": "spaces-windows-x86_64-v0.15.39.zip",
+        "sha256": "6345b4b1e0067fbf31e0f75bd27518d6a0fbf7e1aab021806efcaa2147c35f90",
+        "url": "https://github.com/work-spaces/spaces/releases/download/v0.15.39/spaces-windows-x86_64-v0.15.39.zip"
+      }
+    }
+  },
+  {
+    "tag_name": "v0.15.36",
+    "prerelease": false,
+    "assets": {
+      "macos-aarch64": {
+        "name": "spaces-macos-aarch64-v0.15.36.zip",
+        "sha256": "f7465817e06051e8041e004a8d5bde26b8d863064fe01ce1dc0921e2a1512ae2",
+        "url": "https://github.com/work-spaces/spaces/releases/download/v0.15.36/spaces-macos-aarch64-v0.15.36.zip"
+      },
+      "macos-x86_64": {
+        "name": "spaces-macos-x86_64-v0.15.36.zip",
+        "sha256": "ea7b8595046dd309f69754570de8ac6b605d4050e3985154460ffc6a4759ed61",
+        "url": "https://github.com/work-spaces/spaces/releases/download/v0.15.36/spaces-macos-x86_64-v0.15.36.zip"
+      },
+      "linux-x86_64": {
+        "name": "spaces-linux-x86_64-v0.15.36.zip",
+        "sha256": "8de862ca2d73a884834ae5015ea97ea6e564cc965419bdb68b3be88b4d556cf5",
+        "url": "https://github.com/work-spaces/spaces/releases/download/v0.15.36/spaces-linux-x86_64-v0.15.36.zip"
+      },
+      "linux-aarch64": {
+        "name": "spaces-linux-aarch64-v0.15.36.zip",
+        "sha256": "dd2272b1f569a1cffaf15c8159a80cdd82f25ae4bd8af3f4a8720dfebe8e281b",
+        "url": "https://github.com/work-spaces/spaces/releases/download/v0.15.36/spaces-linux-aarch64-v0.15.36.zip"
+      },
+      "windows-x86_64": {
+        "name": "spaces-windows-x86_64-v0.15.36.zip",
+        "sha256": "674d97d2689f4d2a0f191b64599aa218e0764b61b468f9dda5993ae6919b5aa9",
+        "url": "https://github.com/work-spaces/spaces/releases/download/v0.15.36/spaces-windows-x86_64-v0.15.36.zip"
+      }
+    }
+  },
+  {
+    "tag_name": "v0.15.34",
+    "prerelease": false,
+    "assets": {
+      "macos-aarch64": {
+        "name": "spaces-macos-aarch64-v0.15.34.zip",
+        "sha256": "46f043b718319a6048e1dbbace8d359f518186033e1cf3b19735d468ce60f05e",
+        "url": "https://github.com/work-spaces/spaces/releases/download/v0.15.34/spaces-macos-aarch64-v0.15.34.zip"
+      },
+      "macos-x86_64": {
+        "name": "spaces-macos-x86_64-v0.15.34.zip",
+        "sha256": "9745afe9aead1ab19529ceddfb0ef7bcec279847a11a0798aa9bf8a95cd9e18f",
+        "url": "https://github.com/work-spaces/spaces/releases/download/v0.15.34/spaces-macos-x86_64-v0.15.34.zip"
+      },
+      "linux-x86_64": {
+        "name": "spaces-linux-x86_64-v0.15.34.zip",
+        "sha256": "19f96784d3fdc18871483275f36f45a44e7f47a2967bd248b6045b623dc27072",
+        "url": "https://github.com/work-spaces/spaces/releases/download/v0.15.34/spaces-linux-x86_64-v0.15.34.zip"
+      },
+      "linux-aarch64": {
+        "name": "spaces-linux-aarch64-v0.15.34.zip",
+        "sha256": "53dc3a039d914ab5beffa2ea5d40ada23ba703345d4a8e926ef99e98720eed55",
+        "url": "https://github.com/work-spaces/spaces/releases/download/v0.15.34/spaces-linux-aarch64-v0.15.34.zip"
+      },
+      "windows-x86_64": {
+        "name": "spaces-windows-x86_64-v0.15.34.zip",
+        "sha256": "c22b0e8b927af82846dad8b2940d8d76981e5941a7c84e6e3901ad6155428ca9",
+        "url": "https://github.com/work-spaces/spaces/releases/download/v0.15.34/spaces-windows-x86_64-v0.15.34.zip"
+      }
+    }
+  },
+  {
+    "tag_name": "v0.15.33",
+    "prerelease": false,
+    "assets": {
+      "macos-aarch64": {
+        "name": "spaces-macos-aarch64-v0.15.33.zip",
+        "sha256": "9dd956f373124c789837968a4bee31b4a595d0dd0b90eecf89271c12274ca0b3",
+        "url": "https://github.com/work-spaces/spaces/releases/download/v0.15.33/spaces-macos-aarch64-v0.15.33.zip"
+      },
+      "macos-x86_64": {
+        "name": "spaces-macos-x86_64-v0.15.33.zip",
+        "sha256": "b8d4cefaab92ef0c3d3bcd342e08c733c4b34fdf9043ff37f264df6aaa2f58b8",
+        "url": "https://github.com/work-spaces/spaces/releases/download/v0.15.33/spaces-macos-x86_64-v0.15.33.zip"
+      },
+      "linux-x86_64": {
+        "name": "spaces-linux-x86_64-v0.15.33.zip",
+        "sha256": "ce3477a0247ffb8e5cee28c8301562f48dcc10adc3b1fa49c12460ea122a8a34",
+        "url": "https://github.com/work-spaces/spaces/releases/download/v0.15.33/spaces-linux-x86_64-v0.15.33.zip"
+      },
+      "linux-aarch64": {
+        "name": "spaces-linux-aarch64-v0.15.33.zip",
+        "sha256": "ce2aa88b68e25f2cb9a32eec199c53c1f6c045543ae309f9980f833b3b528163",
+        "url": "https://github.com/work-spaces/spaces/releases/download/v0.15.33/spaces-linux-aarch64-v0.15.33.zip"
+      },
+      "windows-x86_64": {
+        "name": "spaces-windows-x86_64-v0.15.33.zip",
+        "sha256": "fe11e3dc808e22f1400750f9629128a3015f70940e6a463ea1cbf4ce3a46625e",
+        "url": "https://github.com/work-spaces/spaces/releases/download/v0.15.33/spaces-windows-x86_64-v0.15.33.zip"
+      }
+    }
+  }
+]

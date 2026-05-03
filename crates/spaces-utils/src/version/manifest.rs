@@ -45,7 +45,7 @@ pub struct Release {
     pub tag_name: Arc<str>,
     #[serde(default)]
     pub prerelease: bool,
-    pub assets: Vec<Asset>,
+    pub assets: HashMap<platform::Platform, Asset>,
 }
 
 pub struct Manifest {
@@ -206,11 +206,20 @@ impl Manifest {
                             .and_then(|d| d.strip_prefix("sha256:"))
                             .map(Arc::from)?;
 
-                        Some(Asset {
-                            url: gh_asset.browser_download_url,
-                            name: gh_asset.name,
-                            sha256,
-                        })
+                        // Determine which platform this asset targets by matching
+                        // the platform string against the asset name.
+                        let platform = platform::Platform::get_supported_platforms()
+                            .into_iter()
+                            .find(|p| gh_asset.name.contains(p.to_string().as_str()))?;
+
+                        Some((
+                            platform,
+                            Asset {
+                                url: gh_asset.browser_download_url,
+                                name: gh_asset.name,
+                                sha256,
+                            },
+                        ))
                     })
                     .collect();
 
@@ -289,52 +298,46 @@ impl Manifest {
     }
 
     pub fn create_hard_links_to_tools(&self, console: console::Console) -> anyhow::Result<()> {
+        let Some(current_platform) = platform::Platform::get_platform() else {
+            logger(console).debug("Internal error: unknown platform");
+            return Ok(());
+        };
+
         for release in &self.releases {
-            for asset in &release.assets {
-                if let Some(current_platform) = platform::Platform::get_platform() {
-                    if asset.url.contains(current_platform.to_string().as_str()) {
-                        let binary_path = self.get_tools_path_to_binary(&release.tag_name);
-                        if binary_path.exists() {
-                            logger(console.clone()).trace(
-                                format!("Not linking {} already exists", binary_path.display())
-                                    .as_str(),
-                            );
-                            continue;
-                        }
-                        if let Some(source_path) =
-                            self.get_store_path_to_store_binary(console.clone(), asset)
-                        {
-                            if source_path.exists() {
-                                logger(console.clone()).debug(
-                                    format!(
-                                        "Creating hard link from {} to {}",
-                                        source_path.display(),
-                                        binary_path.display()
-                                    )
-                                    .as_str(),
-                                );
-                                std::fs::hard_link(&source_path, &binary_path).context(
-                                    format_context!(
-                                        "failed to link {} to {}",
-                                        source_path.display(),
-                                        binary_path.display()
-                                    ),
-                                )?;
-                            } else {
-                                logger(console.clone()).debug(
-                                    format!("Not linking {} does not exist", source_path.display())
-                                        .as_str(),
-                                );
-                            }
-                        }
-                    } else {
-                        logger(console.clone()).debug(
-                            format!("Not linking. No binary for platform {current_platform}",)
-                                .as_str(),
-                        );
-                    }
+            let Some(asset) = release.assets.get(&current_platform) else {
+                logger(console.clone()).debug(
+                    format!("Not linking. No binary for platform {current_platform}").as_str(),
+                );
+                continue;
+            };
+
+            let binary_path = self.get_tools_path_to_binary(&release.tag_name);
+            if binary_path.exists() {
+                logger(console.clone()).trace(
+                    format!("Not linking {} already exists", binary_path.display()).as_str(),
+                );
+                continue;
+            }
+
+            if let Some(source_path) = self.get_store_path_to_store_binary(console.clone(), asset) {
+                if source_path.exists() {
+                    logger(console.clone()).debug(
+                        format!(
+                            "Creating hard link from {} to {}",
+                            source_path.display(),
+                            binary_path.display()
+                        )
+                        .as_str(),
+                    );
+                    std::fs::hard_link(&source_path, &binary_path).context(format_context!(
+                        "failed to link {} to {}",
+                        source_path.display(),
+                        binary_path.display()
+                    ))?;
                 } else {
-                    logger(console.clone()).debug("Internal error: unknown platform");
+                    logger(console.clone()).debug(
+                        format!("Not linking {} does not exist", source_path.display()).as_str(),
+                    );
                 }
             }
         }
@@ -353,8 +356,7 @@ impl Manifest {
 
         let asset = release
             .assets
-            .iter()
-            .find(|asset| asset.name.contains(current_platform.to_string().as_str()))
+            .get(&current_platform)
             .context(format_context!(
                 "No asset found for the current platform for {}",
                 release.tag_name

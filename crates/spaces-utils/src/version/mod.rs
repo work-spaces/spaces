@@ -185,18 +185,28 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
   {
     "tag_name": "v0.60.1",
     "prerelease": false,
-    "assets": [
-      {
+    "assets": {
+      "macos-aarch64": {
         "name": "spaces-v0.60.1-aarch64-apple-darwin.zip",
         "sha256": "8d5f0d7e8f5f2d8a7fbb6f8d6c0d2aa0e4a6cc724d42b8ef90f3e9e7ea1d2f34",
         "url": "https://example.internal/spaces/releases/v0.60.1/spaces-v0.60.1-aarch64-apple-darwin.zip"
       },
-      {
+      "macos-x86_64": {
+        "name": "spaces-v0.60.1-x86_64-apple-darwin.zip",
+        "sha256": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b",
+        "url": "https://example.internal/spaces/releases/v0.60.1/spaces-v0.60.1-x86_64-apple-darwin.zip"
+      },
+      "linux-x86_64": {
         "name": "spaces-v0.60.1-x86_64-unknown-linux-gnu.zip",
         "sha256": "6e81c32d04f7df2be6c7b8d3b57e77a94dd84267fb64f57ea7a0d1f8f6f11df4",
         "url": "https://example.internal/spaces/releases/v0.60.1/spaces-v0.60.1-x86_64-unknown-linux-gnu.zip"
+      },
+      "linux-aarch64": {
+        "name": "spaces-v0.60.1-aarch64-unknown-linux-gnu.zip",
+        "sha256": "7f90d43e15a8eb2cf7d8c4b68f88b05a5ee95378gc75g68fb01g4f0f8fb2e3g45",
+        "url": "https://example.internal/spaces/releases/v0.60.1/spaces-v0.60.1-aarch64-unknown-linux-gnu.zip"
       }
-    ]
+    }
   }
 ]
 "#;
@@ -329,7 +339,7 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
             }
 
             // Per-asset details
-            for asset in &release.assets {
+            for asset in release.assets.values() {
                 let asset_name = console::style::StyledContent::new(
                     console::total_style(),
                     format!("  {}", asset.name),
