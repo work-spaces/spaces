@@ -520,6 +520,24 @@ pub fn run_version_command_in_workspace(
                     tag.as_ref().map(|e| e.as_ref()).unwrap_or("latest")
                 ))?;
         }
+        version::Command::SetConfig { path } => {
+            version_manager
+                .set_config(console, path.clone())
+                .context(format_context!(
+                    "Failed to set version config from {}",
+                    path
+                ))?;
+        }
+        version::Command::UnsetConfig {} => {
+            version_manager
+                .unset_config(console)
+                .context(format_context!("Failed to unset version config"))?;
+        }
+        version::Command::ShowConfig {} => {
+            version_manager
+                .show_config(console)
+                .context(format_context!("Failed to show version config"))?;
+        }
     }
 
     Ok(())

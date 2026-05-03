@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-pub const VERSION_CONFIG_FILE_NAME: &str = "spaces.version.toml";
-const VERSION_CONFIG_PATH_ENV_NAME: &str = "SPACES_VERSION_CONFIG_PATH";
+pub const VERSION_CONFIG_FILE_NAME: &str = "version.spaces.toml";
+const VERSION_CONFIG_PATH_ENV_NAME: &str = "SPACES_ENV_VERSION_CONFIG_PATH";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

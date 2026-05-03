@@ -7,31 +7,37 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 pub const VERSION_FILE_NAME: &str = "spaces.version.json";
+pub const GH_HOST_ENV: &str = "SPACES_ENV_GH_HOST";
+pub const GH_REPO: &str = "SPACES_ENV_GH_REPO";
 
 fn logger(console: console::Console) -> logger::Logger {
     logger::Logger::new(console, "version/manifest".into())
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Asset {
-    pub url: Option<Arc<str>>,
-    pub name: Arc<str>,
-    pub digest: Option<Arc<str>>,
-    pub browser_download_url: Arc<str>,
+/// GitHub API asset format (from `gh api repos/{repo}/releases`)
+/// The GitHub API uses `browser_download_url` for the actual download link
+/// and `digest` (format: "sha256:HASH") instead of a bare `sha256` field.
+#[derive(Deserialize)]
+struct GhApiAsset {
+    browser_download_url: Arc<str>,
+    name: Arc<str>,
+    #[serde(default)]
+    digest: Option<Arc<str>>,
 }
 
-impl Asset {
-    pub fn get_digest(&self) -> Option<Arc<str>> {
-        if let Some(digest) = &self.digest {
-            if let Some((_, digest)) = digest.split_once(':') {
-                Some(digest.into())
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
+#[derive(Deserialize)]
+struct GhApiRelease {
+    tag_name: Arc<str>,
+    #[serde(default)]
+    prerelease: bool,
+    assets: Vec<GhApiAsset>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Asset {
+    pub url: Arc<str>,
+    pub name: Arc<str>,
+    pub sha256: Arc<str>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -82,10 +88,15 @@ impl Manifest {
         &mut self,
         progress_bar: &mut console::Progress,
     ) -> anyhow::Result<()> {
+        let repo = std::env::var(GH_REPO).unwrap_or_else(|_| "work-spaces/spaces".to_string());
+        let host: Arc<str> = std::env::var(GH_HOST_ENV)
+            .unwrap_or_else(|_| "github.com".to_string())
+            .into();
+
         let options = console::ExecuteOptions {
-            arguments: vec!["api".into(), "repos/work-spaces/spaces/releases".into()],
+            arguments: vec!["api".into(), format!("repos/{}/releases", repo).into()],
             is_return_stdout: true,
-            environment: vec![("GH_HOST".into(), "github.com".into())],
+            environment: vec![("GH_HOST".into(), host)],
             ..Default::default()
         };
 
@@ -99,7 +110,7 @@ impl Manifest {
             .context(format_context!("Failed to execute gh api to get releases"))?
             .stdout
         {
-            self.set_releases_from_json(stdout.as_str())
+            self.set_releases_from_gh_json(stdout.as_str())
                 .context(format_context!("Failed to parse manifest response from gh"))?;
             self.save_to_store()
                 .context(format_context!("Failed to save manifest from gh"))?;
@@ -172,6 +183,48 @@ impl Manifest {
         Ok(())
     }
 
+    /// Parse a GitHub API releases response into our internal `Release` format.
+    /// The GitHub API uses `browser_download_url` as the download URL and
+    /// encodes the hash as `digest: "sha256:HASH"` rather than a bare `sha256` field.
+    fn set_releases_from_gh_json(&mut self, json: &str) -> anyhow::Result<()> {
+        let gh_releases: Vec<GhApiRelease> = serde_json::from_str(json).context(
+            format_context!("Failed to parse GitHub API JSON response\n{json}"),
+        )?;
+
+        self.releases = gh_releases
+            .into_iter()
+            .map(|gh_release| {
+                let assets = gh_release
+                    .assets
+                    .into_iter()
+                    .filter_map(|gh_asset| {
+                        // Extract the bare hex hash from "sha256:HASH", skipping assets
+                        // that carry no recognisable digest.
+                        let sha256: Arc<str> = gh_asset
+                            .digest
+                            .as_deref()
+                            .and_then(|d| d.strip_prefix("sha256:"))
+                            .map(Arc::from)?;
+
+                        Some(Asset {
+                            url: gh_asset.browser_download_url,
+                            name: gh_asset.name,
+                            sha256,
+                        })
+                    })
+                    .collect();
+
+                Release {
+                    tag_name: gh_release.tag_name,
+                    prerelease: gh_release.prerelease,
+                    assets,
+                }
+            })
+            .collect();
+
+        Ok(())
+    }
+
     fn save_to_store(&self) -> anyhow::Result<()> {
         let save_path = self.path_to_store.join(VERSION_FILE_NAME);
         let json = serde_json::to_string_pretty(&self.releases).context(format_context!(
@@ -201,7 +254,7 @@ impl Manifest {
         console: console::Console,
         asset: &Asset,
     ) -> Option<Arc<std::path::Path>> {
-        match http_archive::HttpArchive::url_to_relative_path(&asset.browser_download_url, &None) {
+        match http_archive::HttpArchive::url_to_relative_path(&asset.url, &None) {
             Ok(relative_path) => {
                 let path_in_store = self.path_to_store.join(relative_path);
                 Some(path_in_store.into())
@@ -221,10 +274,10 @@ impl Manifest {
     ) -> Option<Arc<std::path::Path>> {
         let store_path_to_release = self.get_store_path_to_release(console, asset);
 
-        if let (Some(store_path), Some(digest)) = (store_path_to_release, asset.get_digest()) {
+        if let Some(store_path) = store_path_to_release {
             Some(
                 store_path
-                    .join(format!("{digest}.zip_files"))
+                    .join(format!("{}.zip_files", asset.sha256))
                     .join("spaces")
                     .into(),
             )
@@ -243,10 +296,7 @@ impl Manifest {
         for release in &self.releases {
             for asset in &release.assets {
                 if let Some(current_platform) = platform::Platform::get_platform() {
-                    if asset
-                        .browser_download_url
-                        .contains(current_platform.to_string().as_str())
-                    {
+                    if asset.url.contains(current_platform.to_string().as_str()) {
                         let binary_path = self.get_tools_path_to_binary(&release.tag_name);
                         if binary_path.exists() {
                             logger(console.clone()).trace(
@@ -318,13 +368,9 @@ impl Manifest {
             if path.exists() {
                 logger(console.clone()).info(format!("store path: {}", path.display()).as_str());
             } else {
-                let digest = asset
-                    .get_digest()
-                    .context(format_context!("No digest available for asset"))?;
-
                 let archive = http_archive::Archive {
-                    url: asset.browser_download_url.clone(),
-                    sha256: digest.clone(),
+                    url: asset.url.clone(),
+                    sha256: asset.sha256.clone(),
                     link: http_archive::ArchiveLink::Hard,
                     ..Default::default()
                 };
@@ -349,11 +395,9 @@ impl Manifest {
             }
 
             let relative_path =
-                http_archive::HttpArchive::url_to_relative_path(&asset.browser_download_url, &None)
-                    .context(format_context!(
-                        "Failed to get relative path for {}",
-                        asset.browser_download_url
-                    ))?;
+                http_archive::HttpArchive::url_to_relative_path(&asset.url, &None).context(
+                    format_context!("Failed to get relative path for {}", asset.url),
+                )?;
 
             let mut manifest_store = store::Store::new_from_store_path(&self.path_to_store)
                 .context(format_context!("Failed to load store manifest"))?;
@@ -381,7 +425,7 @@ impl Manifest {
         } else {
             Err(format_error!(
                 "Failed to determine store path for {}",
-                asset.browser_download_url
+                asset.url
             ))
         }
     }
