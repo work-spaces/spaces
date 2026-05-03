@@ -3,6 +3,9 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use std::sync::Arc;
 
+mod config;
+mod manifest;
+
 use serde::{Deserialize, Serialize};
 
 const VERSION_FILE_NAME: &str = "spaces.version.json";
