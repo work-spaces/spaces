@@ -142,3 +142,240 @@ impl Config {
         result
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+
+    /// Build a `Config` directly without touching the file system.
+    fn make_config(
+        manifest_url: &str,
+        headers: Vec<(&str, &str)>,
+        env_mappings: Vec<(&str, &str)>,
+    ) -> Config {
+        Config {
+            manifest_url: manifest_url.into(),
+            headers: headers
+                .into_iter()
+                .map(|(k, v)| (Arc::from(k), Arc::from(v)))
+                .collect(),
+            env: env_mappings
+                .into_iter()
+                .map(|(token, env_name)| (Arc::from(token), Arc::from(env_name)))
+                .collect(),
+        }
+    }
+
+    // -------------------------------------------------------
+    // manifest_url validation (no env vars needed)
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_resolve_rejects_empty_manifest_url() {
+        let config = make_config("", vec![], vec![]);
+        let err = config.resolve().unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("manifest_url"),
+            "expected manifest_url in error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_resolve_rejects_whitespace_only_manifest_url() {
+        let config = make_config("   ", vec![], vec![]);
+        let err = config.resolve().unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("manifest_url"),
+            "expected manifest_url in error, got: {msg}"
+        );
+    }
+
+    // -------------------------------------------------------
+    // Token substitution and missing env vars
+    //
+    // All tests that read or write environment variables are
+    // consolidated here so that they cannot interfere with each
+    // other when the test harness runs tests in parallel.
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_resolve_with_env_vars() {
+        // Env var names that are unique to this test suite.
+        const ENV_A: &str = "SPACES_TEST_RESOLVE_TOKEN_A";
+        const ENV_B: &str = "SPACES_TEST_RESOLVE_TOKEN_B";
+        const ENV_LONG: &str = "SPACES_TEST_RESOLVE_TOKEN_LONG";
+
+        // Start with a clean slate.
+        unsafe {
+            env::remove_var(ENV_A);
+            env::remove_var(ENV_B);
+            env::remove_var(ENV_LONG);
+        }
+
+        // --- Test 1: no tokens – URL and headers pass through unchanged ------
+        {
+            let config = make_config(
+                "https://example.com/manifest.json",
+                vec![("Authorization", "Bearer static")],
+                vec![],
+            );
+            let resolved = config.resolve().unwrap();
+            assert_eq!(
+                resolved.manifest_url().as_ref(),
+                "https://example.com/manifest.json"
+            );
+            assert_eq!(
+                resolved.headers().get("Authorization").map(|v| v.as_ref()),
+                Some("Bearer static")
+            );
+        }
+
+        // --- Test 2: token substituted in URL --------------------------------
+        {
+            unsafe { env::set_var(ENV_A, "secret-token") };
+            let config = make_config(
+                "https://example.com/{TOKEN_A}/manifest.json",
+                vec![],
+                vec![("{TOKEN_A}", ENV_A)],
+            );
+            let resolved = config.resolve().unwrap();
+            assert_eq!(
+                resolved.manifest_url().as_ref(),
+                "https://example.com/secret-token/manifest.json"
+            );
+            unsafe { env::remove_var(ENV_A) };
+        }
+
+        // --- Test 3: token substituted in header value -----------------------
+        {
+            unsafe { env::set_var(ENV_A, "my-api-key") };
+            let config = make_config(
+                "https://example.com/manifest.json",
+                vec![("Authorization", "Bearer {TOKEN_A}")],
+                vec![("{TOKEN_A}", ENV_A)],
+            );
+            let resolved = config.resolve().unwrap();
+            assert_eq!(
+                resolved.headers().get("Authorization").map(|v| v.as_ref()),
+                Some("Bearer my-api-key")
+            );
+            unsafe { env::remove_var(ENV_A) };
+        }
+
+        // --- Test 4: token substituted in header key -------------------------
+        {
+            unsafe { env::set_var(ENV_A, "X-Custom-Header") };
+            let config = make_config(
+                "https://example.com/manifest.json",
+                vec![("{TOKEN_A}", "static-value")],
+                vec![("{TOKEN_A}", ENV_A)],
+            );
+            let resolved = config.resolve().unwrap();
+            assert!(
+                resolved.headers().contains_key("X-Custom-Header"),
+                "expected resolved header key 'X-Custom-Header'"
+            );
+            assert_eq!(
+                resolved
+                    .headers()
+                    .get("X-Custom-Header")
+                    .map(|v| v.as_ref()),
+                Some("static-value")
+            );
+            unsafe { env::remove_var(ENV_A) };
+        }
+
+        // --- Test 5: token substituted in both header key and value ----------
+        {
+            unsafe { env::set_var(ENV_A, "resolved-key") };
+            unsafe { env::set_var(ENV_B, "resolved-value") };
+            let config = make_config(
+                "https://example.com/manifest.json",
+                vec![("{TOKEN_A}", "{TOKEN_B}")],
+                vec![("{TOKEN_A}", ENV_A), ("{TOKEN_B}", ENV_B)],
+            );
+            let resolved = config.resolve().unwrap();
+            assert!(
+                resolved.headers().contains_key("resolved-key"),
+                "expected resolved header key 'resolved-key'"
+            );
+            assert_eq!(
+                resolved.headers().get("resolved-key").map(|v| v.as_ref()),
+                Some("resolved-value")
+            );
+            unsafe { env::remove_var(ENV_A) };
+            unsafe { env::remove_var(ENV_B) };
+        }
+
+        // --- Test 6: missing env var – error names both var and token --------
+        {
+            // Guarantee the var is absent.
+            unsafe { env::remove_var(ENV_A) };
+            let config = make_config(
+                "https://example.com/manifest.json",
+                vec![],
+                vec![("{TOKEN_A}", ENV_A)],
+            );
+            let err = config.resolve().unwrap_err();
+            let msg = format!("{err:?}");
+            assert!(
+                msg.contains(ENV_A),
+                "expected env var name '{}' in error, got: {msg}",
+                ENV_A
+            );
+            assert!(
+                msg.contains("{TOKEN_A}"),
+                "expected token name '{{TOKEN_A}}' in error, got: {msg}"
+            );
+        }
+
+        // --- Test 7: overlapping tokens – longer token wins ------------------
+        //
+        // Token `MY_TOKEN` is a raw prefix of `MY_TOKEN_EXTRA`.  Without the
+        // longest-first sort, applying the short token first would corrupt the
+        // longer placeholder, e.g.
+        //   "MY_TOKEN_EXTRA" -> "<short>_EXTRA"  (wrong)
+        // Correct behaviour:
+        //   "MY_TOKEN_EXTRA" -> "<long-value>"   (right)
+        {
+            unsafe { env::set_var(ENV_A, "short") };
+            unsafe { env::set_var(ENV_LONG, "long-value") };
+            let config = make_config(
+                "https://example.com/MY_TOKEN_EXTRA/manifest.json",
+                vec![],
+                vec![("MY_TOKEN", ENV_A), ("MY_TOKEN_EXTRA", ENV_LONG)],
+            );
+            let resolved = config.resolve().unwrap();
+            assert_eq!(
+                resolved.manifest_url().as_ref(),
+                "https://example.com/long-value/manifest.json",
+                "longer token should take priority over its shorter prefix"
+            );
+            unsafe { env::remove_var(ENV_A) };
+            unsafe { env::remove_var(ENV_LONG) };
+        }
+
+        // --- Test 8: token appears multiple times – all occurrences replaced --
+        {
+            unsafe { env::set_var(ENV_A, "v1.0.0") };
+            let config = make_config(
+                "https://example.com/{TOKEN_A}/downloads/{TOKEN_A}.tar.gz",
+                vec![("X-Version", "{TOKEN_A}")],
+                vec![("{TOKEN_A}", ENV_A)],
+            );
+            let resolved = config.resolve().unwrap();
+            assert_eq!(
+                resolved.manifest_url().as_ref(),
+                "https://example.com/v1.0.0/downloads/v1.0.0.tar.gz"
+            );
+            assert_eq!(
+                resolved.headers().get("X-Version").map(|v| v.as_ref()),
+                Some("v1.0.0")
+            );
+            unsafe { env::remove_var(ENV_A) };
+        }
+    }
+}

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
+use url::Url;
 
 pub const VERSION_FILE_NAME: &str = "spaces.version.json";
 pub const GH_HOST_ENV: &str = "SPACES_ENV_GH_HOST";
@@ -78,10 +79,12 @@ impl Manifest {
         let releases: Vec<Release> =
             serde_json::from_str(&json).context(format_context!("Failed to parse manifest"))?;
 
-        Ok(Self {
+        let mut manifest = Self {
             path_to_store: path_to_store.into(),
             releases,
-        })
+        };
+        manifest.sort_releases_desc();
+        Ok(manifest)
     }
 
     pub fn populate_using_gh(
@@ -126,6 +129,19 @@ impl Manifest {
         url: &str,
         headers: &HashMap<Arc<str>, Arc<str>>,
     ) -> anyhow::Result<()> {
+        // Reject non-HTTPS URLs immediately so that misconfiguration (e.g. an
+        // accidental `http://` URL) fails fast with a clear message instead of
+        // silently downloading release metadata over a plaintext channel.
+        let parsed_url =
+            Url::parse(url).context(format_context!("Invalid manifest URL '{}'", url))?;
+        if parsed_url.scheme() != "https" {
+            return Err(format_error!(
+                "Manifest URL must use HTTPS, but '{}' has scheme '{}'",
+                url,
+                parsed_url.scheme()
+            ));
+        }
+
         progress_bar.set_message("downloading custom version manifest");
 
         let mut req_headers = reqwest::header::HeaderMap::new();
@@ -176,20 +192,74 @@ impl Manifest {
         Ok(())
     }
 
+    /// Sort `self.releases` in descending semver order (newest first).
+    ///
+    /// Both `set_releases_from_json` (used for custom HTTPS manifests) and
+    /// `set_releases_from_gh_json` (used for GitHub API responses) call this
+    /// after populating `self.releases`, so `find_release` can safely use
+    /// `.first()` / `.find()` regardless of the order items arrived in.
+    ///
+    /// Tag names are expected to carry an optional leading `v` (e.g. `v1.2.3`).
+    /// Tags that do not parse as valid semver sort after all valid-semver tags,
+    /// and among themselves are ordered lexicographically descending.
+    fn sort_releases_desc(&mut self) {
+        self.releases.sort_by(|a, b| {
+            fn parse(tag: &str) -> Option<semver::Version> {
+                semver::Version::parse(tag.trim_start_matches('v')).ok()
+            }
+            match (parse(&a.tag_name), parse(&b.tag_name)) {
+                (Some(va), Some(vb)) => vb.cmp(&va),         // descending semver
+                (Some(_), None) => std::cmp::Ordering::Less, // valid semver before unparseable
+                (None, Some(_)) => std::cmp::Ordering::Greater, // unparseable after valid semver
+                (None, None) => b.tag_name.cmp(&a.tag_name), // lex descending fallback
+            }
+        });
+    }
+
     fn set_releases_from_json(&mut self, json: &str) -> anyhow::Result<()> {
-        let releases: Vec<Release> = serde_json::from_str(json)
-            .context(format_context!("Failed to parse JSON response\n{json}"))?;
+        let releases: Vec<Release> = serde_json::from_str(json).context(format_context!(
+            "Failed to parse JSON response \
+             (expected a top-level array of {{tag_name, prerelease, assets}} objects); \
+             body prefix: {}",
+            Self::truncate_body(json)
+        ))?;
         self.releases = releases;
+        self.sort_releases_desc();
         Ok(())
+    }
+
+    /// Returns at most [`Self::BODY_LOG_LIMIT`] characters from `body` for use
+    /// in error messages, appending `…` when the input is longer.  This keeps
+    /// error context informative while preventing large or sensitive response
+    /// bodies from bloating logs or leaking into error reports.
+    const BODY_LOG_LIMIT: usize = 120;
+
+    fn truncate_body(body: &str) -> String {
+        if body.len() <= Self::BODY_LOG_LIMIT {
+            body.to_owned()
+        } else {
+            // Walk back to a valid UTF-8 char boundary so we never produce a
+            // string that ends mid-codepoint.
+            let mut end = Self::BODY_LOG_LIMIT;
+            while !body.is_char_boundary(end) {
+                end -= 1;
+            }
+            format!("{}\u{2026}", &body[..end])
+        }
     }
 
     /// Parse a GitHub API releases response into our internal `Release` format.
     /// The GitHub API uses `browser_download_url` as the download URL and
     /// encodes the hash as `digest: "sha256:HASH"` rather than a bare `sha256` field.
     fn set_releases_from_gh_json(&mut self, json: &str) -> anyhow::Result<()> {
-        let gh_releases: Vec<GhApiRelease> = serde_json::from_str(json).context(
-            format_context!("Failed to parse GitHub API JSON response\n{json}"),
-        )?;
+        let gh_releases: Vec<GhApiRelease> =
+            serde_json::from_str(json).context(format_context!(
+                "Failed to parse GitHub API JSON response \
+                 (expected a top-level array of \
+                 {{tag_name, prerelease, assets[{{browser_download_url, name, digest}}]}} \
+                 objects); body prefix: {}",
+                Self::truncate_body(json)
+            ))?;
 
         self.releases = gh_releases
             .into_iter()
@@ -231,6 +301,7 @@ impl Manifest {
             })
             .collect();
 
+        self.sort_releases_desc();
         Ok(())
     }
 
@@ -246,6 +317,15 @@ impl Manifest {
         Ok(())
     }
 
+    /// Return the best matching release.
+    ///
+    /// `self.releases` is always kept sorted newest-first by `sort_releases_desc`,
+    /// so `.first()` / `.find()` here reliably return the *maximum* version rather
+    /// than whichever entry happened to appear first in the source JSON.
+    ///
+    /// * `tag = Some(t)` – exact match by tag name (order-independent).
+    /// * `tag = None, include_prerelease = true` – newest release of any kind.
+    /// * `tag = None, include_prerelease = false` – newest stable (non-prerelease) release.
     pub fn find_release(&self, tag: Option<&str>, include_prerelease: bool) -> Option<&Release> {
         if let Some(tag) = tag {
             self.releases
@@ -257,7 +337,286 @@ impl Manifest {
             self.releases.iter().find(|release| !release.prerelease)
         }
     }
+}
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_progress() -> console::Progress {
+        console::Progress::new(console::Console::new_null(), "", None, None)
+    }
+
+    fn make_release(tag: &str, prerelease: bool) -> Release {
+        Release {
+            tag_name: tag.into(),
+            prerelease,
+            assets: HashMap::new(),
+        }
+    }
+
+    fn make_manifest(releases: Vec<Release>) -> Manifest {
+        Manifest {
+            path_to_store: std::path::Path::new("/tmp").into(),
+            releases,
+        }
+    }
+
+    // -------------------------------------------------------
+    // sort_releases_desc
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_sort_already_newest_first() {
+        let mut m = make_manifest(vec![
+            make_release("v0.15.3", false),
+            make_release("v0.15.2", false),
+            make_release("v0.15.1", false),
+        ]);
+        m.sort_releases_desc();
+        let tags: Vec<&str> = m.releases.iter().map(|r| r.tag_name.as_ref()).collect();
+        assert_eq!(tags, ["v0.15.3", "v0.15.2", "v0.15.1"]);
+    }
+
+    #[test]
+    fn test_sort_oldest_first_becomes_newest_first() {
+        let mut m = make_manifest(vec![
+            make_release("v0.15.1", false),
+            make_release("v0.15.2", false),
+            make_release("v0.15.3", false),
+        ]);
+        m.sort_releases_desc();
+        let tags: Vec<&str> = m.releases.iter().map(|r| r.tag_name.as_ref()).collect();
+        assert_eq!(tags, ["v0.15.3", "v0.15.2", "v0.15.1"]);
+    }
+
+    #[test]
+    fn test_sort_shuffled_mixed_stable_and_prerelease() {
+        // semver: 1.2.0 > 1.1.0 > 1.1.0-beta.1 > 1.0.0 > 0.9.5
+        // (pre-release has lower precedence than the release it annotates)
+        let mut m = make_manifest(vec![
+            make_release("v1.0.0", false),
+            make_release("v1.2.0", false),
+            make_release("v0.9.5", false),
+            make_release("v1.1.0-beta.1", true),
+            make_release("v1.1.0", false),
+        ]);
+        m.sort_releases_desc();
+        let tags: Vec<&str> = m.releases.iter().map(|r| r.tag_name.as_ref()).collect();
+        assert_eq!(
+            tags,
+            ["v1.2.0", "v1.1.0", "v1.1.0-beta.1", "v1.0.0", "v0.9.5"]
+        );
+    }
+
+    #[test]
+    fn test_sort_non_semver_tags_placed_after_valid_semver() {
+        let mut m = make_manifest(vec![
+            make_release("nightly", false),
+            make_release("v0.15.0", false),
+            make_release("latest", false),
+        ]);
+        m.sort_releases_desc();
+        let tags: Vec<&str> = m.releases.iter().map(|r| r.tag_name.as_ref()).collect();
+        // v0.15.0 is the only valid semver; non-semver entries follow (lex desc).
+        assert_eq!(tags[0], "v0.15.0");
+        // "nightly" and "latest" come after; lex-desc order: 'n' > 'l'
+        assert_eq!(tags[1..], ["nightly", "latest"]);
+    }
+
+    // -------------------------------------------------------
+    // find_release – relies on sorted order
+    // -------------------------------------------------------
+
+    /// Core regression: without sorting, find_release(None, false) on an
+    /// oldest-first list would return the *oldest* stable release, not the newest.
+    #[test]
+    fn test_find_release_returns_newest_stable_regardless_of_input_order() {
+        // Input intentionally oldest-first (as a generic HTTPS server might serve).
+        let mut m = make_manifest(vec![
+            make_release("v0.15.1", false),
+            make_release("v0.15.3-alpha.1", true),
+            make_release("v0.15.2", false),
+            make_release("v0.15.3", false),
+        ]);
+        m.sort_releases_desc();
+        let release = m.find_release(None, false);
+        assert_eq!(release.map(|r| r.tag_name.as_ref()), Some("v0.15.3"));
+    }
+
+    #[test]
+    fn test_find_release_newest_including_prerelease() {
+        let mut m = make_manifest(vec![
+            make_release("v0.15.1", false),
+            make_release("v0.15.3-alpha.1", true),
+            make_release("v0.15.2", false),
+        ]);
+        m.sort_releases_desc();
+        // v0.15.3-alpha.1 > v0.15.2 in semver, so it should be first overall.
+        let release = m.find_release(None, true);
+        assert_eq!(
+            release.map(|r| r.tag_name.as_ref()),
+            Some("v0.15.3-alpha.1")
+        );
+    }
+
+    #[test]
+    fn test_find_release_by_exact_tag() {
+        let mut m = make_manifest(vec![
+            make_release("v0.15.1", false),
+            make_release("v0.15.2", false),
+            make_release("v0.15.3", false),
+        ]);
+        m.sort_releases_desc();
+        let release = m.find_release(Some("v0.15.2"), false);
+        assert_eq!(release.map(|r| r.tag_name.as_ref()), Some("v0.15.2"));
+    }
+
+    #[test]
+    fn test_find_release_unknown_tag_returns_none() {
+        let mut m = make_manifest(vec![
+            make_release("v0.15.1", false),
+            make_release("v0.15.2", false),
+        ]);
+        m.sort_releases_desc();
+        assert!(m.find_release(Some("v0.99.0"), false).is_none());
+    }
+
+    #[test]
+    fn test_find_release_stable_skips_prerelease() {
+        let mut m = make_manifest(vec![
+            make_release("v0.15.3-beta.1", true),
+            make_release("v0.15.2", false),
+            make_release("v0.15.1", false),
+        ]);
+        m.sort_releases_desc();
+        // Newest stable should be v0.15.2, not the prerelease v0.15.3-beta.1.
+        let release = m.find_release(None, false);
+        assert_eq!(release.map(|r| r.tag_name.as_ref()), Some("v0.15.2"));
+    }
+
+    #[test]
+    fn test_find_release_empty_manifest() {
+        let m = make_manifest(vec![]);
+        assert!(m.find_release(None, false).is_none());
+        assert!(m.find_release(None, true).is_none());
+        assert!(m.find_release(Some("v1.0.0"), false).is_none());
+    }
+
+    // -------------------------------------------------------
+    // populate_from_url – URL scheme validation
+    // -------------------------------------------------------
+
+    /// An `http://` URL must be rejected before any network I/O is attempted.
+    #[test]
+    fn test_populate_from_url_rejects_http() {
+        let mut m = make_manifest(vec![]);
+        let result = m.populate_from_url(
+            &mut make_progress(),
+            "http://example.com/manifest.json",
+            &HashMap::new(),
+        );
+        let err = result.unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("HTTPS") || msg.contains("https"),
+            "expected HTTPS-related error, got: {msg}"
+        );
+    }
+
+    /// Any non-HTTPS scheme (here FTP) must also be rejected.
+    #[test]
+    fn test_populate_from_url_rejects_ftp() {
+        let mut m = make_manifest(vec![]);
+        let result = m.populate_from_url(
+            &mut make_progress(),
+            "ftp://files.example.com/manifest.json",
+            &HashMap::new(),
+        );
+        let err = result.unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("HTTPS") || msg.contains("https"),
+            "expected HTTPS-related error, got: {msg}"
+        );
+    }
+
+    // -------------------------------------------------------
+    // truncate_body
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_truncate_body_short_string_is_unchanged() {
+        let short = "[{\"tag_name\": \"v1.0.0\"}]";
+        assert_eq!(Manifest::truncate_body(short), short);
+    }
+
+    #[test]
+    fn test_truncate_body_long_string_is_truncated() {
+        // Build a body that is clearly longer than BODY_LOG_LIMIT.
+        let long: String = "x".repeat(Manifest::BODY_LOG_LIMIT * 2);
+        let result = Manifest::truncate_body(&long);
+        // Must be shorter than the original.
+        assert!(
+            result.len() < long.len(),
+            "expected truncation, got length {}",
+            result.len()
+        );
+        // Must end with the ellipsis character.
+        assert!(
+            result.ends_with('\u{2026}'),
+            "expected trailing ellipsis, got: {result:?}"
+        );
+        // The non-ellipsis content must not exceed the limit.
+        let content_len = result.trim_end_matches('\u{2026}').len();
+        assert!(
+            content_len <= Manifest::BODY_LOG_LIMIT,
+            "content ({content_len} bytes) exceeds BODY_LOG_LIMIT ({})",
+            Manifest::BODY_LOG_LIMIT
+        );
+    }
+
+    #[test]
+    fn test_truncate_body_exactly_at_limit_is_unchanged() {
+        let exact: String = "y".repeat(Manifest::BODY_LOG_LIMIT);
+        let result = Manifest::truncate_body(&exact);
+        assert_eq!(result, exact);
+    }
+
+    #[test]
+    fn test_set_releases_from_json_error_does_not_contain_full_body() {
+        let mut m = make_manifest(vec![]);
+        // Craft a body that is much larger than BODY_LOG_LIMIT and is *not* valid JSON.
+        let garbage: String = format!("NOT_JSON_{}", "z".repeat(Manifest::BODY_LOG_LIMIT * 3));
+        let err = m.set_releases_from_json(&garbage).unwrap_err();
+        let msg = format!("{err:?}");
+        // The error must mention truncation (trailing ellipsis) rather than
+        // dumping the entire body.
+        assert!(
+            !msg.contains(&garbage),
+            "full body must not appear in the error message"
+        );
+        assert!(
+            msg.contains('\u{2026}'),
+            "error message should contain a truncation ellipsis; got: {msg}"
+        );
+    }
+
+    /// A completely unparseable string must be rejected with a clear error.
+    #[test]
+    fn test_populate_from_url_rejects_invalid_url() {
+        let mut m = make_manifest(vec![]);
+        let result = m.populate_from_url(&mut make_progress(), "not-a-url", &HashMap::new());
+        assert!(result.is_err(), "expected an invalid URL to be rejected");
+        let msg = format!("{:?}", result.unwrap_err());
+        assert!(
+            msg.contains("Invalid manifest URL"),
+            "expected parse-error message, got: {msg}"
+        );
+    }
+}
+
+impl Manifest {
     pub fn get_store_path_to_release(
         &self,
         console: console::Console,

@@ -246,7 +246,7 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
             );
             console.raw(format!("{config_path_label}{config_path_value}\n\n"))?;
 
-            write_subheader("spaces.version.toml")?;
+            write_subheader("version.spaces.toml")?;
             console.raw(format!("{contents}\n"))?;
         } else {
             let no_config_label = console::style::StyledContent::new(
@@ -292,7 +292,7 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
             );
             console.raw(format!("{customize_message}\n\n"))?;
 
-            write_subheader("Sample spaces.version.toml")?;
+            write_subheader("Sample version.spaces.toml")?;
             console.raw(format!("{SAMPLE_CONFIG}\n"))?;
         }
 
