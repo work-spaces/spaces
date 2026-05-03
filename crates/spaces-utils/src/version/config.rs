@@ -94,7 +94,7 @@ impl Config {
             })
             .collect::<anyhow::Result<Vec<(Arc<str>, String)>>>()?;
 
-        token_values.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+        token_values.sort_by_key(|b| std::cmp::Reverse(b.0.len()));
 
         let manifest_url: Arc<str> =
             Self::replace_tokens(self.manifest_url.as_ref(), &token_values).into();

@@ -274,16 +274,12 @@ impl Manifest {
     ) -> Option<Arc<std::path::Path>> {
         let store_path_to_release = self.get_store_path_to_release(console, asset);
 
-        if let Some(store_path) = store_path_to_release {
-            Some(
-                store_path
-                    .join(format!("{}.zip_files", asset.sha256))
-                    .join("spaces")
-                    .into(),
-            )
-        } else {
-            None
-        }
+        store_path_to_release.map(|store_path| {
+            store_path
+                .join(format!("{}.zip_files", asset.sha256))
+                .join("spaces")
+                .into()
+        })
     }
 
     pub fn get_tools_path_to_binary(&self, tag: &str) -> Arc<std::path::Path> {
