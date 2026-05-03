@@ -1,0 +1,7 @@
+manifest_url = "https://github.com/work-spaces/spaces/releases/download/v0.15.40/manifest.json"
+
+[headers]
+Authorization = "Bearer {GH_TOKEN}"
+
+[env]
+"{GH_TOKEN}" = "GH_TOKEN"

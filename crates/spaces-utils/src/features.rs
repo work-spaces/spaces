@@ -202,7 +202,7 @@ impl FeaturesCommand {
 
                 let title = style::StyledContent::new(console::total_style(), "Feature Status:");
                 console.raw(format!("{}\n", title))?;
-                console.raw("---------------\n")?;
+                console.raw(format!("{}\n", "━".repeat(30)))?;
 
                 // Iterate over all currently-known variants so the output is
                 // always complete, regardless of what is stored on disk.
