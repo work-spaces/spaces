@@ -27,6 +27,8 @@ homedir = "0.3"
 arboard = "3"
 serde_with = "3"
 enum-map = { version = "2", features = ["serde"] }
+nono = { git = "https://github.com/work-spaces/nono", rev = "4e642f291bc3b8bc2666189ba2d6080c18c57f3b"}
+
 
 indexmap.workspace = true
 

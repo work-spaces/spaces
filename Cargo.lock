@@ -369,10 +369,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdd35008169921d80bc60d3d0ab416eecb028c4cd653352907921d95084790be"
 dependencies = [
  "hybrid-array",
-<<<<<<< HEAD
  "zeroize",
-=======
->>>>>>> a79a6ec (#705. Add support for sandboxing with nono)
 ]
 
 [[package]]
@@ -511,11 +508,7 @@ version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e34d8227fe1ba289043aeb13792056ff80fd6de1a9f49137a5f499de8e8c78ea"
 dependencies = [
-<<<<<<< HEAD
  "crypto-common 0.2.1",
-=======
- "crypto-common 0.1.7",
->>>>>>> a79a6ec (#705. Add support for sandboxing with nono)
  "inout",
 ]
 
@@ -579,12 +572,6 @@ dependencies = [
 ]
 
 [[package]]
-<<<<<<< HEAD
-name = "cmov"
-version = "0.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f88a43d011fc4a6876cb7344703e297c71dda42494fee094d5f7c76bf13f746"
-=======
 name = "cmake"
 version = "0.1.58"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -592,7 +579,12 @@ checksum = "c0f78a02292a74a88ac736019ab962ece0bc380e3f977bf72e376c5d78ff0678"
 dependencies = [
  "cc",
 ]
->>>>>>> a79a6ec (#705. Add support for sandboxing with nono)
+
+[[package]]
+name = "cmov"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f88a43d011fc4a6876cb7344703e297c71dda42494fee094d5f7c76bf13f746"
 
 [[package]]
 name = "cmp_any"
@@ -640,15 +632,12 @@ checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
 
 [[package]]
 name = "const-oid"
-<<<<<<< HEAD
-=======
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
 
 [[package]]
 name = "const-oid"
->>>>>>> a79a6ec (#705. Add support for sandboxing with nono)
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
@@ -910,13 +899,13 @@ dependencies = [
 
 [[package]]
 name = "dbus"
-version = "0.9.10"
+version = "0.9.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21b3aa68d7e7abee336255bd7248ea965cc393f3e70411135a6f6a4b651345d4"
+checksum = "b942602992bb7acfd1f51c49811c58a610ef9181b6e66f3e519d79b540a3bf73"
 dependencies = [
  "libc",
  "libdbus-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1051,17 +1040,16 @@ checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
 dependencies = [
  "block-buffer 0.10.4",
  "crypto-common 0.1.7",
-<<<<<<< HEAD
 ]
 
 [[package]]
 name = "digest"
-version = "0.11.2"
+version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4850db49bf08e663084f7fb5c87d202ef91a3907271aff24a94eb97ff039153c"
+checksum = "f1dd6dbb5841937940781866fa1281a1ff7bd3bf827091440879f9994983d5c2"
 dependencies = [
  "block-buffer 0.12.0",
- "const-oid",
+ "const-oid 0.10.2",
  "crypto-common 0.2.1",
  "ctutils",
  "zeroize",
@@ -1074,20 +1062,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "44c45a9d03d6676652bcb5e724c7e988de1acad23a711b5217ab9cbecbec2225"
 dependencies = [
  "dirs-sys",
-=======
- "subtle",
->>>>>>> a79a6ec (#705. Add support for sandboxing with nono)
-]
-
-[[package]]
-name = "digest"
-version = "0.11.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4850db49bf08e663084f7fb5c87d202ef91a3907271aff24a94eb97ff039153c"
-dependencies = [
- "block-buffer 0.12.0",
- "const-oid 0.10.2",
- "crypto-common 0.2.1",
 ]
 
 [[package]]
@@ -1217,7 +1191,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c34f04666d835ff5d62e058c3995147c06f42fe86ff053337632bca83e42702d"
 
 [[package]]
-<<<<<<< HEAD
 name = "enum-map"
 version = "2.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1232,7 +1205,13 @@ name = "enum-map-derive"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f282cfdfe92516eb26c2af8589c274c7c17681f5ecc03c18255fe741c6aa64eb"
-=======
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "enumflags2"
 version = "0.7.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1246,7 +1225,6 @@ name = "enumflags2_derive"
 version = "0.7.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67c78a4d8fdf9953a5c9d458f9efe940fd97a0cab0941c075a813ac594733827"
->>>>>>> a79a6ec (#705. Add support for sandboxing with nono)
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1254,7 +1232,6 @@ dependencies = [
 ]
 
 [[package]]
-<<<<<<< HEAD
 name = "env_filter"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1265,8 +1242,6 @@ dependencies = [
 ]
 
 [[package]]
-=======
->>>>>>> a79a6ec (#705. Add support for sandboxing with nono)
 name = "env_home"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1710,9 +1685,9 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.4.13"
+version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f44da3a8150a6703ed5d34e164b875fd14c2cdab9af1252a9a1020bde2bdc54"
+checksum = "171fefbc92fe4a4de27e0698d6a5b392d6a0e333506bc49133760b3bcf948733"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -1827,11 +1802,7 @@ version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6303bc9732ae41b04cb554b844a762b4115a61bfaa81e3e83050991eeb56863f"
 dependencies = [
-<<<<<<< HEAD
- "digest 0.11.2",
-=======
- "digest 0.10.7",
->>>>>>> a79a6ec (#705. Add support for sandboxing with nono)
+ "digest 0.11.3",
 ]
 
 [[package]]
@@ -1913,15 +1884,9 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
 name = "hybrid-array"
-<<<<<<< HEAD
 version = "0.4.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08d46837a0ed51fe95bd3b05de33cd64a1ee88fc797477ca48446872504507c5"
-=======
-version = "0.4.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3944cf8cf766b40e2a1a333ee5e9b563f854d5fa49d6a8ca2764e97c6eddb214"
->>>>>>> a79a6ec (#705. Add support for sandboxing with nono)
 dependencies = [
  "typenum",
 ]
@@ -2210,16 +2175,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d98f6fed1fde3f8c21bc40a1abb88dd75e67924f9cffc3ef95607bad8017f8e2"
 
 [[package]]
-name = "iri-string"
-version = "0.7.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25e659a4bb38e810ebc252e53b5814ff908a8c58c2a9ce2fae1bbec24cbf4e20"
-dependencies = [
- "memchr",
- "serde",
-]
-
-[[package]]
 name = "is-terminal"
 version = "0.4.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2433,7 +2388,7 @@ dependencies = [
  "bitflags 2.11.1",
  "libc",
  "plain",
- "redox_syscall 0.7.4",
+ "redox_syscall 0.7.5",
 ]
 
 [[package]]
@@ -2776,8 +2731,8 @@ dependencies = [
 
 [[package]]
 name = "nono"
-version = "0.37.1"
-source = "git+https://github.com/work-spaces/nono?rev=258622707fbc10728aeeea769281f1ab26e1d416#258622707fbc10728aeeea769281f1ab26e1d416"
+version = "0.42.0"
+source = "git+https://github.com/work-spaces/nono?rev=4e642f291bc3b8bc2666189ba2d6080c18c57f3b#4e642f291bc3b8bc2666189ba2d6080c18c57f3b"
 dependencies = [
  "der",
  "getrandom 0.4.2",
@@ -2788,7 +2743,7 @@ dependencies = [
  "libc",
  "nix 0.31.2",
  "prettyplease",
- "regress 0.11.1",
+ "regress",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -3021,11 +2976,7 @@ version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "112d82ceb8c5bf524d9af484d4e4970c9fd5a0cc15ba14ad93dccd28873b0629"
 dependencies = [
-<<<<<<< HEAD
- "digest 0.11.2",
-=======
- "digest 0.10.7",
->>>>>>> a79a6ec (#705. Add support for sandboxing with nono)
+ "digest 0.11.3",
  "hmac",
 ]
 
@@ -3174,18 +3125,18 @@ dependencies = [
 
 [[package]]
 name = "pin-project"
-version = "1.1.11"
+version = "1.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1749c7ed4bcaf4c3d0a3efc28538844fb29bcdd7d2b67b2be7e20ba861ff517"
+checksum = "cbf0d9e68100b3a7989b4901972f265cd542e560a3a8a724e1e20322f4d06ce9"
 dependencies = [
  "pin-project-internal",
 ]
 
 [[package]]
 name = "pin-project-internal"
-version = "1.1.11"
+version = "1.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9b20ed30f105399776b9c883e68e536ef602a16ae6f596d2c473591d6ad64c6"
+checksum = "a990e22f43e84855daf260dded30524ef4a9021cc7541c26540500a50b624389"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3460,7 +3411,12 @@ dependencies = [
 ]
 
 [[package]]
-<<<<<<< HEAD
+name = "rand_core"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
+
+[[package]]
 name = "rayon"
 version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3479,12 +3435,6 @@ dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
 ]
-=======
-name = "rand_core"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
->>>>>>> a79a6ec (#705. Add support for sandboxing with nono)
 
 [[package]]
 name = "redox_syscall"
@@ -3497,9 +3447,9 @@ dependencies = [
 
 [[package]]
 name = "redox_syscall"
-version = "0.7.4"
+version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f450ad9c3b1da563fb6948a8e0fb0fb9269711c9c73d9ea1de5058c79c8d643a"
+checksum = "4666a1a60d8412eab19d94f6d13dcc9cea0a5ef4fdf6a5db306537413c661b1b"
 dependencies = [
  "bitflags 2.11.1",
 ]
@@ -3584,16 +3534,6 @@ checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 
 [[package]]
 name = "regress"
-version = "0.10.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2057b2325e68a893284d1538021ab90279adac1139957ca2a74426c6f118fb48"
-dependencies = [
- "hashbrown 0.16.1",
- "memchr",
-]
-
-[[package]]
-name = "regress"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "158a764437582235e3501f683b93a0a6f8d825d04a789dbe5ed30b8799b8908a"
@@ -3644,9 +3584,9 @@ dependencies = [
 
 [[package]]
 name = "reqwest"
-version = "0.13.2"
+version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab3f43e3283ab1488b624b44b0e988d0acea0b3214e694730a055cb6b2efa801"
+checksum = "62e0021ea2c22aed41653bc7e1419abb2c97e038ff2c33d0e1309e49a97deec0"
 dependencies = [
  "base64",
  "bytes",
@@ -4074,9 +4014,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "3.18.0"
+version = "3.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd5414fad8e6907dbdd5bc441a50ae8d6e26151a03b1de04d89a5576de61d01f"
+checksum = "f05839ce67618e14a09b286535c0d9c94e85ef25469b0e13cb4f844e5593eb19"
 dependencies = [
  "base64",
  "chrono",
@@ -4093,9 +4033,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with_macros"
-version = "3.18.0"
+version = "3.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3db8978e608f1fe7357e211969fd9abdcae80bac1ba7a3369bb7eb6b404eb65"
+checksum = "cf2ebbe86054f9b45bc3881e865683ccfaccce97b9b4cb53f3039d67f355a334"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -4142,7 +4082,6 @@ dependencies = [
  "cfg-if",
  "cpufeatures 0.2.17",
  "digest 0.10.7",
-<<<<<<< HEAD
 ]
 
 [[package]]
@@ -4153,9 +4092,7 @@ checksum = "aacc4cc499359472b4abe1bf11d0b12e688af9a805fa5e3016f9a386dc2d0214"
 dependencies = [
  "cfg-if",
  "cpufeatures 0.3.0",
- "digest 0.11.2",
-=======
->>>>>>> a79a6ec (#705. Add support for sandboxing with nono)
+ "digest 0.11.3",
 ]
 
 [[package]]
@@ -4167,8 +4104,6 @@ dependencies = [
  "cfg-if",
  "cpufeatures 0.2.17",
  "digest 0.10.7",
-<<<<<<< HEAD
-=======
 ]
 
 [[package]]
@@ -4179,8 +4114,7 @@ checksum = "446ba717509524cb3f22f17ecc096f10f4822d76ab5c0b9822c5f9c284e825f4"
 dependencies = [
  "cfg-if",
  "cpufeatures 0.3.0",
- "digest 0.11.2",
->>>>>>> a79a6ec (#705. Add support for sandboxing with nono)
+ "digest 0.11.3",
 ]
 
 [[package]]
@@ -4253,9 +4187,9 @@ dependencies = [
 
 [[package]]
 name = "sigstore-bundle"
-version = "0.6.4"
+version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e1c326f5796df635de915cc1b2d29485423df10a4997be6103091772f503451"
+checksum = "0e7dc53c8a941858d01479622dbb7650aaa2ee0ca1fb58fb6cdddbfc3064abbb"
 dependencies = [
  "base64",
  "hex",
@@ -4271,9 +4205,9 @@ dependencies = [
 
 [[package]]
 name = "sigstore-crypto"
-version = "0.6.4"
+version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6271208173601a0f058f5fb5354561905a7ead9b4185d85a6c2ed97fbdd31338"
+checksum = "da90c3d9af638898a5fdc347479b18f950bb0dde11ecf2244f94cd28135da53b"
 dependencies = [
  "aws-lc-rs",
  "base64",
@@ -4293,9 +4227,9 @@ dependencies = [
 
 [[package]]
 name = "sigstore-merkle"
-version = "0.6.4"
+version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "692e1c1037124c0305e6e342c6a5fa180a31d6ce0eafc0e6c8f001d200083f8d"
+checksum = "7c0d53558825c77716855c13794306fff766854c1bf92948e77d7890da3f2455"
 dependencies = [
  "base64",
  "hex",
@@ -4306,13 +4240,13 @@ dependencies = [
 
 [[package]]
 name = "sigstore-rekor"
-version = "0.6.4"
+version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21abbf2ab10930dd2eb77cbc4c24b1efa6da89f6f0dce9b28b7c1362e7b80da8"
+checksum = "641fdaaa40d0cd6e249cf1671c2240beff1a3ece578062cf43e750779e8db2b3"
 dependencies = [
  "base64",
  "hex",
- "reqwest 0.13.2",
+ "reqwest 0.13.3",
  "serde",
  "serde_json",
  "sigstore-crypto",
@@ -4324,9 +4258,9 @@ dependencies = [
 
 [[package]]
 name = "sigstore-trust-root"
-version = "0.6.4"
+version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45f9d2f2dc33e04c80cfd5f11c93b64f0a2555b1d7f92b5aa16307266f05ad8c"
+checksum = "a6b0d2550f05c096400066e858db13d91f9de3b750a7541fb1291c1dc80ca290"
 dependencies = [
  "base64",
  "chrono",
@@ -4342,9 +4276,9 @@ dependencies = [
 
 [[package]]
 name = "sigstore-tsa"
-version = "0.6.4"
+version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c43c677d430038c216b4f6368efc8cea42f35eca4d20fe5fcf51133d71b3b51b"
+checksum = "0bc86c8abc1ece6832236e7e34e9baebb5d4d40490c0332b814a0d8624ca7255"
 dependencies = [
  "aws-lc-rs",
  "base64",
@@ -4355,7 +4289,7 @@ dependencies = [
  "der",
  "hex",
  "rand 0.10.1",
- "reqwest 0.13.2",
+ "reqwest 0.13.3",
  "rustls-pki-types",
  "rustls-webpki",
  "sigstore-crypto",
@@ -4368,9 +4302,9 @@ dependencies = [
 
 [[package]]
 name = "sigstore-types"
-version = "0.6.4"
+version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47aa6bca8f329e06c7ccb5b9f9be82b165b2be063396be0ee57b13402b994744"
+checksum = "f8d870c9bcfdf83396ac2bd2d6a23c5d09ec02cc9fda50fa1cbb3dd71a9bee53"
 dependencies = [
  "base64",
  "chrono",
@@ -4383,9 +4317,9 @@ dependencies = [
 
 [[package]]
 name = "sigstore-verify"
-version = "0.6.4"
+version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d44caf1ea504259cf70c7c16527d8a3fa07bd9374ba4e59ec247e7d13a7f2cb8"
+checksum = "d30aff69036e4579b416956e9ba68cec45b793116f78f10842d04c7f8b924bab"
 dependencies = [
  "base64",
  "chrono",
@@ -4419,9 +4353,9 @@ checksum = "703d5c7ef118737c72f1af64ad2f6f8c5e1921f818cdcb97b8fe6fc69bf66214"
 
 [[package]]
 name = "siphasher"
-version = "1.0.2"
+version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2aa850e253778c88a04c3d7323b043aeda9d3e30d5971937c1855769763678e"
+checksum = "8ee5873ec9cce0195efcb7a4e9507a04cd49aec9c83d0389df45b1ef7ba2e649"
 
 [[package]]
 name = "slab"
@@ -4447,7 +4381,7 @@ dependencies = [
 
 [[package]]
 name = "spaces"
-version = "0.15.41"
+version = "0.15.42"
 dependencies = [
  "anyhow",
  "anyhow-source-location",
@@ -4533,7 +4467,7 @@ dependencies = [
 
 [[package]]
 name = "spaces-utils"
-version = "0.15.41"
+version = "0.15.42"
 dependencies = [
  "anyhow",
  "anyhow-source-location",
@@ -4726,12 +4660,12 @@ dependencies = [
  "md5",
  "num_cpus",
  "regex",
- "reqwest",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "serde_yaml",
  "sha1 0.10.6",
- "sha2",
+ "sha2 0.10.9",
  "starlark",
  "state",
  "sysinfo",
@@ -5176,11 +5110,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
-<<<<<<< HEAD
-name = "tokio"
-version = "1.52.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-=======
 name = "tls_codec"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5203,10 +5132,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.52.1"
+version = "1.52.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
->>>>>>> a79a6ec (#705. Add support for sandboxing with nono)
-checksum = "b67dee974fe86fd92cc45b7a95fdd2f99a36a6d7b0d431a231178d3d670bbcc6"
+checksum = "110a78583f19d5cdb2c5ccf321d1290344e71313c6c37d43520d386027d18386"
 dependencies = [
  "bytes",
  "libc",
@@ -5318,20 +5246,20 @@ dependencies = [
 
 [[package]]
 name = "tower-http"
-version = "0.6.8"
+version = "0.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4e6559d53cc268e5031cd8429d05415bc4cb4aefc4aa5d6cc35fbf5b924a1f8"
+checksum = "a28f0d049ccfaa566e14e9663d304d8577427b368cb4710a20528690287a738b"
 dependencies = [
  "bitflags 2.11.1",
  "bytes",
  "futures-util",
  "http",
  "http-body",
- "iri-string",
  "pin-project-lite",
  "tower",
  "tower-layer",
  "tower-service",
+ "url",
 ]
 
 [[package]]
@@ -5427,9 +5355,9 @@ checksum = "40ce102ab67701b8526c123c1bab5cbe42d7040ccfd0f64af1a385808d2f43de"
 
 [[package]]
 name = "typify"
-version = "0.6.1"
+version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b715573a376585888b742ead9be5f4826105e622169180662e2c81bed4a149c3"
+checksum = "bc0b89f47309feaeb23c4509c15c9a04234f7deccef6f96c3bfe95319819a304"
 dependencies = [
  "typify-impl",
  "typify-macro",
@@ -5437,15 +5365,15 @@ dependencies = [
 
 [[package]]
 name = "typify-impl"
-version = "0.6.1"
+version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2fd0d27608a466d063d23b97cf2d26c25d838f01b4f7d5ff406a7446f16b6e3"
+checksum = "fa7b026f540b148b81043c720889dbb942b08659aa8a43f624ac4f04dbfc1861"
 dependencies = [
  "heck",
  "log",
  "proc-macro2",
  "quote",
- "regress 0.10.5",
+ "regress",
  "schemars 0.8.22",
  "semver",
  "serde",
@@ -5457,9 +5385,9 @@ dependencies = [
 
 [[package]]
 name = "typify-macro"
-version = "0.6.1"
+version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd04bb1207cd4e250941cc1641f4c4815f7eaa2145f45c09dd49cb0a3691710a"
+checksum = "39ed96c57f06ae0839416b986921a98f18b220da63bbb243a8570a00c8492183"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6513,7 +6441,7 @@ checksum = "1301e935010a701ae5f8655edc0ad17c44bad3ac5ce8c39185f75453b720ae94"
 dependencies = [
  "const-oid 0.9.6",
  "der",
- "sha1",
+ "sha1 0.10.6",
  "signature",
  "spki",
  "tls_codec",

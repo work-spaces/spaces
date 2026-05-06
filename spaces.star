@@ -36,7 +36,6 @@ GLOB_DEPS = glob(includes = [
     "//spaces/Cargo.toml",
     "//spaces/Cargo.workspace.toml",
     "//spaces/**/*.rs",
-    "//spaces/rust-toolchain.toml",
 ], excludes = [
     "//spaces/target/**",
 ])
@@ -258,15 +257,7 @@ run_add_exec(
     args = ["clippy"],
     visibility = visibility_private(),
     deps = [
-<<<<<<< HEAD
-        ":check_rust_fmt",
-        ":check_starlark",
-        ":rustup_update",
-        ":script_tests",
-=======
         ":base_deps",
-        ":check_rust_fmt",
-        ":check_starlark",
->>>>>>> a79a6ec (#705. Add support for sandboxing with nono)
+        ":script_tests",
     ],
 )
