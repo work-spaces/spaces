@@ -3,7 +3,7 @@ Load the spaces starlark SDK and packages repositories.
 """
 
 workspace.set_locks(locks = {
-    "@star/sdk": "v0.3.30",
+    "@star/sdk": "5bb98b3843598df995375e53f0837e07027af0dd",
     "@star/packages": "v0.2.48",
 })
 
@@ -20,7 +20,7 @@ checkout.add_repo(
     rule = {"name": "@star/sdk"},
     repo = {
         "url": "https://github.com/work-spaces/sdk",
-        "rev": "5bb98b3843598df995375e53f0837e07027af0dd",
+        "rev": "main",
         "checkout": "Revision",
     },
 )
