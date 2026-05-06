@@ -1039,6 +1039,55 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         Ok(NoneType)
     }
+
+    /// Configures the sandbox applied to `spaces shell` for this workspace.
+    ///
+    /// The sandbox is merged with the default shell sandbox (which already grants access
+    /// to the current working directory, store path, and all `PATH` entries). Any paths or
+    /// policies declared here are unioned on top of those defaults.
+    ///
+    /// The sandbox is persisted in `.spaces/settings.spaces.json` and takes effect the
+    /// next time `spaces shell --sandbox` is run.
+    ///
+    /// ```python
+    /// checkout.set_sandbox(
+    ///     sandbox = {
+    ///         "name": "workspace-sandbox",
+    ///         "read": ["/etc/ssl"],
+    ///         "write": [],
+    ///         "exec": [],
+    ///         "network": "Blocked",
+    ///     },
+    /// )
+    /// ```
+    ///
+    /// # Arguments
+    /// * `sandbox`: A `dict` describing the sandbox policy with the following keys:
+    ///     * `name` (`str`, **required**): Rule name used in sandbox violation diagnostics.
+    ///     * `read` (`list[str]`, optional): Additional read-only paths.
+    ///     * `write` (`list[str]`, optional): Additional read-write paths.
+    ///     * `exec` (`list[str]`, optional): Additional executable paths.
+    ///     * `scratch` (`str`, optional): Scratch/temp directory for intermediate artifacts.
+    ///     * `network` (`str`, optional): Network policy — `"Unrestricted"` (default) or `"Blocked"`.
+    ///     * `deny` (`list[str]`, optional): Paths to explicitly deny even if covered by a broader grant.
+    fn set_sandbox(
+        #[starlark(require = named)] sandbox: starlark::values::Value,
+        eval: &mut Evaluator,
+    ) -> anyhow::Result<NoneType> {
+        let ctx = get_eval_context(eval)?;
+
+        let sandbox_value: utils::sandbox::Sandbox =
+            serde_json::from_value(sandbox.to_json_value()?)
+                .context(format_context!("while parsing sandbox"))?;
+
+        let workspace_arc = ctx
+            .workspace
+            .clone()
+            .ok_or_else(|| format_error!("No active workspace found"))?;
+        workspace_arc.write().settings.json.sandbox = sandbox_value;
+
+        Ok(NoneType)
+    }
 }
 
 fn add_git_url_to_workspace_store_queue(

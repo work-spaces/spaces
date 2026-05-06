@@ -287,6 +287,7 @@ pub fn run_shell_in_workspace(
     console: console::Console,
     path: Option<Arc<str>>,
     completions_command: Option<(clap::Command, rules::HasHelp)>,
+    sandbox: shell::IsSandbox,
 ) -> anyhow::Result<()> {
     let workspace = get_workspace(
         console.clone(),
@@ -356,6 +357,20 @@ pub fn run_shell_in_workspace(
 
     while !console.is_refresh_thread_ready_to_join() {
         std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+
+    if bool::from(sandbox) {
+        let env_path: Arc<str> = run_environment
+            .get("PATH")
+            .cloned()
+            .unwrap_or_else(|| "".into());
+        let store_path = workspace_arc.read().get_store_path();
+        let mut default_sandbox = shell::create_sandbox(env_path, store_path)
+            .context(format_context!("while creating sandbox"))?;
+        default_sandbox.extend(&workspace_arc.read().settings.json.sandbox);
+        default_sandbox
+            .apply()
+            .context(format_context!("while applying sandbox"))?;
     }
 
     shell::run(
