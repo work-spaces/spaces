@@ -1,4 +1,4 @@
-use crate::{changes, fs_mutex, graph, inputs, logger, store};
+use crate::{changes, fs_mutex, graph, inputs, logger, sandbox, store};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 
@@ -311,6 +311,8 @@ pub struct JsonSettings {
     pub max_checkout_queue: i64,
     #[serde(skip)]
     pub bin_settings: BinSettings,
+    #[serde(default)]
+    pub sandbox: sandbox::Sandbox,
 }
 
 impl Default for JsonSettings {
@@ -337,6 +339,7 @@ impl JsonSettings {
             max_run_queue: 8,
             max_checkout_queue: 8,
             bin_settings: Default::default(),
+            sandbox: Default::default(),
         }
     }
 
