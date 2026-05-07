@@ -152,7 +152,7 @@ GH_RULE = package_add("github.com", "cli", "cli", "v2.88.1")
 
 # Required for dbus and nono (linux only)
 
-if workspace_load_value("SPACES_ENABLE_SANDBOX") == "ON":
+if info_is_platform_linux() or workspace_load_value("SPACES_ENABLE_SANDBOX") == "ON":
     checkout_store_value("SPACES_DBUS_ENABLED", True)
     cmake_add("cmake4", "v4.3.1")
     package_add("github.com", "ninja-build", "ninja", "v1.13.2")
@@ -210,6 +210,7 @@ if workspace_load_value("SPACES_ENABLE_SANDBOX") == "ON":
         ],
     )
 
-    sandbox = sandbox_new("workspace-sandbox")
-    sandbox_configure_for_os(sandbox)
-    checkout_set_sandbox(sandbox)
+    if not info_is_ci():
+        sandbox = sandbox_new("workspace-sandbox")
+        sandbox_configure_for_os(sandbox)
+        checkout_set_sandbox(sandbox)
