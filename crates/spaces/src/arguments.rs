@@ -408,6 +408,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             path,
             completions,
             all_targets,
+            sandbox,
         } => {
             singleton::set_execution_phase(task::Phase::Inspect);
             if shell::is_spaces_shell() {
@@ -425,8 +426,13 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                 None
             };
 
-            runner::run_shell_in_workspace(effective_console, path, completions_command)
-                .context(format_context!("while running user shell"))?;
+            runner::run_shell_in_workspace(
+                effective_console,
+                path,
+                completions_command,
+                sandbox.into(),
+            )
+            .context(format_context!("while running user shell"))?;
         }
 
         Commands::RunLsp {} => {
@@ -1068,6 +1074,9 @@ create-lock-file = false # optionally create a lock file
         /// Include all run targets in completions not just those with help populated
         #[arg(long)]
         all_targets: bool,
+        /// Apply a sandbox to restrict filesystem and network access
+        #[arg(long)]
+        sandbox: bool,
     },
     /// Query the status of rules from the logs.
     Logs {
