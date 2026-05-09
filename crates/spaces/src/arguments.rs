@@ -262,7 +262,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             }
 
             let is_ci = singleton::get_is_ci().into();
-            let group = ci::GithubLogGroup::new_group(
+            let _group = ci::GithubLogGroup::new_group(
                 effective_console.clone(),
                 is_ci,
                 format!("Spaces Checkout Repo {url}").as_str(),
@@ -289,7 +289,6 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             )
             .context(format_context!("while checking out repo"));
 
-            group.end_group(effective_console, is_ci)?;
             result?;
         }
         Commands::Co { args } => {
@@ -486,7 +485,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                 .as_ref()
                 .map(|target| format!(" {target}"))
                 .unwrap_or_default();
-            let group = ci::GithubLogGroup::new_group(
+            let _group = ci::GithubLogGroup::new_group(
                 effective_console.clone(),
                 is_ci,
                 format!("Spaces Run{target_message}").as_str(),
@@ -500,7 +499,6 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                 runner::IsCreateLockFile::No,
                 runner::IsExecuteTasks::Yes,
             );
-            group.end_group(effective_console, is_ci)?;
             result.context(format_context!("while executing run rules"))?;
         }
 

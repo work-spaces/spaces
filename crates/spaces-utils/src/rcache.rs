@@ -277,7 +277,7 @@ pub fn prune(
     console: console::Console,
     is_ci: ci::IsCi,
 ) -> anyhow::Result<()> {
-    let group = ci::GithubLogGroup::new_group(console.clone(), is_ci, "Spaces RCache Prune")?;
+    let _group = ci::GithubLogGroup::new_group(console.clone(), is_ci, "Spaces RCache Prune")?;
 
     // Phase 1: find and remove stale rule_digest entries
     let rule_digests_path = cache_path.join(RULE_DIGEST_CACHE_DIR);
@@ -457,7 +457,6 @@ pub fn prune(
     ));
 
     logger(console.clone()).message(finalize_message.as_str());
-    group.end_group(console.clone(), is_ci)?;
     Ok(())
 }
 
@@ -481,7 +480,7 @@ pub fn show_info(
         return Ok(());
     }
 
-    let group = ci::GithubLogGroup::new_group(console.clone(), is_ci, "Spaces RCache Info")?;
+    let _group = ci::GithubLogGroup::new_group(console.clone(), is_ci, "Spaces RCache Info")?;
 
     let artifacts_path = cache_path.join(ARTIFACT_CACHE_DIR);
     let rule_digests_path = cache_path.join(RULE_DIGEST_CACHE_DIR);
@@ -516,7 +515,6 @@ pub fn show_info(
         }
     }
 
-    group.end_group(console.clone(), is_ci)?;
     Ok(())
 }
 

@@ -356,7 +356,7 @@ impl Store {
         is_ci: ci::IsCi,
         rcache_path: &std::path::Path,
     ) -> anyhow::Result<()> {
-        let group = ci::GithubLogGroup::new_group(console.clone(), is_ci, "Spaces Store Info")?;
+        let _group = ci::GithubLogGroup::new_group(console.clone(), is_ci, "Spaces Store Info")?;
 
         // Collect unmanaged directory sizes before printing anything, with progress indicator.
         let managed_top_level_dirs = self.get_managed_top_level_dirs();
@@ -514,8 +514,6 @@ impl Store {
             "gathering store info",
         ));
 
-        group.end_group(console.clone(), is_ci)?;
-
         Ok(())
     }
 
@@ -605,7 +603,7 @@ impl Store {
         is_dry_run: bool,
         is_ci: ci::IsCi,
     ) -> anyhow::Result<()> {
-        let group = ci::GithubLogGroup::new_group(console.clone(), is_ci, "Spaces Store Fix")?;
+        let _group = ci::GithubLogGroup::new_group(console.clone(), is_ci, "Spaces Store Fix")?;
         let log = logger(console.clone());
 
         // Counters accumulated across all fix phases for the finalize summary.
@@ -885,16 +883,12 @@ impl Store {
                     progress.update_progress(0, total);
                     for repo_path in &repos_needing_repair {
                         let path_str = repo_path.to_string_lossy();
-                        progress.set_message(path_str.as_ref());
-                        let mut git_progress = console::Progress::new(
-                            progress.console.clone(),
-                            path_str.as_ref(),
-                            None,
-                            None,
-                        );
+                        let (mut git_progress, display_name) =
+                            get_git_progress(progress.console.clone(), repo_path);
+                        progress.set_message(&display_name);
                         if git::fetch_bare_repo(&mut git_progress, path_str.as_ref()) {
                             bare_repos_repaired += 1;
-                            log.info(format!("Repaired bare repo: {path_str}").as_str());
+                            log.info(format!("Fetched bare repo: {path_str}").as_str());
                         } else {
                             log.warning(
                                 format!(
@@ -966,7 +960,6 @@ impl Store {
             finalize_message.as_str(),
         ));
 
-        group.end_group(console.clone(), is_ci)?;
         Ok(())
     }
 
@@ -977,7 +970,7 @@ impl Store {
         is_dry_run: bool,
         is_ci: ci::IsCi,
     ) -> anyhow::Result<()> {
-        let group = ci::GithubLogGroup::new_group(console.clone(), is_ci, "Spaces Store Prune")?;
+        let _group = ci::GithubLogGroup::new_group(console.clone(), is_ci, "Spaces Store Prune")?;
         let mut remove_entries = Vec::new();
 
         let path_to_store = self.path_to_store.clone();
@@ -1070,7 +1063,6 @@ impl Store {
         ));
 
         logger(console.clone()).message(finalize_message.as_str());
-        group.end_group(console.clone(), is_ci)?;
 
         Ok(())
     }

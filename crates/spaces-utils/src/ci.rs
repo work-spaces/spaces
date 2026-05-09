@@ -18,6 +18,8 @@ pub fn is_github_actions() -> bool {
 
 pub struct GithubLogGroup {
     is_github: bool,
+    is_ci: IsCi,
+    console: console::Console,
 }
 
 impl GithubLogGroup {
@@ -32,13 +34,23 @@ impl GithubLogGroup {
             console.raw(format!("::group::{group_name}\n").as_str())?;
         }
 
-        Ok(GithubLogGroup { is_github })
+        Ok(GithubLogGroup {
+            is_github,
+            is_ci,
+            console,
+        })
     }
 
-    pub fn end_group(&self, console: console::Console, is_ci: IsCi) -> anyhow::Result<()> {
-        if self.is_github && is_ci == IsCi::Yes {
-            console.raw("::endgroup::\n")?;
+    fn end_group(&self) -> anyhow::Result<()> {
+        if self.is_github && self.is_ci == IsCi::Yes {
+            self.console.raw("::endgroup::\n")?;
         }
         Ok(())
+    }
+}
+
+impl Drop for GithubLogGroup {
+    fn drop(&mut self) {
+        let _ = self.end_group();
     }
 }
