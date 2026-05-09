@@ -34,6 +34,9 @@ pub struct RunOptions {
     pub stderr: Option<StderrSpec>,
     pub timeout_ms: Option<u64>,
     pub check: Option<bool>,
+    pub stdout_path: Option<String>,
+    pub stderr_path: Option<String>,
+    pub tee: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -209,6 +212,31 @@ fn execute_run(opts: RunOptions) -> anyhow::Result<RunOutcome> {
 
     let status = output.status.code().unwrap_or(1);
 
+    // Write captured output to disk if paths specified
+    if let Some(path) = opts.stdout_path {
+        std::fs::write(&path, &output.stdout)
+            .context(format_context!("Failed to write stdout to file: {path}"))?;
+    }
+
+    if let Some(path) = opts.stderr_path {
+        std::fs::write(&path, &output.stderr)
+            .context(format_context!("Failed to write stderr to file: {path}"))?;
+    }
+
+    // Tee output to parent process streams if requested
+    if opts.tee.unwrap_or(false) {
+        if capture_stdout || merge_stderr_into_stdout {
+            std::io::stdout()
+                .write_all(&output.stdout)
+                .context(format_context!("Failed to tee stdout"))?;
+        }
+        if capture_stderr {
+            std::io::stderr()
+                .write_all(&output.stderr)
+                .context(format_context!("Failed to tee stderr"))?;
+        }
+    }
+
     if opts.check.unwrap_or(false) && status != 0 {
         bail!("process exited with status {status}");
     }
@@ -373,6 +401,17 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     }
 
     /// Streaming-capable run with explicit redirection and timeout/check behavior.
+    ///
+    /// # New Parameters (optional)
+    ///
+    /// * `stdout_path` – If set, writes the command's captured stdout to this file path
+    ///   (creating/truncating the file). The returned `stdout` field still contains the
+    ///   captured string.
+    /// * `stderr_path` – If set, writes the command's captured stderr to this file path
+    ///   (creating/truncating the file). The returned `stderr` field still contains the
+    ///   captured string.
+    /// * `tee` – When `True`, also forwards stdout/stderr to the calling process's
+    ///   stdout/stderr after capturing.
     fn run<'v>(
         options: starlark::values::Value,
         eval: &mut Evaluator<'v, '_, '_>,
@@ -465,6 +504,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             stderr: Some(StderrSpec::Mode("capture".to_string())),
             timeout_ms: None,
             check: Some(true),
+            stdout_path: None,
+            stderr_path: None,
+            tee: None,
         })?;
 
         Ok(outcome.stdout.trim().to_string())
