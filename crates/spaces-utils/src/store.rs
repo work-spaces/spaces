@@ -1,4 +1,4 @@
-use crate::{age, ci, http_archive, logger};
+use crate::{age, ci, git, http_archive, logger};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use bytesize::ByteSize;
@@ -108,6 +108,40 @@ impl Default for UnmanagedDirectory {
             size: 0,
         }
     }
+}
+
+// ----------------------------------------------------------------
+// Phase 0: normalise manifest keys that contain double slashes.
+//
+// Earlier versions of spaces built manifest keys with a redundant '/'
+// separator, producing paths such as
+//   "bare/https/github.com/BurntSushi//ripgrep.git"
+// because `url_to_relative_path_and_name` returns a path that already
+// ends in '/' and the caller appended another one.
+//
+// We collapse runs of '/' into a single '/' with a pure string
+// operation so that the result is OS-independent (PathBuf::display()
+// would use '\' on Windows and misidentify every key as malformed).
+// ----------------------------------------------------------------
+
+/// Collapse any run of consecutive '/' characters in `s` into a
+/// single '/'.  The result always uses '/' as the separator,
+/// regardless of the host OS.
+fn collapse_slashes(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut last_was_slash = false;
+    for ch in s.chars() {
+        if ch == '/' {
+            if !last_was_slash {
+                out.push('/');
+            }
+            last_was_slash = true;
+        } else {
+            out.push(ch);
+            last_was_slash = false;
+        }
+    }
+    out
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -322,6 +356,8 @@ impl Store {
         is_ci: ci::IsCi,
         rcache_path: &std::path::Path,
     ) -> anyhow::Result<()> {
+        let group = ci::GithubLogGroup::new_group(console.clone(), is_ci, "Spaces Store Info")?;
+
         // Collect unmanaged directory sizes before printing anything, with progress indicator.
         let managed_top_level_dirs = self.get_managed_top_level_dirs();
 
@@ -365,8 +401,6 @@ impl Store {
                 }
             }
         }
-
-        let group = ci::GithubLogGroup::new_group(console.clone(), is_ci, "Spaces Store Info")?;
 
         let mut is_fix_needed = false;
 
@@ -446,8 +480,6 @@ impl Store {
             }
         }
 
-        group.end_group(console.clone(), is_ci)?;
-
         crate::rcache::show_info(rcache_path, console.clone(), is_ci, &format)
             .context(format_context!("While showing rcache info"))?;
 
@@ -481,6 +513,8 @@ impl Store {
             progress.elapsed(),
             "gathering store info",
         ));
+
+        group.end_group(console.clone(), is_ci)?;
 
         Ok(())
     }
@@ -578,40 +612,6 @@ impl Store {
         let keys_normalised: usize;
 
         let mut bare_repos_repaired: usize = 0;
-
-        // ----------------------------------------------------------------
-        // Phase 0: normalise manifest keys that contain double slashes.
-        //
-        // Earlier versions of spaces built manifest keys with a redundant '/'
-        // separator, producing paths such as
-        //   "bare/https/github.com/BurntSushi//ripgrep.git"
-        // because `url_to_relative_path_and_name` returns a path that already
-        // ends in '/' and the caller appended another one.
-        //
-        // We collapse runs of '/' into a single '/' with a pure string
-        // operation so that the result is OS-independent (PathBuf::display()
-        // would use '\' on Windows and misidentify every key as malformed).
-        // ----------------------------------------------------------------
-
-        /// Collapse any run of consecutive '/' characters in `s` into a
-        /// single '/'.  The result always uses '/' as the separator,
-        /// regardless of the host OS.
-        fn collapse_slashes(s: &str) -> String {
-            let mut out = String::with_capacity(s.len());
-            let mut last_was_slash = false;
-            for ch in s.chars() {
-                if ch == '/' {
-                    if !last_was_slash {
-                        out.push('/');
-                    }
-                    last_was_slash = true;
-                } else {
-                    out.push(ch);
-                    last_was_slash = false;
-                }
-            }
-            out
-        }
 
         {
             let bad_keys: Vec<Arc<str>> = self
@@ -818,154 +818,153 @@ impl Store {
         };
 
         // Bare repo maintenance and repair
-        {
-            if !bare_repo_paths.is_empty() {
-                if is_dry_run {
-                    let mut repos_needing_repair = Vec::new();
-                    for repo_path in &bare_repo_paths {
+        if !bare_repo_paths.is_empty() {
+            if is_dry_run {
+                let mut repos_needing_repair = Vec::new();
+                for repo_path in &bare_repo_paths {
+                    let path_str = repo_path.to_string_lossy();
+                    let (mut git_progress, display_name) =
+                        get_git_progress(progress.console.clone(), repo_path);
+                    progress.set_message(&display_name);
+
+                    if !git::is_bare_repo_healthy(&mut git_progress, path_str.as_ref()) {
+                        log.warning(
+                            format!("Bare repo has problems (would attempt repair): {path_str}")
+                                .as_str(),
+                        );
+                        repos_needing_repair.push(repo_path.clone());
+                    }
+                    progress.increment(1);
+                }
+                log.message(
+                    format!("Would run gc on {} bare repos", bare_repo_paths.len()).as_str(),
+                );
+                if !repos_needing_repair.is_empty() {
+                    log.message(
+                        format!(
+                            "Would attempt fetch repair on {} bare repos",
+                            repos_needing_repair.len()
+                        )
+                        .as_str(),
+                    );
+                }
+                bare_repos_repaired = repos_needing_repair.len();
+            } else {
+                // Phase 1: maintenance (gc)
+                for repo_path in &bare_repo_paths {
+                    let path_str = repo_path.to_string_lossy();
+                    let (mut git_progress, display_name) =
+                        get_git_progress(progress.console.clone(), repo_path);
+                    progress.set_message(&display_name);
+
+                    if !git::run_bare_repo_maintenance(&mut git_progress, path_str.as_ref()) {
+                        log.warning(format!("gc failed for bare repo: {path_str}").as_str());
+                    }
+                    progress.increment(1);
+                }
+
+                // Phase 2: detection (fsck)
+                let mut repos_needing_repair = Vec::new();
+                for repo_path in &bare_repo_paths {
+                    let path_str = repo_path.to_string_lossy();
+
+                    let (mut git_progress, display_name) =
+                        get_git_progress(progress.console.clone(), repo_path);
+                    progress.set_message(&display_name);
+
+                    if !git::is_bare_repo_healthy(&mut git_progress, path_str.as_ref()) {
+                        repos_needing_repair.push(repo_path.clone());
+                    }
+                    progress.increment(1);
+                }
+
+                // Phase 3: repair (fetch) – extend the declared total now
+                // that we know how many repos need repair.
+                if !repos_needing_repair.is_empty() {
+                    total += repos_needing_repair.len() as u64;
+                    progress.update_progress(0, total);
+                    for repo_path in &repos_needing_repair {
                         let path_str = repo_path.to_string_lossy();
                         progress.set_message(path_str.as_ref());
-                        if !crate::git::is_bare_repo_healthy(&mut progress, path_str.as_ref()) {
+                        let mut git_progress = console::Progress::new(
+                            progress.console.clone(),
+                            path_str.as_ref(),
+                            None,
+                            None,
+                        );
+                        if git::fetch_bare_repo(&mut git_progress, path_str.as_ref()) {
+                            bare_repos_repaired += 1;
+                            log.info(format!("Repaired bare repo: {path_str}").as_str());
+                        } else {
                             log.warning(
                                 format!(
-                                    "Bare repo has problems (would attempt repair): {path_str}"
+                                    "Failed to fetch bare repo: {path_str} - consider re-cloning"
                                 )
                                 .as_str(),
                             );
-                            repos_needing_repair.push(repo_path.clone());
                         }
                         progress.increment(1);
-                    }
-                    log.message(
-                        format!("Would run gc on {} bare repos", bare_repo_paths.len()).as_str(),
-                    );
-                    if !repos_needing_repair.is_empty() {
-                        log.message(
-                            format!(
-                                "Would attempt fetch repair on {} bare repos",
-                                repos_needing_repair.len()
-                            )
-                            .as_str(),
-                        );
-                    }
-                    bare_repos_repaired = repos_needing_repair.len();
-                } else {
-                    // Phase 1: maintenance (gc)
-                    for repo_path in &bare_repo_paths {
-                        let path_str = repo_path.to_string_lossy();
-                        progress.set_message(path_str.as_ref());
-                        if !crate::git::run_bare_repo_maintenance(&mut progress, path_str.as_ref())
-                        {
-                            log.warning(format!("gc failed for bare repo: {path_str}").as_str());
-                        }
-                        progress.increment(1);
-                    }
-
-                    // Phase 2: detection (fsck)
-                    let mut repos_needing_repair = Vec::new();
-                    for repo_path in &bare_repo_paths {
-                        let path_str = repo_path.to_string_lossy();
-                        progress.set_message(path_str.as_ref());
-                        if !crate::git::is_bare_repo_healthy(&mut progress, path_str.as_ref()) {
-                            repos_needing_repair.push(repo_path.clone());
-                        }
-                        progress.increment(1);
-                    }
-
-                    // Phase 3: repair (fetch) – extend the declared total now
-                    // that we know how many repos need repair.
-                    if !repos_needing_repair.is_empty() {
-                        total += repos_needing_repair.len() as u64;
-                        progress.set_total(Some(total));
-                        for repo_path in &repos_needing_repair {
-                            let path_str = repo_path.to_string_lossy();
-                            progress.set_message(path_str.as_ref());
-                            if crate::git::fetch_bare_repo(&mut progress, path_str.as_ref()) {
-                                if crate::git::is_bare_repo_healthy(
-                                    &mut progress,
-                                    path_str.as_ref(),
-                                ) {
-                                    bare_repos_repaired += 1;
-                                    log.info(format!("Repaired bare repo: {path_str}").as_str());
-                                } else {
-                                    log.warning(
-                                        format!(
-                                            "Bare repo still has problems after repair: {path_str} - consider re-cloning"
-                                        )
-                                        .as_str(),
-                                    );
-                                }
-                            } else {
-                                log.warning(
-                                    format!(
-                                        "Failed to fetch bare repo: {path_str} - consider re-cloning"
-                                    )
-                                    .as_str(),
-                                );
-                            }
-                            progress.increment(1);
-                        }
                     }
                 }
             }
-            let finalize_message = {
-                let parts: Vec<String> = [
-                    (
-                        keys_normalised,
-                        if is_dry_run {
-                            "key(s) to normalise"
-                        } else {
-                            "key(s) normalised"
-                        },
-                    ),
-                    (
-                        entries_removed,
-                        if is_dry_run {
-                            "entr(ies) to remove"
-                        } else {
-                            "entr(ies) removed"
-                        },
-                    ),
-                    (
-                        stale_links_cleaned,
-                        if is_dry_run {
-                            "stale link(s) to clean"
-                        } else {
-                            "stale link(s) cleaned"
-                        },
-                    ),
-                    (
-                        bare_repos_repaired,
-                        if is_dry_run {
-                            "bare repo(s) to repair"
-                        } else {
-                            "bare repo(s) repaired"
-                        },
-                    ),
-                ]
-                .into_iter()
-                .filter(|(n, _)| *n > 0)
-                .map(|(n, label)| format!("{n} {label}"))
-                .collect();
-
-                if parts.is_empty() {
-                    if is_dry_run {
-                        "dry run: store is healthy".to_string()
-                    } else {
-                        "store is healthy".to_string()
-                    }
-                } else if is_dry_run {
-                    format!("dry run: {}", parts.join(", "))
-                } else {
-                    format!("fixed: {}", parts.join(", "))
-                }
-            };
-            progress.set_finalize_lines(logger::make_finalize_line(
-                logger::FinalType::Finished,
-                progress.elapsed(),
-                finalize_message.as_str(),
-            ));
         }
+        let finalize_message = {
+            let parts: Vec<String> = [
+                (
+                    keys_normalised,
+                    if is_dry_run {
+                        "key(s) to normalise"
+                    } else {
+                        "key(s) normalised"
+                    },
+                ),
+                (
+                    entries_removed,
+                    if is_dry_run {
+                        "entr(ies) to remove"
+                    } else {
+                        "entr(ies) removed"
+                    },
+                ),
+                (
+                    stale_links_cleaned,
+                    if is_dry_run {
+                        "stale link(s) to clean"
+                    } else {
+                        "stale link(s) cleaned"
+                    },
+                ),
+                (
+                    bare_repos_repaired,
+                    if is_dry_run {
+                        "bare repo(s) to repair"
+                    } else {
+                        "bare repo(s) repaired"
+                    },
+                ),
+            ]
+            .into_iter()
+            .filter(|(n, _)| *n > 0)
+            .map(|(n, label)| format!("{n} {label}"))
+            .collect();
+
+            if parts.is_empty() {
+                if is_dry_run {
+                    "dry run: store is healthy".to_string()
+                } else {
+                    "store is healthy".to_string()
+                }
+            } else if is_dry_run {
+                format!("dry run: {}", parts.join(", "))
+            } else {
+                format!("fixed: {}", parts.join(", "))
+            }
+        };
+        progress.set_finalize_lines(logger::make_finalize_line(
+            logger::FinalType::Finished,
+            progress.elapsed(),
+            finalize_message.as_str(),
+        ));
 
         group.end_group(console.clone(), is_ci)?;
         Ok(())
@@ -1591,6 +1590,21 @@ fn emit_pretty_bare_info(
     bare_separator(console, 56);
 }
 
+fn get_git_progress(
+    console: console::Console,
+    repo_path: &std::path::Path,
+) -> (console::Progress, String) {
+    let display_name = repo_path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    (
+        console::Progress::new(console, display_name.as_str(), None, None),
+        display_name,
+    )
+}
+
 fn show_bare_info(
     bare_path: &std::path::Path,
     progress: &mut console::Progress,
@@ -1608,10 +1622,14 @@ fn show_bare_info(
     let mut repos_with_problems = 0usize;
 
     if !bare_repo_paths.is_empty() {
+        progress.update_progress(0, bare_repo_paths.len() as u64);
         for repo_path in bare_repo_paths {
             let path_str = repo_path.to_string_lossy();
-            progress.set_message(path_str.as_ref());
-            if !crate::git::is_bare_repo_healthy(progress, path_str.as_ref()) {
+            let (mut git_progress, display_name) =
+                get_git_progress(progress.console.clone(), repo_path);
+            progress.set_message(&display_name);
+
+            if !git::is_bare_repo_healthy(&mut git_progress, path_str.as_ref()) {
                 repos_with_problems += 1;
             }
             progress.increment(1);
