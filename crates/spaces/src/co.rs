@@ -307,7 +307,7 @@ impl CheckoutWorkflow {
         lock: Vec<Arc<str>>,
     ) -> anyhow::Result<()> {
         let is_ci: ci::IsCi = singleton::get_is_ci().into();
-        let group = ci::GithubLogGroup::new_group(
+        let _group = ci::GithubLogGroup::new_group(
             console.clone(),
             is_ci,
             format!("Spaces Checkout Workflow {name}").as_str(),
@@ -334,7 +334,6 @@ impl CheckoutWorkflow {
                 lock,
             },
         );
-        group.end_group(console.clone(), is_ci)?;
         result.context(format_context!("in CheckoutWorkflow"))?;
         Ok(())
     }
@@ -365,7 +364,7 @@ impl CheckoutRepo {
         lock: Vec<Arc<str>>,
     ) -> anyhow::Result<()> {
         let is_ci: ci::IsCi = singleton::get_is_ci().into();
-        let group = ci::GithubLogGroup::new_group(
+        let _group = ci::GithubLogGroup::new_group(
             console.clone(),
             is_ci,
             format!("Spaces Checkout Repo {}", self.url).as_str(),
@@ -393,7 +392,6 @@ impl CheckoutRepo {
                 lock,
             },
         );
-        group.end_group(console.clone(), is_ci)?;
         result.context(format_context!("in CheckoutRepo"))?;
         Ok(())
     }

@@ -89,22 +89,19 @@ fn download_and_install(
 pub fn handle_command(console: console::Console, command: Command) -> anyhow::Result<()> {
     let is_ci = singleton::get_is_ci().into();
 
-    let group = ci::GithubLogGroup::new_group(
+    let _group = ci::GithubLogGroup::new_group(
         console.clone(),
         is_ci,
         format!("Spaces Tools {command}").as_str(),
     )?;
-    let result = match command {
+
+    match command {
         Command::List {} => list_tools(console.clone()),
         Command::Install {} => install_tools(console.clone(), true),
         Command::CleanupCheckouts { age, dry_run } => {
             cleanup_checkouts(console.clone(), age, dry_run)
         }
-    };
-
-    group.end_group(console, is_ci)?;
-
-    result
+    }
 }
 
 pub fn list_tools(console: console::Console) -> anyhow::Result<()> {
