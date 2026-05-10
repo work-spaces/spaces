@@ -185,6 +185,82 @@ diagnostic_results["validation"]["end_column_validation_exists"] = True  # End c
 diagnostic_results["validation"]["format_validation_exists"] = True  # Invalid formats are rejected
 
 # ============================================================================
+# Related Diagnostics Tests
+# ============================================================================
+
+diagnostic_results["related"] = {}
+
+# Create a diagnostic with related diagnostics
+related_note1 = text_diagnostic(
+    "src/main.rs",
+    "note",
+    "Did you mean 'counter'?",
+    line = 5,
+    column = 8,
+)
+
+related_note2 = text_diagnostic(
+    "src/lib.rs",
+    "note",
+    "Similar error occurred here",
+    line = 42,
+)
+
+main_diag = text_diagnostic(
+    "src/main.rs",
+    "error",
+    "undefined variable 'countr'",
+    line = 10,
+    column = 5,
+    code = "E0425",
+    related = [related_note1, related_note2],
+)
+
+diagnostic_results["related"]["has_related"] = main_diag.get("related") != None
+if main_diag.get("related") != None:
+    diagnostic_results["related"]["related_count"] = len(main_diag["related"]) == 2
+
+# Test human format with related diagnostics
+related_diags = [main_diag]
+related_human_output = text_render_diagnostics(related_diags, format = "human")
+diagnostic_results["related"]["human_has_main"] = "src/main.rs:10:5: error: undefined variable 'countr'" in related_human_output
+diagnostic_results["related"]["human_has_related1"] = "src/main.rs:5:8: note: Did you mean 'counter'?" in related_human_output
+diagnostic_results["related"]["human_has_related2"] = "src/lib.rs:42: note: Similar error occurred here" in related_human_output
+diagnostic_results["related"]["human_has_indentation"] = "  src/" in related_human_output
+diagnostic_results["related"]["human_related_has_location"] = "src/main.rs:5:8" in related_human_output
+
+# Test github format with related diagnostics
+related_github_output = text_render_diagnostics(related_diags, format = "github")
+diagnostic_results["related"]["github_has_main"] = "::error file=src/main.rs,line=10,col=5::undefined variable 'countr'" in related_github_output
+diagnostic_results["related"]["github_has_related1"] = "::notice file=src/main.rs,line=5,col=8::Did you mean 'counter'?" in related_github_output
+diagnostic_results["related"]["github_has_related2"] = "::notice file=src/lib.rs,line=42::Similar error occurred here" in related_github_output
+
+# Test JSON format preserves related (it should already work)
+related_json_output = text_render_diagnostics(related_diags, format = "json")
+diagnostic_results["related"]["json_has_related"] = '"related"' in related_json_output
+
+# Test diagnostic without file in related
+related_no_file = text_diagnostic(
+    "",
+    "note",
+    "This is a general hint",
+)
+
+diag_with_no_file_related = text_diagnostic(
+    "src/test.rs",
+    "warning",
+    "deprecated function",
+    line = 20,
+    related = [related_no_file],
+)
+
+no_file_human = text_render_diagnostics([diag_with_no_file_related], format = "human")
+diagnostic_results["related"]["human_related_no_file"] = "  note: This is a general hint" in no_file_human
+
+no_file_github = text_render_diagnostics([diag_with_no_file_related], format = "github")
+diagnostic_results["related"]["github_related_no_file"] = "::notice file=::This is a general hint" in no_file_github
+
+# ============================================================================
 # Output Results
 # ============================================================================
 

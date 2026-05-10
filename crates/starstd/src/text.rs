@@ -44,6 +44,59 @@ pub struct DiagnosticOptions {
     pub source: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiagnosticResult {
+    pub file: String,
+    pub severity: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub column: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_line: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_column: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub related: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegexMatchResult {
+    pub tag: String,
+    pub line: i32,
+    pub column: i32,
+    #[serde(rename = "match")]
+    pub match_str: String,
+    pub named: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MatchToDiagnosticOptions {
+    #[serde(rename = "match")]
+    pub match_result: serde_json::Value,
+    #[serde(default = "default_severity")]
+    pub severity: String,
+    #[serde(default)]
+    pub default_message: String,
+    #[serde(default = "default_file_value")]
+    pub default_file: String,
+    pub source: Option<String>,
+}
+
+fn default_severity() -> String {
+    "error".to_string()
+}
+
+fn default_file_value() -> String {
+    "unknown".to_string()
+}
+
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
     /// Stream a file line-by-line and invoke a callback for each line.
@@ -1147,14 +1200,19 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                             }
                         }
 
-                        let mut result_map = BTreeMap::new();
-                        result_map.insert("tag".to_string(), heap.alloc(tag.clone()));
-                        result_map.insert("line".to_string(), heap.alloc(line_number));
-                        result_map.insert("column".to_string(), heap.alloc(column));
-                        result_map.insert("match".to_string(), heap.alloc(m.as_str().to_string()));
-                        result_map.insert("named".to_string(), heap.alloc(named));
+                        let result = RegexMatchResult {
+                            tag: tag.clone(),
+                            line: line_number,
+                            column,
+                            match_str: m.as_str().to_string(),
+                            named,
+                        };
 
-                        results.push(heap.alloc(result_map));
+                        let result_value =
+                            heap.alloc(serde_json::to_value(&result).context(format_context!(
+                                "failed to serialize regex match result"
+                            ))?);
+                        results.push(result_value);
                     }
                 }
             }
@@ -1300,14 +1358,19 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                             }
                         }
 
-                        let mut result_map = BTreeMap::new();
-                        result_map.insert("tag".to_string(), heap.alloc(tag.clone()));
-                        result_map.insert("line".to_string(), heap.alloc(line_number));
-                        result_map.insert("column".to_string(), heap.alloc(column));
-                        result_map.insert("match".to_string(), heap.alloc(m.as_str().to_string()));
-                        result_map.insert("named".to_string(), heap.alloc(named));
+                        let result = RegexMatchResult {
+                            tag: tag.clone(),
+                            line: line_number,
+                            column,
+                            match_str: m.as_str().to_string(),
+                            named,
+                        };
 
-                        results.push(heap.alloc(result_map));
+                        let result_value =
+                            heap.alloc(serde_json::to_value(&result).context(format_context!(
+                                "failed to serialize regex match result"
+                            ))?);
+                        results.push(result_value);
                     }
                 }
             }
@@ -1359,9 +1422,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         options: Value<'v>,
         #[starlark(require = named)] related: Option<Value<'v>>,
         eval: &mut Evaluator<'v, '_, '_>,
-    ) -> anyhow::Result<BTreeMap<String, Value<'v>>> {
+    ) -> anyhow::Result<Value<'v>> {
         if is_lsp_mode() {
-            return Ok(BTreeMap::new());
+            return Ok(eval
+                .heap()
+                .alloc(serde_json::Value::Object(serde_json::Map::new())));
         }
 
         let opts: DiagnosticOptions = serde_json::from_value(options.to_json_value()?)
@@ -1404,34 +1469,191 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         }
 
         let heap = eval.heap();
-        let mut result = BTreeMap::new();
-        result.insert("file".to_string(), heap.alloc(opts.file.as_str()));
-        result.insert("severity".to_string(), heap.alloc(severity_lower.as_str()));
-        result.insert("message".to_string(), heap.alloc(opts.message.as_str()));
 
-        if let Some(l) = opts.line {
-            result.insert("line".to_string(), heap.alloc(l));
-        }
-        if let Some(c) = opts.column {
-            result.insert("column".to_string(), heap.alloc(c));
-        }
-        if let Some(el) = opts.end_line {
-            result.insert("end_line".to_string(), heap.alloc(el));
-        }
-        if let Some(ec) = opts.end_column {
-            result.insert("end_column".to_string(), heap.alloc(ec));
-        }
-        if let Some(cd) = &opts.code {
-            result.insert("code".to_string(), heap.alloc(cd.as_str()));
-        }
-        if let Some(src) = &opts.source {
-            result.insert("source".to_string(), heap.alloc(src.as_str()));
-        }
-        if let Some(rel) = related {
-            result.insert("related".to_string(), rel);
+        // Convert related Value to serde_json::Value if present
+        let related_json = if let Some(rel) = related {
+            Some(
+                rel.to_json_value()
+                    .context(format_context!("failed to convert related diagnostics"))?,
+            )
+        } else {
+            None
+        };
+
+        // Assemble result in a serializable struct
+        let result = DiagnosticResult {
+            file: opts.file,
+            severity: severity_lower,
+            message: opts.message,
+            line: opts.line,
+            column: opts.column,
+            end_line: opts.end_line,
+            end_column: opts.end_column,
+            code: opts.code,
+            source: opts.source,
+            related: related_json,
+        };
+
+        // Convert to serde_json::Value, then to Starlark Value
+        let result_value = serde_json::to_value(&result)
+            .context(format_context!("failed to serialize diagnostic result"))?;
+
+        Ok(heap.alloc(result_value))
+    }
+
+    /// Convert a regex match result to a diagnostic.
+    ///
+    /// This function takes a `RegexMatchResult` (from `regex_scan_tagged` or similar functions)
+    /// and converts it to a `DiagnosticResult` by extracting named capture groups.
+    /// This is more efficient than manually extracting fields in Starlark code.
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - A dictionary with the following keys:
+    ///   * `match` (dict, required): A regex match result from `regex_scan_tagged` or similar
+    ///   * `severity` (string, optional): Severity level ("error", "warning", "info", "hint", or "note"). Default: "error"
+    ///   * `default_message` (string, optional): Message to use if no "message" capture group exists. Default: uses the full match string
+    ///   * `default_file` (string, optional): File to use if no "file" capture group exists. Default: "unknown"
+    ///   * `source` (string, optional): Source identifier for the diagnostic (e.g., "eslint", "rustc")
+    /// * `related` - Optional related diagnostics
+    ///
+    /// # Named Capture Groups
+    ///
+    /// The function looks for these named groups in the match:
+    /// * `file` - File path
+    /// * `line` - Line number (1-based)
+    /// * `column` - Column number (1-based)
+    /// * `end_line` - End line number (1-based)
+    /// * `end_column` - End column number (1-based)
+    /// * `code` - Error/warning code
+    /// * `message` - Diagnostic message
+    ///
+    /// # Returns
+    ///
+    /// A diagnostic dictionary that can be rendered with `render_diagnostics`.
+    ///
+    /// # Example
+    ///
+    /// ```python
+    /// matches = text.regex_scan_tagged(
+    ///     content,
+    ///     [("error", r"(?P<file>\S+):(?P<line>\d+): (?P<message>.*)$")]
+    /// )
+    /// diags = [
+    ///     text.match_to_diagnostic({
+    ///         "match": m,
+    ///         "severity": "error",
+    ///         "source": "mycompiler"
+    ///     })
+    ///     for m in matches
+    /// ]
+    /// ```
+    fn match_to_diagnostic<'v>(
+        options: Value<'v>,
+        #[starlark(require = named)] related: Option<Value<'v>>,
+        eval: &mut Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<Value<'v>> {
+        if is_lsp_mode() {
+            return Ok(eval
+                .heap()
+                .alloc(serde_json::Value::Object(serde_json::Map::new())));
         }
 
-        Ok(result)
+        let opts: MatchToDiagnosticOptions = serde_json::from_value(options.to_json_value()?)
+            .context(format_context!("bad options for match_to_diagnostic"))?;
+
+        // Validate severity
+        let severity_lower = opts.severity.to_lowercase();
+        if !["error", "warning", "info", "hint", "note"].contains(&severity_lower.as_str()) {
+            return Err(anyhow!(
+                "severity must be one of: error, warning, info, hint, note; got: {}",
+                opts.severity
+            )
+            .context(format_context!("invalid severity")));
+        }
+
+        // Parse the match result
+        let match_result: RegexMatchResult = serde_json::from_value(opts.match_result)
+            .context(format_context!("bad match result for match_to_diagnostic"))?;
+
+        let named = &match_result.named;
+
+        // Extract fields from named captures
+        let file = named
+            .get("file")
+            .map(|s| s.as_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&opts.default_file)
+            .to_string();
+
+        let line = named
+            .get("line")
+            .and_then(|s| s.parse::<i32>().ok())
+            .filter(|&l| l >= 1);
+
+        let column = named
+            .get("column")
+            .and_then(|s| s.parse::<i32>().ok())
+            .filter(|&c| c >= 1);
+
+        let end_line = named
+            .get("end_line")
+            .and_then(|s| s.parse::<i32>().ok())
+            .filter(|&l| l >= 1);
+
+        let end_column = named
+            .get("end_column")
+            .and_then(|s| s.parse::<i32>().ok())
+            .filter(|&c| c >= 1);
+
+        let code = named.get("code").map(|s| s.clone());
+
+        // Message: use captured message or fall back to default_message or full match
+        let message = named
+            .get("message")
+            .map(|s| s.as_str())
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                if !opts.default_message.is_empty() {
+                    Some(opts.default_message.as_str())
+                } else {
+                    Some(match_result.match_str.as_str())
+                }
+            })
+            .unwrap_or(&match_result.match_str)
+            .to_string();
+
+        let heap = eval.heap();
+
+        // Convert related Value to serde_json::Value if present
+        let related_json = if let Some(rel) = related {
+            Some(
+                rel.to_json_value()
+                    .context(format_context!("failed to convert related diagnostics"))?,
+            )
+        } else {
+            None
+        };
+
+        // Assemble result
+        let result = DiagnosticResult {
+            file,
+            severity: severity_lower,
+            message,
+            line,
+            column,
+            end_line,
+            end_column,
+            code,
+            source: opts.source,
+            related: related_json,
+        };
+
+        // Convert to serde_json::Value, then to Starlark Value
+        let result_value = serde_json::to_value(&result)
+            .context(format_context!("failed to serialize diagnostic result"))?;
+
+        Ok(heap.alloc(result_value))
     }
 
     /// Remove duplicate diagnostics from a list.
@@ -1480,15 +1702,16 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// Render a list of diagnostics in various formats.
     ///
     /// Converts a list of diagnostic dictionaries into a formatted string suitable for display
-    /// or consumption by CI/CD tools.
+    /// or consumption by CI/CD tools. Related diagnostics are rendered inline after their parent
+    /// diagnostic to provide additional context.
     ///
     /// # Arguments
     ///
     /// * `diagnostics` - A list of diagnostic dictionaries (created with `diagnostic()`)
     /// * `format` - Output format (default: "human"):
-    ///   * `"human"`: Human-readable format like "file.py:10:5: error: message"
-    ///   * `"github"`: GitHub Actions workflow commands format (creates annotations)
-    ///   * `"json"`: Pretty-printed JSON array
+    ///   * `"human"`: Human-readable format like "file.py:10:5: error: message". Related diagnostics are indented with "  ".
+    ///   * `"github"`: GitHub Actions workflow commands format (creates annotations). Related diagnostics are emitted as separate commands.
+    ///   * `"json"`: Pretty-printed JSON array (includes all fields including related)
     ///   * `"sarif"`: SARIF 2.1.0 format (Static Analysis Results Interchange Format)
     ///
     /// # Returns
@@ -1585,6 +1808,44 @@ fn render_human(diagnostics: Vec<Value>) -> anyhow::Result<String> {
         }
         output.push_str(&format!(": {}: {}", severity, message));
         lines.push(output);
+
+        // Handle related diagnostics
+        if let Some(related) = obj.get("related") {
+            if let Some(related_array) = related.as_array() {
+                for related_diag in related_array {
+                    if let Some(related_obj) = related_diag.as_object() {
+                        let rel_file = related_obj
+                            .get("file")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let rel_severity = related_obj
+                            .get("severity")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("note");
+                        let rel_message = related_obj
+                            .get("message")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let rel_line = related_obj.get("line").and_then(|v| v.as_i64());
+                        let rel_column = related_obj.get("column").and_then(|v| v.as_i64());
+
+                        let mut rel_output = String::from("  ");
+                        if !rel_file.is_empty() {
+                            rel_output.push_str(rel_file);
+                            if let Some(l) = rel_line {
+                                rel_output.push_str(&format!(":{}", l));
+                                if let Some(c) = rel_column {
+                                    rel_output.push_str(&format!(":{}", c));
+                                }
+                            }
+                            rel_output.push_str(": ");
+                        }
+                        rel_output.push_str(&format!("{}: {}", rel_severity, rel_message));
+                        lines.push(rel_output);
+                    }
+                }
+            }
+        }
     }
 
     Ok(lines.join("\n"))
@@ -1632,6 +1893,52 @@ fn render_github(diagnostics: Vec<Value>) -> anyhow::Result<String> {
         output.push_str("::");
         output.push_str(message);
         lines.push(output);
+
+        // Handle related diagnostics
+        if let Some(related) = obj.get("related") {
+            if let Some(related_array) = related.as_array() {
+                for related_diag in related_array {
+                    if let Some(related_obj) = related_diag.as_object() {
+                        let rel_file = related_obj
+                            .get("file")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let rel_severity = related_obj
+                            .get("severity")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("note");
+                        let rel_message = related_obj
+                            .get("message")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let rel_line = related_obj.get("line").and_then(|v| v.as_i64());
+                        let rel_column = related_obj.get("column").and_then(|v| v.as_i64());
+
+                        // Map related severity to GitHub Actions level
+                        let rel_level = match rel_severity {
+                            "error" | "hint" => "error",
+                            "warning" => "warning",
+                            "info" | "note" => "notice",
+                            _ => "notice",
+                        };
+
+                        let mut rel_output = format!("::{}", rel_level);
+                        let mut rel_params = vec![format!("file={}", rel_file)];
+                        if let Some(l) = rel_line {
+                            rel_params.push(format!("line={}", l));
+                        }
+                        if let Some(c) = rel_column {
+                            rel_params.push(format!("col={}", c));
+                        }
+                        rel_output.push(' ');
+                        rel_output.push_str(&rel_params.join(","));
+                        rel_output.push_str("::");
+                        rel_output.push_str(rel_message);
+                        lines.push(rel_output);
+                    }
+                }
+            }
+        }
     }
 
     Ok(lines.join("\n"))

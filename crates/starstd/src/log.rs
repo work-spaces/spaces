@@ -71,10 +71,9 @@ fn ensure_initialized() {
                 } else {
                     writeln!(
                         buf,
-                        "[{} {:5} {}] {}",
+                        "[{} {}] {}",
                         buf.timestamp_millis(),
                         record.level(),
-                        record.target(),
                         record.args()
                     )
                 }
