@@ -77,6 +77,22 @@ pub struct RegexMatchResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct RegexScanTaggedOptions {
+    pub patterns: Vec<TaggedPattern>,
+    /// If true, match each line to at most one pattern (first match wins)
+    #[serde(default)]
+    pub first_match_only: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaggedPattern {
+    pub tag: String,
+    pub pattern: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MatchToDiagnosticOptions {
     #[serde(rename = "match")]
     pub match_result: serde_json::Value,
@@ -95,6 +111,125 @@ fn default_severity() -> String {
 
 fn default_file_value() -> String {
     "unknown".to_string()
+}
+
+/// Helper function to extract tags and pattern strings from pattern list.
+#[allow(dead_code)]
+fn extract_tagged_patterns(patterns_vec: &[Value]) -> anyhow::Result<(Vec<String>, Vec<String>)> {
+    let mut tags = Vec::new();
+    let mut pattern_strings = Vec::new();
+
+    for (i, val) in patterns_vec.iter().enumerate() {
+        let json = val
+            .to_json_value()
+            .context(format_context!("failed to convert pattern at index {}", i))?;
+        let obj = json.as_object().ok_or_else(|| {
+            anyhow!(format_context!(
+                "pattern at index {} must be a dict with 'tag' and 'pattern' keys",
+                i
+            ))
+        })?;
+
+        let tag = obj.get("tag").and_then(|v| v.as_str()).ok_or_else(|| {
+            anyhow!(format_context!(
+                "pattern at index {} must have 'tag' string key",
+                i
+            ))
+        })?;
+        let pattern = obj.get("pattern").and_then(|v| v.as_str()).ok_or_else(|| {
+            anyhow!(format_context!(
+                "pattern at index {} must have 'pattern' string key",
+                i
+            ))
+        })?;
+
+        tags.push(tag.to_string());
+        pattern_strings.push(pattern.to_string());
+    }
+
+    Ok((tags, pattern_strings))
+}
+
+/// Helper function to extract patterns from RegexScanTaggedOptions.
+fn extract_patterns_from_options(options: &RegexScanTaggedOptions) -> (Vec<String>, Vec<String>) {
+    let mut tags = Vec::new();
+    let mut pattern_strings = Vec::new();
+
+    for pattern in &options.patterns {
+        tags.push(pattern.tag.clone());
+        pattern_strings.push(pattern.pattern.clone());
+    }
+
+    (tags, pattern_strings)
+}
+
+/// Helper function to compile regexes and create a RegexSet.
+fn compile_tagged_regexes(pattern_strings: &[String]) -> anyhow::Result<(Vec<Regex>, RegexSet)> {
+    let regexes: Vec<Regex> = pattern_strings
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            Regex::new(p).context(format_context!(
+                "invalid regex pattern {} at index {}",
+                p,
+                i
+            ))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let regex_set =
+        RegexSet::new(pattern_strings).context(format_context!("failed to create RegexSet"))?;
+
+    Ok((regexes, regex_set))
+}
+
+/// Helper function to process a line and extract regex matches.
+fn process_line_for_matches(
+    line: &str,
+    line_number: i32,
+    regex_set: &RegexSet,
+    regexes: &[Regex],
+    tags: &[String],
+    first_match_only: bool,
+) -> anyhow::Result<Vec<RegexMatchResult>> {
+    let mut results = Vec::new();
+    let matches = regex_set.matches(line);
+
+    for pattern_idx in matches.iter() {
+        let re = &regexes[pattern_idx];
+        let tag = &tags[pattern_idx];
+
+        if let Some(caps) = re.captures(line) {
+            if let Some(m) = caps.get(0) {
+                let byte_start = m.start();
+                let column = line[..byte_start].chars().count() as i32 + 1;
+
+                let mut named = BTreeMap::new();
+                for name in re.capture_names().flatten() {
+                    if let Some(capture) = caps.name(name) {
+                        named.insert(name.to_string(), capture.as_str().to_string());
+                    }
+                }
+
+                let result = RegexMatchResult {
+                    tag: tag.clone(),
+                    line: line_number,
+                    column,
+                    match_str: m.as_str().to_string(),
+                    named,
+                };
+
+                results.push(result);
+
+                // If first_match_only is true, stop after the first match
+                if first_match_only {
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok(results)
 }
 
 #[starlark_module]
@@ -1088,9 +1223,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Arguments
     ///
     /// * `content` - The string to search
-    /// * `patterns` - A list of dictionaries, each with:
-    ///   * `tag` (string): A custom identifier for this pattern
-    ///   * `pattern` (string): The regex pattern to match
+    /// * `options` - A dictionary with:
+    ///   * `patterns` (list): A list of dictionaries, each with:
+    ///     * `tag` (string): A custom identifier for this pattern
+    ///     * `pattern` (string): The regex pattern to match
+    ///   * `first_match_only` (bool, optional): If true, match each line to at most one pattern
+    ///     where the first pattern to match wins. Defaults to false.
     ///
     /// # Returns
     ///
@@ -1105,116 +1243,59 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// ```python
     /// log_content = fs.read_file("app.log")
-    /// matches = text.regex_scan_tagged(log_content, [
-    ///     {"tag": "error", "pattern": r"ERROR: (?P<msg>.*)"},
-    ///     {"tag": "warning", "pattern": r"WARN: (?P<msg>.*)"},
-    ///     {"tag": "fatal", "pattern": r"FATAL: (?P<msg>.*)"}
-    /// ])
+    /// matches = text.regex_scan_tagged(log_content, {
+    ///     "patterns": [
+    ///         {"tag": "error", "pattern": r"ERROR: (?P<msg>.*)"},
+    ///         {"tag": "warning", "pattern": r"WARN: (?P<msg>.*)"},
+    ///         {"tag": "fatal", "pattern": r"FATAL: (?P<msg>.*)"}
+    ///     ],
+    ///     "first_match_only": True
+    /// })
     /// for m in matches:
     ///     print("{}: {}".format(m["tag"], m["named"]["msg"]))
     /// ```
     fn regex_scan_tagged<'v>(
         content: &str,
-        patterns: UnpackList<Value<'v>>,
+        options: Value<'v>,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<Vec<Value<'v>>> {
         if is_lsp_mode() {
             return Ok(Vec::new());
         }
 
-        let patterns_vec = patterns.items;
-        if patterns_vec.is_empty() {
+        let options_json = options
+            .to_json_value()
+            .context(format_context!("failed to convert options to JSON"))?;
+        let scan_options: RegexScanTaggedOptions = serde_json::from_value(options_json)
+            .context(format_context!("failed to deserialize options"))?;
+
+        if scan_options.patterns.is_empty() {
             return Ok(Vec::new());
         }
 
-        // Extract tags and pattern strings
-        let mut tags = Vec::new();
-        let mut pattern_strings = Vec::new();
-
-        for (i, val) in patterns_vec.iter().enumerate() {
-            let json = val
-                .to_json_value()
-                .context(format_context!("failed to convert pattern at index {}", i))?;
-            let obj = json.as_object().ok_or_else(|| {
-                anyhow!(format_context!(
-                    "pattern at index {} must be a dict with 'tag' and 'pattern' keys",
-                    i
-                ))
-            })?;
-
-            let tag = obj.get("tag").and_then(|v| v.as_str()).ok_or_else(|| {
-                anyhow!(format_context!(
-                    "pattern at index {} must have 'tag' string key",
-                    i
-                ))
-            })?;
-            let pattern = obj.get("pattern").and_then(|v| v.as_str()).ok_or_else(|| {
-                anyhow!(format_context!(
-                    "pattern at index {} must have 'pattern' string key",
-                    i
-                ))
-            })?;
-
-            tags.push(tag.to_string());
-            pattern_strings.push(pattern.to_string());
-        }
-
-        // Compile individual regexes
-        let regexes: Vec<Regex> = pattern_strings
-            .iter()
-            .enumerate()
-            .map(|(i, p)| {
-                Regex::new(p).context(format_context!(
-                    "invalid regex pattern {} at index {}",
-                    p,
-                    i
-                ))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        // Build a RegexSet for fast matching
-        let regex_set = RegexSet::new(&pattern_strings)
-            .context(format_context!("failed to create RegexSet"))?;
+        let (tags, pattern_strings) = extract_patterns_from_options(&scan_options);
+        let (regexes, regex_set) = compile_tagged_regexes(&pattern_strings)?;
 
         let heap = eval.heap();
         let mut results = Vec::new();
         let mut line_number = 1i32;
 
         for line in content.lines() {
-            // Check if any pattern matches
-            let matches = regex_set.matches(line);
+            let line_results = process_line_for_matches(
+                line,
+                line_number,
+                &regex_set,
+                &regexes,
+                &tags,
+                scan_options.first_match_only,
+            )?;
 
-            for pattern_idx in matches.iter() {
-                let re = &regexes[pattern_idx];
-                let tag = &tags[pattern_idx];
-
-                if let Some(caps) = re.captures(line) {
-                    if let Some(m) = caps.get(0) {
-                        let byte_start = m.start();
-                        let column = line[..byte_start].chars().count() as i32 + 1;
-
-                        let mut named = BTreeMap::new();
-                        for name in re.capture_names().flatten() {
-                            if let Some(capture) = caps.name(name) {
-                                named.insert(name.to_string(), capture.as_str().to_string());
-                            }
-                        }
-
-                        let result = RegexMatchResult {
-                            tag: tag.clone(),
-                            line: line_number,
-                            column,
-                            match_str: m.as_str().to_string(),
-                            named,
-                        };
-
-                        let result_value =
-                            heap.alloc(serde_json::to_value(&result).context(format_context!(
-                                "failed to serialize regex match result"
-                            ))?);
-                        results.push(result_value);
-                    }
-                }
+            for result in line_results {
+                let result_value = heap.alloc(
+                    serde_json::to_value(&result)
+                        .context(format_context!("failed to serialize regex match result"))?,
+                );
+                results.push(result_value);
             }
 
             line_number += 1;
@@ -1231,9 +1312,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Arguments
     ///
     /// * `path` - Path to the file to scan
-    /// * `patterns` - A list of dictionaries, each with:
-    ///   * `tag` (string): A custom identifier for this pattern
-    ///   * `pattern` (string): The regex pattern to match
+    /// * `options` - A dictionary with:
+    ///   * `patterns` (list): A list of dictionaries, each with:
+    ///     * `tag` (string): A custom identifier for this pattern
+    ///     * `pattern` (string): The regex pattern to match
+    ///   * `first_match_only` (bool, optional): If true, match each line to at most one pattern
+    ///     where the first pattern to match wins. Defaults to false.
     ///
     /// # Returns
     ///
@@ -1247,73 +1331,35 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Example
     ///
     /// ```python
-    /// matches = text.regex_scan_tagged_file("large.log", [
-    ///     {"tag": "error", "pattern": r"ERROR: (?P<msg>.*)"},
-    ///     {"tag": "fatal", "pattern": r"FATAL: (?P<msg>.*)"}
-    /// ])
+    /// matches = text.regex_scan_tagged_file("large.log", {
+    ///     "patterns": [
+    ///         {"tag": "error", "pattern": r"ERROR: (?P<msg>.*)"},
+    ///         {"tag": "fatal", "pattern": r"FATAL: (?P<msg>.*)"}
+    ///     ],
+    ///     "first_match_only": True
+    /// })
     /// ```
     fn regex_scan_tagged_file<'v>(
         path: &str,
-        patterns: UnpackList<Value<'v>>,
+        options: Value<'v>,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<Vec<Value<'v>>> {
         if is_lsp_mode() {
             return Ok(Vec::new());
         }
 
-        let patterns_vec = patterns.items;
-        if patterns_vec.is_empty() {
+        let options_json = options
+            .to_json_value()
+            .context(format_context!("failed to convert options to JSON"))?;
+        let scan_options: RegexScanTaggedOptions = serde_json::from_value(options_json)
+            .context(format_context!("failed to deserialize options"))?;
+
+        if scan_options.patterns.is_empty() {
             return Ok(Vec::new());
         }
 
-        // Extract tags and pattern strings
-        let mut tags = Vec::new();
-        let mut pattern_strings = Vec::new();
-
-        for (i, val) in patterns_vec.iter().enumerate() {
-            let json = val
-                .to_json_value()
-                .context(format_context!("failed to convert pattern at index {}", i))?;
-            let obj = json.as_object().ok_or_else(|| {
-                anyhow!(format_context!(
-                    "pattern at index {} must be a dict with 'tag' and 'pattern' keys",
-                    i
-                ))
-            })?;
-
-            let tag = obj.get("tag").and_then(|v| v.as_str()).ok_or_else(|| {
-                anyhow!(format_context!(
-                    "pattern at index {} must have 'tag' string key",
-                    i
-                ))
-            })?;
-            let pattern = obj.get("pattern").and_then(|v| v.as_str()).ok_or_else(|| {
-                anyhow!(format_context!(
-                    "pattern at index {} must have 'pattern' string key",
-                    i
-                ))
-            })?;
-
-            tags.push(tag.to_string());
-            pattern_strings.push(pattern.to_string());
-        }
-
-        // Compile individual regexes
-        let regexes: Vec<Regex> = pattern_strings
-            .iter()
-            .enumerate()
-            .map(|(i, p)| {
-                Regex::new(p).context(format_context!(
-                    "invalid regex pattern {} at index {}",
-                    p,
-                    i
-                ))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        // Build a RegexSet for fast matching
-        let regex_set = RegexSet::new(&pattern_strings)
-            .context(format_context!("failed to create RegexSet"))?;
+        let (tags, pattern_strings) = extract_patterns_from_options(&scan_options);
+        let (regexes, regex_set) = compile_tagged_regexes(&pattern_strings)?;
 
         let file = File::open(path).context(format_context!("failed to open file {}", path))?;
         let mut reader = BufReader::new(file);
@@ -1339,40 +1385,21 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             ))?;
             let line = strip_newline_str(line);
 
-            // Check if any pattern matches
-            let matches = regex_set.matches(&line);
+            let line_results = process_line_for_matches(
+                &line,
+                line_number,
+                &regex_set,
+                &regexes,
+                &tags,
+                scan_options.first_match_only,
+            )?;
 
-            for pattern_idx in matches.iter() {
-                let re = &regexes[pattern_idx];
-                let tag = &tags[pattern_idx];
-
-                if let Some(caps) = re.captures(&line) {
-                    if let Some(m) = caps.get(0) {
-                        let byte_start = m.start();
-                        let column = line[..byte_start].chars().count() as i32 + 1;
-
-                        let mut named = BTreeMap::new();
-                        for name in re.capture_names().flatten() {
-                            if let Some(capture) = caps.name(name) {
-                                named.insert(name.to_string(), capture.as_str().to_string());
-                            }
-                        }
-
-                        let result = RegexMatchResult {
-                            tag: tag.clone(),
-                            line: line_number,
-                            column,
-                            match_str: m.as_str().to_string(),
-                            named,
-                        };
-
-                        let result_value =
-                            heap.alloc(serde_json::to_value(&result).context(format_context!(
-                                "failed to serialize regex match result"
-                            ))?);
-                        results.push(result_value);
-                    }
-                }
+            for result in line_results {
+                let result_value = heap.alloc(
+                    serde_json::to_value(&result)
+                        .context(format_context!("failed to serialize regex match result"))?,
+                );
+                results.push(result_value);
             }
 
             line_number += 1;
@@ -1782,7 +1809,13 @@ fn strip_newline_str(s: &str) -> String {
 fn render_human(diagnostics: Vec<Value>) -> anyhow::Result<String> {
     let mut lines = Vec::new();
 
-    for diag in diagnostics {
+    for (idx, diag) in diagnostics.iter().enumerate() {
+        // Add separator between diagnostics (not before the first one)
+        if idx > 0 {
+            lines.push(String::new()); // blank line
+            lines.push("=".repeat(80)); // separator line
+            lines.push(String::new()); // blank line
+        }
         let json_value = diag
             .to_json_value()
             .context(format_context!("failed to convert diagnostic to JSON"))?;
