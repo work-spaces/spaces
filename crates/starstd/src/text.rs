@@ -593,6 +593,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             return Err(anyhow!(format_context!("n must be non-negative")));
         }
 
+        if n == 0 {
+            return Ok(Vec::new());
+        }
+
         let file = File::open(path).context(format_context!("failed to open file {}", path))?;
         let reader = BufReader::new(file);
         let mut ring = VecDeque::with_capacity(n as usize);
@@ -964,7 +968,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         }
 
         // Drain remaining windows (shorter than n)
-        while window.len() > 1 {
+        while !window.is_empty() {
             let start_line = line_number - (window.len() as i32);
             let window_vec: Vec<String> = window.iter().cloned().collect();
 
@@ -1551,7 +1555,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// ```python
     /// matches = text.regex_scan_tagged(
     ///     content,
-    ///     [("error", r"(?P<file>\S+):(?P<line>\d+): (?P<message>.*)$")]
+    ///     {
+    ///         "patterns": [
+    ///             {"tag": "error", "pattern": r"(?P<file>\S+):(?P<line>\d+): (?P<message>.*)$"}
+    ///         ]
+    ///     }
     /// )
     /// diags = [
     ///     text.match_to_diagnostic({

@@ -3,7 +3,7 @@ Load the spaces starlark SDK and packages repositories.
 """
 
 workspace.set_locks(locks = {
-    "@star/sdk": "v0.3.30",
+    "@star/sdk": "d808b1948138c89f00392e42f82c77a6c30e0ec0",
     "@star/packages": "v0.2.48",
 })
 
