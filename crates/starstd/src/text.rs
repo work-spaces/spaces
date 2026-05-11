@@ -1880,6 +1880,28 @@ fn render_human(diagnostics: Vec<Value>) -> anyhow::Result<String> {
 }
 
 /// Render diagnostics in GitHub Actions format
+/// Escapes a string for use in GitHub Actions workflow commands.
+/// According to GitHub's documentation, these characters must be escaped:
+/// - % -> %25
+/// - \r -> %0D
+/// - \n -> %0A
+///
+/// For property values, we also escape , and : to prevent breaking the parameter format.
+fn escape_github_value(s: &str, is_property: bool) -> String {
+    let mut result = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '%' => result.push_str("%25"),
+            '\r' => result.push_str("%0D"),
+            '\n' => result.push_str("%0A"),
+            ',' if is_property => result.push_str("%2C"),
+            ':' if is_property => result.push_str("%3A"),
+            _ => result.push(ch),
+        }
+    }
+    result
+}
+
 fn render_github(diagnostics: Vec<Value>) -> anyhow::Result<String> {
     let mut lines = Vec::new();
 
@@ -1909,7 +1931,7 @@ fn render_github(diagnostics: Vec<Value>) -> anyhow::Result<String> {
         };
 
         let mut output = format!("::{}", level);
-        let mut params = vec![format!("file={}", file)];
+        let mut params = vec![format!("file={}", escape_github_value(file, true))];
         if let Some(l) = line {
             params.push(format!("line={}", l));
         }
@@ -1919,7 +1941,7 @@ fn render_github(diagnostics: Vec<Value>) -> anyhow::Result<String> {
         output.push(' ');
         output.push_str(&params.join(","));
         output.push_str("::");
-        output.push_str(message);
+        output.push_str(&escape_github_value(message, false));
         lines.push(output);
 
         // Handle related diagnostics
@@ -1952,7 +1974,8 @@ fn render_github(diagnostics: Vec<Value>) -> anyhow::Result<String> {
                     };
 
                     let mut rel_output = format!("::{}", rel_level);
-                    let mut rel_params = vec![format!("file={}", rel_file)];
+                    let mut rel_params =
+                        vec![format!("file={}", escape_github_value(rel_file, true))];
                     if let Some(l) = rel_line {
                         rel_params.push(format!("line={}", l));
                     }
@@ -1962,7 +1985,7 @@ fn render_github(diagnostics: Vec<Value>) -> anyhow::Result<String> {
                     rel_output.push(' ');
                     rel_output.push_str(&rel_params.join(","));
                     rel_output.push_str("::");
-                    rel_output.push_str(rel_message);
+                    rel_output.push_str(&escape_github_value(rel_message, false));
                     lines.push(rel_output);
                 }
             }
@@ -2072,4 +2095,92 @@ fn render_sarif(diagnostics: Vec<Value>) -> anyhow::Result<String> {
     });
 
     serde_json::to_string_pretty(&sarif).context(format_context!("failed to serialize SARIF"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_escape_github_value_basic() {
+        // Test basic characters that should not be escaped
+        assert_eq!(escape_github_value("hello world", false), "hello world");
+        assert_eq!(escape_github_value("test123", false), "test123");
+    }
+
+    #[test]
+    fn test_escape_github_value_special_chars() {
+        // Test percent signs
+        assert_eq!(escape_github_value("100%", false), "100%25");
+        assert_eq!(escape_github_value("%PATH%", false), "%25PATH%25");
+
+        // Test newlines
+        assert_eq!(escape_github_value("line1\nline2", false), "line1%0Aline2");
+        assert_eq!(
+            escape_github_value("multi\nline\nerror", false),
+            "multi%0Aline%0Aerror"
+        );
+
+        // Test carriage returns
+        assert_eq!(escape_github_value("line1\rline2", false), "line1%0Dline2");
+
+        // Test combined CRLF
+        assert_eq!(
+            escape_github_value("line1\r\nline2", false),
+            "line1%0D%0Aline2"
+        );
+    }
+
+    #[test]
+    fn test_escape_github_value_properties() {
+        // Test that commas and colons are escaped in property values
+        assert_eq!(escape_github_value("file:path", true), "file%3Apath");
+        assert_eq!(escape_github_value("item1,item2", true), "item1%2Citem2");
+        assert_eq!(
+            escape_github_value("path/to:file,name", true),
+            "path/to%3Afile%2Cname"
+        );
+
+        // Test that commas and colons are NOT escaped in non-property values (messages)
+        assert_eq!(
+            escape_github_value("Error: something failed", false),
+            "Error: something failed"
+        );
+        assert_eq!(
+            escape_github_value("Items: a, b, c", false),
+            "Items: a, b, c"
+        );
+    }
+
+    #[test]
+    fn test_escape_github_value_command_injection() {
+        // Test potential command injection scenarios
+        assert_eq!(
+            escape_github_value("test\n::error::injected", false),
+            "test%0A::error::injected"
+        );
+        assert_eq!(
+            escape_github_value("file.txt\n::set-output name=x::value", false),
+            "file.txt%0A::set-output name=x::value"
+        );
+    }
+
+    #[test]
+    fn test_escape_github_value_multiple_special_chars() {
+        // Test combinations of special characters
+        assert_eq!(
+            escape_github_value("Error: 100% failed\nFile: test.txt", false),
+            "Error: 100%25 failed%0AFile: test.txt"
+        );
+        assert_eq!(
+            escape_github_value("path:to:file,with,commas", true),
+            "path%3Ato%3Afile%2Cwith%2Ccommas"
+        );
+    }
+
+    #[test]
+    fn test_escape_github_value_empty_string() {
+        assert_eq!(escape_github_value("", false), "");
+        assert_eq!(escape_github_value("", true), "");
+    }
 }
