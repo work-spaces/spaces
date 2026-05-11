@@ -199,32 +199,32 @@ fn process_line_for_matches(
         let re = &regexes[pattern_idx];
         let tag = &tags[pattern_idx];
 
-        if let Some(caps) = re.captures(line) {
-            if let Some(m) = caps.get(0) {
-                let byte_start = m.start();
-                let column = line[..byte_start].chars().count() as i32 + 1;
+        if let Some(caps) = re.captures(line)
+            && let Some(m) = caps.get(0)
+        {
+            let byte_start = m.start();
+            let column = line[..byte_start].chars().count() as i32 + 1;
 
-                let mut named = BTreeMap::new();
-                for name in re.capture_names().flatten() {
-                    if let Some(capture) = caps.name(name) {
-                        named.insert(name.to_string(), capture.as_str().to_string());
-                    }
+            let mut named = BTreeMap::new();
+            for name in re.capture_names().flatten() {
+                if let Some(capture) = caps.name(name) {
+                    named.insert(name.to_string(), capture.as_str().to_string());
                 }
+            }
 
-                let result = RegexMatchResult {
-                    tag: tag.clone(),
-                    line: line_number,
-                    column,
-                    match_str: m.as_str().to_string(),
-                    named,
-                };
+            let result = RegexMatchResult {
+                tag: tag.clone(),
+                line: line_number,
+                column,
+                match_str: m.as_str().to_string(),
+                named,
+            };
 
-                results.push(result);
+            results.push(result);
 
-                // If first_match_only is true, stop after the first match
-                if first_match_only {
-                    break;
-                }
+            // If first_match_only is true, stop after the first match
+            if first_match_only {
+                break;
             }
         }
     }
@@ -456,10 +456,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         }
 
         // If file is non-empty and doesn't end with newline, add one
-        if let Some(b) = last_byte {
-            if b != b'\n' {
-                count += 1;
-            }
+        if let Some(b) = last_byte
+            && b != b'\n'
+        {
+            count += 1;
         }
 
         Ok(count)
@@ -503,9 +503,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let file = File::open(path).context(format_context!("failed to open file {}", path))?;
         let reader = BufReader::new(file);
         let mut result = Vec::new();
-        let mut line_number = 1i32;
 
-        for line in reader.lines() {
+        for (line_number, line) in (1i32..).zip(reader.lines()) {
             if line_number > end {
                 break;
             }
@@ -519,8 +518,6 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             if line_number >= start {
                 result.push(line_str);
             }
-
-            line_number += 1;
         }
 
         Ok(result)
@@ -674,10 +671,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             File::open(&opts.path).context(format_context!("failed to open file {}", opts.path))?;
         let reader = BufReader::new(file);
         let mut results = Vec::new();
-        let mut line_number = 1i32;
         let mut hit_count = 0i32;
 
-        for line in reader.lines() {
+        for (line_number, line) in (1i32..).zip(reader.lines()) {
             let line_str = line.context(format_context!(
                 "failed to read line {} from {}",
                 line_number,
@@ -719,14 +715,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 results.push(heap.alloc(map));
                 hit_count += 1;
 
-                if let Some(max_val) = max_hits {
-                    if hit_count >= max_val {
-                        break;
-                    }
+                if let Some(max_val) = max_hits
+                    && hit_count >= max_val
+                {
+                    break;
                 }
             }
-
-            line_number += 1;
         }
 
         Ok(results)
@@ -1058,40 +1052,36 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let heap = eval.heap();
         let mut results = Vec::new();
-        let mut line_number = 1i32;
 
-        for line in content.lines() {
+        for (line_number, line) in (1i32..).zip(content.lines()) {
             // Check if any pattern matches
             let matches = regex_set.matches(line);
 
             for pattern_idx in matches.iter() {
                 let re = &regexes[pattern_idx];
-                if let Some(caps) = re.captures(line) {
-                    if let Some(m) = caps.get(0) {
-                        let byte_start = m.start();
-                        let column = line[..byte_start].chars().count() as i32 + 1;
+                if let Some(caps) = re.captures(line)
+                    && let Some(m) = caps.get(0)
+                {
+                    let byte_start = m.start();
+                    let column = line[..byte_start].chars().count() as i32 + 1;
 
-                        let mut named = BTreeMap::new();
-                        for name in re.capture_names().flatten() {
-                            if let Some(capture) = caps.name(name) {
-                                named.insert(name.to_string(), capture.as_str().to_string());
-                            }
+                    let mut named = BTreeMap::new();
+                    for name in re.capture_names().flatten() {
+                        if let Some(capture) = caps.name(name) {
+                            named.insert(name.to_string(), capture.as_str().to_string());
                         }
-
-                        let mut result_map = BTreeMap::new();
-                        result_map
-                            .insert("pattern_index".to_string(), heap.alloc(pattern_idx as i32));
-                        result_map.insert("line".to_string(), heap.alloc(line_number));
-                        result_map.insert("column".to_string(), heap.alloc(column));
-                        result_map.insert("match".to_string(), heap.alloc(m.as_str().to_string()));
-                        result_map.insert("named".to_string(), heap.alloc(named));
-
-                        results.push(heap.alloc(result_map));
                     }
+
+                    let mut result_map = BTreeMap::new();
+                    result_map.insert("pattern_index".to_string(), heap.alloc(pattern_idx as i32));
+                    result_map.insert("line".to_string(), heap.alloc(line_number));
+                    result_map.insert("column".to_string(), heap.alloc(column));
+                    result_map.insert("match".to_string(), heap.alloc(m.as_str().to_string()));
+                    result_map.insert("named".to_string(), heap.alloc(named));
+
+                    results.push(heap.alloc(result_map));
                 }
             }
-
-            line_number += 1;
         }
 
         Ok(results)
@@ -1184,28 +1174,27 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
             for pattern_idx in matches.iter() {
                 let re = &regexes[pattern_idx];
-                if let Some(caps) = re.captures(&line) {
-                    if let Some(m) = caps.get(0) {
-                        let byte_start = m.start();
-                        let column = line[..byte_start].chars().count() as i32 + 1;
+                if let Some(caps) = re.captures(&line)
+                    && let Some(m) = caps.get(0)
+                {
+                    let byte_start = m.start();
+                    let column = line[..byte_start].chars().count() as i32 + 1;
 
-                        let mut named = BTreeMap::new();
-                        for name in re.capture_names().flatten() {
-                            if let Some(capture) = caps.name(name) {
-                                named.insert(name.to_string(), capture.as_str().to_string());
-                            }
+                    let mut named = BTreeMap::new();
+                    for name in re.capture_names().flatten() {
+                        if let Some(capture) = caps.name(name) {
+                            named.insert(name.to_string(), capture.as_str().to_string());
                         }
-
-                        let mut result_map = BTreeMap::new();
-                        result_map
-                            .insert("pattern_index".to_string(), heap.alloc(pattern_idx as i32));
-                        result_map.insert("line".to_string(), heap.alloc(line_number));
-                        result_map.insert("column".to_string(), heap.alloc(column));
-                        result_map.insert("match".to_string(), heap.alloc(m.as_str().to_string()));
-                        result_map.insert("named".to_string(), heap.alloc(named));
-
-                        results.push(heap.alloc(result_map));
                     }
+
+                    let mut result_map = BTreeMap::new();
+                    result_map.insert("pattern_index".to_string(), heap.alloc(pattern_idx as i32));
+                    result_map.insert("line".to_string(), heap.alloc(line_number));
+                    result_map.insert("column".to_string(), heap.alloc(column));
+                    result_map.insert("match".to_string(), heap.alloc(m.as_str().to_string()));
+                    result_map.insert("named".to_string(), heap.alloc(named));
+
+                    results.push(heap.alloc(result_map));
                 }
             }
 
@@ -1278,9 +1267,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let heap = eval.heap();
         let mut results = Vec::new();
-        let mut line_number = 1i32;
 
-        for line in content.lines() {
+        for (line_number, line) in (1i32..).zip(content.lines()) {
             let line_results = process_line_for_matches(
                 line,
                 line_number,
@@ -1297,8 +1285,6 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 );
                 results.push(result_value);
             }
-
-            line_number += 1;
         }
 
         Ok(results)
@@ -1470,29 +1456,30 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         }
 
         // Validate numeric fields
-        if let Some(l) = opts.line {
-            if l < 1 {
-                return Err(anyhow!("line must be >= 1, got {}", l)
-                    .context(format_context!("invalid line")));
-            }
+        if let Some(l) = opts.line
+            && l < 1
+        {
+            return Err(
+                anyhow!("line must be >= 1, got {}", l).context(format_context!("invalid line"))
+            );
         }
-        if let Some(c) = opts.column {
-            if c < 1 {
-                return Err(anyhow!("column must be >= 1, got {}", c)
-                    .context(format_context!("invalid column")));
-            }
+        if let Some(c) = opts.column
+            && c < 1
+        {
+            return Err(anyhow!("column must be >= 1, got {}", c)
+                .context(format_context!("invalid column")));
         }
-        if let Some(el) = opts.end_line {
-            if el < 1 {
-                return Err(anyhow!("end_line must be >= 1, got {}", el)
-                    .context(format_context!("invalid end_line")));
-            }
+        if let Some(el) = opts.end_line
+            && el < 1
+        {
+            return Err(anyhow!("end_line must be >= 1, got {}", el)
+                .context(format_context!("invalid end_line")));
         }
-        if let Some(ec) = opts.end_column {
-            if ec < 1 {
-                return Err(anyhow!("end_column must be >= 1, got {}", ec)
-                    .context(format_context!("invalid end_column")));
-            }
+        if let Some(ec) = opts.end_column
+            && ec < 1
+        {
+            return Err(anyhow!("end_column must be >= 1, got {}", ec)
+                .context(format_context!("invalid end_column")));
         }
 
         let heap = eval.heap();
@@ -1633,14 +1620,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .and_then(|s| s.parse::<i32>().ok())
             .filter(|&c| c >= 1);
 
-        let code = named.get("code").map(|s| s.clone());
+        let code = named.get("code").cloned();
 
         // Message: use captured message or fall back to default_message or full match
         let message = named
             .get("message")
             .map(|s| s.as_str())
             .filter(|s| !s.is_empty())
-            .or_else(|| {
+            .or({
                 if !opts.default_message.is_empty() {
                     Some(opts.default_message.as_str())
                 } else {
@@ -1843,39 +1830,39 @@ fn render_human(diagnostics: Vec<Value>) -> anyhow::Result<String> {
         lines.push(output);
 
         // Handle related diagnostics
-        if let Some(related) = obj.get("related") {
-            if let Some(related_array) = related.as_array() {
-                for related_diag in related_array {
-                    if let Some(related_obj) = related_diag.as_object() {
-                        let rel_file = related_obj
-                            .get("file")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("");
-                        let rel_severity = related_obj
-                            .get("severity")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("note");
-                        let rel_message = related_obj
-                            .get("message")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("");
-                        let rel_line = related_obj.get("line").and_then(|v| v.as_i64());
-                        let rel_column = related_obj.get("column").and_then(|v| v.as_i64());
+        if let Some(related) = obj.get("related")
+            && let Some(related_array) = related.as_array()
+        {
+            for related_diag in related_array {
+                if let Some(related_obj) = related_diag.as_object() {
+                    let rel_file = related_obj
+                        .get("file")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let rel_severity = related_obj
+                        .get("severity")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("note");
+                    let rel_message = related_obj
+                        .get("message")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let rel_line = related_obj.get("line").and_then(|v| v.as_i64());
+                    let rel_column = related_obj.get("column").and_then(|v| v.as_i64());
 
-                        let mut rel_output = String::from("  ");
-                        if !rel_file.is_empty() {
-                            rel_output.push_str(rel_file);
-                            if let Some(l) = rel_line {
-                                rel_output.push_str(&format!(":{}", l));
-                                if let Some(c) = rel_column {
-                                    rel_output.push_str(&format!(":{}", c));
-                                }
+                    let mut rel_output = String::from("  ");
+                    if !rel_file.is_empty() {
+                        rel_output.push_str(rel_file);
+                        if let Some(l) = rel_line {
+                            rel_output.push_str(&format!(":{}", l));
+                            if let Some(c) = rel_column {
+                                rel_output.push_str(&format!(":{}", c));
                             }
-                            rel_output.push_str(": ");
                         }
-                        rel_output.push_str(&format!("{}: {}", rel_severity, rel_message));
-                        lines.push(rel_output);
+                        rel_output.push_str(": ");
                     }
+                    rel_output.push_str(&format!("{}: {}", rel_severity, rel_message));
+                    lines.push(rel_output);
                 }
             }
         }
@@ -1928,47 +1915,47 @@ fn render_github(diagnostics: Vec<Value>) -> anyhow::Result<String> {
         lines.push(output);
 
         // Handle related diagnostics
-        if let Some(related) = obj.get("related") {
-            if let Some(related_array) = related.as_array() {
-                for related_diag in related_array {
-                    if let Some(related_obj) = related_diag.as_object() {
-                        let rel_file = related_obj
-                            .get("file")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("");
-                        let rel_severity = related_obj
-                            .get("severity")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("note");
-                        let rel_message = related_obj
-                            .get("message")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("");
-                        let rel_line = related_obj.get("line").and_then(|v| v.as_i64());
-                        let rel_column = related_obj.get("column").and_then(|v| v.as_i64());
+        if let Some(related) = obj.get("related")
+            && let Some(related_array) = related.as_array()
+        {
+            for related_diag in related_array {
+                if let Some(related_obj) = related_diag.as_object() {
+                    let rel_file = related_obj
+                        .get("file")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let rel_severity = related_obj
+                        .get("severity")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("note");
+                    let rel_message = related_obj
+                        .get("message")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let rel_line = related_obj.get("line").and_then(|v| v.as_i64());
+                    let rel_column = related_obj.get("column").and_then(|v| v.as_i64());
 
-                        // Map related severity to GitHub Actions level
-                        let rel_level = match rel_severity {
-                            "error" | "hint" => "error",
-                            "warning" => "warning",
-                            "info" | "note" => "notice",
-                            _ => "notice",
-                        };
+                    // Map related severity to GitHub Actions level
+                    let rel_level = match rel_severity {
+                        "error" | "hint" => "error",
+                        "warning" => "warning",
+                        "info" | "note" => "notice",
+                        _ => "notice",
+                    };
 
-                        let mut rel_output = format!("::{}", rel_level);
-                        let mut rel_params = vec![format!("file={}", rel_file)];
-                        if let Some(l) = rel_line {
-                            rel_params.push(format!("line={}", l));
-                        }
-                        if let Some(c) = rel_column {
-                            rel_params.push(format!("col={}", c));
-                        }
-                        rel_output.push(' ');
-                        rel_output.push_str(&rel_params.join(","));
-                        rel_output.push_str("::");
-                        rel_output.push_str(rel_message);
-                        lines.push(rel_output);
+                    let mut rel_output = format!("::{}", rel_level);
+                    let mut rel_params = vec![format!("file={}", rel_file)];
+                    if let Some(l) = rel_line {
+                        rel_params.push(format!("line={}", l));
                     }
+                    if let Some(c) = rel_column {
+                        rel_params.push(format!("col={}", c));
+                    }
+                    rel_output.push(' ');
+                    rel_output.push_str(&rel_params.join(","));
+                    rel_output.push_str("::");
+                    rel_output.push_str(rel_message);
+                    lines.push(rel_output);
                 }
             }
         }
@@ -2007,11 +1994,9 @@ fn render_sarif(diagnostics: Vec<Value>) -> anyhow::Result<String> {
         })?;
 
         // Get tool name from first diagnostic with a source
-        if !found_source {
-            if let Some(source) = obj.get("source").and_then(|v| v.as_str()) {
-                tool_name = source.to_string();
-                found_source = true;
-            }
+        if !found_source && let Some(source) = obj.get("source").and_then(|v| v.as_str()) {
+            tool_name = source.to_string();
+            found_source = true;
         }
 
         let file = obj.get("file").and_then(|v| v.as_str()).unwrap_or("");
