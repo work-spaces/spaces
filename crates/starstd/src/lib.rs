@@ -13,6 +13,7 @@ pub mod script;
 pub mod sh;
 pub mod string;
 pub mod sys;
+pub mod text;
 pub mod time;
 pub mod tmp;
 pub mod toml;
