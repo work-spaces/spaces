@@ -6,14 +6,19 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Graph {
-    pub directed_graph: petgraph::graph::DiGraph<Arc<str>, ()>,
-    /// Cache mapping task names to their node indices for O(1) lookup
-    /// This is not serialized and will be rebuilt on deserialization
-    #[serde(skip)]
+    directed_graph: petgraph::graph::DiGraph<Arc<str>, ()>,
     node_index_cache: HashMap<Arc<str>, petgraph::prelude::NodeIndex>,
 }
 
 impl Graph {
+    pub fn edge_count(&self) -> usize {
+        self.directed_graph.edge_count()
+    }
+
+    pub fn capacity(&self) -> (usize, usize) {
+        self.directed_graph.capacity()
+    }
+
     pub fn clear(&mut self) {
         self.directed_graph.clear();
         self.node_index_cache.clear();

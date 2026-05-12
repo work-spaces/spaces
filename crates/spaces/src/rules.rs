@@ -737,7 +737,7 @@ impl State {
         }
         if let NeedsGraph::Yes(phase) = needs_graph {
             // if the graph is empty, populate it with the tasks
-            if self.graph.directed_graph.edge_count() == 0 {
+            if self.graph.edge_count() == 0 {
                 logger.debug("bin settings graph is empty - updating");
                 self.update_dependency_graph(console.clone(), None, phase)
                     .context(format_context!("Failed to update dependency graph"))?;
@@ -826,7 +826,7 @@ impl State {
             format!(
                 "sorted {} tasks of {:?}",
                 topo_sorted.len(),
-                self.graph.directed_graph.capacity()
+                self.graph.capacity()
             )
             .as_str(),
         );
