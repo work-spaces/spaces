@@ -625,17 +625,18 @@ impl State {
         {
             let start_time = std::time::Instant::now();
             let mut progress: Option<console::Progress> = None;
+            let task_count = tasks.len();
             for task in tasks.values_mut() {
                 let now = std::time::Instant::now();
                 if now.duration_since(start_time).as_millis() > 100 {
                     if let Some(progress) = progress.as_mut() {
-                        progress.increment_with_overflow(1);
+                        progress.increment(1);
                         progress.set_message("populating dependency graph");
                     } else {
                         progress = Some(console::Progress::new(
                             console.clone(),
                             "workspace",
-                            Some(200),
+                            Some(task_count as u64),
                             None,
                         ));
                     }
@@ -649,14 +650,17 @@ impl State {
 
                 // connect the dependencies
                 let all_rules = task.collect_rule_deps();
+
                 for rule_dep in all_rules.iter() {
                     self.graph
                         .add_dependency(&task.rule.name, rule_dep)
-                        .context(format_context!(
-                            "Failed to add dependency {rule_dep} to rule {}: {}",
-                            task.rule.name,
-                            self.graph.get_target_not_found(rule_dep.clone())
-                        ))?;
+                        .with_context(|| {
+                            format_context!(
+                                "Failed to add dependency {rule_dep} to rule {}: {}",
+                                task.rule.name,
+                                self.graph.get_target_not_found(rule_dep.clone())
+                            )
+                        })?;
                 }
             }
         }

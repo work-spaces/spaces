@@ -4,6 +4,7 @@ version = "0.15.42"
 edition = "2024"
 
 [dependencies]
+rustc-hash = "2"
 blake3 = "1"
 walkdir = "2"
 glob-match = "0.2"
