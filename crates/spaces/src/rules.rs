@@ -649,10 +649,8 @@ impl State {
                 }
 
                 // connect the dependencies
-                logger.debug("collecting rule dependencies");
                 let all_rules = task.collect_rule_deps();
 
-                logger.debug("connecting dependencies for rules");
                 for rule_dep in all_rules.iter() {
                     self.graph
                         .add_dependency(&task.rule.name, rule_dep)
