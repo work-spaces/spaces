@@ -1,13 +1,14 @@
 use crate::suggest;
 use anyhow_source_location::format_error;
+use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Graph {
     directed_graph: petgraph::graph::DiGraph<Arc<str>, ()>,
-    node_index_cache: HashMap<Arc<str>, petgraph::prelude::NodeIndex>,
+    #[serde(skip)]
+    node_index_cache: FxHashMap<Arc<str>, petgraph::prelude::NodeIndex>,
 }
 
 impl Graph {
