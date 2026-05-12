@@ -654,11 +654,13 @@ impl State {
                 for rule_dep in all_rules.iter() {
                     self.graph
                         .add_dependency(&task.rule.name, rule_dep)
-                        .context(format_context!(
-                            "Failed to add dependency {rule_dep} to rule {}: {}",
-                            task.rule.name,
-                            self.graph.get_target_not_found(rule_dep.clone())
-                        ))?;
+                        .with_context(|| {
+                            format_context!(
+                                "Failed to add dependency {rule_dep} to rule {}: {}",
+                                task.rule.name,
+                                self.graph.get_target_not_found(rule_dep.clone())
+                            )
+                        })?;
                 }
             }
         }
