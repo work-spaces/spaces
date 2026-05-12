@@ -427,7 +427,7 @@ pub struct State {
 }
 
 impl State {
-    pub fn insert_task(&self, task: task::Task) -> anyhow::Result<()> {
+    fn insert_task(&self, task: task::Task) -> anyhow::Result<()> {
         self.insert_task_with_context(
             task,
             &Arc::from(""),
@@ -440,7 +440,7 @@ impl State {
     /// visibility.  This variant is called from builtin functions that carry an
     /// `EvalContext`, allowing multiple modules to be evaluated in parallel
     /// without races on `latest_starlark_module`.
-    pub fn insert_task_with_context(
+    fn insert_task_with_context(
         &self,
         mut task_to_insert: task::Task,
         module_name: &Arc<str>,
@@ -596,7 +596,7 @@ impl State {
         Ok(())
     }
 
-    pub fn update_dependency_graph(
+    fn update_dependency_graph(
         &mut self,
         console: console::Console,
         workspace: Option<WorkspaceArc>,
@@ -675,7 +675,7 @@ impl State {
         Ok(())
     }
 
-    pub fn update_target_dependency_graph(
+    fn update_target_dependency_graph(
         &mut self,
         console: console::Console,
         target: Option<Arc<str>>,
@@ -713,7 +713,7 @@ impl State {
         Ok(())
     }
 
-    pub fn import_tasks_from_workspace_settings(
+    fn import_tasks_from_workspace_settings(
         &mut self,
         console: console::Console,
         workspace: workspace::WorkspaceArc,
@@ -733,10 +733,11 @@ impl State {
             logger.debug("loading graph from workspace bin settings");
 
             self.graph = workspace.settings.bin.graph.clone();
+            self.graph.rebuild_cache();
         }
         if let NeedsGraph::Yes(phase) = needs_graph {
             // if the graph is empty, populate it with the tasks
-            if self.graph.directed_graph.edge_count() == 0 {
+            if self.graph.edge_count() == 0 {
                 logger.debug("bin settings graph is empty - updating");
                 self.update_dependency_graph(console.clone(), None, phase)
                     .context(format_context!("Failed to update dependency graph"))?;
@@ -806,7 +807,7 @@ impl State {
         Ok(())
     }
 
-    pub fn update_tasks_digests(
+    fn update_tasks_digests(
         &self,
         console: console::Console,
         workspace: WorkspaceArc,
@@ -825,7 +826,7 @@ impl State {
             format!(
                 "sorted {} tasks of {:?}",
                 topo_sorted.len(),
-                self.graph.directed_graph.capacity()
+                self.graph.capacity()
             )
             .as_str(),
         );
@@ -855,7 +856,7 @@ impl State {
         Ok(())
     }
 
-    pub fn show_tasks(
+    fn show_tasks(
         &self,
         console: console::Console,
         workspace: WorkspaceArc,
