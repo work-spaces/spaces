@@ -1621,7 +1621,8 @@ fn show_bare_info(
                 get_git_progress(progress.console.clone(), repo_path);
             progress.set_message(&display_name);
 
-            if !git::is_bare_repo_healthy(&mut git_progress, path_str.as_ref()) {
+            // Use lightweight validation for info command (no fsck)
+            if !git::is_bare_repo_valid(&mut git_progress, path_str.as_ref()) {
                 repos_with_problems += 1;
             }
             progress.increment(1);

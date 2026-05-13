@@ -458,6 +458,20 @@ pub fn get_commit_tag(
     }
 }
 
+/// Lightweight check if a bare repository appears valid (does not run fsck).
+/// This uses `git rev-parse --git-dir` which is fast and just checks if the
+/// repository directory structure is valid.
+pub fn is_bare_repo_valid(progress_bar: &mut console::Progress, path: &str) -> bool {
+    let options = console::ExecuteOptions {
+        working_directory: Some(path.into()),
+        arguments: vec!["rev-parse".into(), "--git-dir".into()],
+        ..Default::default()
+    };
+    execute_git_command(progress_bar, path, options).is_ok()
+}
+
+/// Thorough check if a bare repository is healthy using git fsck.
+/// This is more expensive and should only be used when attempting to fix issues.
 pub fn is_bare_repo_healthy(progress_bar: &mut console::Progress, path: &str) -> bool {
     let options = console::ExecuteOptions {
         working_directory: Some(path.into()),
