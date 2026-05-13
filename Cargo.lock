@@ -213,17 +213,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "async-trait"
-version = "0.1.89"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9035ad2d096bed7955a320ee7e2230574d28fd3c3a0f186cbea1ff3c7eed5dbb"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
-]
-
-[[package]]
 name = "atomic"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3647,19 +3636,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sha256"
-version = "1.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f880fc8562bdeb709793f00eb42a2ad0e672c4f883bbe59122b926eca935c8f6"
-dependencies = [
- "async-trait",
- "bytes",
- "hex",
- "sha2",
- "tokio",
-]
-
-[[package]]
 name = "sharded-slab"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3769,7 +3745,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
- "sha256",
+ "sha2",
  "signal-hook",
  "spaces-archiver",
  "spaces-console",
@@ -3801,7 +3777,7 @@ dependencies = [
  "glob-match",
  "serde",
  "sevenz-rust",
- "sha256",
+ "sha2",
  "spaces-console",
  "tar",
  "walkdir",
@@ -3852,7 +3828,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "serde_yaml",
- "sha256",
+ "sha2",
  "spaces-archiver",
  "spaces-console",
  "state",

@@ -14,6 +14,14 @@ enum DecoderDriver {
     SevenZ,
 }
 
+// Represents TAR data that needs to be extracted
+enum TarSource {
+    // TAR data already in memory
+    Bytes(Vec<u8>),
+    // Path to TAR file that should be streamed
+    FilePath(String),
+}
+
 pub struct Decoder {
     decoder: DecoderDriver,
     output_directory: String,
@@ -127,12 +135,12 @@ impl Decoder {
         }
 
         let tar_bytes = match self.decoder {
-            DecoderDriver::Gzip(decoder) => Some(Self::extract_to_tar_bytes(
+            DecoderDriver::Gzip(decoder) => Some(TarSource::Bytes(Self::extract_to_tar_bytes(
                 decoder,
                 reader_size,
                 driver,
                 &mut progress_bar,
-            )?),
+            )?)),
             DecoderDriver::Zip(mut decoder) => {
                 let file_names: Vec<String> = decoder.file_names().map(|e| e.to_string()).collect();
 
@@ -220,18 +228,18 @@ impl Decoder {
 
                 None
             }
-            DecoderDriver::Bzip2(decoder) => Some(Self::extract_to_tar_bytes(
+            DecoderDriver::Bzip2(decoder) => Some(TarSource::Bytes(Self::extract_to_tar_bytes(
                 decoder,
                 reader_size,
                 driver,
                 &mut progress_bar,
-            )?),
-            DecoderDriver::Xz(decoder) => Some(Self::extract_to_tar_bytes(
+            )?)),
+            DecoderDriver::Xz(decoder) => Some(TarSource::Bytes(Self::extract_to_tar_bytes(
                 decoder,
                 reader_size,
                 driver,
                 &mut progress_bar,
-            )?),
+            )?)),
             DecoderDriver::SevenZ => {
                 driver::update_status(
                     &mut progress_bar,
@@ -242,37 +250,61 @@ impl Decoder {
                     },
                 );
 
-                let handle = std::thread::spawn(move || -> anyhow::Result<Vec<u8>> {
+                let handle = std::thread::spawn(move || -> anyhow::Result<String> {
                     let temporary_file_path = format!("{output_directory}/{SEVEN_Z_TAR_FILENAME}");
                     let input_file = std::fs::File::open(input_file.as_str())
                         .context(format_context!("{input_file}"))?;
                     sevenz_rust::decompress(input_file, output_directory.as_str()).context(
                         format_context!("{temporary_file_path} -> {output_directory}"),
                     )?;
-                    let result = std::fs::read(temporary_file_path.as_str())
-                        .context(format_context!("{temporary_file_path}"));
 
-                    std::fs::remove_file(temporary_file_path.as_str())
-                        .context(format_context!("{temporary_file_path}"))?;
-
-                    result
+                    // Return the path to the TAR file for streaming extraction
+                    Ok(temporary_file_path)
                 });
 
-                let tar_contents =
+                let tar_file_path =
                     driver::wait_handle(handle, &mut progress_bar).context(format_context!(""))?;
 
-                Some(tar_contents)
+                Some(TarSource::FilePath(tar_file_path))
             }
         };
 
         let output_directory = self.output_directory.clone();
 
-        if let Some(tar_bytes) = tar_bytes {
+        if let Some(tar_source) = tar_bytes {
             let handle = std::thread::spawn(move || -> anyhow::Result<()> {
-                let mut archive = tar::Archive::new(tar_bytes.as_slice());
-                archive
-                    .unpack(output_directory.as_str())
-                    .context(format_context!("{output_directory}"))?;
+                match tar_source {
+                    TarSource::Bytes(tar_bytes) => {
+                        // Extract from TAR data in memory
+                        let mut archive = tar::Archive::new(tar_bytes.as_slice());
+                        archive
+                            .unpack(output_directory.as_str())
+                            .context(format_context!("{output_directory}"))?;
+                    }
+                    TarSource::FilePath(tar_file_path) => {
+                        // Ensure cleanup happens on both success and failure paths
+                        struct CleanupGuard(String);
+                        impl Drop for CleanupGuard {
+                            fn drop(&mut self) {
+                                // Attempt to remove the temporary file, but don't fail if it's already gone
+                                let _ = std::fs::remove_file(&self.0);
+                            }
+                        }
+                        let _cleanup = CleanupGuard(tar_file_path.clone());
+
+                        // Stream the TAR file directly instead of loading it into memory
+                        let tar_file = std::fs::File::open(&tar_file_path).context(
+                            format_context!("Failed to open TAR file {}", tar_file_path),
+                        )?;
+                        let tar_reader = std::io::BufReader::new(tar_file);
+                        let mut archive = tar::Archive::new(tar_reader);
+                        archive
+                            .unpack(output_directory.as_str())
+                            .context(format_context!("{output_directory}"))?;
+
+                        // Cleanup guard will remove the temporary TAR file when it goes out of scope
+                    }
+                }
 
                 Ok(())
             });

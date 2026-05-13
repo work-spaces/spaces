@@ -232,11 +232,14 @@ pub fn get_workspace_path(workspace_path: &str, current_path: &str, target_path:
 }
 
 fn get_unique() -> anyhow::Result<String> {
+    use sha2::{Digest, Sha256};
     let duration_since_epoch = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .context(format_context!("No system time"))?;
     let duration_since_epoch_string = format!("{}", duration_since_epoch.as_nanos());
-    let unique_sha256 = sha256::digest(duration_since_epoch_string.as_bytes());
+    let mut hasher = Sha256::new();
+    hasher.update(duration_since_epoch_string.as_bytes());
+    let unique_sha256 = format!("{:x}", hasher.finalize());
     Ok(unique_sha256.as_str()[0..4].to_string())
 }
 
