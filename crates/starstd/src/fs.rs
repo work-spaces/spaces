@@ -143,16 +143,27 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             return Ok(false);
         }
 
-        let bytes = std::fs::read(file_path).context(format_context!(
-            "Failed to read file {} for text detection",
+        use std::io::Read;
+        let mut file = std::fs::File::open(file_path).context(format_context!(
+            "Failed to open file {} for text detection",
             path
         ))?;
 
+        // Read up to 8KB for text detection - enough to be confident about file type
+        // This avoids loading entire large files into memory
+        const SAMPLE_SIZE: usize = 8192;
+        let mut buffer = vec![0u8; SAMPLE_SIZE];
+        let bytes_read = file.read(&mut buffer).context(format_context!(
+            "Failed to read file {} for text detection",
+            path
+        ))?;
+        buffer.truncate(bytes_read);
+
         // A file is considered text if it is valid UTF-8 and contains no NUL bytes.
-        if bytes.contains(&0u8) {
+        if buffer.contains(&0u8) {
             return Ok(false);
         }
-        Ok(std::str::from_utf8(&bytes).is_ok())
+        Ok(std::str::from_utf8(&buffer).is_ok())
     }
 
     /// Reads a TOML file and returns its contents as a dictionary.

@@ -325,13 +325,10 @@ mod tests {
 
             let archive_path_string = format!("tmp/symlink_test.{}", driver.extension());
 
-            let digest = {
-                use sha2::{Digest, Sha256};
-                let contents = std::fs::read(archive_path_string.as_str()).unwrap();
-                let mut hasher = Sha256::new();
-                hasher.update(&contents);
-                format!("{:x}", hasher.finalize())
-            };
+            let digest = crate::driver::stream_sha256_hash(std::path::Path::new(
+                archive_path_string.as_str(),
+            ))
+            .unwrap();
 
             let progress_bar =
                 console::Progress::new(console.clone(), archive_path_string.as_str(), None, None);
@@ -395,13 +392,10 @@ mod tests {
 
             let archive_path_string = format!("tmp/test.{}", driver.extension());
 
-            let digest = {
-                use sha2::{Digest, Sha256};
-                let contents = std::fs::read(archive_path_string.as_str()).unwrap();
-                let mut hasher = Sha256::new();
-                hasher.update(&contents);
-                format!("{:x}", hasher.finalize())
-            };
+            let digest = crate::driver::stream_sha256_hash(std::path::Path::new(
+                archive_path_string.as_str(),
+            ))
+            .unwrap();
 
             let progress_bar =
                 console::Progress::new(console.clone(), archive_path_string.as_str(), None, None);

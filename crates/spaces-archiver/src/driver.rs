@@ -21,7 +21,7 @@ pub(crate) const SEVEN_Z_TAR_FILENAME: &str = "swiss_army_archive_seven7_temp.ta
 
 /// Stream a file through SHA-256 hasher.
 /// Memory usage is constant regardless of file size.
-fn stream_sha256_hash(path: &Path) -> anyhow::Result<String> {
+pub(crate) fn stream_sha256_hash(path: &Path) -> anyhow::Result<String> {
     use sha2::{Digest, Sha256};
     use std::io::Read;
 
