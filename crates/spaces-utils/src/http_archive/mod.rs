@@ -1404,7 +1404,13 @@ mod tests {
 
         // Verify SHA256
         let file_contents = std::fs::read(&dest).expect("should be able to read downloaded file");
-        let actual_sha256 = sha256::digest(&file_contents).to_ascii_lowercase();
+        let actual_sha256 = {
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(&file_contents);
+            format!("{:x}", hasher.finalize())
+        }
+        .to_ascii_lowercase();
         assert_eq!(
             actual_sha256, expected_sha256,
             "SHA256 mismatch: expected {expected_sha256}, got {actual_sha256}"

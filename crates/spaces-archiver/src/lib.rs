@@ -326,8 +326,11 @@ mod tests {
             let archive_path_string = format!("tmp/symlink_test.{}", driver.extension());
 
             let digest = {
+                use sha2::{Digest, Sha256};
                 let contents = std::fs::read(archive_path_string.as_str()).unwrap();
-                sha256::digest(contents)
+                let mut hasher = Sha256::new();
+                hasher.update(&contents);
+                format!("{:x}", hasher.finalize())
             };
 
             let progress_bar =
@@ -393,8 +396,11 @@ mod tests {
             let archive_path_string = format!("tmp/test.{}", driver.extension());
 
             let digest = {
+                use sha2::{Digest, Sha256};
                 let contents = std::fs::read(archive_path_string.as_str()).unwrap();
-                sha256::digest(contents)
+                let mut hasher = Sha256::new();
+                hasher.update(&contents);
+                format!("{:x}", hasher.finalize())
             };
 
             let progress_bar =
