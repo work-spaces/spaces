@@ -1,6 +1,7 @@
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 #[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Driver {
@@ -17,6 +18,30 @@ pub enum Driver {
 }
 
 pub(crate) const SEVEN_Z_TAR_FILENAME: &str = "swiss_army_archive_seven7_temp.tar";
+
+/// Stream a file through SHA-256 hasher.
+/// Memory usage is constant regardless of file size.
+fn stream_sha256_hash(path: &Path) -> anyhow::Result<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+
+    let file = std::fs::File::open(path).context(format_context!("{}", path.display()))?;
+    let mut reader = std::io::BufReader::new(file);
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 65536]; // 64 KiB read buffer
+
+    loop {
+        let n = reader
+            .read(&mut buf)
+            .context(format_context!("{}", path.display()))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+
+    Ok(format!("{:x}", hasher.finalize()))
+}
 
 impl Driver {
     pub fn extension(&self) -> String {
@@ -103,9 +128,7 @@ pub(crate) fn digest_file(
     let file_path = file_path.to_owned();
 
     let handle = std::thread::spawn(move || -> anyhow::Result<String> {
-        let file_contents = std::fs::read(&file_path).context(format_context!("{file_path}"))?;
-        let digest = sha256::digest(file_contents);
-        Ok(digest)
+        stream_sha256_hash(Path::new(&file_path)).context(format_context!("{file_path}"))
     });
 
     wait_handle(handle, progress).context(format_context!(""))

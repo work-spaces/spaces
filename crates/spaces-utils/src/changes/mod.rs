@@ -1,3 +1,4 @@
+use crate::hash_streaming;
 use crate::logger;
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
@@ -326,10 +327,9 @@ fn process_entry(
     progress.set_message(format!("Processing {path:?}").as_str());
 
     let detail_type = if path.is_file() {
-        let contents =
-            std::fs::read(path).with_context(|| format_context!("failed to load {path:?}"))?;
-        let hash = blake3::hash(&contents);
-        ChangeDetailType::File(hash.to_string().into())
+        let hash = hash_streaming::stream_blake3_hash(path)
+            .with_context(|| format_context!("failed to hash {path:?}"))?;
+        ChangeDetailType::File(hash.into())
     } else if path.is_dir() {
         ChangeDetailType::Directory
     } else if path.is_symlink() {

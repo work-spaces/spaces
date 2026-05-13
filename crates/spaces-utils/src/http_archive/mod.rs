@@ -1,4 +1,4 @@
-use crate::{changes::glob, lock, logger, ws};
+use crate::{changes::glob, hash_streaming, lock, logger, ws};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -932,11 +932,9 @@ impl HttpArchive {
             ))?;
 
             // Check sha256 is correct
-            let file_contents = std::fs::read(path_to_artifact).context(format_context!(
-                "failed to load contents for {:?}",
-                path_to_artifact
-            ))?;
-            let file_digest = sha256::digest(file_contents).to_ascii_lowercase();
+            let file_digest = hash_streaming::stream_sha256_hash(path_to_artifact)
+                .context(format_context!("failed to hash {:?}", path_to_artifact))?
+                .to_ascii_lowercase();
             let expected_digest = self.archive.sha256.to_lowercase();
             if file_digest != expected_digest {
                 return Err(format_error!(

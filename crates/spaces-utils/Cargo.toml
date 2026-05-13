@@ -19,6 +19,7 @@ reqwest = { version = "0.12", default-features = false, features = [
 tokio = { version = "1", features = ["rt-multi-thread", "time"] }
 which = "7"
 sha256 = "1"
+sha2 = "0.10"
 semver = "1"
 bytesize = "2"
 clap = { version = "4", features = ["derive"] }

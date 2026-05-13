@@ -1,6 +1,6 @@
 /// Rule cache
 /// Cache the outputs of the rule based on the input digest
-use crate::{age, ci, logger, targets};
+use crate::{age, ci, hash_streaming, logger, targets};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use bytesize::ByteSize;
@@ -48,14 +48,12 @@ fn save_artifact_to_cache(
     artifact_path: &std::path::Path,
 ) -> anyhow::Result<Arc<str>> {
     // calculate the hash of the artifact
-    let contents = std::fs::read(artifact_path).with_context(|| {
+    let artifact_hash = hash_streaming::stream_blake3_hash(artifact_path).with_context(|| {
         format_context!(
-            "Failed to read workspace artifact {}",
+            "Failed to hash workspace artifact {}",
             artifact_path.display()
         )
     })?;
-
-    let artifact_hash = blake3::hash(&contents).to_string();
     //path in cache is the hash of the artifact contents
     let path_in_cache = get_artifact_cache_path(cache_path, &artifact_hash);
 
@@ -81,13 +79,12 @@ fn save_artifact_to_cache(
         })?;
 
         // verify the staged file hash matches the expected hash
-        let staged_contents = std::fs::read(&staged_path).with_context(|| {
+        let staged_hash = hash_streaming::stream_blake3_hash(&staged_path).with_context(|| {
             format_context!(
-                "Failed to read staged cache artifact {}",
+                "Failed to hash staged cache artifact {}",
                 staged_path.display()
             )
         })?;
-        let staged_hash = blake3::hash(&staged_contents).to_string();
         if staged_hash != artifact_hash {
             let _ = std::fs::remove_file(&staged_path);
             return Err(anyhow::anyhow!(format_context!(

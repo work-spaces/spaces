@@ -1,7 +1,6 @@
 use crate::driver::{self, Driver, UpdateStatus, SEVEN_Z_TAR_FILENAME};
 use anyhow::Context;
 use anyhow_source_location::format_context;
-use std::io::Write;
 
 pub struct Entry {
     pub archive_path: String,
@@ -185,15 +184,15 @@ impl Encoder {
                     let options = zip::write::SimpleFileOptions::default()
                         .compression_method(zip::CompressionMethod::Deflated)
                         .unix_permissions(0o755);
-                    let contents = std::fs::read(file_path).context(format_context!(
-                        "Failed to read file for zip archive {file_path}"
-                    ))?;
                     encoder
                         .start_file(archive_path, options)
                         .context(format_context!("{file_path}"))?;
-                    encoder
-                        .write_all(contents.as_slice())
-                        .context(format_context!("{file_path}"))?;
+                    let mut file = std::fs::File::open(file_path).context(format_context!(
+                        "Failed to open file for zip archive {file_path}"
+                    ))?;
+                    std::io::copy(&mut file, encoder.as_mut()).context(format_context!(
+                        "Failed to copy file to zip archive {file_path}"
+                    ))?;
                 }
             }
         }

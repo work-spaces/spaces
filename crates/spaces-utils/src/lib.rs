@@ -9,6 +9,7 @@ pub mod features;
 pub mod fs_mutex;
 pub mod git;
 pub mod graph;
+pub mod hash_streaming;
 pub mod http_archive;
 pub mod inputs;
 pub mod inspect;
