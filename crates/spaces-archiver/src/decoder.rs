@@ -282,6 +282,16 @@ impl Decoder {
                             .context(format_context!("{output_directory}"))?;
                     }
                     TarSource::FilePath(tar_file_path) => {
+                        // Ensure cleanup happens on both success and failure paths
+                        struct CleanupGuard(String);
+                        impl Drop for CleanupGuard {
+                            fn drop(&mut self) {
+                                // Attempt to remove the temporary file, but don't fail if it's already gone
+                                let _ = std::fs::remove_file(&self.0);
+                            }
+                        }
+                        let _cleanup = CleanupGuard(tar_file_path.clone());
+
                         // Stream the TAR file directly instead of loading it into memory
                         let tar_file = std::fs::File::open(&tar_file_path).context(
                             format_context!("Failed to open TAR file {}", tar_file_path),
@@ -292,11 +302,7 @@ impl Decoder {
                             .unpack(output_directory.as_str())
                             .context(format_context!("{output_directory}"))?;
 
-                        // Clean up the temporary TAR file after extraction
-                        std::fs::remove_file(&tar_file_path).context(format_context!(
-                            "Failed to remove temporary TAR file {}",
-                            tar_file_path
-                        ))?;
+                        // Cleanup guard will remove the temporary TAR file when it goes out of scope
                     }
                 }
 
