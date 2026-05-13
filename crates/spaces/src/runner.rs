@@ -403,9 +403,9 @@ pub fn run_store_command_in_workspace(
                 .save(store_path)
                 .context(format_context!("Failed to save store at {store_path_str}"))?;
         }
-        store::StoreCommand::Fix { dry_run } => {
+        store::StoreCommand::Fix { dry_run, git_fsck } => {
             store
-                .fix(console.clone(), dry_run, is_ci)
+                .fix(console.clone(), dry_run, is_ci, git_fsck)
                 .context(format_context!("While fixing store"))?;
 
             store

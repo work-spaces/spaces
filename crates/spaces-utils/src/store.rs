@@ -42,6 +42,9 @@ pub enum StoreCommand {
         /// Show which entries have errors and will be deleted without deleting the data
         #[clap(long)]
         dry_run: bool,
+        /// Run git fsck on bare repositories to detect and repair issues
+        #[clap(long)]
+        git_fsck: bool,
     },
     /// Prune the store by deleting entries that are this age or older (inclusive).
     Prune {
@@ -602,6 +605,7 @@ impl Store {
         console: console::Console,
         is_dry_run: bool,
         is_ci: ci::IsCi,
+        run_git_fsck: bool,
     ) -> anyhow::Result<()> {
         let _group = ci::GithubLogGroup::new_group(console.clone(), is_ci, "Spaces Store Fix")?;
         let log = logger(console.clone());
@@ -682,11 +686,15 @@ impl Store {
             .map(|key| path_to_store.join(key.as_ref()))
             .collect();
 
-        // dry-run: 1 pass over bare_repo_paths (health check)
-        // live:    2 passes over bare_repo_paths (gc + fsck), plus a repair
+        // dry-run: 1 pass over bare_repo_paths (health check if --git-fsck)
+        // live:    2 passes over bare_repo_paths (gc + fsck if --git-fsck), plus a repair
         //          pass whose size is unknown until after phase 2 – it is
         //          added via set_total once repos_needing_repair is known.
-        let bare_passes = if is_dry_run { 1u64 } else { 2u64 };
+        let bare_passes = if is_dry_run {
+            if run_git_fsck { 1u64 } else { 0u64 }
+        } else {
+            if run_git_fsck { 2u64 } else { 1u64 }
+        };
         let mut total = (unmanaged_candidates.len() + self.entries.len()) as u64
             + bare_repo_paths.len() as u64 * bare_passes;
         let mut progress = console::Progress::new(console.clone(), "scanning", Some(total), None);
@@ -816,7 +824,7 @@ impl Store {
         };
 
         // Bare repo maintenance and repair
-        if !bare_repo_paths.is_empty() {
+        if !bare_repo_paths.is_empty() && run_git_fsck {
             if is_dry_run {
                 let mut repos_needing_repair = Vec::new();
                 for repo_path in &bare_repo_paths {
@@ -848,7 +856,7 @@ impl Store {
                 }
                 bare_repos_repaired = repos_needing_repair.len();
             } else {
-                // Phase 1: maintenance (gc)
+                // Phase 1: maintenance (gc) - always run
                 for repo_path in &bare_repo_paths {
                     let path_str = repo_path.to_string_lossy();
                     let (mut git_progress, display_name) =
@@ -900,6 +908,21 @@ impl Store {
                         progress.increment(1);
                     }
                 }
+            }
+        }
+        // Also run gc on bare repos even when --git-fsck is not specified
+        if !bare_repo_paths.is_empty() && !run_git_fsck && !is_dry_run {
+            // Only run gc (no fsck or repair)
+            for repo_path in &bare_repo_paths {
+                let path_str = repo_path.to_string_lossy();
+                let (mut git_progress, display_name) =
+                    get_git_progress(progress.console.clone(), repo_path);
+                progress.set_message(&display_name);
+
+                if !git::run_bare_repo_maintenance(&mut git_progress, path_str.as_ref()) {
+                    log.warning(format!("gc failed for bare repo: {path_str}").as_str());
+                }
+                progress.increment(1);
             }
         }
         let finalize_message = {
