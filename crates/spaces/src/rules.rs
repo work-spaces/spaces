@@ -1168,7 +1168,7 @@ impl State {
                     if number_running < singleton::get_max_queue_count() {
                         break;
                     } else {
-                        std::thread::sleep(std::time::Duration::from_millis(100));
+                        std::thread::sleep(std::time::Duration::from_millis(1));
                     }
                 }
             }
