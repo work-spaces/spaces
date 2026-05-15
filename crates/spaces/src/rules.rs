@@ -142,8 +142,8 @@ pub fn execute_rule(
             format!("Skip execute message after platform check? {skip_execute_message:?}").as_str(),
         );
 
-        let deps_signals =
-            get_task_signal_deps(&task).context(format_context!("Failed to get signal deps"))?;
+        let deps_signals = get_task_signal_deps(&task)
+            .with_context(|| format_context!("Failed to get signal deps"))?;
         let total = deps_signals.len();
 
         logger.trace(format!("{total} dependencies").as_str());
@@ -171,7 +171,7 @@ pub fn execute_rule(
             let tasks = state.tasks.read();
             let task = tasks
                 .get(name.as_ref())
-                .context(format_context!("Rule not found {name}"))?;
+                .with_context(|| format_context!("Rule not found {name}"))?;
             if task.phase == task::Phase::Cancelled {
                 logger.debug(format!("Skipping {name}: cancelled").as_str());
                 skip_execute_message = logger::make_finalize_line(
@@ -402,7 +402,7 @@ pub fn execute_rule(
 
             let task = tasks
                 .get_mut(name.as_ref())
-                .context(format_context!("Rule not found {name}"))?;
+                .with_context(|| format_context!("Rule not found {name}"))?;
             task.phase = task::Phase::Complete;
 
             state.log_status.write().push(log_status);
