@@ -99,10 +99,9 @@ fn expand_file_tokens(
         } else {
             format!("{working_directory}/{file_path}")
         };
-        let contents = std::fs::read_to_string(&abs_path).context(format_context!(
-            "Failed to read $RUN_LOAD_FILE_CONTENTS{{{}}}",
-            file_path
-        ))?;
+        let contents = std::fs::read_to_string(&abs_path).with_context(|| {
+            format_context!("Failed to read $RUN_LOAD_FILE_CONTENTS{{{}}}", file_path)
+        })?;
         result.push_str(&contents);
         remaining = &after[end + 1..];
     }
@@ -168,21 +167,24 @@ impl Exec {
         let working_dir = pwd.as_ref();
 
         for arg in arguments.iter_mut() {
-            *arg = expand_file_tokens(arg, workspace_root, working_dir).context(
-                format_context!("Failed to expand $RUN_LOAD_FILE_CONTENTS tokens in args"),
-            )?;
-            *arg = expand_exit_value_tokens(arg, &workspace).context(format_context!(
-                "Failed to expand $RUN_LOAD_EXIT_VALUE tokens in args"
-            ))?;
+            *arg = expand_file_tokens(arg, workspace_root, working_dir).with_context(|| {
+                format_context!("Failed to expand $RUN_LOAD_FILE_CONTENTS tokens in args")
+            })?;
+            *arg = expand_exit_value_tokens(arg, &workspace).with_context(|| {
+                format_context!("Failed to expand $RUN_LOAD_EXIT_VALUE tokens in args")
+            })?;
         }
 
         for (key, value) in self.env.clone().unwrap_or_default() {
-            let expanded = expand_file_tokens(&value, workspace_root, working_dir).context(
-                format_context!("Failed to expand $RUN_LOAD_FILE_CONTENTS tokens in env var {key}"),
-            )?;
-            let expanded = expand_exit_value_tokens(&expanded, &workspace).context(
-                format_context!("Failed to expand $RUN_LOAD_EXIT_VALUE tokens in env var {key}"),
-            )?;
+            let expanded =
+                expand_file_tokens(&value, workspace_root, working_dir).with_context(|| {
+                    format_context!(
+                        "Failed to expand $RUN_LOAD_FILE_CONTENTS tokens in env var {key}"
+                    )
+                })?;
+            let expanded = expand_exit_value_tokens(&expanded, &workspace).with_context(|| {
+                format_context!("Failed to expand $RUN_LOAD_EXIT_VALUE tokens in env var {key}")
+            })?;
             exec_env_vars.insert(key, expanded);
         }
 

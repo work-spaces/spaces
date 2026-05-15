@@ -460,7 +460,7 @@ fn try_evaluate_with_cache(
 
     // Try to load existing module result from build folder
     let module_deps_option = mtarget::ModuleDeps::new_from_json(name.as_ref())
-        .context(format_context!("Failed to load module deps for {:?}", name))?;
+        .with_context(|| format_context!("Failed to load module deps for {:?}", name))?;
 
     let (is_always_evaluate, is_module_caching_feature_enabled) = {
         let read_workspace = workspace.read();
@@ -502,10 +502,7 @@ fn try_evaluate_with_cache(
         let workspace = workspace.read();
         module_deps
             .compute_digest(&workspace.settings.bin.star_files)
-            .context(format_context!(
-                "Failed to compute digest for module {:?}",
-                name,
-            ))?
+            .with_context(|| format_context!("Failed to compute digest for module {:?}", name,))?
     };
 
     // Get rcache path
@@ -550,7 +547,7 @@ fn try_evaluate_with_cache(
         None => {
             eval_logger.debug(format!("Cache hit for module {:?}", name).as_str());
             let Some(mtarget) = mtarget::ModuleTarget::new_from_json(name.as_ref())
-                .context(format_context!("Failed to load mtarget for cache hit"))?
+                .with_context(|| format_context!("Failed to load mtarget for cache hit"))?
             else {
                 return Err(format_error!(
                     "Internal error: mtarget not found for cache hit {name} - {json_target}",
@@ -692,7 +689,7 @@ fn show_eval_progress(
 
     match handle.join() {
         Ok(result) => {
-            result.context(format_context!("Failed to evaluate module {}", name))?;
+            result.with_context(|| format_context!("Failed to evaluate module {}", name))?;
         }
         Err(_) => {
             return Err(format_error!("Failed to evaluate module {name}"));
@@ -799,7 +796,7 @@ pub fn evaluate_starlark_modules(
                     content.to_string(),
                     eval_digest,
                 )
-                .context(format_context!("Failed to evaluate module {eval_name}"))?;
+                .with_context(|| format_context!("Failed to evaluate module {eval_name}"))?;
                 Ok(())
             });
 
@@ -812,7 +809,7 @@ pub fn evaluate_starlark_modules(
                         let (n, h) = eval_handles.remove(i);
                         h.join()
                             .map_err(|_| format_error!("eval thread panicked for {n}"))?
-                            .context(format_context!("Failed to evaluate module {n}"))?;
+                            .with_context(|| format_context!("Failed to evaluate module {n}"))?;
                     } else {
                         i += 1;
                     }
@@ -821,7 +818,7 @@ pub fn evaluate_starlark_modules(
                 if eval_handles.len() >= MAX_CONCURRENT_EVALS {
                     let (n, h) = eval_handles.remove(0);
                     show_eval_progress(console.clone(), &n, h)
-                        .context(format_context!("Failed to evaluate module {n}"))?;
+                        .with_context(|| format_context!("Failed to evaluate module {n}"))?;
                 }
                 eval_handles.push((name, handle));
             } else {
@@ -845,27 +842,31 @@ pub fn evaluate_starlark_modules(
                 progress.set_prefix(format!("[{rule_name}]").as_str());
 
                 show_eval_progress(console.clone(), &name, handle)
-                    .context(format_context!("Failed to show eval progress"))?;
+                    .with_context(|| format_context!("Failed to show eval progress"))?;
 
                 logger.debug("--Checkout Phase--");
 
                 rules::update_depedency_graph(console.clone(), None, phase)
-                    .context(format_context!("Failed to evaluate dependency graph"))?;
+                    .with_context(|| format_context!("Failed to evaluate dependency graph"))?;
 
-                rules::update_target_dependency_graph(console.clone(), None).context(
-                    format_context!("Failed to update run target dependency graph during checkout"),
+                rules::update_target_dependency_graph(console.clone(), None).with_context(
+                    || {
+                        format_context!(
+                            "Failed to update run target dependency graph during checkout"
+                        )
+                    },
                 )?;
 
                 rules::debug_sorted_tasks(console.clone(), phase)
-                    .context(format_context!("Failed to debug sorted tasks"))?;
+                    .with_context(|| format_context!("Failed to debug sorted tasks"))?;
 
                 progress.set_message(format!("Executing {phase} rules").as_str());
 
                 let task_result = rules::execute(progress, workspace.clone(), phase)
-                    .context(format_context!("Failed to execute tasks"))?;
+                    .with_context(|| format_context!("Failed to execute tasks"))?;
 
                 update_secrets(console.clone(), workspace.clone())
-                    .context(format_context!("while running checkout tasks"))?;
+                    .with_context(|| format_context!("while running checkout tasks"))?;
 
                 if !task_result.new_modules.is_empty() {
                     logger.trace(format!("New Modules:{:?}", task_result.new_modules).as_str());
@@ -876,7 +877,9 @@ pub fn evaluate_starlark_modules(
                     workspace_write
                         .get_env_mut()
                         .repopulate_inherited_vars()
-                        .context(format_context!("While populating required inherited vars"))?;
+                        .with_context(|| {
+                            format_context!("While populating required inherited vars")
+                        })?;
                 }
 
                 let mut new_modules = Vec::new();
@@ -884,7 +887,7 @@ pub fn evaluate_starlark_modules(
                 for module in task_result.new_modules {
                     let path_to_module = format!("{workspace_path}/{module}");
                     let content = std::fs::read_to_string(path_to_module.as_str())
-                        .context(format_context!("Failed to read file {path_to_module}"))?;
+                        .with_context(|| format_context!("Failed to read file {path_to_module}"))?;
 
                     new_modules.push((module, content));
                 }
@@ -925,7 +928,7 @@ pub fn evaluate_starlark_modules(
     for (n, h) in eval_handles.drain(..) {
         h.join()
             .map_err(|_| format_error!("eval thread panicked for {n}"))?
-            .context(format_context!("Failed to evaluate module {n}"))?;
+            .with_context(|| format_context!("Failed to evaluate module {n}"))?;
     }
 
     if let Some(stardoc) = singleton::get_inspect_options().stardoc {
@@ -933,7 +936,7 @@ pub fn evaluate_starlark_modules(
         workspace
             .stardoc
             .generate(stardoc.as_ref())
-            .context(format_context!("Failed to generate stardoc"))?;
+            .with_context(|| format_context!("Failed to generate stardoc"))?;
     }
 
     let final_message = if phase == task::Phase::Checkout {

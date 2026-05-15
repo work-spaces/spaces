@@ -146,10 +146,12 @@ impl AddWhichAsset {
         workspace: workspace::WorkspaceArc,
         _name: &str,
     ) -> anyhow::Result<()> {
-        let path = which::which(self.which.as_str()).context(format_context!(
-            "Failed to find {} on using `which`. This is required for this workspace",
-            self.which
-        ))?;
+        let path = which::which(self.which.as_str()).with_context(|| {
+            format_context!(
+                "Failed to find {} on using `which`. This is required for this workspace",
+                self.which
+            )
+        })?;
 
         let mut workspace_write_lock = workspace.write();
         let _ = workspace_write_lock
@@ -171,11 +173,13 @@ impl AddWhichAsset {
             None,
             copy::LinkType::Hard,
         )
-        .context(format_context!(
-            "Failed to create hard link from {} to {}",
-            path.display(),
-            destination
-        ))?;
+        .with_context(|| {
+            format_context!(
+                "Failed to create hard link from {} to {}",
+                path.display(),
+                destination
+            )
+        })?;
 
         Ok(())
     }
@@ -218,11 +222,13 @@ impl AddHardLink {
             None,
             copy::LinkType::Hard,
         )
-        .context(format_context!(
-            "Failed to create hard link from {} to {}",
-            source,
-            destination
-        ))?;
+        .with_context(|| {
+            format_context!(
+                "Failed to create hard link from {} to {}",
+                source,
+                destination
+            )
+        })?;
 
         Ok(())
     }
@@ -309,37 +315,41 @@ impl AddSoftLink {
 
         let destination_path = std::path::Path::new(&destination);
         if let Some(parent) = destination_path.parent() {
-            std::fs::create_dir_all(parent).context(format_context!(
-                "Failed to create parent directories for soft link {}",
-                destination
-            ))?;
+            std::fs::create_dir_all(parent).with_context(|| {
+                format_context!(
+                    "Failed to create parent directories for soft link {}",
+                    destination
+                )
+            })?;
         }
 
         if destination_path.is_symlink() {
-            symlink::remove_symlink_auto(destination_path).context(format_context!(
-                "Failed to remove existing symlink {}",
-                destination
-            ))?;
+            symlink::remove_symlink_auto(destination_path).with_context(|| {
+                format_context!("Failed to remove existing symlink {}", destination)
+            })?;
         } else if destination_path.exists() {
-            std::fs::remove_file(destination_path).context(format_context!(
-                "Failed to remove existing file {}",
-                destination
-            ))?;
+            std::fs::remove_file(destination_path).with_context(|| {
+                format_context!("Failed to remove existing file {}", destination)
+            })?;
         }
 
         let source_path = std::path::Path::new(&source);
         if source_path.is_dir() {
-            symlink::symlink_dir(source_path, destination_path).context(format_context!(
-                "Failed to create soft link dir from {} to {}",
-                source,
-                destination
-            ))?;
+            symlink::symlink_dir(source_path, destination_path).with_context(|| {
+                format_context!(
+                    "Failed to create soft link dir from {} to {}",
+                    source,
+                    destination
+                )
+            })?;
         } else {
-            symlink::symlink_file(source_path, destination_path).context(format_context!(
-                "Failed to create soft link file from {} to {}",
-                source,
-                destination
-            ))?;
+            symlink::symlink_file(source_path, destination_path).with_context(|| {
+                format_context!(
+                    "Failed to create soft link file from {} to {}",
+                    source,
+                    destination
+                )
+            })?;
         }
 
         Ok(())
@@ -362,7 +372,7 @@ impl AddHomeAsset {
         let logger = logger::Logger::new(progress.console.clone(), name.into());
 
         let home = std::env::var("HOME")
-            .context(format_context!("HOME environment variable is not set"))?;
+            .with_context(|| format_context!("HOME environment variable is not set"))?;
 
         let source_path = std::path::Path::new(&home).join(&self.source);
 
@@ -387,10 +397,12 @@ impl AddHomeAsset {
             .join(&self.source);
 
         if let Some(parent) = workspace_home.parent() {
-            std::fs::create_dir_all(parent).context(format_context!(
-                "Failed to create workspace home directories for {}",
-                workspace_home.display()
-            ))?;
+            std::fs::create_dir_all(parent).with_context(|| {
+                format_context!(
+                    "Failed to create workspace home directories for {}",
+                    workspace_home.display()
+                )
+            })?;
         }
 
         normalize_home_asset_store_entry(&workspace_home, source_path.is_dir()).context(
@@ -403,28 +415,36 @@ impl AddHomeAsset {
         if source_path.is_dir() {
             copy::copy_with_cow_semantics(
                 progress,
-                source_path.to_str().context(format_context!(
-                    "Failed to convert source path to string {}",
-                    source_path.display()
-                ))?,
-                workspace_home.to_str().context(format_context!(
-                    "Failed to convert workspace home path to string {}",
-                    workspace_home.display()
-                ))?,
+                source_path.to_str().with_context(|| {
+                    format_context!(
+                        "Failed to convert source path to string {}",
+                        source_path.display()
+                    )
+                })?,
+                workspace_home.to_str().with_context(|| {
+                    format_context!(
+                        "Failed to convert workspace home path to string {}",
+                        workspace_home.display()
+                    )
+                })?,
                 copy::UseCowSemantics::No,
                 None,
             )
-            .context(format_context!(
-                "Failed to copy home asset {} to workspace home {}",
-                source_path.display(),
-                workspace_home.display()
-            ))?;
+            .with_context(|| {
+                format_context!(
+                    "Failed to copy home asset {} to workspace home {}",
+                    source_path.display(),
+                    workspace_home.display()
+                )
+            })?;
         } else {
-            std::fs::copy(&source_path, &workspace_home).context(format_context!(
-                "Failed to copy home asset {} to workspace home {}",
-                source_path.display(),
-                workspace_home.display()
-            ))?;
+            std::fs::copy(&source_path, &workspace_home).with_context(|| {
+                format_context!(
+                    "Failed to copy home asset {} to workspace home {}",
+                    source_path.display(),
+                    workspace_home.display()
+                )
+            })?;
         }
 
         Ok(())
