@@ -22,12 +22,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// * `bool`: True if the workspace is reproducible, False otherwise.
     fn is_reproducible(eval: &mut Evaluator) -> anyhow::Result<bool> {
         let ctx = get_eval_context(eval)?;
-        let workspace_arc = ctx
-            .workspace
-            .clone()
-            .ok_or_else(|| format_error!("No active workspace found"))?;
-        let workspace = workspace_arc.read();
-        Ok(workspace.is_reproducible())
+        // Use cached value from EvalContext to avoid lock contention
+        Ok(ctx.workspace_is_reproducible)
     }
 
     /// Returns the path to the shell config file.
@@ -55,13 +51,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// * `str`: The unique digest string of the workspace.
     fn get_digest(eval: &mut Evaluator) -> anyhow::Result<String> {
         let ctx = get_eval_context(eval)?;
-        let workspace_arc = ctx
-            .workspace
-            .clone()
-            .ok_or_else(|| format_error!("No active workspace found"))?;
-        let workspace = workspace_arc.read();
-        let digest = workspace.settings.json.digest.clone();
-        Ok(digest.map(|e| e.to_string()).unwrap_or_default())
+        // Use cached value from EvalContext to avoid lock contention
+        Ok(ctx.workspace_digest.to_string())
     }
 
     /// Returns the short digest of the workspace.
@@ -74,12 +65,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// * `str`: The short digest string of the workspace.
     fn get_short_digest(eval: &mut Evaluator) -> anyhow::Result<String> {
         let ctx = get_eval_context(eval)?;
-        let workspace_arc = ctx
-            .workspace
-            .clone()
-            .ok_or_else(|| format_error!("No active workspace found"))?;
-        let workspace = workspace_arc.read();
-        Ok(workspace.get_short_digest().to_string())
+        // Use cached value from EvalContext to avoid lock contention
+        Ok(ctx.workspace_short_digest.to_string())
     }
 
     /// Returns true if the workspace environment variable is set.

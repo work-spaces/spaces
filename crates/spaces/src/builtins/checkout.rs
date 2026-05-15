@@ -239,8 +239,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let worktree_path = if let Some(directory) = repo.working_directory.as_ref() {
             directory.clone()
         } else {
-            let workspace = workspace_arc.read();
-            workspace.get_absolute_path()
+            // Use cached value from EvalContext to avoid lock contention
+            ctx.workspace_absolute_path.clone()
         };
 
         if let Some(clone_type) = repo.clone.as_ref()
@@ -319,13 +319,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let mut rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for cargo_bin rule"))?;
 
-        let workspace_arc = ctx
-            .workspace
-            .clone()
-            .ok_or_else(|| format_error!("No active workspace found"))?;
-        let workspace = workspace_arc.read();
+        // Validate workspace exists
+        if ctx.workspace.is_none() {
+            return Err(format_error!("No active workspace found"));
+        }
 
-        let cargo_binstall_dir = workspace.get_cargo_binstall_root();
+        // Use cached value from EvalContext to avoid lock contention
+        let cargo_binstall_dir = ctx.workspace_cargo_binstall_root.clone();
 
         let output_directory = format!("{}/{}", cargo_binstall_dir, cargo_bin.version);
 
@@ -337,7 +337,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let cargo_binstall_path = format!(
             "{}/sysroot/bin/cargo-binstall",
-            workspace.get_spaces_tools_path()
+            ctx.workspace_spaces_tools_path
         );
 
         let exec = executor::exec::Exec {

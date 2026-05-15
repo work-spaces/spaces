@@ -251,12 +251,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// * `str`: The absolute path to the local spaces store directory.
     fn get_path_to_store(eval: &mut Evaluator) -> anyhow::Result<String> {
         let ctx = get_eval_context(eval)?;
-        let workspace_arc = ctx
-            .workspace
-            .clone()
-            .ok_or_else(|| format_error!("No active workspace found"))?;
-        let workspace = workspace_arc.read();
-        Ok(workspace.get_store_path().to_string())
+        // Use cached value from EvalContext to avoid lock contention
+        Ok(ctx.workspace_store_path.to_string())
     }
 
     /// Returns the path to the spaces tools directory.
@@ -269,12 +265,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// * `str`: The absolute path to the spaces tools directory.
     fn get_path_to_spaces_tools(eval: &mut Evaluator) -> anyhow::Result<String> {
         let ctx = get_eval_context(eval)?;
-        let workspace_arc = ctx
-            .workspace
-            .clone()
-            .ok_or_else(|| format_error!("No active workspace found"))?;
-        let workspace = workspace_arc.read();
-        Ok(workspace.get_spaces_tools_path().to_string())
+        // Use cached value from EvalContext to avoid lock contention
+        Ok(ctx.workspace_spaces_tools_path.to_string())
     }
 
     /// Returns a string representing the end of the log header.
