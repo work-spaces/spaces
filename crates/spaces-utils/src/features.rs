@@ -30,6 +30,7 @@ pub enum Feature {
     RulesOnlyStarlark,
     CloneWithoutCommitGraph,
     AllowShellConfig,
+    EnableAllBuiltins,
 }
 
 impl Feature {
