@@ -14,6 +14,12 @@ enum ShellType {
     Fish,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IsPristineShell {
+    No,
+    Yes,
+}
+
 impl TryFrom<Arc<str>> for ShellType {
     type Error = anyhow::Error;
 
@@ -227,10 +233,71 @@ pub fn run(
     startup_directory: &std::path::Path,
     completion_content: Vec<u8>,
     working_directory: &std::path::Path,
+    pristine_shell: IsPristineShell,
 ) -> anyhow::Result<()> {
     // Create the command
     let mut process = std::process::Command::new(config.path.as_ref());
     process.env_clear();
+
+    // If pristine shell is enabled, set environment variables to prevent
+    // shells from sourcing config files from $HOME
+    if pristine_shell == IsPristineShell::Yes {
+        let shell_type = ShellType::try_from(config.path.clone()).context(format_context!(
+            "while decoding shell type from {}",
+            config.path
+        ))?;
+
+        match shell_type {
+            ShellType::Bash => {
+                // Prevent bash from reading ~/.bashrc, ~/.bash_profile, etc.
+                // Only add --norc and --noprofile if --init-file is not already specified
+                // because --norc causes bash to ignore --init-file
+                let has_init_file = config.args.iter().any(|arg| arg.as_ref() == "--init-file");
+                if !has_init_file {
+                    process.arg("--norc");
+                    process.arg("--noprofile");
+                }
+                // Note: If --init-file is specified, the startup script is responsible
+                // for not sourcing user config files
+            }
+            ShellType::Zsh => {
+                // Prevent zsh from reading ~/.zshrc, ~/.zshenv, etc.
+                // Set ZDOTDIR to the startup directory so zsh looks there for config files
+                // We create empty config files there to prevent user configs from being sourced
+                process.env("ZDOTDIR", startup_directory);
+
+                // Create empty .zshrc and .zshenv to prevent zsh from looking elsewhere
+                let zshrc = startup_directory.join(".zshrc");
+                let zshenv = startup_directory.join(".zshenv");
+                std::fs::write(&zshrc, "").context(format_context!(
+                    "Failed to write empty .zshrc to {}",
+                    zshrc.display()
+                ))?;
+                std::fs::write(&zshenv, "").context(format_context!(
+                    "Failed to write empty .zshenv to {}",
+                    zshenv.display()
+                ))?;
+            }
+            ShellType::Fish => {
+                // Prevent fish from reading config files from $HOME
+                // Set XDG_CONFIG_HOME to the startup directory so fish looks there
+                // We create an empty fish config to prevent user configs from being sourced
+                process.env("XDG_CONFIG_HOME", startup_directory);
+
+                // Create empty fish config directory and config.fish
+                let fish_dir = startup_directory.join("fish");
+                std::fs::create_dir_all(&fish_dir).context(format_context!(
+                    "Failed to create fish config directory at {}",
+                    fish_dir.display()
+                ))?;
+                let fish_config = fish_dir.join("config.fish");
+                std::fs::write(&fish_config, "").context(format_context!(
+                    "Failed to write empty config.fish to {}",
+                    fish_config.display()
+                ))?;
+            }
+        }
+    }
 
     if let Some(shortcuts) = config.shortcuts.as_ref() {
         let shortcuts = create_shortcuts(config.path.clone(), shortcuts)
