@@ -358,6 +358,10 @@ pub fn run_shell_in_workspace(
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
 
+    // Finalize the console output to flush all pending output before starting the shell
+    console.finalize();
+
+    // Run the interactive shell. This blocks until the user exits.
     shell::run(
         &shell_config,
         &run_environment,
