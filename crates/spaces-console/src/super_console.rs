@@ -165,6 +165,14 @@ impl ConsoleWriter for Writer {
             let _ = console.render(&self.component);
         }
     }
+
+    fn finalize(&mut self) {
+        self.component.active_progress.clear();
+        // Take the console to prevent double finalization in Drop
+        if let Some(console) = self.console.take() {
+            let _ = console.finalize(&self.component);
+        }
+    }
 }
 
 impl Drop for Writer {

@@ -12,4 +12,5 @@ pub(crate) trait ConsoleWriter: Send {
     fn reset_progress_elapsed(&mut self, label: &str);
     fn get_progress_elapsed(&self, label: &str) -> Option<std::time::Duration>;
     fn refresh(&mut self) {}
+    fn finalize(&mut self) {}
 }

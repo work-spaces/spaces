@@ -391,6 +391,10 @@ impl Console {
         self.writer.lock().unwrap().refresh();
     }
 
+    pub fn finalize(&self) {
+        self.writer.lock().unwrap().finalize();
+    }
+
     pub fn trace<Type: std::fmt::Display>(&self, name: &str, value: Type) -> anyhow::Result<()> {
         self.log(Level::Trace, &format!("{name}: {value}"))
     }
