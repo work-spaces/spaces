@@ -358,16 +358,27 @@ pub fn run_shell_in_workspace(
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
 
+    // Run the interactive shell. This blocks until the user exits.
+    let pristine_shell = if workspace_arc
+        .read()
+        .features
+        .is_enabled(features::Feature::AllowShellConfig)
+    {
+        shell::IsPristineShell::No
+    } else {
+        shell::IsPristineShell::Yes
+    };
+
     // Finalize the console output to flush all pending output before starting the shell
     console.finalize();
 
-    // Run the interactive shell. This blocks until the user exits.
     shell::run(
         &shell_config,
         &run_environment,
         std::path::Path::new(SHELL_DIR),
         completion_content,
         &working_directory,
+        pristine_shell,
     )
     .context(format_context!("while running shell"))?;
 

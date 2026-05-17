@@ -29,6 +29,7 @@ pub enum Feature {
     DeprecationWarnings,
     RulesOnlyStarlark,
     CloneWithoutCommitGraph,
+    AllowShellConfig,
 }
 
 impl Feature {
