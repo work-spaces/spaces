@@ -1244,7 +1244,7 @@ fn execute_tasks(
         for file in extraneous_files {
             let path = std::path::Path::new(file.as_ref());
             if path.exists() {
-                logger.warning(format!("Expired, removing: {file}").as_str());
+                logger.info(format!("Expired, removing: {file}").as_str());
                 match std::fs::remove_file(path).context(format_context!("Failed to remove {file}"))
                 {
                     Ok(_) => {}
