@@ -1,5 +1,6 @@
 use crate::{singleton, task, workspace};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::Arc;
 use utils::{mtarget, rule};
 
@@ -59,6 +60,10 @@ pub struct EvalContext {
 
     /// Whether workspace is reproducible
     pub workspace_is_reproducible: bool,
+
+    /// Cached workspace environment variables
+    /// Stored to avoid repeated lock acquisitions and env var computation
+    pub workspace_env_vars: HashMap<Arc<str>, Arc<str>>,
 }
 
 // SAFETY: All fields are 'static (Arc, bool, enum, RefCell<Vec<...>>, Vec<...>) so EvalContext is 'static.
@@ -77,6 +82,7 @@ impl EvalContext {
             digest,
             short_digest,
             is_reproducible,
+            env_vars,
         ) = if let Some(ref ws) = workspace {
             let ws_read = ws.read();
             (
@@ -92,6 +98,7 @@ impl EvalContext {
                     .unwrap_or_else(|| Arc::from("")),
                 ws_read.get_short_digest(),
                 ws_read.is_reproducible(),
+                ws_read.get_env_vars().unwrap_or_default(),
             )
         } else {
             (
@@ -102,6 +109,7 @@ impl EvalContext {
                 Arc::from(""),
                 Arc::from(""),
                 false,
+                HashMap::new(),
             )
         };
 
@@ -123,6 +131,7 @@ impl EvalContext {
             workspace_digest: digest,
             workspace_short_digest: short_digest,
             workspace_is_reproducible: is_reproducible,
+            workspace_env_vars: env_vars,
         }
     }
 
