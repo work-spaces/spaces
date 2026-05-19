@@ -141,10 +141,12 @@ impl SpacesContext {
         let result = evaluator::evaluate_module(
             None,
             workspace_path,
-            path.to_string_lossy().into(),
-            content,
-            evaluator::GlobalsConfig::All,
-            Arc::from(""),
+            evaluator::ModuleEvalParams {
+                globals_config: evaluator::GlobalsConfig::All,
+                name: path.to_string_lossy().into(),
+                content,
+                checkout_state_digest: Arc::from(""),
+            },
             workspace_env,
         )?;
 

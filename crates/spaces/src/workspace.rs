@@ -1024,14 +1024,6 @@ impl Workspace {
         self.env.get_secret_values()
     }
 
-    pub fn is_env_var_set(&self, key: &str) -> bool {
-        self.env.is_env_var_set(key)
-    }
-
-    pub fn is_env_var_set_to(&self, key: &str, value: &str) -> bool {
-        self.env.is_env_var_set_to(key, value)
-    }
-
     pub fn get_env_mut(&mut self) -> &mut environment::AnyEnvironment {
         &mut self.env
     }
