@@ -321,6 +321,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         add_git_url_to_workspace_store_queue(workspace_arc.clone(), url.as_ref(), store_prefix)
             .context(format_context!("during checkout add repo"))?;
 
+        let _rules_timer = TimingLogger::new("add_repo_insert_task_for_module");
         rules::insert_task_for_module(
             task::Task::new(
                 rule,
