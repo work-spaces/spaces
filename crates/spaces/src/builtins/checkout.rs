@@ -9,12 +9,13 @@ use starlark::environment::GlobalsBuilder;
 use starlark::eval::Evaluator;
 use starlark::values::none::NoneType;
 use std::io::Write;
-use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
+use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use utils::{changes, environment, git, http_archive, logger, platform, rule, store};
 
 // Timing helper struct
+static LOG_FILE_MUTEX: Mutex<()> = Mutex::new(());
 struct TimingLogger {
     start: Instant,
     function_name: &'static str,
@@ -37,6 +38,9 @@ impl Drop for TimingLogger {
             .unwrap()
             .as_secs();
 
+        // Acquire mutex to ensure thread-safe file access
+        let _guard = LOG_FILE_MUTEX.lock().unwrap();
+
         let log_filename = format!("checkout_timing_{}.timing.log", std::process::id());
         if let Ok(mut file) = std::fs::OpenOptions::new()
             .create(true)
@@ -52,6 +56,7 @@ impl Drop for TimingLogger {
                 duration.as_micros() as f64 / 1000.0
             );
         }
+        // Mutex guard is dropped here, releasing the lock
     }
 }
 
@@ -1205,6 +1210,7 @@ fn add_http_archive(
 
         let workspace = workspace_arc.read();
 
+        let timer_http_archive = TimingLogger::new("http_archive::HttpArchive::new");
         let http_archive = http_archive::HttpArchive::new(
             &workspace.get_store_path(),
             rule.name.as_ref(),
@@ -1215,6 +1221,7 @@ fn add_http_archive(
             "Failed to create http_archive {}",
             rule.name
         ))?;
+        drop(timer_http_archive);
 
         let rule_name = rule.name.clone();
         rules::insert_task_for_module(
