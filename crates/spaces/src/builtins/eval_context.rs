@@ -63,7 +63,8 @@ pub struct EvalContext {
 
     /// Cached workspace environment variables
     /// Stored to avoid repeated lock acquisitions and env var computation
-    pub workspace_env_vars: HashMap<Arc<str>, Arc<str>>,
+    /// In checkout mode, this needs to be refreshed after each module's rules execute
+    pub workspace_env_vars: Arc<HashMap<Arc<str>, Arc<str>>>,
 }
 
 // SAFETY: All fields are 'static (Arc, bool, enum, RefCell<Vec<...>>, Vec<...>) so EvalContext is 'static.
@@ -72,7 +73,11 @@ unsafe impl<'a> starlark::any::ProvidesStaticType<'a> for EvalContext {
 }
 
 impl EvalContext {
-    pub fn new(workspace: Option<workspace::WorkspaceArc>, module_name: Arc<str>) -> Self {
+    pub fn new(
+        workspace: Option<workspace::WorkspaceArc>,
+        module_name: Arc<str>,
+        workspace_env: Arc<HashMap<Arc<str>, Arc<str>>>,
+    ) -> Self {
         // Cache frequently-accessed workspace state to avoid lock contention
         let (
             absolute_path,
@@ -82,7 +87,6 @@ impl EvalContext {
             digest,
             short_digest,
             is_reproducible,
-            env_vars,
         ) = if let Some(ref ws) = workspace {
             let ws_read = ws.read();
             (
@@ -98,7 +102,6 @@ impl EvalContext {
                     .unwrap_or_else(|| Arc::from("")),
                 ws_read.get_short_digest(),
                 ws_read.is_reproducible(),
-                ws_read.get_env_vars().unwrap_or_default(),
             )
         } else {
             (
@@ -109,7 +112,6 @@ impl EvalContext {
                 Arc::from(""),
                 Arc::from(""),
                 false,
-                HashMap::new(),
             )
         };
 
@@ -131,7 +133,7 @@ impl EvalContext {
             workspace_digest: digest,
             workspace_short_digest: short_digest,
             workspace_is_reproducible: is_reproducible,
-            workspace_env_vars: env_vars,
+            workspace_env_vars: workspace_env,
         }
     }
 
