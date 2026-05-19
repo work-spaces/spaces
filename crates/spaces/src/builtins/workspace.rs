@@ -7,7 +7,56 @@ use starlark::eval::Evaluator;
 use starlark::values::Value;
 use starlark::values::none::NoneType;
 use std::collections::HashMap;
+use std::io::Write;
+use std::sync::Mutex;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use utils::{environment, rule, ws};
+
+// Timing helper struct
+static LOG_FILE_MUTEX: Mutex<()> = Mutex::new(());
+struct TimingLogger {
+    start: Instant,
+    function_name: &'static str,
+}
+
+impl TimingLogger {
+    fn new(function_name: &'static str) -> Self {
+        Self {
+            start: Instant::now(),
+            function_name,
+        }
+    }
+}
+
+impl Drop for TimingLogger {
+    fn drop(&mut self) {
+        let duration = self.start.elapsed();
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        // Acquire mutex to ensure thread-safe file access
+        let _guard = LOG_FILE_MUTEX.lock().unwrap();
+
+        let log_filename = format!("workspace_timing_{}.timing.log", std::process::id());
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_filename)
+        {
+            let _ = writeln!(
+                file,
+                "[{}] {} took {:.6}s ({:.3}ms)",
+                timestamp,
+                self.function_name,
+                duration.as_secs_f64(),
+                duration.as_micros() as f64 / 1000.0
+            );
+        }
+        // Mutex guard is dropped here, releasing the lock
+    }
+}
 
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
@@ -21,6 +70,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `bool`: True if the workspace is reproducible, False otherwise.
     fn is_reproducible(eval: &mut Evaluator) -> anyhow::Result<bool> {
+        let _timer = TimingLogger::new("is_reproducible");
         let ctx = get_eval_context(eval)?;
         // Use cached value from EvalContext to avoid lock contention
         Ok(ctx.workspace_is_reproducible)
@@ -35,6 +85,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `str`: The path to the shell configuration file used by the workspace.
     fn get_path_to_shell_config() -> anyhow::Result<String> {
+        let _timer = TimingLogger::new("get_path_to_shell_config");
         Ok(crate::workspace::SHELL_TOML_NAME.to_string())
     }
 
@@ -50,6 +101,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `str`: The unique digest string of the workspace.
     fn get_digest(eval: &mut Evaluator) -> anyhow::Result<String> {
+        let _timer = TimingLogger::new("get_digest");
         let ctx = get_eval_context(eval)?;
         // Use cached value from EvalContext to avoid lock contention
         Ok(ctx.workspace_digest.to_string())
@@ -64,6 +116,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `str`: The short digest string of the workspace.
     fn get_short_digest(eval: &mut Evaluator) -> anyhow::Result<String> {
+        let _timer = TimingLogger::new("get_short_digest");
         let ctx = get_eval_context(eval)?;
         // Use cached value from EvalContext to avoid lock contention
         Ok(ctx.workspace_short_digest.to_string())
@@ -82,6 +135,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `bool`: True if the variable exists in the workspace environment, False otherwise.
     fn is_env_var_set(var_name: &str, eval: &mut Evaluator) -> anyhow::Result<bool> {
+        let _timer = TimingLogger::new("is_env_var_set");
         if var_name == "PATH" {
             return Ok(true);
         }
@@ -107,6 +161,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         var_value: &str,
         eval: &mut Evaluator,
     ) -> anyhow::Result<bool> {
+        let _timer = TimingLogger::new("is_env_var_set_to");
         let ctx = get_eval_context(eval)?;
         Ok(ctx
             .workspace_env_vars
@@ -127,6 +182,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `str`: The value of the environment variable.
     fn get_env_var(var_name: &str, eval: &mut Evaluator) -> anyhow::Result<String> {
+        let _timer = TimingLogger::new("get_env_var");
         let ctx = get_eval_context(eval)?;
 
         if let Some(value) = ctx.workspace_env_vars.get(var_name) {
@@ -158,6 +214,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] env: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
+        let _timer = TimingLogger::new("set_env");
         let ctx = get_eval_context(eval)?;
         let workspace_arc = ctx
             .workspace
@@ -191,6 +248,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] locks: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
+        let _timer = TimingLogger::new("set_locks");
         let locks = serde_json::from_value(locks.to_json_value()?)
             .context(format_context!("Failed to parse set_locks arguments"))?;
 
@@ -218,6 +276,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         always_evaluate: bool,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
+        let _timer = TimingLogger::new("set_always_evaluate");
         let ctx = get_eval_context(eval)?;
         let workspace_arc = ctx
             .workspace
@@ -249,6 +308,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] member: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<String> {
+        let _timer = TimingLogger::new("get_path_to_member");
         let ctx = get_eval_context(eval)?;
         let workspace_arc = ctx
             .workspace
@@ -294,6 +354,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] member: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<bool> {
+        let _timer = TimingLogger::new("is_path_to_member_available");
         let ctx = get_eval_context(eval)?;
         let workspace_arc = ctx
             .workspace
@@ -327,6 +388,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `str`: The relative path to the log file within the workspace.
     fn get_path_to_log_file(rule: &str, eval: &mut Evaluator) -> anyhow::Result<String> {
+        let _timer = TimingLogger::new("get_path_to_log_file");
         let ctx = get_eval_context(eval)?;
         let workspace_arc = ctx
             .workspace
@@ -350,6 +412,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `str`: The absolute path to the workspace.
     fn get_absolute_path(eval: &mut Evaluator) -> anyhow::Result<String> {
+        let _timer = TimingLogger::new("get_absolute_path");
         let ctx = get_eval_context(eval)?;
         let workspace_arc = ctx
             .workspace
@@ -368,6 +431,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `str`: The path to the directory containing the current script.
     fn get_path_to_checkout(eval: &mut Evaluator) -> anyhow::Result<String> {
+        let _timer = TimingLogger::new("get_path_to_checkout");
         let ctx = get_eval_context(eval)?;
         Ok(rules::get_checkout_path_for_module(&ctx.module_name).to_string())
     }
@@ -387,6 +451,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule_name: &str,
         eval: &mut Evaluator,
     ) -> anyhow::Result<String> {
+        let _timer = TimingLogger::new("get_path_to_build_checkout");
         let ctx = get_eval_context(eval)?;
         Ok(
             rules::get_path_to_build_checkout_for_module(rule_name.into(), &ctx.module_name)
@@ -417,6 +482,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] archive: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<String> {
+        let _timer = TimingLogger::new("get_path_to_build_archive");
         let ctx = get_eval_context(eval)?;
         let create_archive: archiver::CreateArchive =
             serde_json::from_value(archive.to_json_value()?)
@@ -454,6 +520,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] archive: starlark::values::Value,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<Value<'v>> {
+        let _timer = TimingLogger::new("get_build_archive_info");
         let ctx = get_eval_context(eval)?;
         let create_archive: archiver::CreateArchive =
             serde_json::from_value(archive.to_json_value()?)
@@ -495,6 +562,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// workspace.set_default_module_visibility_private()
     /// ```
     fn set_default_module_visibility_private(eval: &mut Evaluator) -> anyhow::Result<NoneType> {
+        let _timer = TimingLogger::new("set_default_module_visibility_private");
         let ctx = get_eval_context_mut(eval)?;
         ctx.default_module_visibility = rule::Visibility::Private;
         Ok(NoneType)
@@ -544,6 +612,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named, default = NoneType)] path: Value,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<Value<'v>> {
+        let _timer = TimingLogger::new("load_value");
         if !url.is_none() && !path.is_none() {
             return Err(format_error!(
                 "Cannot specify both `url` and `path` in workspace.load_value()"
@@ -629,6 +698,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// Returns an error if no active workspace is found in the evaluator context.
     fn get_path_to_home() -> anyhow::Result<String> {
+        let _timer = TimingLogger::new("get_path_to_home");
         Ok(ws::SPACES_HOME_NAME.into())
     }
 }
