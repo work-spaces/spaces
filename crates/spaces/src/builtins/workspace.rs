@@ -414,11 +414,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     fn get_absolute_path(eval: &mut Evaluator) -> anyhow::Result<String> {
         let _timer = TimingLogger::new("get_absolute_path");
         let ctx = get_eval_context(eval)?;
+        let _timer1 = TimingLogger::new("get_absolute_path1");
         let workspace_arc = ctx
             .workspace
             .clone()
             .ok_or_else(|| format_error!("No active workspace found"))?;
+        let _timer2 = TimingLogger::new("get_absolute_path2");
         let workspace = workspace_arc.read();
+        let _timer3 = TimingLogger::new("get_absolute_path3");
         Ok(workspace.absolute_path.clone().to_string())
     }
 
