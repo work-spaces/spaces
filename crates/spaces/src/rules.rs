@@ -451,6 +451,8 @@ impl State {
             return Ok("".into());
         }
 
+        return Ok("".into());
+
         // check to see if the task will cause a conflict
         let workspace_destination = match &task_to_insert.executor {
             executor::Task::Git(repo) => Some(repo.spaces_key.clone()),
