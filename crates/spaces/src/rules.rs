@@ -475,9 +475,7 @@ impl State {
             labels::IsDep::No,
         );
 
-        if let Some(ws_dest) = workspace_destination
-            && false
-        {
+        if let Some(ws_dest) = workspace_destination {
             let mut workspace_destinations = self.workspace_destinations.write();
             if let Some(rule_name) = workspace_destinations.get(&ws_dest) {
                 return Err(format_error!(

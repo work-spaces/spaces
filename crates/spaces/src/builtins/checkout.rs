@@ -8,9 +8,52 @@ use serde::{Deserialize, Serialize};
 use starlark::environment::GlobalsBuilder;
 use starlark::eval::Evaluator;
 use starlark::values::none::NoneType;
+use std::io::Write;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use utils::{changes, environment, git, http_archive, logger, platform, rule, store};
+
+// Timing helper struct
+struct TimingLogger {
+    start: Instant,
+    function_name: &'static str,
+}
+
+impl TimingLogger {
+    fn new(function_name: &'static str) -> Self {
+        Self {
+            start: Instant::now(),
+            function_name,
+        }
+    }
+}
+
+impl Drop for TimingLogger {
+    fn drop(&mut self) {
+        let duration = self.start.elapsed();
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let log_filename = format!("checkout_timing_{}.timing.log", std::process::id());
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_filename)
+        {
+            let _ = writeln!(
+                file,
+                "[{}] {} took {:.6}s ({:.3}ms)",
+                timestamp,
+                self.function_name,
+                duration.as_secs_f64(),
+                duration.as_micros() as f64 / 1000.0
+            );
+        }
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
@@ -61,6 +104,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         value: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
+        let _timer = TimingLogger::new("store_value");
         let json_value = value.to_json_value().context(format_context!(
             "Failed to convert value to JSON for key '{key}'"
         ))?;
@@ -110,6 +154,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// * `message`: Abort message to show the user.
     ///
     fn abort(message: &str, eval: &mut Evaluator) -> anyhow::Result<NoneType> {
+        let _timer = TimingLogger::new("abort");
         let ctx = get_eval_context_mut(eval)?;
         if ctx.is_lsp {
             Ok(NoneType)
@@ -132,6 +177,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
+        let _timer = TimingLogger::new("add_target");
         let ctx = get_eval_context_mut(eval)?;
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for add target rule"))?;
@@ -164,6 +210,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] exec: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
+        let _timer = TimingLogger::new("add_exec");
         let ctx = get_eval_context_mut(eval)?;
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for exec rule"))?;
@@ -224,6 +271,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] repo: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
+        let _timer = TimingLogger::new("add_repo");
         let ctx = get_eval_context_mut(eval)?;
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for repo rule"))?;
@@ -312,6 +360,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] cargo_bin: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
+        let _timer = TimingLogger::new("add_cargo_bin");
         let ctx = get_eval_context_mut(eval)?;
         let cargo_bin: CargoBin = serde_json::from_value(cargo_bin.to_json_value()?)
             .context(format_context!("bad options for cargo_bin"))?;
@@ -475,6 +524,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] platforms: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
+        let _timer = TimingLogger::new("add_platform_archive");
         let ctx = get_eval_context_mut(eval)?;
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for add platform archive rule"))?;
@@ -537,6 +587,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] asset: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
+        let _timer = TimingLogger::new("add_which_asset");
         let ctx = get_eval_context_mut(eval)?;
         logger::push_deprecation_warning(
             Some(ctx.module_name.clone()),
@@ -586,6 +637,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] asset: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
+        let _timer = TimingLogger::new("add_hard_link_asset");
         let ctx = get_eval_context_mut(eval)?;
         logger::push_deprecation_warning(
             Some(ctx.module_name.clone()),
@@ -637,6 +689,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] asset: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
+        let _timer = TimingLogger::new("add_soft_link_asset");
         let ctx = get_eval_context_mut(eval)?;
         logger::push_deprecation_warning(
             Some(ctx.module_name.clone()),
@@ -687,6 +740,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] assets: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
+        let _timer = TimingLogger::new("add_any_assets");
         let ctx = get_eval_context_mut(eval)?;
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for which asset rule"))?;
@@ -735,6 +789,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         // includes, excludes, strip_prefix
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
+        let _timer = TimingLogger::new("add_archive");
         let ctx = get_eval_context_mut(eval)?;
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for add archive rule"))?;
@@ -764,6 +819,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         // includes, excludes, strip_prefix
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
+        let _timer = TimingLogger::new("add_oras_archive");
         let ctx = get_eval_context_mut(eval)?;
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for oras rule"))?;
@@ -810,6 +866,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] asset: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
+        let _timer = TimingLogger::new("add_asset");
         let ctx = get_eval_context_mut(eval)?;
         logger::push_deprecation_warning(
             Some(ctx.module_name.clone()),
@@ -878,6 +935,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] asset: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
+        let _timer = TimingLogger::new("update_asset");
         let ctx = get_eval_context_mut(eval)?;
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for update asset rule"))?;
@@ -933,6 +991,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] env: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
+        let _timer = TimingLogger::new("update_env");
         let ctx = get_eval_context_mut(eval)?;
         logger::push_deprecation_warning(
             Some(ctx.module_name.clone()),
@@ -997,6 +1056,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] any_env: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
+        let _timer = TimingLogger::new("add_env_vars");
         let ctx = get_eval_context_mut(eval)?;
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for update env rule"))?;
@@ -1046,6 +1106,7 @@ fn add_git_url_to_workspace_store_queue(
     url: &str,
     cow: &str,
 ) -> anyhow::Result<()> {
+    let _timer = TimingLogger::new("add_git_url_to_workspace_store_queue");
     // Non-store clone modes (e.g. Shallow) have an empty cow prefix.
     // Those repos are cloned directly into the workspace and have no
     // presence inside the store directory, so there is nothing to track.
@@ -1070,6 +1131,7 @@ fn add_http_url_to_workspace_store_queue(
     url: &str,
     filename: &Option<Arc<str>>,
 ) -> anyhow::Result<()> {
+    let _timer = TimingLogger::new("add_http_url_to_workspace_store_queue");
     let mut workspace = workspace_arc.write();
     if let Ok(relative_path) = http_archive::HttpArchive::url_to_relative_path(url, filename) {
         workspace
@@ -1089,6 +1151,7 @@ fn add_http_archive(
     default_visibility: rule::Visibility,
     eval_context: Option<&crate::builtins::eval_context::EvalContext>,
 ) -> anyhow::Result<()> {
+    let _timer = TimingLogger::new("add_http_archive");
     if let Some(mut archive) = archive_option {
         //create a target that waits for all downloads
         //then create links based on all downloads being complete
