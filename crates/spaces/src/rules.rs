@@ -451,6 +451,17 @@ impl State {
             return Ok("".into());
         }
 
+        // check to see if the task will cause a conflict
+        let workspace_destination = match &task_to_insert.executor {
+            executor::Task::Git(repo) => Some(repo.spaces_key.clone()),
+            executor::Task::AddAsset(asset) => Some(asset.destination.clone()),
+            executor::Task::AddHardLink(asset) => Some(asset.destination.clone().into()),
+            executor::Task::AddSoftLink(asset) => Some(asset.destination.clone().into()),
+            executor::Task::AddWhichAsset(asset) => Some(asset.destination.clone().into()),
+            // UpdateAsset by design will edit the same destination
+            _ => None,
+        };
+
         let module_opt = if module_name.is_empty() {
             None
         } else {
@@ -464,20 +475,9 @@ impl State {
             labels::IsDep::No,
         );
 
-        return Ok(rule_label.into());
-
-        // check to see if the task will cause a conflict
-        let workspace_destination = match &task_to_insert.executor {
-            executor::Task::Git(repo) => Some(repo.spaces_key.clone()),
-            executor::Task::AddAsset(asset) => Some(asset.destination.clone()),
-            executor::Task::AddHardLink(asset) => Some(asset.destination.clone().into()),
-            executor::Task::AddSoftLink(asset) => Some(asset.destination.clone().into()),
-            executor::Task::AddWhichAsset(asset) => Some(asset.destination.clone().into()),
-            // UpdateAsset by design will edit the same destination
-            _ => None,
-        };
-
-        if let Some(ws_dest) = workspace_destination {
+        if let Some(ws_dest) = workspace_destination
+            && false
+        {
             let mut workspace_destinations = self.workspace_destinations.write();
             if let Some(rule_name) = workspace_destinations.get(&ws_dest) {
                 return Err(format_error!(
