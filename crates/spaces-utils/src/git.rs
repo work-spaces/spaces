@@ -302,7 +302,7 @@ pub fn execute_git_command(
                     );
                     continue;
                 }
-                return Err(err);
+                return Err(err.context(format!("Git command failed for repository: {url}")));
             }
         }
     }

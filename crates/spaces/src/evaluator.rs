@@ -260,12 +260,10 @@ pub fn evaluate_loads(
 
 pub fn evaluate_ast(
     ast: AstModule,
-    name: Arc<str>,
+    params: ModuleEvalParams,
     workspace: Option<WorkspaceArc>,
     workspace_path: Arc<str>,
-    globals_config: GlobalsConfig,
     mut eval_context: Option<EvalContext>,
-    checkout_state_digest: Arc<str>,
     workspace_env_vars: Arc<HashMap<Arc<str>, Arc<str>>>,
 ) -> starlark::Result<(
     FrozenModule,
@@ -274,10 +272,10 @@ pub fn evaluate_ast(
 )> {
     let loads = evaluate_loads(
         &ast,
-        name.clone(),
+        params.name.clone(),
         workspace.clone(),
         workspace_path.clone(),
-        globals_config,
+        params.globals_config,
         workspace_env_vars,
     )?;
 
@@ -311,7 +309,7 @@ pub fn evaluate_ast(
         .map(|lr| (lr.module_id.as_ref(), &lr.frozen_module))
         .collect();
     let loader = ReturnFileLoader { modules: &modules };
-    let globals_builder = get_globals(globals_config);
+    let globals_builder = get_globals(params.globals_config);
     let globals = globals_builder.build();
 
     Module::with_temp_heap(move |module| {
@@ -327,28 +325,31 @@ pub fn evaluate_ast(
             eval.eval_module(ast, &globals)?;
         }
 
-        let (module_deps, module_target) = if singleton::is_lsp_mode()
-            || singleton::get_is_checkout()
-            || singleton::get_is_sync()
-        {
-            (None, None)
-        } else {
-            // Build module result for caching (caller will save if appropriate)
-            let module_target = eval_context
-                .as_ref()
-                .map(|ctx| build_module_target(ctx.module_name.clone(), ctx))
-                .transpose()
-                .map_err(|e| format_error!("Failed to build module result: {}", e))?;
+        let (module_deps, module_target) =
+            if singleton::is_lsp_mode() || singleton::get_is_checkout() || singleton::get_is_sync()
+            {
+                (None, None)
+            } else {
+                // Build module result for caching (caller will save if appropriate)
+                let module_target = eval_context
+                    .as_ref()
+                    .map(|ctx| build_module_target(ctx.module_name.clone(), ctx))
+                    .transpose()
+                    .map_err(|e| format_error!("Failed to build module result: {}", e))?;
 
-            let module_deps = eval_context
-                .as_ref()
-                .map(|ctx| {
-                    build_module_deps(ctx.module_name.clone(), ctx, checkout_state_digest.clone())
-                })
-                .transpose()
-                .map_err(|e| format_error!("Failed to build module deps: {}", e))?;
-            (module_deps, module_target)
-        };
+                let module_deps = eval_context
+                    .as_ref()
+                    .map(|ctx| {
+                        build_module_deps(
+                            ctx.module_name.clone(),
+                            ctx,
+                            params.checkout_state_digest.clone(),
+                        )
+                    })
+                    .transpose()
+                    .map_err(|e| format_error!("Failed to build module deps: {}", e))?;
+                (module_deps, module_target)
+            };
 
         if let Some(workspace) = workspace
             && singleton::get_inspect_options().stardoc.is_some()
@@ -365,7 +366,7 @@ pub fn evaluate_ast(
                     let signature_starts_with_name = value
                         .parameters_spec()
                         .map(|spec| spec.signature())
-                        .map(|signature| signature.starts_with(name.as_ref()))
+                        .map(|signature| signature.starts_with(params.name.as_ref()))
                         .unwrap_or(false);
                     if signature_starts_with_name {
                         Some((function_name.as_str().into(), value.documentation()))
@@ -374,9 +375,10 @@ pub fn evaluate_ast(
                     }
                 })
                 .collect();
-            let relative_name = name
+            let relative_name = params
+                .name
                 .strip_prefix(format!("{}/", workspace.get_absolute_path()).as_str())
-                .unwrap_or(name.as_ref());
+                .unwrap_or(params.name.as_ref());
             workspace.stardoc.insert(relative_name.into(), doc_items);
         }
 
@@ -409,12 +411,10 @@ pub fn evaluate_module(
     let ast = AstModule::parse(params.name.as_ref(), params.content.to_string(), &dialect)?;
     let evaluate_ast_result = evaluate_ast(
         ast,
-        params.name.clone(),
+        params.clone(),
         workspace,
         workspace_path.clone(),
-        params.globals_config,
         eval_context,
-        params.checkout_state_digest.clone(),
         workspace_env,
     );
 

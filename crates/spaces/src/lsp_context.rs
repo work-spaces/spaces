@@ -278,12 +278,15 @@ impl SpacesContext {
         eprintln!("run: evaluate_ast => {name}");
         let eval_result = evaluator::evaluate_ast(
             ast.clone(),
-            name.into(),
+            evaluator::ModuleEvalParams {
+                globals_config: evaluator::GlobalsConfig::All,
+                name: name.into(),
+                content: Arc::from(""),
+                checkout_state_digest: Arc::from(""),
+            },
             Some(self.workspace.clone()),
             workspace_path.clone(),
-            evaluator::GlobalsConfig::All,
             eval_context,
-            Arc::from(""),
             workspace_env.clone(),
         );
 
