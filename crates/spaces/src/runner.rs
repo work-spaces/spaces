@@ -341,16 +341,16 @@ pub fn run_shell_in_workspace(
         .get_env_vars()
         .context(format_context!("while getting env vars"))?;
 
-    const SHELL_DIR: &str = ".spaces/shell";
-    std::fs::create_dir_all(SHELL_DIR).context(format_context!(
-        "while creating shell directory `{}`",
-        SHELL_DIR
-    ))?;
-
+    let absolute_path = workspace_arc.read().absolute_path.clone();
+    let absolute_workspace_path = std::path::Path::new(absolute_path.as_ref());
     let relative_directory = workspace_arc.read().relative_invoked_path.clone();
-    let working_directory =
-        std::path::Path::new(workspace_arc.read().absolute_path.clone().as_ref())
-            .join(relative_directory.as_ref());
+    let working_directory = absolute_workspace_path.join(relative_directory.as_ref());
+
+    const RELATIVE_SHELL_DIR: &str = ".spaces/shell";
+    let startup_dir = absolute_workspace_path.join(RELATIVE_SHELL_DIR);
+
+    std::fs::create_dir_all(&startup_dir)
+        .context(format_context!("while creating shell startup dir"))?;
 
     console.shutdown_refresh_thread();
 
@@ -375,7 +375,7 @@ pub fn run_shell_in_workspace(
     shell::run(
         &shell_config,
         &run_environment,
-        std::path::Path::new(SHELL_DIR),
+        &startup_dir,
         completion_content,
         &working_directory,
         pristine_shell,
