@@ -349,8 +349,8 @@ pub fn run_shell_in_workspace(
     const RELATIVE_SHELL_DIR: &str = ".spaces/shell";
     let startup_dir = absolute_workspace_path.join(RELATIVE_SHELL_DIR);
 
-    std::fs::create_dir_all(RELATIVE_SHELL_DIR)
-        .context(format_context!("while creating shell starupt dir"))?;
+    std::fs::create_dir_all(&startup_dir)
+        .context(format_context!("while creating shell startup dir"))?;
 
     console.shutdown_refresh_thread();
 
