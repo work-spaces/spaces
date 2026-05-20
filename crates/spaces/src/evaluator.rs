@@ -207,6 +207,7 @@ pub fn evaluate_loads(
     workspace: Option<WorkspaceArc>,
     workspace_path: Arc<str>,
     globals_config: GlobalsConfig,
+    workspace_env: Arc<HashMap<Arc<str>, Arc<str>>>,
 ) -> starlark::Result<Vec<LoadResult>> {
     // We can get the loaded modules from `ast.loads`.
     // And ultimately produce a `loader` capable of giving those modules to Starlark.
@@ -242,7 +243,7 @@ pub fn evaluate_loads(
                 content: contents.into(),
                 checkout_state_digest: Arc::from(""),
             },
-            workspace_env_vars.clone(),
+            workspace_env.clone(),
         )?;
         let frozen_module = result.frozen_module;
         let module_deps = result.module_deps;
@@ -265,6 +266,7 @@ pub fn evaluate_ast(
     globals_config: GlobalsConfig,
     mut eval_context: Option<EvalContext>,
     checkout_state_digest: Arc<str>,
+    workspace_env_vars: Arc<HashMap<Arc<str>, Arc<str>>>,
 ) -> starlark::Result<(
     FrozenModule,
     Option<mtarget::ModuleDeps>,
@@ -276,6 +278,7 @@ pub fn evaluate_ast(
         workspace.clone(),
         workspace_path.clone(),
         globals_config,
+        workspace_env_vars,
     )?;
 
     // Collect all load statements: direct loads (normalized) + transitive loads from children
@@ -412,6 +415,7 @@ pub fn evaluate_module(
         params.globals_config,
         eval_context,
         params.checkout_state_digest.clone(),
+        workspace_env,
     );
 
     if evaluate_ast_result.is_err() {

@@ -284,6 +284,7 @@ impl SpacesContext {
             evaluator::GlobalsConfig::All,
             eval_context,
             Arc::from(""),
+            workspace_env.clone(),
         );
 
         eprintln!("run: {name} - got result");
