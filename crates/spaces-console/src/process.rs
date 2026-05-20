@@ -37,6 +37,7 @@ pub(crate) fn parse_log_file(content: &str) -> anyhow::Result<(LogHeader, &str)>
 #[derive(Debug, Clone)]
 pub struct ExecuteResult {
     pub stdout: Option<String>,
+    pub stderr: Option<String>,
     pub exit_code: i32,
 }
 
@@ -44,6 +45,7 @@ pub struct ExecuteResult {
 pub struct ExecuteOptions {
     pub label: Arc<str>,
     pub is_return_stdout: bool,
+    pub is_return_stderr: bool,
     pub working_directory: Option<Arc<str>>,
     pub environment: Vec<(Arc<str>, Arc<str>)>,
     pub arguments: Vec<Arc<str>>,
@@ -62,6 +64,7 @@ impl Default for ExecuteOptions {
         Self {
             label: "working".into(),
             is_return_stdout: false,
+            is_return_stderr: false,
             working_directory: None,
             environment: vec![],
             arguments: vec![],
@@ -275,11 +278,21 @@ pub(crate) fn monitor_process(
         } else {
             None
         },
+        stderr: if options.is_return_stderr {
+            Some(stderr_content.clone())
+        } else {
+            None
+        },
         exit_code,
     };
 
     if !options.allow_failure && exit_code != 0 {
-        return Err(anyhow::anyhow!("Process exited with code {exit_code}"));
+        let error_msg = if stderr_content.is_empty() {
+            format!("Process exited with code {exit_code}")
+        } else {
+            format!("Process exited with code {exit_code}\n\nstderr:\n{stderr_content}")
+        };
+        return Err(anyhow::anyhow!("{error_msg}"));
     }
 
     Ok(result)

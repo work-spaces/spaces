@@ -237,6 +237,7 @@ impl Exec {
             environment,
             working_directory,
             is_return_stdout: self.redirect_stdout.is_some(),
+            is_return_stderr: false,
             log_file_path: log_file_path.clone(),
             clear_environment: true,
             process_started_with_id: Some(handle_process_started),
