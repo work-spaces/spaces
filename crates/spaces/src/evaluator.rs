@@ -242,7 +242,7 @@ pub fn evaluate_loads(
                 content: contents,
                 checkout_state_digest: Arc::from(""),
             },
-            Arc::new(HashMap::new()),
+            workspace_env_vars.clone(),
         )?;
         let frozen_module = result.frozen_module;
         let module_deps = result.module_deps;
