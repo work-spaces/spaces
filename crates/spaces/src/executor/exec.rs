@@ -131,10 +131,7 @@ impl Exec {
         use_workspace_env: UseWorkspaceEnv,
     ) -> anyhow::Result<()> {
         let mut arguments = self.args.clone().unwrap_or_default();
-        let all_env_vars = workspace
-            .read()
-            .get_env_vars()
-            .context(format_context!("while getting env vars"))?;
+        let all_env_vars = workspace.read().env_vars.clone();
 
         let mut exec_env_vars: HashMap<Arc<str>, Arc<str>> =
             if use_workspace_env == UseWorkspaceEnv::Yes {

@@ -768,11 +768,13 @@ pub fn evaluate_starlark_modules(
     //   up-to-date. Each module evaluation creates a fresh EvalContext that captures
     //   the current state of the workspace env.
 
-    let workspace_env = workspace
-        .read()
-        .get_env_vars()
-        .context(format_context!("While getting workspace env"))?;
-    let mut eval_workspace_env = Arc::new(workspace_env);
+    let mut eval_workspace_env = {
+        let mut workspace_write = workspace.write();
+        workspace_write
+            .evaluate_env_vars()
+            .context(format_context!("evaluating env vars"))?;
+        Arc::new(workspace_write.env_vars.clone())
+    };
 
     // first module is the env module. It is always evaluated first.
     // It can't be evaluated in parallel with other modules.
@@ -804,11 +806,13 @@ pub fn evaluate_starlark_modules(
         Arc::from("")
     };
 
-    let workspace_env = workspace
-        .read()
-        .get_env_vars()
-        .context(format_context!("While getting workspace env"))?;
-    eval_workspace_env = Arc::new(workspace_env);
+    eval_workspace_env = {
+        let mut workspace_write = workspace.write();
+        workspace_write
+            .evaluate_env_vars()
+            .context(format_context!("evaluating env vars"))?;
+        Arc::new(workspace_write.env_vars.clone())
+    };
 
     let mut progress = None;
 
@@ -928,10 +932,12 @@ pub fn evaluate_starlark_modules(
                                 "While populating inherited vars after executing checkout rules"
                             )
                         })?;
-                    let workspace_env = workspace_write
-                        .get_env_vars()
-                        .context(format_context!("While getting workspace env"))?;
-                    eval_workspace_env = Arc::new(workspace_env);
+
+                    workspace_write
+                        .evaluate_env_vars()
+                        .context(format_context!("evaluating env vars"))?;
+
+                    eval_workspace_env = Arc::new(workspace_write.env_vars.clone());
                 }
 
                 if !task_result.new_modules.is_empty() {
@@ -1493,6 +1499,11 @@ pub fn run_starlark_modules(
         };
 
     let is_save_bin = if is_execute_tasks == IsExecuteTasks::Yes {
+        workspace
+            .write()
+            .evaluate_env_vars()
+            .context(format_context!("evaluating env vars"))?;
+
         execute_tasks(
             console.clone(),
             workspace.clone(),
