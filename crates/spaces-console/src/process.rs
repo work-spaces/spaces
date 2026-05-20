@@ -290,7 +290,7 @@ pub(crate) fn monitor_process(
         let error_msg = if stderr_content.is_empty() {
             format!("Process exited with code {exit_code}")
         } else {
-            format!("Process exited with code {exit_code}\n\nstderr:\n{stderr_content}")
+            format!("Process exited with code {exit_code}\n{stderr_content}")
         };
         return Err(anyhow::anyhow!("{error_msg}"));
     }
