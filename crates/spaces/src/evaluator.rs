@@ -41,7 +41,7 @@ pub struct EvaluateModuleResult {
 pub struct ModuleEvalParams {
     pub globals_config: GlobalsConfig,
     pub name: Arc<str>,
-    pub content: String,
+    pub content: Arc<str>,
     pub checkout_state_digest: Arc<str>,
 }
 
@@ -239,7 +239,7 @@ pub fn evaluate_loads(
             ModuleEvalParams {
                 globals_config,
                 name: normalized_path.clone(),
-                content: contents,
+                content: contents.into(),
                 checkout_state_digest: Arc::from(""),
             },
             workspace_env_vars.clone(),
@@ -403,7 +403,7 @@ pub fn evaluate_module(
         .map(|w| EvalContext::new(Some(w.clone()), params.name.clone(), workspace_env.clone()));
 
     let dialect = get_dialect();
-    let ast = AstModule::parse(params.name.as_ref(), params.content.clone(), &dialect)?;
+    let ast = AstModule::parse(params.name.as_ref(), params.content.to_string(), &dialect)?;
     let evaluate_ast_result = evaluate_ast(
         ast,
         params.name.clone(),
@@ -764,6 +764,12 @@ pub fn evaluate_starlark_modules(
     //   up-to-date. Each module evaluation creates a fresh EvalContext that captures
     //   the current state of the workspace env.
 
+    let workspace_env = workspace
+        .read()
+        .get_env_vars()
+        .context(format_context!("While getting workspace env"))?;
+    let mut eval_workspace_env = Arc::new(workspace_env);
+
     // first module is the env module. It is always evaluated first.
     // It can't be evaluated in parallel with other modules.
     // After env.spaces.star is evaluated, the workspace env is fully populated
@@ -778,10 +784,10 @@ pub fn evaluate_starlark_modules(
             ModuleEvalParams {
                 globals_config,
                 name: name.clone(),
-                content: content.to_string(),
+                content,
                 checkout_state_digest: Arc::from(""),
             },
-            Arc::new(HashMap::new()),
+            eval_workspace_env.clone(),
         )
         .map_err(|e| format_error!("Failed to evaluate module {:?}", e))?;
 
@@ -794,10 +800,11 @@ pub fn evaluate_starlark_modules(
         Arc::from("")
     };
 
-    let mut workspace_env = workspace
+    let workspace_env = workspace
         .read()
         .get_env_vars()
         .context(format_context!("While getting workspace env"))?;
+    eval_workspace_env = Arc::new(workspace_env);
 
     let mut progress = None;
 
@@ -815,12 +822,12 @@ pub fn evaluate_starlark_modules(
             let eval_console = console.clone();
             let eval_workspace = workspace.clone();
             let eval_digest = checkout_state_digest.clone();
-            let eval_workspace_env = Arc::new(workspace_env.clone());
+            let eval_workspace_env_inner = eval_workspace_env.clone();
 
             let params = ModuleEvalParams {
                 globals_config,
                 name: eval_name.clone(),
-                content: content.to_string(),
+                content,
                 checkout_state_digest: eval_digest,
             };
 
@@ -830,7 +837,7 @@ pub fn evaluate_starlark_modules(
                     eval_workspace,
                     phase,
                     params,
-                    eval_workspace_env,
+                    eval_workspace_env_inner,
                 )
                 .with_context(|| format_context!("Failed to evaluate module {eval_name}"))?;
                 Ok(())
@@ -917,9 +924,10 @@ pub fn evaluate_starlark_modules(
                                 "While populating inherited vars after executing checkout rules"
                             )
                         })?;
-                    workspace_env = workspace_write
+                    let workspace_env = workspace_write
                         .get_env_vars()
                         .context(format_context!("While getting workspace env"))?;
+                    eval_workspace_env = Arc::new(workspace_env);
                 }
 
                 if !task_result.new_modules.is_empty() {
@@ -1517,7 +1525,7 @@ pub fn run_starlark_script(name: Arc<str>, script: Arc<str>) -> anyhow::Result<(
         ModuleEvalParams {
             globals_config: GlobalsConfig::StarStd,
             name: name.clone(),
-            content: script.to_string(),
+            content: script,
             checkout_state_digest: Arc::from(""),
         },
         Arc::new(HashMap::new()),

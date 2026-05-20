@@ -144,7 +144,7 @@ impl SpacesContext {
             evaluator::ModuleEvalParams {
                 globals_config: evaluator::GlobalsConfig::All,
                 name: path.to_string_lossy().into(),
-                content,
+                content: content.into(),
                 checkout_state_digest: Arc::from(""),
             },
             workspace_env,
