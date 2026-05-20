@@ -6,7 +6,7 @@ use anyhow_source_location::{format_context, format_error};
 use starlark::environment::{FrozenModule, GlobalsBuilder, Module};
 use starlark::eval::{Evaluator, ReturnFileLoader};
 use starlark::syntax::{AstModule, Dialect};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use utils::{features, inspect, labels, logger, mtarget, query, rcache, rule, targets, ws};
 
@@ -34,6 +34,15 @@ enum IsSaveBin {
 pub struct EvaluateModuleResult {
     pub frozen_module: FrozenModule,
     pub module_deps: Option<mtarget::ModuleDeps>,
+}
+
+/// Parameters for module evaluation
+#[derive(Clone)]
+pub struct ModuleEvalParams {
+    pub globals_config: GlobalsConfig,
+    pub name: Arc<str>,
+    pub content: Arc<str>,
+    pub checkout_state_digest: Arc<str>,
 }
 
 fn star_logger(console: console::Console) -> logger::Logger {
@@ -198,6 +207,7 @@ pub fn evaluate_loads(
     workspace: Option<WorkspaceArc>,
     workspace_path: Arc<str>,
     globals_config: GlobalsConfig,
+    workspace_env: Arc<HashMap<Arc<str>, Arc<str>>>,
 ) -> starlark::Result<Vec<LoadResult>> {
     // We can get the loaded modules from `ast.loads`.
     // And ultimately produce a `loader` capable of giving those modules to Starlark.
@@ -227,10 +237,13 @@ pub fn evaluate_loads(
         let result = evaluate_module(
             workspace.clone(),
             workspace_path.clone(),
-            normalized_path.clone(),
-            contents,
-            globals_config,
-            Arc::from(""),
+            ModuleEvalParams {
+                globals_config,
+                name: normalized_path.clone(),
+                content: contents.into(),
+                checkout_state_digest: Arc::from(""),
+            },
+            workspace_env.clone(),
         )?;
         let frozen_module = result.frozen_module;
         let module_deps = result.module_deps;
@@ -253,6 +266,7 @@ pub fn evaluate_ast(
     globals_config: GlobalsConfig,
     mut eval_context: Option<EvalContext>,
     checkout_state_digest: Arc<str>,
+    workspace_env_vars: Arc<HashMap<Arc<str>, Arc<str>>>,
 ) -> starlark::Result<(
     FrozenModule,
     Option<mtarget::ModuleDeps>,
@@ -264,6 +278,7 @@ pub fn evaluate_ast(
         workspace.clone(),
         workspace_path.clone(),
         globals_config,
+        workspace_env_vars,
     )?;
 
     // Collect all load statements: direct loads (normalized) + transitive loads from children
@@ -374,34 +389,33 @@ pub fn evaluate_ast(
 pub fn evaluate_module(
     workspace: Option<WorkspaceArc>,
     workspace_path: Arc<str>,
-    name: Arc<str>,
-    content: String,
-    globals_config: GlobalsConfig,
-    checkout_state_digest: Arc<str>,
+    params: ModuleEvalParams,
+    workspace_env: Arc<HashMap<Arc<str>, Arc<str>>>,
 ) -> starlark::Result<EvaluateModuleResult> {
     // Register the module name so that the global task-graph machinery can
     // track which modules exist, without writing to `latest_starlark_module`
     // (which would race with parallel evaluations).
-    if workspace::is_rules_module(name.as_ref()) {
-        rules::register_module(name.clone());
+    if workspace::is_rules_module(params.name.as_ref()) {
+        rules::register_module(params.name.clone());
     }
 
     // Build a per-evaluation context that builtins access via `eval.extra_mut`
     // instead of through the global singleton.
     let eval_context = workspace
         .as_ref()
-        .map(|w| EvalContext::new(Some(w.clone()), name.clone()));
+        .map(|w| EvalContext::new(Some(w.clone()), params.name.clone(), workspace_env.clone()));
 
     let dialect = get_dialect();
-    let ast = AstModule::parse(name.as_ref(), content, &dialect)?;
+    let ast = AstModule::parse(params.name.as_ref(), params.content.to_string(), &dialect)?;
     let evaluate_ast_result = evaluate_ast(
         ast,
-        name.clone(),
+        params.name.clone(),
         workspace,
         workspace_path.clone(),
-        globals_config,
+        params.globals_config,
         eval_context,
-        checkout_state_digest,
+        params.checkout_state_digest.clone(),
+        workspace_env,
     );
 
     if evaluate_ast_result.is_err() {
@@ -410,7 +424,7 @@ pub fn evaluate_module(
 
     let (module, module_deps, module_target) = evaluate_ast_result?;
 
-    if workspace::is_rules_module(name.as_ref())
+    if workspace::is_rules_module(params.name.as_ref())
         && matches!(
             singleton::get_execution_phase(),
             task::Phase::Run | task::Phase::Inspect
@@ -420,14 +434,14 @@ pub fn evaluate_module(
         if let Some(ref result) = module_deps {
             result.save_to_json().context(format_context!(
                 "Internal Error: Failed to save module deps for {}",
-                name.as_ref()
+                params.name.as_ref()
             ))?;
         }
 
         if let Some(ref target) = module_target {
             target.save_to_json().context(format_context!(
                 "Internal Error: Failed to save module target for {}",
-                name.as_ref()
+                params.name.as_ref()
             ))?;
         }
     }
@@ -450,17 +464,15 @@ fn try_evaluate_with_cache(
     console: console::Console,
     workspace: WorkspaceArc,
     phase: task::Phase,
-    globals_config: GlobalsConfig,
-    name: Arc<str>,
-    content: String,
-    checkout_state_digest: Arc<str>,
+    params: ModuleEvalParams,
+    workspace_env: Arc<HashMap<Arc<str>, Arc<str>>>,
 ) -> anyhow::Result<()> {
     let workspace_path = workspace.read().get_absolute_path();
     let eval_logger = star_logger(console.clone());
 
     // Try to load existing module result from build folder
-    let module_deps_option = mtarget::ModuleDeps::new_from_json(name.as_ref())
-        .with_context(|| format_context!("Failed to load module deps for {:?}", name))?;
+    let module_deps_option = mtarget::ModuleDeps::new_from_json(params.name.as_ref())
+        .with_context(|| format_context!("Failed to load module deps for {:?}", params.name))?;
 
     let (is_always_evaluate, is_module_caching_feature_enabled) = {
         let read_workspace = workspace.read();
@@ -480,15 +492,9 @@ fn try_evaluate_with_cache(
         || !is_module_caching_feature_enabled;
 
     if caching_not_allowed {
-        let _ = evaluate_module(
-            Some(workspace),
-            workspace_path,
-            name,
-            content,
-            globals_config,
-            checkout_state_digest,
-        )
-        .map_err(|e| format_error!("Failed to evaluate module during checkout {:?} -> {e}", e))?;
+        let _ = evaluate_module(Some(workspace), workspace_path, params, workspace_env).map_err(
+            |e| format_error!("Failed to evaluate module during checkout {:?} -> {e}", e),
+        )?;
         return Ok(());
     }
 
@@ -502,7 +508,9 @@ fn try_evaluate_with_cache(
         let workspace = workspace.read();
         module_deps
             .compute_digest(&workspace.settings.bin.star_files)
-            .with_context(|| format_context!("Failed to compute digest for module {:?}", name,))?
+            .with_context(|| {
+                format_context!("Failed to compute digest for module {:?}", params.name,)
+            })?
     };
 
     // Get rcache path
@@ -512,7 +520,7 @@ fn try_evaluate_with_cache(
     };
 
     // rcache targets = the JSON file
-    let json_target: Arc<str> = mtarget::ModuleTarget::get_json_path(name.as_ref())
+    let json_target: Arc<str> = mtarget::ModuleTarget::get_json_path(params.name.as_ref())
         .to_string_lossy()
         .into();
 
@@ -527,10 +535,8 @@ fn try_evaluate_with_cache(
             let result = evaluate_module(
                 Some(workspace.clone()),
                 workspace_path.clone(),
-                name.clone(),
-                content.clone(),
-                globals_config,
-                checkout_state_digest.clone(),
+                params.clone(),
+                workspace_env.clone(),
             )
             .map(|_| ());
             result.map_err(|e| format_error!("Failed to evaluate module {:?}", e))
@@ -540,21 +546,22 @@ fn try_evaluate_with_cache(
 
     match result {
         Some(Ok(_)) => {
-            eval_logger.debug(format!("No cache hit for module {:?}", name).as_str());
+            eval_logger.debug(format!("No cache hit for module {:?}", params.name).as_str());
             Ok(())
         }
         Some(Err(e)) => Err(e),
         None => {
-            eval_logger.debug(format!("Cache hit for module {:?}", name).as_str());
-            let Some(mtarget) = mtarget::ModuleTarget::new_from_json(name.as_ref())
+            eval_logger.debug(format!("Cache hit for module {:?}", params.name).as_str());
+            let Some(mtarget) = mtarget::ModuleTarget::new_from_json(params.name.as_ref())
                 .with_context(|| format_context!("Failed to load mtarget for cache hit"))?
             else {
                 return Err(format_error!(
-                    "Internal error: mtarget not found for cache hit {name} - {json_target}",
+                    "Internal error: mtarget not found for cache hit {} - {json_target}",
+                    params.name
                 ));
             };
             // Cache hit - restore tasks from mtarget
-            rules::restore_tasks_from_cache(&mtarget, &name)
+            rules::restore_tasks_from_cache(&mtarget, &params.name)
         }
     }
 }
@@ -752,8 +759,25 @@ pub fn evaluate_starlark_modules(
             GlobalsConfig::RulesLegacy
         };
 
+    // Workspace environment management:
+    // - In Run/Inspect modes: env.spaces.star is evaluated first (below), populating
+    //   the workspace env. This env is then cached in EvalContext for all subsequent
+    //   module evaluations, avoiding repeated lock acquisitions.
+    // - In Checkout mode: the workspace env mutates after each module's rules execute.
+    //   After executing rules, we repopulate inherited vars to ensure the env is
+    //   up-to-date. Each module evaluation creates a fresh EvalContext that captures
+    //   the current state of the workspace env.
+
+    let workspace_env = workspace
+        .read()
+        .get_env_vars()
+        .context(format_context!("While getting workspace env"))?;
+    let mut eval_workspace_env = Arc::new(workspace_env);
+
     // first module is the env module. It is always evaluated first.
     // It can't be evaluated in parallel with other modules.
+    // After env.spaces.star is evaluated, the workspace env is fully populated
+    // and available for subsequent modules in Run/Inspect modes.
     let checkout_state_digest = if phase != task::Phase::Checkout
         && let Some((name, content)) = module_queue.pop_front()
     {
@@ -761,19 +785,30 @@ pub fn evaluate_starlark_modules(
         let _ = evaluate_module(
             Some(workspace.clone()),
             workspace_path.clone(),
-            name.clone(),
-            content.to_string(),
-            globals_config,
-            Arc::from(""),
+            ModuleEvalParams {
+                globals_config,
+                name: name.clone(),
+                content,
+                checkout_state_digest: Arc::from(""),
+            },
+            eval_workspace_env.clone(),
         )
         .map_err(|e| format_error!("Failed to evaluate module {:?}", e))?;
 
         // After env.spaces.star is evaluated, compute the checkout_state_digest
+        // The workspace env is now fully populated and will be cached in
+        // EvalContext for all subsequent module evaluations
         workspace.read().compute_checkout_state_digest()?
     } else {
         // During checkout phase, use empty digest for env module
         Arc::from("")
     };
+
+    let workspace_env = workspace
+        .read()
+        .get_env_vars()
+        .context(format_context!("While getting workspace env"))?;
+    eval_workspace_env = Arc::new(workspace_env);
 
     let mut progress = None;
 
@@ -791,16 +826,22 @@ pub fn evaluate_starlark_modules(
             let eval_console = console.clone();
             let eval_workspace = workspace.clone();
             let eval_digest = checkout_state_digest.clone();
+            let eval_workspace_env_inner = eval_workspace_env.clone();
+
+            let params = ModuleEvalParams {
+                globals_config,
+                name: eval_name.clone(),
+                content,
+                checkout_state_digest: eval_digest,
+            };
 
             let handle = std::thread::spawn(move || -> anyhow::Result<()> {
                 try_evaluate_with_cache(
                     eval_console,
                     eval_workspace,
                     phase,
-                    globals_config,
-                    eval_name.clone(),
-                    content.to_string(),
-                    eval_digest,
+                    params,
+                    eval_workspace_env_inner,
                 )
                 .with_context(|| format_context!("Failed to evaluate module {eval_name}"))?;
                 Ok(())
@@ -874,18 +915,27 @@ pub fn evaluate_starlark_modules(
                 update_secrets(console.clone(), workspace.clone())
                     .with_context(|| format_context!("while running checkout tasks"))?;
 
-                if !task_result.new_modules.is_empty() {
-                    logger.trace(format!("New Modules:{:?}", task_result.new_modules).as_str());
-                }
-
+                // In checkout mode, the workspace env mutates after executing rules.
+                // Repopulate inherited vars to ensure the env is up-to-date for
+                // subsequent module evaluations.
                 {
                     let mut workspace_write = workspace.write();
                     workspace_write
                         .get_env_mut()
                         .repopulate_inherited_vars()
                         .with_context(|| {
-                            format_context!("While populating required inherited vars")
+                            format_context!(
+                                "While populating inherited vars after executing checkout rules"
+                            )
                         })?;
+                    let workspace_env = workspace_write
+                        .get_env_vars()
+                        .context(format_context!("While getting workspace env"))?;
+                    eval_workspace_env = Arc::new(workspace_env);
+                }
+
+                if !task_result.new_modules.is_empty() {
+                    logger.trace(format!("New Modules:{:?}", task_result.new_modules).as_str());
                 }
 
                 let mut new_modules = Vec::new();
@@ -1476,10 +1526,13 @@ pub fn run_starlark_script(name: Arc<str>, script: Arc<str>) -> anyhow::Result<(
     let _ = evaluate_module(
         None,
         workspace,
-        name.clone(),
-        script.to_string(),
-        GlobalsConfig::StarStd,
-        Arc::from(""),
+        ModuleEvalParams {
+            globals_config: GlobalsConfig::StarStd,
+            name: name.clone(),
+            content: script,
+            checkout_state_digest: Arc::from(""),
+        },
+        Arc::new(HashMap::new()),
     )
     .map_err(|e| format_error!("Failed to evaluate module {name}: {e}"))?;
 

@@ -1,5 +1,6 @@
 use crate::{singleton, task, workspace};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::Arc;
 use utils::{mtarget, rule};
 
@@ -59,6 +60,11 @@ pub struct EvalContext {
 
     /// Whether workspace is reproducible
     pub workspace_is_reproducible: bool,
+
+    /// Cached workspace environment variables
+    /// Stored to avoid repeated lock acquisitions and env var computation
+    /// In checkout mode, this needs to be refreshed after each module's rules execute
+    pub workspace_env_vars: Arc<HashMap<Arc<str>, Arc<str>>>,
 }
 
 // SAFETY: All fields are 'static (Arc, bool, enum, RefCell<Vec<...>>, Vec<...>) so EvalContext is 'static.
@@ -67,7 +73,11 @@ unsafe impl<'a> starlark::any::ProvidesStaticType<'a> for EvalContext {
 }
 
 impl EvalContext {
-    pub fn new(workspace: Option<workspace::WorkspaceArc>, module_name: Arc<str>) -> Self {
+    pub fn new(
+        workspace: Option<workspace::WorkspaceArc>,
+        module_name: Arc<str>,
+        workspace_env: Arc<HashMap<Arc<str>, Arc<str>>>,
+    ) -> Self {
         // Cache frequently-accessed workspace state to avoid lock contention
         let (
             absolute_path,
@@ -123,6 +133,7 @@ impl EvalContext {
             workspace_digest: digest,
             workspace_short_digest: short_digest,
             workspace_is_reproducible: is_reproducible,
+            workspace_env_vars: workspace_env,
         }
     }
 

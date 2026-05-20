@@ -137,13 +137,17 @@ impl SpacesContext {
         let content =
             fs::read_to_string(path).context(format_context!("Failed to read {path:?}"))?;
 
+        let workspace_env = Arc::new(self.workspace.read().get_env_vars().unwrap_or_default());
         let result = evaluator::evaluate_module(
             None,
             workspace_path,
-            path.to_string_lossy().into(),
-            content,
-            evaluator::GlobalsConfig::All,
-            Arc::from(""),
+            evaluator::ModuleEvalParams {
+                globals_config: evaluator::GlobalsConfig::All,
+                name: path.to_string_lossy().into(),
+                content: content.into(),
+                checkout_state_digest: Arc::from(""),
+            },
+            workspace_env,
         )?;
 
         Ok(result.frozen_module)
@@ -264,7 +268,12 @@ impl SpacesContext {
         rules::register_module(name.into());
         eprintln!("run: {name}");
 
-        let eval_context = Some(EvalContext::new(Some(self.workspace.clone()), name.into()));
+        let workspace_env = Arc::new(self.workspace.read().get_env_vars().unwrap_or_default());
+        let eval_context = Some(EvalContext::new(
+            Some(self.workspace.clone()),
+            name.into(),
+            workspace_env.clone(),
+        ));
 
         eprintln!("run: evaluate_ast => {name}");
         let eval_result = evaluator::evaluate_ast(
@@ -275,6 +284,7 @@ impl SpacesContext {
             evaluator::GlobalsConfig::All,
             eval_context,
             Arc::from(""),
+            workspace_env.clone(),
         );
 
         eprintln!("run: {name} - got result");

@@ -86,12 +86,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             return Ok(true);
         }
         let ctx = get_eval_context(eval)?;
-        let workspace_arc = ctx
-            .workspace
-            .clone()
-            .ok_or_else(|| format_error!("Internal error: no active workspace found"))?;
-        let workspace = workspace_arc.read();
-        Ok(workspace.is_env_var_set(var_name))
+        Ok(ctx.workspace_env_vars.contains_key(var_name))
     }
 
     /// Returns true if the workspace environment variable is set.
@@ -113,12 +108,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         eval: &mut Evaluator,
     ) -> anyhow::Result<bool> {
         let ctx = get_eval_context(eval)?;
-        let workspace_arc = ctx
-            .workspace
-            .clone()
-            .ok_or_else(|| format_error!("Internal error: no active workspace found"))?;
-        let workspace = workspace_arc.read();
-        Ok(workspace.is_env_var_set_to(var_name, var_value))
+        Ok(ctx
+            .workspace_env_vars
+            .get(var_name)
+            .map(|v| v.as_ref() == var_value)
+            .unwrap_or(false))
     }
 
     /// Returns the value of a workspace environment variable.
@@ -134,18 +128,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// * `str`: The value of the environment variable.
     fn get_env_var(var_name: &str, eval: &mut Evaluator) -> anyhow::Result<String> {
         let ctx = get_eval_context(eval)?;
-        let workspace_arc = ctx
-            .workspace
-            .clone()
-            .ok_or_else(|| format_error!("No active workspace found"))?;
-        let workspace = workspace_arc.read();
 
-        let env_vars = workspace
-            .get_env_vars()
-            .context(format_context!("while workspace.get_env_var({var_name})"))?;
-
-        if let Some(value) = env_vars.get(var_name) {
-            Ok(value.clone().to_string())
+        if let Some(value) = ctx.workspace_env_vars.get(var_name) {
+            Ok(value.to_string())
         } else if ctx.is_lsp {
             Ok("<not available to LSP>".to_string())
         } else {
