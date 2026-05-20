@@ -272,20 +272,6 @@ pub(crate) fn monitor_process(
         -1
     };
 
-    let result = ExecuteResult {
-        stdout: if options.is_return_stdout {
-            Some(stdout_content)
-        } else {
-            None
-        },
-        stderr: if options.is_return_stderr {
-            Some(stderr_content.clone())
-        } else {
-            None
-        },
-        exit_code,
-    };
-
     if !options.allow_failure && exit_code != 0 {
         let error_msg = if stderr_content.is_empty() {
             format!("Process exited with code {exit_code}")
@@ -294,6 +280,20 @@ pub(crate) fn monitor_process(
         };
         return Err(anyhow::anyhow!("{error_msg}"));
     }
+
+    let result = ExecuteResult {
+        stdout: if options.is_return_stdout {
+            Some(stdout_content)
+        } else {
+            None
+        },
+        stderr: if options.is_return_stderr {
+            Some(stderr_content)
+        } else {
+            None
+        },
+        exit_code,
+    };
 
     Ok(result)
 }
