@@ -10,6 +10,7 @@ load(
     "run_add_exec",
     "run_add_exec_test",
 )
+load("//@star/sdk/star/semver.star", "semver_is_valid_version")
 load("//@star/sdk/star/shell.star", "shell")
 load(
     "//@star/sdk/star/visibility.star",
