@@ -265,8 +265,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             ""
         };
 
-        add_git_url_to_workspace_store_queue(workspace_arc.clone(), url.as_ref(), store_prefix)
-            .context(format_context!("during checkout add repo"))?;
+        if ctx.is_checkout || ctx.is_sync {
+            add_git_url_to_workspace_store_queue(workspace_arc.clone(), url.as_ref(), store_prefix)
+                .context(format_context!("during checkout add repo"))?;
+        }
 
         rules::insert_task_for_module(
             task::Task::new(
@@ -510,7 +512,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             workspace_arc,
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
-            Some(ctx),
+            ctx,
         )
         .context(format_context!("Failed to add archive"))?;
 
@@ -752,7 +754,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             workspace_arc,
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
-            Some(ctx),
+            ctx,
         )
         .context(format_context!("Failed to add archive"))?;
         Ok(NoneType)
@@ -1014,10 +1016,6 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 .ok_or_else(|| format_error!("No active workspace found"))?;
             let workspace = workspace_arc.read();
             workspace.insert_automatic_var_placeholders(&mut any_env);
-            logger::push_deprecation_warning(
-                None,
-                "checkout.update_env() will be removed in v0.16",
-            );
         }
 
         let update_env = executor::env::UpdateEnv {
@@ -1087,7 +1085,7 @@ fn add_http_archive(
     workspace_arc: WorkspaceArc,
     module_name: &Arc<str>,
     default_visibility: rule::Visibility,
-    eval_context: Option<&crate::builtins::eval_context::EvalContext>,
+    eval_context: &crate::builtins::eval_context::EvalContext,
 ) -> anyhow::Result<()> {
     if let Some(mut archive) = archive_option {
         //create a target that waits for all downloads
@@ -1131,22 +1129,22 @@ fn add_http_archive(
             archive.globs = None;
         }
 
-        add_http_url_to_workspace_store_queue(
-            workspace_arc.clone(),
-            archive.url.as_ref(),
-            &archive.filename,
-        )
-        .context(format_context!(
-            "Failed to add http url to workspace store queue"
-        ))?;
-
-        let workspace = workspace_arc.read();
+        if eval_context.is_checkout || eval_context.is_sync {
+            add_http_url_to_workspace_store_queue(
+                workspace_arc.clone(),
+                archive.url.as_ref(),
+                &archive.filename,
+            )
+            .context(format_context!(
+                "Failed to add http url to workspace store queue"
+            ))?;
+        }
 
         let http_archive = http_archive::HttpArchive::new(
-            &workspace.get_store_path(),
+            &eval_context.workspace_store_path,
             rule.name.as_ref(),
             &archive,
-            format!("{}/sysroot/bin", workspace.get_spaces_tools_path()).as_str(),
+            format!("{}/sysroot/bin", eval_context.workspace_spaces_tools_path).as_str(),
         )
         .context(format_context!(
             "Failed to create http_archive {}",
@@ -1162,7 +1160,7 @@ fn add_http_archive(
             ),
             module_name,
             default_visibility,
-            eval_context,
+            Some(eval_context),
         )
         .context(format_context!("Failed to register rule {rule_name}"))?;
     }
