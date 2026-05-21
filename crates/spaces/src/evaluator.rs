@@ -202,6 +202,7 @@ pub struct LoadResult {
 }
 
 pub fn evaluate_loads(
+    console: console::Console,
     ast: &AstModule,
     name: Arc<str>,
     workspace: Option<WorkspaceArc>,
@@ -209,10 +210,14 @@ pub fn evaluate_loads(
     globals_config: GlobalsConfig,
     workspace_env: Arc<HashMap<Arc<str>, Arc<str>>>,
 ) -> starlark::Result<Vec<LoadResult>> {
+    let logger = star_logger(console.clone());
+    logger.debug(format!("{} -> Entering evaluate_loads", name).as_str());
+
     // We can get the loaded modules from `ast.loads`.
     // And ultimately produce a `loader` capable of giving those modules to Starlark.
     let mut loads = Vec::new();
     for load in ast.loads() {
+        logger.debug(format!("{} -> prepare load", name).as_str());
         let module_load_path =
             workspace::get_workspace_path(workspace_path.as_ref(), name.as_ref(), load.module_id);
         if module_load_path.ends_with(workspace::SPACES_MODULE_NAME) {
@@ -234,7 +239,9 @@ pub fn evaluate_loads(
             .map(|p| p.into())
             .unwrap_or_else(|| module_load_path.clone());
 
+        logger.debug(format!("{} -> evaluate load", name).as_str());
         let result = evaluate_module(
+            console.clone(),
             workspace.clone(),
             workspace_path.clone(),
             ModuleEvalParams {
@@ -259,6 +266,7 @@ pub fn evaluate_loads(
 }
 
 pub fn evaluate_ast(
+    console: console::Console,
     ast: AstModule,
     params: ModuleEvalParams,
     workspace: Option<WorkspaceArc>,
@@ -270,7 +278,11 @@ pub fn evaluate_ast(
     Option<mtarget::ModuleDeps>,
     Option<mtarget::ModuleTarget>,
 )> {
+    let logger = star_logger(console.clone());
+    logger.debug(format!("{}: Entering evaluate_ast", name).as_str());
+
     let loads = evaluate_loads(
+        console.clone(),
         &ast,
         params.name.clone(),
         workspace.clone(),
@@ -281,6 +293,7 @@ pub fn evaluate_ast(
 
     // Collect all load statements: direct loads (normalized) + transitive loads from children
     let mut all_loads: Vec<mtarget::LoadStatement> = Vec::new();
+    logger.debug(format!("{}: Gather loads", name).as_str());
     for load_result in &loads {
         // Add the direct load with normalized path
         all_loads.push(mtarget::LoadStatement::new(
@@ -296,14 +309,18 @@ pub fn evaluate_ast(
     }
 
     // Deduplicate loads by module_id
+    logger.debug(format!("{}: sort loads", name).as_str());
     all_loads.sort_by(|a, b| a.module_id.cmp(&b.module_id));
+    logger.debug(format!("{}: depulicate loads", name).as_str());
     all_loads.dedup_by(|a, b| a.module_id == b.module_id);
 
     // Store load statements in context if available
     if let Some(ref mut ctx) = eval_context {
+        logger.debug(format!("{}: set load statements", name).as_str());
         ctx.set_load_statements(all_loads);
     }
 
+    logger.debug(format!("{}: collect loads", name).as_str());
     let modules: std::collections::HashMap<&str, &FrozenModule> = loads
         .iter()
         .map(|lr| (lr.module_id.as_ref(), &lr.frozen_module))
@@ -317,11 +334,14 @@ pub fn evaluate_ast(
         // lifetime, which is strictly shorter than the closure body.
         let mut eval_context = eval_context;
         {
+            logger.debug(format!("{}: create evaluator", name).as_str());
             let mut eval = Evaluator::new(&module);
             if let Some(ref mut ctx) = eval_context {
                 eval.extra_mut = Some(ctx);
             }
+            logger.debug(format!("{}: set loader", name).as_str());
             eval.set_loader(&loader);
+            logger.debug(format!("{}: eval module", name).as_str());
             eval.eval_module(ast, &globals)?;
         }
 
@@ -354,6 +374,8 @@ pub fn evaluate_ast(
         if let Some(workspace) = workspace
             && singleton::get_inspect_options().stardoc.is_some()
         {
+            logger.debug(format!("{}: stardoc", name).as_str());
+
             let mut workspace = workspace.write();
             let doc_items: Vec<(Arc<str>, _)> = module
                 .names()
@@ -382,18 +404,23 @@ pub fn evaluate_ast(
             workspace.stardoc.insert(relative_name.into(), doc_items);
         }
 
+        logger.debug(format!("{}: freeze", name).as_str());
         let frozen_module = module.freeze()?;
-
+        logger.debug(format!("{}: complete", name).as_str());
         Ok((frozen_module, module_deps, module_target))
     })
 }
 
 pub fn evaluate_module(
+    console: console::Console,
     workspace: Option<WorkspaceArc>,
     workspace_path: Arc<str>,
     params: ModuleEvalParams,
     workspace_env: Arc<HashMap<Arc<str>, Arc<str>>>,
 ) -> starlark::Result<EvaluateModuleResult> {
+    let logger = star_logger(console.clone());
+    logger.debug(format!("{} -> Entering evaluate_module", name).as_str());
+
     // Register the module name so that the global task-graph machinery can
     // track which modules exist, without writing to `latest_starlark_module`
     // (which would race with parallel evaluations).
@@ -401,15 +428,18 @@ pub fn evaluate_module(
         rules::register_module(params.name.clone());
     }
 
+    logger.debug(format!("{} -> Build eval context", name).as_str());
     // Build a per-evaluation context that builtins access via `eval.extra_mut`
     // instead of through the global singleton.
     let eval_context = workspace
         .as_ref()
         .map(|w| EvalContext::new(Some(w.clone()), params.name.clone(), workspace_env.clone()));
 
+    logger.debug(format!("{} -> Get Dialect", name).as_str());
     let dialect = get_dialect();
     let ast = AstModule::parse(params.name.as_ref(), params.content.to_string(), &dialect)?;
     let evaluate_ast_result = evaluate_ast(
+        console,
         ast,
         params.clone(),
         workspace,
@@ -432,6 +462,7 @@ pub fn evaluate_module(
     {
         // Save module result for rules modules in Run/Inspect phases
         if let Some(ref result) = module_deps {
+            logger.debug(format!("{} -> Save deps", name).as_str());
             result.save_to_json().context(format_context!(
                 "Internal Error: Failed to save module deps for {}",
                 params.name.as_ref()
@@ -439,6 +470,7 @@ pub fn evaluate_module(
         }
 
         if let Some(ref target) = module_target {
+            logger.debug(format!("{} -> Save target", name).as_str());
             target.save_to_json().context(format_context!(
                 "Internal Error: Failed to save module target for {}",
                 params.name.as_ref()
@@ -446,6 +478,7 @@ pub fn evaluate_module(
         }
     }
 
+    logger.debug(format!("{} -> complete evaluate module", name).as_str());
     Ok(EvaluateModuleResult {
         frozen_module: module,
         module_deps,
@@ -533,6 +566,7 @@ fn try_evaluate_with_cache(
         &cache_targets,
         || {
             let result = evaluate_module(
+                console.clone(),
                 Some(workspace.clone()),
                 workspace_path.clone(),
                 params.clone(),
@@ -783,6 +817,7 @@ pub fn evaluate_starlark_modules(
     {
         eval_progress.set_message("env.spaces.star (first module)");
         let _ = evaluate_module(
+            console.clone(),
             Some(workspace.clone()),
             workspace_path.clone(),
             ModuleEvalParams {
@@ -836,6 +871,8 @@ pub fn evaluate_starlark_modules(
             };
 
             let handle = std::thread::spawn(move || -> anyhow::Result<()> {
+                let logger = star_logger(eval_console.clone());
+                logger.debug(format!("{eval_name} -> try_evaluate_with_cache").as_str());
                 try_evaluate_with_cache(
                     eval_console,
                     eval_workspace,
@@ -844,6 +881,7 @@ pub fn evaluate_starlark_modules(
                     eval_workspace_env_inner,
                 )
                 .with_context(|| format_context!("Failed to evaluate module {eval_name}"))?;
+                logger.debug(format!("{eval_name} -> try_evaluate_with_cache completed").as_str());
                 Ok(())
             });
 
@@ -851,6 +889,7 @@ pub fn evaluate_starlark_modules(
                 // Drain any already-finished handles before checking the limit.
 
                 let mut i = 0;
+                logger.debug(format!("start evaluation loop").as_str());
                 while i < eval_handles.len() {
                     if eval_handles[i].1.is_finished() {
                         let (n, h) = eval_handles.remove(i);
@@ -1517,13 +1556,21 @@ pub fn run_starlark_modules(
     Ok(())
 }
 
-pub fn run_starlark_script(name: Arc<str>, script: Arc<str>) -> anyhow::Result<()> {
+pub fn run_starlark_script(
+    console: console::Console,
+    name: Arc<str>,
+    script: Arc<str>,
+) -> anyhow::Result<()> {
+    let logger = star_logger(console.clone());
+    logger.debug("Entering run_starlark_script");
+
     // load SPACES_WORKSPACE from env
     let workspace = std::env::var(ws::SPACES_WORKSPACE_ENV_VAR)
         .unwrap_or(".".to_string())
         .into();
 
     let _ = evaluate_module(
+        console,
         None,
         workspace,
         ModuleEvalParams {

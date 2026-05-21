@@ -139,6 +139,7 @@ impl SpacesContext {
 
         let workspace_env = Arc::new(self.workspace.read().get_env_vars().unwrap_or_default());
         let result = evaluator::evaluate_module(
+            console,
             None,
             workspace_path,
             evaluator::ModuleEvalParams {
@@ -276,7 +277,9 @@ impl SpacesContext {
         ));
 
         eprintln!("run: evaluate_ast => {name}");
+        let console = console::Console::new_null();
         let eval_result = evaluator::evaluate_ast(
+            console,
             ast.clone(),
             evaluator::ModuleEvalParams {
                 globals_config: evaluator::GlobalsConfig::All,

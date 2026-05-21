@@ -88,7 +88,9 @@ pub fn execute() -> anyhow::Result<()> {
             let mut stdin_contents = String::new();
             use std::io::Read;
             std::io::stdin().read_to_string(&mut stdin_contents)?;
+            let console = console::Console::new_stdout(console::Verbosity::default())?;
             evaluator::run_starlark_script(
+                console,
                 workspace::SPACES_STDIN_NAME.into(),
                 stdin_contents.into(),
             )
@@ -109,7 +111,8 @@ pub fn execute() -> anyhow::Result<()> {
 
             let input_contents = std::fs::read_to_string(input)
                 .context(format_context!("Failed to read input file {input:?}"))?;
-            evaluator::run_starlark_script(filename.clone(), input_contents.into())
+            let console = console::Console::new_stdout(console::Verbosity::default())?;
+            evaluator::run_starlark_script(console, filename.clone(), input_contents.into())
                 .context(format_context!("Failed to run starlark script {filename}"))?;
 
             let exit_code = starstd::script::get_exit_code();
