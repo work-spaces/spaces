@@ -131,18 +131,16 @@ impl Exec {
         use_workspace_env: UseWorkspaceEnv,
     ) -> anyhow::Result<()> {
         let mut arguments = self.args.clone().unwrap_or_default();
-        let all_env_vars = workspace
-            .read()
-            .get_env_vars()
-            .context(format_context!("while getting env vars"))?;
+        let all_env_vars = workspace.read().get_frozen_env_vars();
 
         let mut exec_env_vars: HashMap<Arc<str>, Arc<str>> =
             if use_workspace_env == UseWorkspaceEnv::Yes {
-                all_env_vars
+                all_env_vars.as_ref().clone()
             } else {
                 all_env_vars
-                    .into_iter()
+                    .iter()
                     .filter(|(key, _)| key.as_ref() == "PATH")
+                    .map(|(k, v)| (k.clone(), v.clone()))
                     .collect()
             };
 

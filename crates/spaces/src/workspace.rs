@@ -293,6 +293,7 @@ pub struct Workspace {
     pub minimum_version: semver::Version,
     pub store: store::Store,
     pub features: features::Features,
+    env_vars: Arc<HashMap<Arc<str>, Arc<str>>>,
 }
 
 impl Workspace {
@@ -866,6 +867,7 @@ impl Workspace {
             is_any_digest_updated: false,
             store,
             features,
+            env_vars: Arc::new(HashMap::new()),
         })
     }
 
@@ -1018,6 +1020,18 @@ impl Workspace {
         }
 
         Ok(env_vars)
+    }
+
+    pub fn evaluate_env_vars(&mut self) -> anyhow::Result<()> {
+        let env_vars = self
+            .get_env_vars()
+            .context(format_context!("While evaluating env vars"))?;
+        self.env_vars = Arc::new(env_vars);
+        Ok(())
+    }
+
+    pub fn get_frozen_env_vars(&self) -> Arc<HashMap<Arc<str>, Arc<str>>> {
+        self.env_vars.clone()
     }
 
     pub fn get_secret_values(&self) -> anyhow::Result<Vec<Arc<str>>> {
