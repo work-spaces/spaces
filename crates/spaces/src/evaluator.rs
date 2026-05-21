@@ -773,7 +773,7 @@ pub fn evaluate_starlark_modules(
         workspace_write
             .evaluate_env_vars()
             .context(format_context!("evaluating env vars"))?;
-        Arc::new(workspace_write.env_vars.clone())
+        workspace_write.get_frozen_env_vars()
     };
 
     // first module is the env module. It is always evaluated first.
@@ -811,7 +811,7 @@ pub fn evaluate_starlark_modules(
         workspace_write
             .evaluate_env_vars()
             .context(format_context!("evaluating env vars"))?;
-        Arc::new(workspace_write.env_vars.clone())
+        workspace_write.get_frozen_env_vars()
     };
 
     let mut progress = None;
@@ -937,7 +937,7 @@ pub fn evaluate_starlark_modules(
                         .evaluate_env_vars()
                         .context(format_context!("evaluating env vars"))?;
 
-                    eval_workspace_env = Arc::new(workspace_write.env_vars.clone());
+                    eval_workspace_env = workspace_write.get_frozen_env_vars();
                 }
 
                 if !task_result.new_modules.is_empty() {

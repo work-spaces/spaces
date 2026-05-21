@@ -139,7 +139,7 @@ impl SpacesContext {
         let content =
             fs::read_to_string(path).context(format_context!("Failed to read {path:?}"))?;
 
-        let workspace_env = Arc::new(self.workspace.read().env_vars.clone());
+        let workspace_env = self.workspace.read().get_frozen_env_vars();
         let result = evaluator::evaluate_module(
             None,
             workspace_path,
@@ -270,7 +270,7 @@ impl SpacesContext {
         rules::register_module(name.into());
         eprintln!("run: {name}");
 
-        let workspace_env = Arc::new(self.workspace.read().env_vars.clone());
+        let workspace_env = self.workspace.read().get_frozen_env_vars();
         let eval_context = Some(EvalContext::new(
             Some(self.workspace.clone()),
             name.into(),

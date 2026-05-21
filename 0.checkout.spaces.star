@@ -4,7 +4,7 @@ Load the spaces starlark SDK and packages repositories.
 
 workspace.set_locks(locks = {
     "@star/sdk": "v0.3.31",
-    "@star/packages": "v0.2.49",
+    "@star/packages": "5f8fdb5882ac36e8883145067693c12acbd03399",
 })
 
 # Ensure tools checked out to sysroot/bin are available
