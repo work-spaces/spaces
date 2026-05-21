@@ -351,12 +351,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// * `str`: The absolute path to the workspace.
     fn get_absolute_path(eval: &mut Evaluator) -> anyhow::Result<String> {
         let ctx = get_eval_context(eval)?;
-        let workspace_arc = ctx
-            .workspace
-            .clone()
-            .ok_or_else(|| format_error!("No active workspace found"))?;
-        let workspace = workspace_arc.read();
-        Ok(workspace.absolute_path.clone().to_string())
+        Ok(ctx.workspace_absolute_path.to_string())
     }
 
     /// Returns the repository path in the workspace of the calling script.
