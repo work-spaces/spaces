@@ -512,7 +512,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             workspace_arc,
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
-            &ctx,
+            ctx,
         )
         .context(format_context!("Failed to add archive"))?;
 
@@ -754,7 +754,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             workspace_arc,
             &ctx.module_name,
             ctx.default_module_visibility.clone(),
-            &ctx,
+            ctx,
         )
         .context(format_context!("Failed to add archive"))?;
         Ok(NoneType)
