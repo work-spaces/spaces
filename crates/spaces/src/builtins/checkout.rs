@@ -265,7 +265,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             ""
         };
 
-        if ctx.is_checkout {
+        if ctx.is_checkout || ctx.is_sync {
             add_git_url_to_workspace_store_queue(workspace_arc.clone(), url.as_ref(), store_prefix)
                 .context(format_context!("during checkout add repo"))?;
         }
@@ -1129,7 +1129,7 @@ fn add_http_archive(
             archive.globs = None;
         }
 
-        if eval_context.is_checkout {
+        if eval_context.is_checkout || eval_context.is_sync {
             add_http_url_to_workspace_store_queue(
                 workspace_arc.clone(),
                 archive.url.as_ref(),
