@@ -377,11 +377,12 @@ impl Git {
 
         let mut clone_arguments: Vec<Arc<str>> = vec!["clone".into()];
 
-        if workspace
+        let is_clone_with_commit_graph = workspace
             .read()
             .features
-            .is_enabled(features::Feature::CloneWithoutCommitGraph)
-        {
+            .is_enabled(features::Feature::CloneWithCommitGraph);
+
+        if !is_clone_with_commit_graph {
             clone_arguments.extend(vec![
                 "-c".into(),
                 "core.commitGraph=false".into(),
