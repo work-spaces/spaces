@@ -58,7 +58,7 @@ impl Feature {
                 This disables legacy script calls."
             }
             Feature::CloneWithoutCommitGraph => {
-                r"Deprecated: use `CloneWithCommitGraph` instead.
+                r"Deprecated: use `clone-with-commit-graph` instead.
                 Default behavior is to clone without the commit graph."
             }
             Feature::AllowShellConfig => {
@@ -66,10 +66,10 @@ impl Feature {
             }
             Feature::EnableAllBuiltins => {
                 r"Enable all built-in Starlark functions.
-                This is only usefulf for generating documentation"
+                This is only useful for generating documentation"
             }
             Feature::CloneWithCommitGraph => {
-                r"Clone repositories and fetch the full commit graph (enables git log and blame).
+                r"Clone repositories and fetch the full commit graph.
                 This can cause errors with some versions of git."
             }
         }
