@@ -31,6 +31,7 @@ pub enum Feature {
     CloneWithoutCommitGraph,
     AllowShellConfig,
     EnableAllBuiltins,
+    CloneWithCommitGraph,
 }
 
 impl Feature {
@@ -41,6 +42,37 @@ impl Feature {
 
     pub fn into_kebab_case(self) -> Arc<str> {
         self.to_string().replace("_", "-").into()
+    }
+
+    /// Returns a human-readable description of this feature.
+    pub fn description(self) -> &'static str {
+        match self {
+            Feature::ModuleCache => {
+                r"Cache compiled Starlark modules between runs to speed up repeated evaluations."
+            }
+            Feature::DeprecationWarnings => {
+                r"Emit warnings when deprecated APIs or features are used."
+            }
+            Feature::RulesOnlyStarlark => {
+                r"Restrict Starlark evaluation to rules-only mode.
+                This disables legacy script calls."
+            }
+            Feature::CloneWithoutCommitGraph => {
+                r"Deprecated: use `clone-with-commit-graph` instead.
+                Default behavior is to clone without the commit graph."
+            }
+            Feature::AllowShellConfig => {
+                r"Use shell config from the $HOME directory when running `spaces shell`."
+            }
+            Feature::EnableAllBuiltins => {
+                r"Enable all built-in Starlark functions.
+                This is only useful for generating documentation"
+            }
+            Feature::CloneWithCommitGraph => {
+                r"Clone repositories and fetch the full commit graph.
+                This can cause errors with some versions of git."
+            }
+        }
     }
 }
 
@@ -230,6 +262,13 @@ impl FeaturesCommand {
                         "  {} - {} ({})\n",
                         feature_name, status_styled, source_styled
                     ))?;
+                    let description = feature
+                        .description()
+                        .lines()
+                        .map(str::trim)
+                        .collect::<Vec<_>>()
+                        .join("\n    ");
+                    console.raw(format!("    {}\n", description))?;
                 }
                 Ok(())
             }
