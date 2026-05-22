@@ -96,21 +96,33 @@ impl Manifest {
             .unwrap_or_else(|_| "github.com".to_string())
             .into();
 
+        let logout_cmd = format!("gh auth logout --hostname {host}");
+        let status_tip = if host.as_ref() == "github.com" {
+            "GitHub may be experiencing an outage. Check https://www.githubstatus.com".to_string()
+        } else {
+            format!("{host} may be experiencing an outage. Check with your administrator.")
+        };
+        let troubleshooting = format!(
+            "Troubleshooting:\n  - An expired {host} token can cause this error even though no token is required.\n    Run `{logout_cmd}` to remove it, then retry.\n  - {status_tip}"
+        );
+
         let options = console::ExecuteOptions {
             arguments: vec!["api".into(), format!("repos/{}/releases", repo).into()],
             is_return_stdout: true,
-            environment: vec![("GH_HOST".into(), host)],
+            environment: vec![("GH_HOST".into(), host.clone())],
             ..Default::default()
         };
 
-        progress_bar.set_message("getting latest version using gh");
+        progress_bar.set_message(format!("getting latest version from {host} using gh").as_str());
 
         let gh_command =
             ws::get_spaces_tools_path_to_sysroot_bin(self.path_to_store.as_ref()).join("gh");
 
         if let Some(stdout) = progress_bar
             .execute_process(gh_command.to_string_lossy().as_ref(), options)
-            .context(format_context!("Failed to execute gh api to get releases"))?
+            .context(format_context!(
+                "Failed to execute gh to get the latest releases.\n{troubleshooting}"
+            ))?
             .stdout
         {
             self.set_releases_from_gh_json(stdout.as_str())
@@ -119,7 +131,9 @@ impl Manifest {
                 .context(format_context!("Failed to save manifest from gh"))?;
             Ok(())
         } else {
-            Err(format_error!("Failed to fetch latest release"))
+            Err(format_error!(
+                "Failed to fetch latest release from {host} (no output from gh).\n{troubleshooting}"
+            ))
         }
     }
 
