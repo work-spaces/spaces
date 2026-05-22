@@ -65,7 +65,9 @@ pub fn get_dialect() -> Dialect {
 }
 
 pub fn get_globals(config: GlobalsConfig) -> GlobalsBuilder {
-    let mut builder = GlobalsBuilder::standard().with_namespace("info", builtins::info::globals);
+    let mut builder = GlobalsBuilder::standard()
+        .with_namespace("info", builtins::info::globals)
+        .with_namespace("semver", builtins::semver::globals);
 
     match config {
         GlobalsConfig::All => {
