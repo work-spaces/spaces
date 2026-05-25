@@ -441,7 +441,7 @@ impl Workspace {
         relative_invoked_path
     }
 
-    fn filter_predicate(workspace_path: &std::path::Path, entry: &walkdir::DirEntry) -> bool {
+    pub fn filter_predicate(workspace_path: &std::path::Path, entry: &walkdir::DirEntry) -> bool {
         if entry.path() == workspace_path {
             return true;
         }

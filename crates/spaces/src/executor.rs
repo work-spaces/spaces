@@ -93,20 +93,24 @@ impl Task {
 
                 // if the repo is a workflows repo, don't add the modules
                 if !workflows_file_path.exists() {
-                    // add files in the directory that end in spaces.star
-                    let modules = std::fs::read_dir(new_repo_path.clone()).context(
-                        format_context!("Failed to read workspace directory {new_repo_path:?}"),
-                    )?;
+                    // walkdir to find all spaces.star files recursively in the new repo
+                    let walkdir = walkdir::WalkDir::new(new_repo_path.clone())
+                        .into_iter()
+                        .filter_entry(|entry| {
+                            workspace::Workspace::filter_predicate(&new_repo_path, entry)
+                        });
 
-                    for module in modules.flatten() {
-                        let path = module.path();
-                        if path.is_file() {
-                            let path = path.to_string_lossy().to_string();
-                            if workspace::is_rules_module(path.as_str()) {
-                                let relative_workspace_path =
-                                    format!("{}/{}", last, module.file_name().to_string_lossy());
-                                result.new_modules.push(relative_workspace_path.into());
-                            }
+                    for entry in walkdir.flatten() {
+                        if !entry.file_type().is_file() {
+                            continue;
+                        }
+                        let entry_name = entry.file_name().to_string_lossy().to_string();
+                        if workspace::is_rules_module(entry_name.as_str()) {
+                            let stripped = entry
+                                .path()
+                                .strip_prefix(workspace_path)
+                                .unwrap_or(entry.path());
+                            result.new_modules.push(stripped.to_string_lossy().into());
                         }
                     }
                 }
