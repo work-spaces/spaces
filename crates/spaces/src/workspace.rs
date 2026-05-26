@@ -1038,6 +1038,10 @@ impl Workspace {
         self.env.get_secret_values()
     }
 
+    pub fn get_env(&self) -> &environment::AnyEnvironment {
+        &self.env
+    }
+
     pub fn get_env_mut(&mut self) -> &mut environment::AnyEnvironment {
         &mut self.env
     }

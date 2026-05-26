@@ -8,7 +8,9 @@ use starlark::eval::{Evaluator, ReturnFileLoader};
 use starlark::syntax::{AstModule, Dialect};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use utils::{features, inspect, labels, logger, mtarget, query, rcache, rule, targets, ws};
+use utils::{
+    environment, features, inspect, labels, logger, mtarget, query, rcache, rule, targets, ws,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GlobalsConfig {
@@ -1197,10 +1199,15 @@ fn execute_tasks(
                     })
                     .collect();
 
+                let (assign_from_arg_env, command_line_store) =
+                    collect_checkout_repro_args(&workspace);
+
                 inspect_options
                     .execute_inspect_checkout(
                         console.clone(),
                         inspect_checkout_git_rules.as_slice(),
+                        assign_from_arg_env.as_slice(),
+                        command_line_store.as_slice(),
                     )
                     .context(format_context!("while inspecting checkout rules"))?;
             } else {
@@ -1436,13 +1443,65 @@ fn build_query_context(
         None
     };
 
+    let (assign_from_arg_env, command_line_store) = collect_checkout_repro_args(&workspace);
+
     Ok(query::QueryContext {
         checkout_rules,
         run_rules,
         checkout_git_tasks,
+        assign_from_arg_env,
+        command_line_store,
         relative_invoked_path,
         graph,
     })
+}
+
+/// Extract the `--env=KEY=VALUE` and `--store=KEY=VALUE` arguments that were
+/// supplied on the original `spaces checkout` / `checkout-repo` / `co` command
+/// line so the `query checkout` subcommand can reproduce the workspace.
+///
+/// - `--env` args are stored as `Value::AssignFromArg` in the workspace env
+///   (saved to `env.spaces.star`).
+/// - `--store` args are stored under the synthetic `//` entry of the
+///   checkout store (saved to `.spaces/store.spaces.json`).
+type CheckoutReproArgs = Vec<(Arc<str>, Arc<str>)>;
+
+fn collect_checkout_repro_args(workspace: &WorkspaceArc) -> (CheckoutReproArgs, CheckoutReproArgs) {
+    let ws_read = workspace.read();
+
+    let mut assign_from_arg_env: Vec<(Arc<str>, Arc<str>)> = ws_read
+        .get_env()
+        .vars
+        .iter()
+        .filter_map(|var| match &var.value {
+            environment::Value::AssignFromArg(value) => Some((var.name.clone(), value.clone())),
+            _ => None,
+        })
+        .collect();
+    assign_from_arg_env.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut command_line_store: Vec<(Arc<str>, Arc<str>)> = ws_read
+        .settings
+        .checkout_store
+        .entries
+        .get("//" as &str)
+        .map(|entry| {
+            entry
+                .values
+                .iter()
+                .map(|(key, value)| {
+                    let value_str: Arc<str> = match value {
+                        serde_json::Value::String(s) => s.as_str().into(),
+                        other => other.to_string().into(),
+                    };
+                    (key.clone(), value_str)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    command_line_store.sort_by(|a, b| a.0.cmp(&b.0));
+
+    (assign_from_arg_env, command_line_store)
 }
 
 pub fn run_starlark_modules(
