@@ -197,6 +197,12 @@ pub struct QueryContext {
     pub run_rules: Vec<QueryRule>,
     /// Checkout-phase Git tasks, used by the `Checkout` subcommand.
     pub checkout_git_tasks: Vec<inspect::GitTask>,
+    /// Environment variables set via `--env=KEY=VALUE` during the original
+    /// checkout. Used by the `Checkout` subcommand to reproduce the workspace.
+    pub assign_from_arg_env: Vec<(Arc<str>, Arc<str>)>,
+    /// Store values set via `--store=KEY=VALUE` during the original checkout.
+    /// Used by the `Checkout` subcommand to reproduce the workspace.
+    pub command_line_store: Vec<(Arc<str>, Arc<str>)>,
     /// Workspace-relative path where `spaces` was invoked; used to compute a
     /// default filter when none is supplied.
     pub relative_invoked_path: Arc<str>,
@@ -1048,7 +1054,12 @@ impl QueryCommand {
                     ..Default::default()
                 };
                 options
-                    .execute_inspect_checkout(console, ctx.checkout_git_tasks.as_slice())
+                    .execute_inspect_checkout(
+                        console,
+                        ctx.checkout_git_tasks.as_slice(),
+                        ctx.assign_from_arg_env.as_slice(),
+                        ctx.command_line_store.as_slice(),
+                    )
                     .context(format_context!("while printing checkout command"))
             }
 

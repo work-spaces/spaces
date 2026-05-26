@@ -34,6 +34,8 @@ impl Options {
         &self,
         console: console::Console,
         checkout_rules: &[GitTask],
+        assign_from_arg_env: &[(Arc<str>, Arc<str>)],
+        command_line_store: &[(Arc<str>, Arc<str>)],
     ) -> anyhow::Result<()> {
         let mut progress = console::Progress::new(console.clone(), "inspect-checkout", None, None);
         let mut locks = Vec::new();
@@ -85,6 +87,13 @@ impl Options {
                     command.push_str(&format!("  --lock={dir_name}={commit} \\"));
                 }
                 command.push('\n');
+            }
+
+            for (name, value) in assign_from_arg_env {
+                command.push_str(&format!("  --env={name}={value} \\\n"));
+            }
+            for (key, value) in command_line_store {
+                command.push_str(&format!("  --store={key}={value} \\\n"));
             }
 
             let workspace_name = workspace_name.replace("/", "-");
