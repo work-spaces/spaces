@@ -124,12 +124,75 @@ pub struct CheckoutArgs {
     pub lock: Vec<Arc<str>>,
 }
 
+fn build_checkout_command_docstring(
+    name: &str,
+    url: &str,
+    rev: &str,
+    rule_name: Option<&str>,
+    clone: git::Clone,
+    env: &[Arc<str>],
+    store: &[Arc<str>],
+    new_branch: &[Arc<str>],
+    lock: &[Arc<str>],
+    create_lock_file: bool,
+) -> String {
+    let mut command_parts: Vec<String> = vec![
+        format!("  --name={name}"),
+        format!("  --url={url}"),
+        format!("  --rev={rev}"),
+    ];
+
+    if let Some(rule_name) = rule_name {
+        command_parts.push(format!("  --rule-name={rule_name}"));
+    }
+
+    command_parts.push(format!("  --clone={clone}"));
+
+    for env_val in env {
+        command_parts.push(format!("  --env={env_val}"));
+    }
+
+    for store_val in store {
+        command_parts.push(format!("  --store={store_val}"));
+    }
+
+    for branch in new_branch {
+        command_parts.push(format!("  --new-branch={branch}"));
+    }
+
+    for lock_val in lock {
+        command_parts.push(format!("  --lock={lock_val}"));
+    }
+
+    if create_lock_file {
+        command_parts.push("  --create-lock-file".to_string());
+    }
+
+    format!(
+        "\"\"\"\nspaces checkout-repo \\\n{}\n\"\"\"\n",
+        command_parts.join(" \\\n")
+    )
+}
+
 pub fn checkout_repo(
     console: console::Console,
     name: Arc<str>,
     repo_args: CheckoutRepoArgs,
     args: CheckoutArgs,
 ) -> anyhow::Result<()> {
+    let command_docstring = build_checkout_command_docstring(
+        &name,
+        &repo_args.url,
+        &repo_args.rev,
+        repo_args.rule_name.as_deref(),
+        repo_args.clone.unwrap_or(git::Clone::Default),
+        &args.env,
+        &args.store,
+        &args.new_branch,
+        &args.lock,
+        args.create_lock_file,
+    );
+
     set_workspace_env(args.env).context(format_context!("While checking out repo"))?;
     set_workspace_store(args.store).context(format_context!("While checking out repo"))?;
     singleton::set_args_locks(args.lock).context(format_context!("While checking out repo"))?;
@@ -153,7 +216,7 @@ pub fn checkout_repo(
     let rev = &repo_args.rev;
 
     let script: Arc<str> = format!(
-        r#"
+        r#"{command_docstring}
 checkout.add_repo(
     rule = {{
         "name": "{repo_name}"
