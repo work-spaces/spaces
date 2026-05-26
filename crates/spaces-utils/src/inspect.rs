@@ -8,6 +8,35 @@ pub fn logger(console: console::Console) -> logger::Logger {
     logger::Logger::new(console, "inspect".into())
 }
 
+/// POSIX-shell quote a value so it can be safely interpolated into a generated
+/// command line. Values that only contain a conservative set of "safe"
+/// characters are returned unchanged; everything else is wrapped in single
+/// quotes (with any embedded single quotes escaped as `'\''`).
+fn shell_quote(value: &str) -> std::borrow::Cow<'_, str> {
+    let is_safe = !value.is_empty()
+        && value.bytes().all(|b| {
+            matches!(b,
+                b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9'
+                | b'_' | b'-' | b'.' | b'/' | b':' | b'=' | b'@' | b'+' | b','
+            )
+        });
+    if is_safe {
+        std::borrow::Cow::Borrowed(value)
+    } else {
+        let mut quoted = String::with_capacity(value.len() + 2);
+        quoted.push('\'');
+        for ch in value.chars() {
+            if ch == '\'' {
+                quoted.push_str("'\\''");
+            } else {
+                quoted.push(ch);
+            }
+        }
+        quoted.push('\'');
+        std::borrow::Cow::Owned(quoted)
+    }
+}
+
 #[derive(Debug)]
 pub struct GitTask {
     pub url: Arc<str>,
@@ -75,29 +104,38 @@ impl Options {
         if let Some((checkout_dir_name, url)) = checkout_repo {
             let mut workspace_name: String = String::from(checkout_dir_name.as_ref());
             let mut command = format!(
-                r#"spaces checkout-repo --url={url} \
-  --rule-name={checkout_dir_name} \
-"#
+                "spaces checkout-repo --url={url} \\\n  --rule-name={rule_name} \\\n",
+                url = shell_quote(&url),
+                rule_name = shell_quote(&checkout_dir_name),
             );
             for (dir_name, commit) in locks.iter() {
                 if dir_name == &checkout_dir_name {
-                    command.push_str(&format!("  --rev={commit} \\"));
+                    command.push_str(&format!("  --rev={} \\", shell_quote(commit)));
                     workspace_name.push_str(&format!("-{commit}"));
                 } else {
-                    command.push_str(&format!("  --lock={dir_name}={commit} \\"));
+                    command.push_str(&format!(
+                        "  --lock={} \\",
+                        shell_quote(&format!("{dir_name}={commit}"))
+                    ));
                 }
                 command.push('\n');
             }
 
             for (name, value) in assign_from_arg_env {
-                command.push_str(&format!("  --env={name}={value} \\\n"));
+                command.push_str(&format!(
+                    "  --env={} \\\n",
+                    shell_quote(&format!("{name}={value}"))
+                ));
             }
             for (key, value) in command_line_store {
-                command.push_str(&format!("  --store={key}={value} \\\n"));
+                command.push_str(&format!(
+                    "  --store={} \\\n",
+                    shell_quote(&format!("{key}={value}"))
+                ));
             }
 
             let workspace_name = workspace_name.replace("/", "-");
-            command.push_str(&format!("  --name={workspace_name}\n"));
+            command.push_str(&format!("  --name={}\n", shell_quote(&workspace_name)));
 
             console.raw("\n")?;
             console.raw(&command)?;
