@@ -693,8 +693,16 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for which asset rule"))?;
 
-        let any_assets: asset::AddAnyAssets = serde_json::from_value(assets.to_json_value()?)
-            .context(format_context!("Failed to parse add_any_assets arguments"))?;
+        let mut any_assets: asset::AddAnyAssets =
+            serde_json::from_value(assets.to_json_value()?)
+                .context(format_context!("Failed to parse add_any_assets arguments"))?;
+
+        let workspace_absolute_path = ctx.workspace.as_ref().map(|w| w.read().get_absolute_path());
+        sanitize_any_assets_paths(
+            &mut any_assets,
+            &ctx.module_name,
+            workspace_absolute_path.as_deref(),
+        );
 
         let rule_name = rule.name.clone();
         rules::insert_task_for_module(
@@ -884,9 +892,17 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
             .context(format_context!("bad options for update asset rule"))?;
         // support JSON, yaml, and toml
-        let update_asset: executor::asset::UpdateAsset =
+        let mut update_asset: executor::asset::UpdateAsset =
             serde_json::from_value(asset.to_json_value()?)
                 .context(format_context!("Failed to parse update_asset arguments"))?;
+
+        let workspace_absolute_path = ctx.workspace.as_ref().map(|w| w.read().get_absolute_path());
+        update_asset.destination = sanitize_workspace_relative_path(
+            &update_asset.destination,
+            &ctx.module_name,
+            workspace_absolute_path.as_deref(),
+        )
+        .into();
 
         let rule_name = rule.name.clone();
         rules::insert_task_for_module(
@@ -1036,6 +1052,110 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         .context(format_context!("Failed to register rule {rule_name}"))?;
 
         Ok(NoneType)
+    }
+}
+
+/// Sanitizes a path that is expected to be relative to the workspace root.
+///
+/// - If the path begins with `//`, the prefix is stripped and the remainder is
+///   used verbatim as a workspace-relative path.
+/// - Otherwise, a deprecation warning is emitted to encourage migrating to the
+///   `//` prefix; the path is left unchanged so existing scripts continue to be
+///   interpreted relative to the workspace root. In a future version, paths
+///   without `//` will be interpreted relative to the spaces module file.
+/// - Absolute filesystem paths are passed through unchanged. If the absolute
+///   path is inside the workspace, a deprecation warning is emitted suggesting
+///   the `//` prefix instead; otherwise it is left alone without warning.
+fn sanitize_workspace_relative_path(
+    path: &str,
+    module_name: &Arc<str>,
+    workspace_absolute_path: Option<&str>,
+) -> String {
+    if let Some(stripped) = path.strip_prefix("//") {
+        return stripped.to_string();
+    }
+
+    if std::path::Path::new(path).is_absolute() {
+        if let Some(workspace_path) = workspace_absolute_path
+            && let Ok(relative) =
+                std::path::Path::new(path).strip_prefix(std::path::Path::new(workspace_path))
+        {
+            let relative = relative.to_string_lossy();
+            logger::push_deprecation_warning(
+                Some(module_name.clone()),
+                format!(
+                    "asset path `{path}` is inside the workspace; use `//{relative}` \
+                         to indicate a workspace-relative path instead of an absolute path."
+                ),
+            );
+        }
+        return path.to_string();
+    }
+
+    logger::push_deprecation_warning(
+        Some(module_name.clone()),
+        format!(
+            "asset path `{path}` should start with `//` to indicate the workspace root. \
+             In a future version, asset paths without `//` will be interpreted relative \
+             to the spaces module file."
+        ),
+    );
+
+    path.to_string()
+}
+
+fn sanitize_any_assets_paths(
+    any_assets: &mut asset::AddAnyAssets,
+    module_name: &Arc<str>,
+    workspace_absolute_path: Option<&str>,
+) {
+    for any in any_assets.any.iter_mut() {
+        match any {
+            asset::AnyAsset::SoftLink(link) => {
+                link.source = sanitize_workspace_relative_path(
+                    &link.source,
+                    module_name,
+                    workspace_absolute_path,
+                );
+                link.destination = sanitize_workspace_relative_path(
+                    &link.destination,
+                    module_name,
+                    workspace_absolute_path,
+                );
+            }
+            asset::AnyAsset::Asset(add_asset) => {
+                add_asset.destination = sanitize_workspace_relative_path(
+                    &add_asset.destination,
+                    module_name,
+                    workspace_absolute_path,
+                )
+                .into();
+            }
+            asset::AnyAsset::HardLink(link) => {
+                link.source = sanitize_workspace_relative_path(
+                    &link.source,
+                    module_name,
+                    workspace_absolute_path,
+                );
+                link.destination = sanitize_workspace_relative_path(
+                    &link.destination,
+                    module_name,
+                    workspace_absolute_path,
+                );
+            }
+            asset::AnyAsset::Which(which_asset) => {
+                // `which` is an executable name, not a workspace-relative path;
+                // only the destination is sanitized.
+                which_asset.destination = sanitize_workspace_relative_path(
+                    &which_asset.destination,
+                    module_name,
+                    workspace_absolute_path,
+                );
+            }
+            asset::AnyAsset::Home(_) => {
+                // `source` is interpreted relative to $HOME, not the workspace.
+            }
+        }
     }
 }
 
