@@ -163,6 +163,7 @@ impl Git {
                         "fetch".into(),
                         "--all".into(),
                         "--tags".into(),
+                        "--force".into(),
                         "--prune".into(),
                     ],
                     ..Default::default()
