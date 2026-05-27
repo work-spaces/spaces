@@ -9,10 +9,19 @@ workspace.set_locks(locks = {
 
 # Ensure tools checked out to sysroot/bin are available
 # during checkout_add_exec() calls
-checkout.update_env(
+checkout.add_env_vars(
     rule = {"name": "sysroot_env_path"},
-    env = {
-        "paths": ["{}/sysroot/bin".format(workspace.get_absolute_path())],
+    any_env = {
+        "vars": [{
+            "name": "PATH",
+            "help": "Add sysroot/bin to the PATH",
+            "value": {
+                "Append": {
+                    "value": "{}/sysroot/bin".format(workspace.get_absolute_path()),
+                    "separator": ":",
+                },
+            },
+        }],
     },
 )
 
