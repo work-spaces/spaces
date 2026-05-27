@@ -103,19 +103,6 @@ fn save_artifact_to_cache(
                 path_in_cache.display()
             )
         })?;
-
-        let artifact_metadata = std::fs::metadata(artifact_path)
-            .with_context(|| format_context!("Failed to get metadata for {artifact_path:?}"))?;
-
-        // Update the metadata to be read-only
-        let mut read_write_permissions = artifact_metadata.permissions();
-
-        read_write_permissions.set_readonly(true);
-
-        // Set the permissions to read-write
-        std::fs::set_permissions(artifact_path, read_write_permissions).context(
-            format_context!("Failed to set permissions for {}", artifact_path.display()),
-        )?;
     }
 
     Ok(artifact_hash.into())
@@ -161,7 +148,7 @@ impl CachedTarget {
         }
 
         let path_in_cache = get_artifact_cache_path(path_to_cache, &self.path_in_cache);
-        std::fs::hard_link(&path_in_cache, path_in_workspace).with_context(|| {
+        reflink_copy::reflink_or_copy(&path_in_cache, path_in_workspace).with_context(|| {
             format_context!(
                 "Failed to restore artifact to workspace at {} from {}",
                 path_in_workspace.display(),

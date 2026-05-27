@@ -33,6 +33,15 @@ GLOB_DEPS = glob(includes = [
 ])
 
 run_add_exec(
+    "rustup_update",
+    command = "rustup",
+    args = ["update", "--no-self-update"],
+    deps = deps(files = ["//spaces/rust-toolchain.toml"]),
+    help = "Update the Rust toolchain via rustup",
+    visibility = visibility_private(),
+)
+
+run_add_exec(
     "check",
     command = "cargo",
     args = ["check"],
@@ -115,15 +124,6 @@ if workspace_is_env_var_set(SPACES_INSTALL_ROOT):
     root = workspace_get_env_var(SPACES_INSTALL_ROOT)
 else:
     root = "{}/.local".format(workspace_get_env_var("HOME"))
-
-run_add_exec(
-    "rustup_update",
-    command = "rustup",
-    args = ["update"],
-    deps = deps(files = ["//spaces/rust-toolchain.toml"]),
-    help = "Update the Rust toolchain via rustup",
-    visibility = visibility_private(),
-)
 
 run_add_exec(
     "wait",
