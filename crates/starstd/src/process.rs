@@ -107,8 +107,9 @@ fn execute_run(opts: RunOptions) -> anyhow::Result<RunOutcome> {
 
     let mut capture_stdout = false;
     let mut capture_stderr = false;
-    // Keep the stdout file handle around so stderr="merge" can clone it (2>&1 style).
-    let mut stdout_file: Option<std::fs::File> = None;
+    // Only keep a cloned stdout file handle around when stderr="merge" needs it (2>&1 style).
+    let stderr_is_merge = matches!(&stderr_spec, StderrSpec::Mode(m) if m == "merge");
+    let mut stdout_file = None;
 
     match stdout_spec {
         StdoutSpec::Mode(mode) => match mode.as_str() {
@@ -127,11 +128,13 @@ fn execute_run(opts: RunOptions) -> anyhow::Result<RunOutcome> {
         StdoutSpec::File { file } => {
             let file_handle = std::fs::File::create(&file)
                 .context(format_context!("failed to open stdout file: {file}"))?;
-            let dup = file_handle.try_clone().context(format_context!(
-                "failed to clone stdout file handle: {file}"
-            ))?;
+            if stderr_is_merge {
+                let dup = file_handle.try_clone().context(format_context!(
+                    "failed to clone stdout file handle: {file}"
+                ))?;
+                stdout_file = Some(dup);
+            }
             cmd.stdout(Stdio::from(file_handle));
-            stdout_file = Some(dup);
         }
     }
 
