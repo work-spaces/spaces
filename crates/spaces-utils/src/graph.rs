@@ -222,12 +222,10 @@ impl Graph {
         if extras.is_empty() {
             format!("  cycle: {cycle_str}")
         } else {
-            let mut involved: Vec<String> = scc.iter().map(|idx| name_of(*idx)).collect();
-            involved.sort();
             extras.sort();
             format!(
-                "  cycle: {cycle_str}\n  involved rules: {}",
-                involved.join(", ")
+                "  cycle: {cycle_str}\n  also in the same component: {}",
+                extras.join(", ")
             )
         }
     }
