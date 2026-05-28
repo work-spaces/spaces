@@ -85,9 +85,8 @@ impl Graph {
     ) -> anyhow::Result<Vec<petgraph::prelude::NodeIndex>> {
         let mut topo_tasks =
             petgraph::algo::toposort(&self.directed_graph, None).map_err(|err| {
-                // get the name of the node
-                let name = self.directed_graph[err.node_id()].clone();
-                format_error!("Found a circular dependency involving {name}")
+                let description = self.describe_cycle(err.node_id());
+                format_error!("Found a circular dependency:\n{description}")
             })?;
 
         let sorted_tasks = if let Some(target) = target {
@@ -128,6 +127,107 @@ impl Graph {
             .get(rule_name)
             .copied()
             .ok_or_else(|| format_error!("Rule not found: {}", rule_name))
+    }
+
+    /// Given a node known to participate in a cycle, return a human-readable
+    /// description of the cycle, e.g. "a -> b -> c -> a", along with the full
+    /// set of rules in the same strongly-connected component.
+    fn describe_cycle(&self, seed: petgraph::prelude::NodeIndex) -> String {
+        use petgraph::prelude::NodeIndex;
+        use rustc_hash::FxHashSet;
+
+        let name_of = |idx: NodeIndex| self.directed_graph[idx].to_string();
+
+        // Find the strongly-connected component containing `seed`. All nodes
+        // mutually reachable from `seed` participate in a cycle with it.
+        let sccs = petgraph::algo::tarjan_scc(&self.directed_graph);
+        let scc = sccs
+            .into_iter()
+            .find(|component| component.contains(&seed))
+            .unwrap_or_else(|| vec![seed]);
+        let scc_set: FxHashSet<NodeIndex> = scc.iter().copied().collect();
+
+        // Handle the self-loop case explicitly.
+        if scc.len() == 1 {
+            let name = name_of(seed);
+            return format!("  cycle: {name} -> {name}");
+        }
+
+        // Walk the SCC depth-first starting from `seed` until we revisit a
+        // node already on the current path. That closes a concrete cycle.
+        let mut path: Vec<NodeIndex> = Vec::new();
+        let mut on_path: FxHashSet<NodeIndex> = FxHashSet::default();
+        let mut stack: Vec<(NodeIndex, Vec<NodeIndex>)> = vec![(
+            seed,
+            self.directed_graph
+                .neighbors(seed)
+                .filter(|n| scc_set.contains(n))
+                .collect(),
+        )];
+        path.push(seed);
+        on_path.insert(seed);
+
+        let mut cycle: Vec<NodeIndex> = Vec::new();
+        'dfs: while let Some((_node, neighbors)) = stack.last_mut() {
+            if let Some(next) = neighbors.pop() {
+                if on_path.contains(&next) {
+                    // Cycle closed: take the slice of the path from `next`
+                    // onward, then append `next` again to make the loop
+                    // visually explicit.
+                    let start = path.iter().position(|n| *n == next).unwrap();
+                    cycle.extend_from_slice(&path[start..]);
+                    cycle.push(next);
+                    break 'dfs;
+                }
+                path.push(next);
+                on_path.insert(next);
+                stack.push((
+                    next,
+                    self.directed_graph
+                        .neighbors(next)
+                        .filter(|n| scc_set.contains(n))
+                        .collect(),
+                ));
+            } else {
+                let popped = path.pop().expect("path and stack stay in sync");
+                on_path.remove(&popped);
+                stack.pop();
+            }
+        }
+
+        // Fall back to listing the SCC if no concrete cycle was extracted
+        // (shouldn't happen for a real SCC of size > 1, but stay defensive).
+        if cycle.is_empty() {
+            cycle = scc.clone();
+            if let Some(first) = cycle.first().copied() {
+                cycle.push(first);
+            }
+        }
+
+        let cycle_str = cycle
+            .iter()
+            .map(|idx| name_of(*idx))
+            .collect::<Vec<_>>()
+            .join(" -> ");
+
+        // If the SCC contains nodes outside the printed cycle, list them too
+        // so the user knows other rules are tangled in the same component.
+        let printed: FxHashSet<NodeIndex> = cycle.iter().copied().collect();
+        let mut extras: Vec<String> = scc
+            .iter()
+            .filter(|idx| !printed.contains(idx))
+            .map(|idx| name_of(*idx))
+            .collect();
+
+        if extras.is_empty() {
+            format!("  cycle: {cycle_str}")
+        } else {
+            extras.sort();
+            format!(
+                "  cycle: {cycle_str}\n  also in the same component: {}",
+                extras.join(", ")
+            )
+        }
     }
 
     /// Rebuilds the node index cache from the directed graph
@@ -218,6 +318,69 @@ mod tests {
         // find_node should use cache
         let found_idx = graph.find_node("task1").unwrap();
         assert_eq!(idx, found_idx);
+    }
+
+    #[test]
+    fn test_cycle_two_nodes() {
+        let mut graph = Graph::default();
+        graph.add_task("a".into());
+        graph.add_task("b".into());
+        graph.add_dependency("a", "b").unwrap();
+        graph.add_dependency("b", "a").unwrap();
+
+        let err = graph.get_sorted_tasks(None).unwrap_err().to_string();
+        assert!(err.contains("circular dependency"), "got: {err}");
+        assert!(err.contains("a") && err.contains("b"), "got: {err}");
+        // The cycle line should close on itself.
+        assert!(
+            err.contains("a -> b -> a") || err.contains("b -> a -> b"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_cycle_three_nodes() {
+        let mut graph = Graph::default();
+        graph.add_task("a".into());
+        graph.add_task("b".into());
+        graph.add_task("c".into());
+        graph.add_dependency("a", "b").unwrap();
+        graph.add_dependency("b", "c").unwrap();
+        graph.add_dependency("c", "a").unwrap();
+
+        let err = graph.get_sorted_tasks(None).unwrap_err().to_string();
+        // All three rules must appear and the cycle line must close.
+        for name in ["a", "b", "c"] {
+            assert!(err.contains(name), "missing {name}: {err}");
+        }
+        let rotations = ["a -> b -> c -> a", "b -> c -> a -> b", "c -> a -> b -> c"];
+        assert!(
+            rotations.iter().any(|r| err.contains(r)),
+            "expected one of {rotations:?} in: {err}"
+        );
+    }
+
+    #[test]
+    fn test_cycle_self_loop() {
+        let mut graph = Graph::default();
+        graph.add_task("a".into());
+        graph.add_dependency("a", "a").unwrap();
+
+        let err = graph.get_sorted_tasks(None).unwrap_err().to_string();
+        assert!(err.contains("a -> a"), "got: {err}");
+    }
+
+    #[test]
+    fn test_cycle_excludes_unrelated_rules() {
+        let mut graph = Graph::default();
+        graph.add_task("a".into());
+        graph.add_task("b".into());
+        graph.add_task("unrelated".into());
+        graph.add_dependency("a", "b").unwrap();
+        graph.add_dependency("b", "a").unwrap();
+
+        let err = graph.get_sorted_tasks(None).unwrap_err().to_string();
+        assert!(!err.contains("unrelated"), "got: {err}");
     }
 
     #[test]
