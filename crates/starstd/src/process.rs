@@ -107,6 +107,9 @@ fn execute_run(opts: RunOptions) -> anyhow::Result<RunOutcome> {
 
     let mut capture_stdout = false;
     let mut capture_stderr = false;
+    // Only keep a cloned stdout file handle around when stderr="merge" needs it (2>&1 style).
+    let stderr_is_merge = matches!(&stderr_spec, StderrSpec::Mode(m) if m == "merge");
+    let mut stdout_file = None;
 
     match stdout_spec {
         StdoutSpec::Mode(mode) => match mode.as_str() {
@@ -125,11 +128,19 @@ fn execute_run(opts: RunOptions) -> anyhow::Result<RunOutcome> {
         StdoutSpec::File { file } => {
             let file_handle = std::fs::File::create(&file)
                 .context(format_context!("failed to open stdout file: {file}"))?;
+            if stderr_is_merge {
+                let dup = file_handle.try_clone().context(format_context!(
+                    "failed to clone stdout file handle: {file}"
+                ))?;
+                stdout_file = Some(dup);
+            }
             cmd.stdout(Stdio::from(file_handle));
         }
     }
 
     // DEFECT 1 FIX: Added StderrSpec::File arm so stderr can be redirected to a file.
+    // When stderr is "merge" and stdout is targeting a file, redirect stderr to a clone
+    // of that same file (OS-level 2>&1) so stderr actually reaches the file.
     let merge_stderr_into_stdout = match stderr_spec {
         StderrSpec::Mode(mode) => match mode.as_str() {
             "inherit" => {
@@ -146,8 +157,13 @@ fn execute_run(opts: RunOptions) -> anyhow::Result<RunOutcome> {
                 false
             }
             "merge" => {
-                cmd.stderr(Stdio::piped());
-                true
+                if let Some(file) = stdout_file.take() {
+                    cmd.stderr(Stdio::from(file));
+                    false
+                } else {
+                    cmd.stderr(Stdio::piped());
+                    true
+                }
             }
             other => bail!("invalid stderr mode: {other}"),
         },
@@ -535,6 +551,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         )?;
 
         // For background jobs: default to inheriting stdout/stderr unless explicitly configured.
+        let mut stdout_file: Option<std::fs::File> = None;
         match opts
             .stdout
             .unwrap_or_else(|| StdoutSpec::Mode("inherit".to_string()))
@@ -554,7 +571,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             StdoutSpec::File { file } => {
                 let file_handle = std::fs::File::create(&file)
                     .context(format_context!("failed to open stdout file: {file}"))?;
+                let dup = file_handle.try_clone().context(format_context!(
+                    "failed to clone stdout file handle: {file}"
+                ))?;
                 cmd.stdout(Stdio::from(file_handle));
+                stdout_file = Some(dup);
             }
         }
 
@@ -578,9 +599,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                     cmd.stderr(Stdio::null());
                 }
                 "merge" => {
-                    // Pipe stderr so wait() can read and append it to stdout.
-                    cmd.stderr(Stdio::piped());
-                    merge_stderr = true;
+                    if let Some(file) = stdout_file.take() {
+                        // stdout is a file: send stderr to the same file (2>&1).
+                        cmd.stderr(Stdio::from(file));
+                    } else {
+                        // Pipe stderr so wait() can read and append it to stdout.
+                        cmd.stderr(Stdio::piped());
+                        merge_stderr = true;
+                    }
                 }
                 other => bail!("invalid stderr mode: {other}"),
             },
