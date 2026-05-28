@@ -314,8 +314,12 @@ pub fn execute_rule(
                     Some(Err(err)) => {
                         cache_status =
                             workspace::CacheStatus::Executed(effective_rule_digest.clone());
+                        // The rule actually ran (and failed) under rcache, so
+                        // did_complete must be true; otherwise the log file is
+                        // recorded as "<skipped>" and the failure suppression
+                        // logic in arguments.rs can't find the log to point at.
                         (
-                            false,
+                            true,
                             Err(err)
                                 .context(format_context!("[{rule_name}] while executing/caching")),
                         )
@@ -1218,9 +1222,10 @@ impl State {
                                 logs.push(log.file.clone());
                             }
                         }
-                        if !logs.is_empty() {
-                            singleton::set_rule_failure(logs);
-                        }
+                        // Always mark a rule failure (even with no logs) so the
+                        // top-level error handler knows to suppress the full
+                        // error chain backtrace.
+                        singleton::set_rule_failure(logs);
                         first_error = Some(format_error!("Rule failed: {err_message}"));
                     }
                 },

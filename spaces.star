@@ -35,7 +35,7 @@ GLOB_DEPS = glob(includes = [
 run_add_exec(
     "rustup_update",
     command = "rustup",
-    args = ["update", "--no-self-update"],
+    args = ["update"],
     deps = deps(files = ["//spaces/rust-toolchain.toml"]),
     help = "Update the Rust toolchain via rustup",
     visibility = visibility_private(),
