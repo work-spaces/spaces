@@ -32,12 +32,23 @@ GLOB_DEPS = glob(includes = [
     "//spaces/target/**",
 ])
 
+rustup_files = ["//spaces/rust-toolchain.toml"]
+
 run_add_exec(
     "rustup_update",
     command = "rustup",
     args = ["update"],
-    deps = deps(files = ["//spaces/rust-toolchain.toml"]),
+    deps = deps(files = rustup_files),
     help = "Update the Rust toolchain via rustup",
+    visibility = visibility_private(),
+)
+
+run_add_exec(
+    "cargo_tree",
+    command = "cargo",
+    args = ["tree"],
+    deps = deps(rules = [":rustup_update"], files = rustup_files),
+    help = "Run cargo tree. This is used to clean up the result of rustup update without any race conditions.",
     visibility = visibility_private(),
 )
 
@@ -46,7 +57,7 @@ run_add_exec(
     command = "cargo",
     args = ["check"],
     help = "Run cargo check on workspace",
-    deps = deps(rules = [":rustup_update"], globs = [GLOB_DEPS]),
+    deps = deps(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
     visibility = visibility_private(),
 )
 
@@ -55,7 +66,7 @@ run_add_exec(
     command = "cargo",
     args = ["build", "--target-dir=build/target"],
     deps = deps(
-        rules = [":rustup_update", ":check"],
+        rules = [":check"],
         globs = [GLOB_DEPS],
         files = [
             "{}/bin/cargo".format(workspace_get_env_var("CARGO_HOME")),
@@ -87,7 +98,7 @@ run_add_exec(
     command = "cargo",
     args = ["clippy"],
     log_level = "Passthrough",
-    deps = deps(rules = [":rustup_update"], globs = [GLOB_DEPS]),
+    deps = deps(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
     help = "Run cargo clippy on workspace",
     visibility = visibility_private(),
 )
@@ -97,7 +108,7 @@ run_add_exec(
     command = "cargo",
     args = ["fmt"],
     log_level = "Passthrough",
-    deps = deps(rules = [":rustup_update"], globs = [GLOB_DEPS]),
+    deps = deps(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
     help = "Run cargo fmt on workspace",
     visibility = visibility_private(),
 )
@@ -114,7 +125,7 @@ run_add_exec_test(
         "RUST_BACKTRACE": "1",
         "RUST_LOG": "trace",
     },
-    deps = deps(rules = [":rustup_update"], globs = [GLOB_DEPS]),
+    deps = deps(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
     visibility = visibility_rules(["//:test", "//spaces"]),
 )
 
@@ -137,7 +148,7 @@ run_add_exec(
     "install_dev",
     command = "bash",
     args = ["-c", "cargo install --force --path=spaces/crates/spaces --profile=dev --root={}".format(root)],
-    deps = [":rustup_update"],
+    deps = [":cargo_tree"],
     visibility = visibility_private(),
     help = "Install dev build on local system",
 )
@@ -145,14 +156,14 @@ run_add_exec(
 shell(
     "install_release",
     script = "cargo install --target-dir=build/target --force --path=spaces/crates/spaces --profile=release --root={}".format(root),
-    deps = [":rustup_update"],
+    deps = [":cargo_tree"],
     visibility = visibility_private(),
 )
 
 shell(
     "install_dev_lsp",
     script = "cargo install --target-dir=build/target --features=lsp-debug --force --path=spaces/crates/spaces --profile=dev --root={}".format(root),
-    deps = [":rustup_update"],
+    deps = [":cargo_tree"],
     visibility = visibility_private(),
 )
 
@@ -178,7 +189,7 @@ run_add_exec(
     "check_rust_fmt",
     command = "cargo",
     args = ["fmt", "--check"],
-    deps = [":rustup_update"],
+    deps = [":cargo_tree"],
     visibility = visibility_private(),
 )
 
@@ -210,7 +221,6 @@ run_add_exec(
     deps = [
         ":check_rust_fmt",
         ":check_starlark",
-        ":rustup_update",
         ":script_tests",
     ],
 )
