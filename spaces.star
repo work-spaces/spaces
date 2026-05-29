@@ -3,7 +3,7 @@ Spaces starlark checkout/run script to make changes to spaces, printer, and arch
 With VSCode/Zed integration
 """
 
-load("//@star/sdk/star/deps.star", "deps", "deps_run_once")
+load("//@star/sdk/star/deps.star", "deps")
 load("//@star/sdk/star/glob.star", "glob")
 load(
     "//@star/sdk/star/run.star",
