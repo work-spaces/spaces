@@ -48,7 +48,7 @@ run_add_exec(
     command = "cargo",
     args = ["tree"],
     deps = deps(rules = [":rustup_update"], files = rustup_files),
-    help = "Run cargo tree. This is used to cleanup the result of rustup update without any race conditions.",
+    help = "Run cargo tree. This is used to clean up the result of rustup update without any race conditions.",
     visibility = visibility_private(),
 )
 
@@ -221,7 +221,6 @@ run_add_exec(
     deps = [
         ":check_rust_fmt",
         ":check_starlark",
-        ":rustup_update",
         ":script_tests",
     ],
 )
