@@ -9,6 +9,7 @@ pub mod json;
 pub mod log;
 pub mod path;
 pub mod process;
+pub mod process_error;
 pub mod script;
 pub mod sh;
 pub mod string;

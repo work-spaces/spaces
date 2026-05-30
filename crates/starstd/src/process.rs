@@ -1,4 +1,5 @@
 use crate::is_lsp_mode;
+use crate::process_error::{format_command_line, format_failure, format_timeout};
 use anyhow::{Context, bail};
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
@@ -77,8 +78,14 @@ fn process_registry() -> &'static Mutex<HashMap<u64, ChildHandle>> {
     PROCESS_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Build a `Command` and run it, capturing/streaming output per `opts`.
 fn execute_run(opts: RunOptions) -> anyhow::Result<RunOutcome> {
     let started = Instant::now();
+
+    // Snapshot a human-readable rendering of the command for error messages,
+    // since `opts` will be partially consumed below.
+    let command_line = format_command_line(&opts.command, opts.args.as_deref());
+    let cwd_display = opts.cwd.clone();
 
     let mut cmd = Command::new(&opts.command);
 
@@ -201,7 +208,10 @@ fn execute_run(opts: RunOptions) -> anyhow::Result<RunOutcome> {
             if started.elapsed().as_millis() as u64 >= limit_ms {
                 let _ = child.kill();
                 let _ = child.wait();
-                bail!("process timed out after {limit_ms}ms");
+                bail!(
+                    "{}",
+                    format_timeout("process", &command_line, cwd_display.as_deref(), limit_ms)
+                );
             }
 
             std::thread::sleep(Duration::from_millis(10));
@@ -254,7 +264,19 @@ fn execute_run(opts: RunOptions) -> anyhow::Result<RunOutcome> {
     }
 
     if opts.check.unwrap_or(false) && status != 0 {
-        bail!("process exited with status {status}");
+        // Use the shared helper so process/shell failures share one format.
+        // When stderr was redirected (file/inherit/null) `stderr_text` is
+        // empty and the helper omits the `stderr:` section.
+        bail!(
+            "{}",
+            format_failure(
+                "process",
+                &command_line,
+                cwd_display.as_deref(),
+                status,
+                &stderr_text,
+            )
+        );
     }
 
     Ok(RunOutcome {

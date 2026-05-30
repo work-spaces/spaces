@@ -75,6 +75,7 @@
 //! - **No timeout** – use `process.run` (with `timeout_ms`) when you need one.
 
 use crate::is_lsp_mode;
+use crate::process_error::format_failure;
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use starlark::environment::GlobalsBuilder;
@@ -142,7 +143,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         if check && status != 0 {
             return Err(anyhow::anyhow!(
-                "Shell command failed with status {status}: {command}\nstderr:\n{stderr}"
+                "{}",
+                format_failure("shell command", command, cwd.as_deref(), status, &stderr)
             ))
             .context(format_context!(
                 "Shell command returned non-zero exit status"
@@ -214,7 +216,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         if check && status != 0 {
             return Err(anyhow::anyhow!(
-                "Shell command failed with status {status}: {command}\nstderr:\n{stderr}"
+                "{}",
+                format_failure("shell command", command, cwd.as_deref(), status, &stderr)
             ))
             .context(format_context!(
                 "Shell command returned non-zero exit status"
@@ -282,7 +285,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         if check && status != 0 {
             return Err(anyhow::anyhow!(
-                "Shell command failed with status {status}: {command}\nstderr:\n{stderr}"
+                "{}",
+                format_failure("shell command", command, cwd.as_deref(), status, &stderr)
             ))
             .context(format_context!(
                 "Shell command returned non-zero exit status"
