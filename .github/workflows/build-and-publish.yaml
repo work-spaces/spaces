@@ -1,13 +1,33 @@
 name: Build and Publish Binaries
 
 on:
-  push:
-    tags:
-      - "v*.*.*" # Trigger on version tags
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to build and upload binaries for (e.g. v1.2.3)"
+        required: true
+        type: string
 
 jobs:
+  check-release:
+    name: Verify Release Exists
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - name: Check that release ${{ inputs.tag }} exists
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! gh release view "${{ inputs.tag }}" --repo "${{ github.repository }}" > /dev/null 2>&1; then
+            echo "::error::Release '${{ inputs.tag }}' does not exist in ${{ github.repository }}. Create the release before running this workflow."
+            exit 1
+          fi
+          echo "Release '${{ inputs.tag }}' found."
+
   build-ubuntu:
     name: Build and Publish Ubuntu Binary
+    needs: check-release
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -17,6 +37,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
 
       - name: Set up Rust
         uses: actions-rs/toolchain@v1
@@ -37,18 +59,17 @@ jobs:
       - name: Create binary artifact
         run: |
           mkdir -p artifacts
-          (cd target/x86_64-unknown-linux-musl/release; zip ../../../artifacts/spaces-linux-x86_64-${{ github.ref_name }}.zip spaces)
+          (cd target/x86_64-unknown-linux-musl/release; zip ../../../artifacts/spaces-linux-x86_64-${{ inputs.tag }}.zip spaces)
 
       - name: Publish release with Ubuntu binary
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create ${{ github.ref_name }} \
-            artifacts/spaces-linux-x86_64-${{ github.ref_name }}.zip --title "${{ github.ref_name }}" --generate-notes
+          gh release upload ${{ inputs.tag }} artifacts/spaces-linux-x86_64-${{ inputs.tag }}.zip --clobber
 
   build-matrix-windows:
     name: Build and Upload Other OS Binaries
-    needs: build-ubuntu
+    needs: check-release
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write
@@ -61,6 +82,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
 
       - name: Set up Rust
         uses: actions-rs/toolchain@v1
@@ -77,18 +100,18 @@ jobs:
       - name: Create binary executable
         run: |
           mkdir -p artifacts
-          (cd target/${{ matrix.arch }}/release; 7z a -tzip ../../../artifacts/spaces-windows-x86_64-${{ github.ref_name }}.zip spaces.exe)
+          (cd target/${{ matrix.arch }}/release; 7z a -tzip ../../../artifacts/spaces-windows-x86_64-${{ inputs.tag }}.zip spaces.exe)
         shell: bash
 
       - name: Upload binary to release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh.exe release upload ${{ github.ref_name }} artifacts/spaces-windows-x86_64-${{ github.ref_name }}.zip --clobber
+          gh.exe release upload ${{ inputs.tag }} artifacts/spaces-windows-x86_64-${{ inputs.tag }}.zip --clobber
 
   build-matrix-macos:
     name: Build and Upload Other OS Binaries
-    needs: build-ubuntu
+    needs: check-release
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write
@@ -101,6 +124,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
 
       - name: Set up Rust
         uses: actions-rs/toolchain@v1
@@ -117,19 +142,19 @@ jobs:
       - name: Create binary artifact (zip)
         run: |
           mkdir -p artifacts
-          (cd target/${{ matrix.arch }}-apple-darwin/release; zip ../../../artifacts/spaces-macos-${{ matrix.arch }}-${{ github.ref_name }}.zip spaces)
+          (cd target/${{ matrix.arch }}-apple-darwin/release; zip ../../../artifacts/spaces-macos-${{ matrix.arch }}-${{ inputs.tag }}.zip spaces)
         shell: bash
 
       - name: Upload binary to release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload ${{ github.ref_name }} \
-            artifacts/spaces-macos-${{ matrix.arch }}-${{ github.ref_name }}.zip --clobber
+          gh release upload ${{ inputs.tag }} \
+            artifacts/spaces-macos-${{ matrix.arch }}-${{ inputs.tag }}.zip --clobber
 
   build-linux-aarch64:
     name: Build and Upload Linux aarch64
-    needs: build-ubuntu
+    needs: check-release
     runs-on: ubuntu-22.04-arm
     permissions:
       contents: write
@@ -138,6 +163,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
 
       - name: Set up Rust
         uses: actions-rs/toolchain@v1
@@ -158,11 +185,11 @@ jobs:
       - name: Create binary artifact
         run: |
           mkdir -p artifacts
-          (cd target/aarch64-unknown-linux-musl/release; zip ../../../artifacts/spaces-linux-aarch64-${{ github.ref_name }}.zip spaces)
+          (cd target/aarch64-unknown-linux-musl/release; zip ../../../artifacts/spaces-linux-aarch64-${{ inputs.tag }}.zip spaces)
 
       - name: Upload binary to release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload ${{ github.ref_name }} \
-            artifacts/spaces-linux-aarch64-${{ github.ref_name }}.zip --clobber
+          gh release upload ${{ inputs.tag }} \
+            artifacts/spaces-linux-aarch64-${{ inputs.tag }}.zip --clobber
