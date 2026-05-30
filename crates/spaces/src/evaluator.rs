@@ -92,7 +92,7 @@ pub fn get_globals(config: GlobalsConfig) -> GlobalsBuilder {
                 .with_namespace("tmp", starstd::tmp::globals)
                 .with_namespace("toml", starstd::toml::globals)
                 .with_namespace("yaml", starstd::yaml::globals)
-                .with_namespace("rlog", builtins::log::globals)
+                .with_namespace("rlog", builtins::rlog::globals)
                 .with_namespace("workspace", builtins::workspace::globals)
                 .with_namespace("checkout", builtins::checkout::globals)
                 .with_namespace("run", builtins::run::globals);
@@ -120,7 +120,7 @@ pub fn get_globals(config: GlobalsConfig) -> GlobalsBuilder {
         }
         GlobalsConfig::Rules => {
             builder = builder
-                .with_namespace("rlog", builtins::log::globals)
+                .with_namespace("rlog", builtins::rlog::globals)
                 .with_namespace("workspace", builtins::workspace::globals)
                 .with_namespace("checkout", builtins::checkout::globals)
                 .with_namespace("run", builtins::run::globals);
@@ -128,7 +128,7 @@ pub fn get_globals(config: GlobalsConfig) -> GlobalsBuilder {
         GlobalsConfig::RulesLegacy => {
             builder = builder
                 .with(starstd::globals)
-                .with_namespace("rlog", builtins::log::globals)
+                .with_namespace("rlog", builtins::rlog::globals)
                 .with_namespace("fs", starstd::fs::globals)
                 .with_namespace("json", starstd::json::globals)
                 .with_namespace("hash", starstd::hash::globals)
