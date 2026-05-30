@@ -2,7 +2,7 @@ use crate::{singleton, task, workspace};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
-use utils::{mtarget, rule};
+use utils::{logger, mtarget, rule};
 
 /// Per-evaluation context passed to builtin functions via `eval.extra_mut`.
 ///
@@ -65,6 +65,12 @@ pub struct EvalContext {
     /// Stored to avoid repeated lock acquisitions and env var computation
     /// In checkout mode, this needs to be refreshed after each module's rules execute
     pub workspace_env_vars: Arc<HashMap<Arc<str>, Arc<str>>>,
+
+    /// Optional logger used by `log` builtins to emit messages on the active
+    /// console. Constructed when a `console::Console` is supplied to
+    /// `EvalContext::new`. When absent (e.g. LSP mode, scripts without a
+    /// console), `log` builtins are no-ops.
+    pub logger: Option<logger::Logger>,
 }
 
 // SAFETY: All fields are 'static (Arc, bool, enum, RefCell<Vec<...>>, Vec<...>) so EvalContext is 'static.
@@ -77,6 +83,7 @@ impl EvalContext {
         workspace: Option<workspace::WorkspaceArc>,
         module_name: Arc<str>,
         workspace_env: Arc<HashMap<Arc<str>, Arc<str>>>,
+        console: Option<console::Console>,
     ) -> Self {
         // Cache frequently-accessed workspace state to avoid lock contention
         let (
@@ -117,7 +124,7 @@ impl EvalContext {
 
         Self {
             workspace,
-            module_name,
+            module_name: module_name.clone(),
             default_module_visibility: rule::Visibility::Public,
             is_checkout: singleton::get_is_checkout(),
             is_sync: singleton::get_is_sync(),
@@ -134,6 +141,7 @@ impl EvalContext {
             workspace_short_digest: short_digest,
             workspace_is_reproducible: is_reproducible,
             workspace_env_vars: workspace_env,
+            logger: console.map(|c| logger::Logger::new(c, module_name)),
         }
     }
 

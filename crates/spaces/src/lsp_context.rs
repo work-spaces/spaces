@@ -150,6 +150,7 @@ impl SpacesContext {
                 checkout_state_digest: Arc::from(""),
             },
             workspace_env,
+            None,
         )?;
 
         Ok(result.frozen_module)
@@ -275,6 +276,7 @@ impl SpacesContext {
             Some(self.workspace.clone()),
             name.into(),
             workspace_env.clone(),
+            None,
         ));
 
         eprintln!("run: evaluate_ast => {name}");
@@ -290,6 +292,7 @@ impl SpacesContext {
             workspace_path.clone(),
             eval_context,
             workspace_env.clone(),
+            None,
         );
 
         eprintln!("run: {name} - got result");

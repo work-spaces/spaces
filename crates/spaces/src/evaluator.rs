@@ -92,6 +92,7 @@ pub fn get_globals(config: GlobalsConfig) -> GlobalsBuilder {
                 .with_namespace("tmp", starstd::tmp::globals)
                 .with_namespace("toml", starstd::toml::globals)
                 .with_namespace("yaml", starstd::yaml::globals)
+                .with_namespace("rlog", builtins::rlog::globals)
                 .with_namespace("workspace", builtins::workspace::globals)
                 .with_namespace("checkout", builtins::checkout::globals)
                 .with_namespace("run", builtins::run::globals);
@@ -119,6 +120,7 @@ pub fn get_globals(config: GlobalsConfig) -> GlobalsBuilder {
         }
         GlobalsConfig::Rules => {
             builder = builder
+                .with_namespace("rlog", builtins::rlog::globals)
                 .with_namespace("workspace", builtins::workspace::globals)
                 .with_namespace("checkout", builtins::checkout::globals)
                 .with_namespace("run", builtins::run::globals);
@@ -126,6 +128,7 @@ pub fn get_globals(config: GlobalsConfig) -> GlobalsBuilder {
         GlobalsConfig::RulesLegacy => {
             builder = builder
                 .with(starstd::globals)
+                .with_namespace("rlog", builtins::rlog::globals)
                 .with_namespace("fs", starstd::fs::globals)
                 .with_namespace("json", starstd::json::globals)
                 .with_namespace("hash", starstd::hash::globals)
@@ -212,6 +215,7 @@ pub fn evaluate_loads(
     workspace_path: Arc<str>,
     globals_config: GlobalsConfig,
     workspace_env: Arc<HashMap<Arc<str>, Arc<str>>>,
+    console: Option<console::Console>,
 ) -> starlark::Result<Vec<LoadResult>> {
     // We can get the loaded modules from `ast.loads`.
     // And ultimately produce a `loader` capable of giving those modules to Starlark.
@@ -248,6 +252,7 @@ pub fn evaluate_loads(
                 checkout_state_digest: Arc::from(""),
             },
             workspace_env.clone(),
+            console.clone(),
         )?;
         let frozen_module = result.frozen_module;
         let module_deps = result.module_deps;
@@ -269,6 +274,7 @@ pub fn evaluate_ast(
     workspace_path: Arc<str>,
     mut eval_context: Option<EvalContext>,
     workspace_env_vars: Arc<HashMap<Arc<str>, Arc<str>>>,
+    console: Option<console::Console>,
 ) -> starlark::Result<(
     FrozenModule,
     Option<mtarget::ModuleDeps>,
@@ -281,6 +287,7 @@ pub fn evaluate_ast(
         workspace_path.clone(),
         params.globals_config,
         workspace_env_vars,
+        console,
     )?;
 
     // Collect all load statements: direct loads (normalized) + transitive loads from children
@@ -397,6 +404,7 @@ pub fn evaluate_module(
     workspace_path: Arc<str>,
     params: ModuleEvalParams,
     workspace_env: Arc<HashMap<Arc<str>, Arc<str>>>,
+    console: Option<console::Console>,
 ) -> starlark::Result<EvaluateModuleResult> {
     // Register the module name so that the global task-graph machinery can
     // track which modules exist, without writing to `latest_starlark_module`
@@ -407,9 +415,14 @@ pub fn evaluate_module(
 
     // Build a per-evaluation context that builtins access via `eval.extra_mut`
     // instead of through the global singleton.
-    let eval_context = workspace
-        .as_ref()
-        .map(|w| EvalContext::new(Some(w.clone()), params.name.clone(), workspace_env.clone()));
+    let eval_context = workspace.as_ref().map(|w| {
+        EvalContext::new(
+            Some(w.clone()),
+            params.name.clone(),
+            workspace_env.clone(),
+            console.clone(),
+        )
+    });
 
     let dialect = get_dialect();
     let ast = AstModule::parse(params.name.as_ref(), params.content.to_string(), &dialect)?;
@@ -420,6 +433,7 @@ pub fn evaluate_module(
         workspace_path.clone(),
         eval_context,
         workspace_env,
+        console,
     );
 
     if evaluate_ast_result.is_err() {
@@ -496,9 +510,14 @@ fn try_evaluate_with_cache(
         || !is_module_caching_feature_enabled;
 
     if caching_not_allowed {
-        let _ = evaluate_module(Some(workspace), workspace_path, params, workspace_env).map_err(
-            |e| format_error!("Failed to evaluate module during checkout {:?} -> {e}", e),
-        )?;
+        let _ = evaluate_module(
+            Some(workspace),
+            workspace_path,
+            params,
+            workspace_env,
+            Some(console.clone()),
+        )
+        .map_err(|e| format_error!("Failed to evaluate module during checkout {:?} -> {e}", e))?;
         return Ok(());
     }
 
@@ -541,6 +560,7 @@ fn try_evaluate_with_cache(
                 workspace_path.clone(),
                 params.clone(),
                 workspace_env.clone(),
+                Some(console.clone()),
             )
             .map(|_| ());
             result.map_err(|e| format_error!("Failed to evaluate module {:?}", e))
@@ -798,6 +818,7 @@ pub fn evaluate_starlark_modules(
                 checkout_state_digest: Arc::from(""),
             },
             eval_workspace_env.clone(),
+            Some(console.clone()),
         )
         .map_err(|e| format_error!("Failed to evaluate module {:?}", e))?;
 
@@ -1605,6 +1626,7 @@ pub fn run_starlark_script(name: Arc<str>, script: Arc<str>) -> anyhow::Result<(
             checkout_state_digest: Arc::from(""),
         },
         Arc::new(HashMap::new()),
+        None,
     )
     .map_err(|e| format_error!("Failed to evaluate module {name}: {e}"))?;
 
