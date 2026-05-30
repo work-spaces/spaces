@@ -14,6 +14,7 @@ load("//@star/sdk/star/shell.star", "shell")
 load(
     "//@star/sdk/star/visibility.star",
     "visibility_private",
+    "visibility_public",
     "visibility_rules",
 )
 load(
@@ -157,7 +158,7 @@ shell(
     "install_release",
     script = "cargo install --target-dir=build/target --force --path=spaces/crates/spaces --profile=release --root={}".format(root),
     deps = [":cargo_tree"],
-    visibility = visibility_private(),
+    visibility = visibility_public(),
 )
 
 shell(
