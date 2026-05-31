@@ -679,6 +679,13 @@ impl Workspace {
             progress.set_total(Some(walkdir.len() as u64));
             settings.bin.star_files.clear();
             settings.json.scanned_modules.clear();
+            settings.bin.star_files.insert(
+                ws::CHECKOUT_STORE_FILE_NAME.into(),
+                ws::BinDetail {
+                    modified: None,
+                    ..Default::default()
+                },
+            );
             for entry in walkdir {
                 progress.increment(1);
                 if let Ok(entry) = entry {
