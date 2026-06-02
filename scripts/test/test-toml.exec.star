@@ -1,11 +1,11 @@
 #!/usr/bin/env spaces
 
 load(
-    "//@star/sdk/star/std/json.star",
+    "//@star/prelude/exec/json.star",
     "json_dumps",
 )
 load(
-    "//@star/sdk/star/std/toml.star",
+    "//@star/prelude/exec/toml.star",
     "toml_decode",
     "toml_encode",
     "toml_encode_compact",

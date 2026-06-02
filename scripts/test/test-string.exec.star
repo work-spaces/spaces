@@ -1,11 +1,11 @@
 #!/usr/bin/env spaces
 
 load(
-    "//@star/sdk/star/std/json.star",
+    "//@star/prelude/exec/json.star",
     "json_dumps",
 )
 load(
-    "//@star/sdk/star/std/string.star",
+    "//@star/prelude/exec/string.star",
     "string_camel_case",
     "string_contains",
     "string_ends_with",

@@ -1,7 +1,7 @@
 #!/usr/bin/env spaces
 
 load(
-    "//@star/sdk/star/std/env.star",
+    "//@star/prelude/exec/env.star",
     "env_all",
     "env_chdir",
     "env_cwd",
@@ -13,7 +13,7 @@ load(
     "env_which_all",
 )
 load(
-    "//@star/sdk/star/std/json.star",
+    "//@star/prelude/exec/json.star",
     "json_dumps",
 )
 

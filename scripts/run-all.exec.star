@@ -1,23 +1,23 @@
 #!/usr/bin/env spaces
 
 load(
-    "//@star/sdk/star/std/args.star",
+    "//@star/prelude/exec/args.star",
     "args_opt",
     "args_parse",
     "args_parser",
     "args_program",
 )
-load("//@star/sdk/star/std/fs.star", "fs_read_directory")
-load("//@star/sdk/star/std/log.star", "log_error", "log_info")
-load("//@star/sdk/star/std/path.star", "path_dirname", "path_join")
+load("//@star/prelude/exec/fs.star", "fs_read_directory")
+load("//@star/prelude/exec/log.star", "log_error", "log_info")
+load("//@star/prelude/exec/path.star", "path_dirname", "path_join")
 load(
-    "//@star/sdk/star/std/process.star",
+    "//@star/prelude/exec/process.star",
     "process_options",
     "process_run",
     "process_stderr_capture",
     "process_stdout_capture",
 )
-load("//@star/sdk/star/std/sys.star", "sys_exit")
+load("//@star/prelude/exec/sys.star", "sys_exit")
 
 parser = args_parser(
     name = "run-all",

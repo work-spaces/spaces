@@ -1,12 +1,12 @@
 #!/usr/bin/env spaces
 
-load("//@star/sdk/star/std/fs.star", "fs_exists", "fs_read_text", "fs_write_text")
+load("//@star/prelude/exec/fs.star", "fs_exists", "fs_read_text", "fs_write_text")
 load(
-    "//@star/sdk/star/std/json.star",
+    "//@star/prelude/exec/json.star",
     "json_dumps",
 )
 load(
-    "//@star/sdk/star/std/tmp.star",
+    "//@star/prelude/exec/tmp.star",
     "tmp_cleanup",
     "tmp_cleanup_all",
     "tmp_dir",

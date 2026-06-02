@@ -1,11 +1,11 @@
 #!/usr/bin/env spaces
 
 load(
-    "//@star/sdk/star/std/json.star",
+    "//@star/prelude/exec/json.star",
     "json_dumps",
 )
 load(
-    "//@star/sdk/star/std/sys.star",
+    "//@star/prelude/exec/sys.star",
     "sys_arch",
     "sys_cpu_count",
     "sys_endianness",

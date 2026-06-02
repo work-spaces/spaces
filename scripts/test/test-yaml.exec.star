@@ -1,16 +1,16 @@
 #!/usr/bin/env spaces
 
 load(
-    "//@star/sdk/star/std/fs.star",
+    "//@star/prelude/exec/fs.star",
     "fs_read_text",
     "fs_write_text",
 )
 load(
-    "//@star/sdk/star/std/json.star",
+    "//@star/prelude/exec/json.star",
     "json_dumps",
 )
 load(
-    "//@star/sdk/star/std/yaml.star",
+    "//@star/prelude/exec/yaml.star",
     "yaml_decode",
     "yaml_dumps",
     "yaml_encode",

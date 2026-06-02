@@ -1,6 +1,6 @@
 use crate::builtins::eval_context::EvalContext;
 use crate::workspace::WorkspaceArc;
-use crate::{builtins, executor, rules, singleton, task, workspace};
+use crate::{builtins, executor, prelude, rules, singleton, task, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use starlark::environment::{FrozenModule, GlobalsBuilder, Module};
@@ -208,6 +208,14 @@ pub struct LoadResult {
     pub module_deps: Option<mtarget::ModuleDeps>,
 }
 
+const EMBEDDED_PRELUDE_PREFIX: &str = "//@star/prelude/";
+
+fn embedded_prelude_relative_path(module_id: &str) -> Option<&str> {
+    module_id
+        .strip_prefix(EMBEDDED_PRELUDE_PREFIX)
+        .filter(|s| !s.is_empty())
+}
+
 pub fn evaluate_loads(
     ast: &AstModule,
     name: Arc<str>,
@@ -221,26 +229,74 @@ pub fn evaluate_loads(
     // And ultimately produce a `loader` capable of giving those modules to Starlark.
     let mut loads = Vec::new();
     for load in ast.loads() {
+        let embedded_rel = embedded_prelude_relative_path(load.module_id);
         let module_load_path =
             workspace::get_workspace_path(workspace_path.as_ref(), name.as_ref(), load.module_id);
         if module_load_path.ends_with(workspace::SPACES_MODULE_NAME) {
             return Err(format_error!("Error: Attempting to load module ending with `spaces.star` module. This is a reserved module name.").into());
         }
-        let contents = std::fs::read_to_string(module_load_path.as_ref()).map_err(|e| {
-            use starlark::{Error, ErrorKind};
-            Error::new_spanned(
-                ErrorKind::Fail(format_error!("Failed to load {module_load_path} -> {e}")),
-                load.span.span,
-                &load.span.file,
-            )
-        })?;
+
+        let contents: Arc<str> = match std::fs::read_to_string(module_load_path.as_ref()) {
+            Ok(contents) => contents.into(),
+            Err(disk_error) => {
+                if disk_error.kind() == std::io::ErrorKind::NotFound {
+                    if let Some(relative_path) = embedded_rel {
+                        match prelude::get_embedded_prelude_content(relative_path) {
+                            Ok(Some(embedded_contents)) => embedded_contents,
+                            Ok(None) => {
+                                use starlark::{Error, ErrorKind};
+                                return Err(Error::new_spanned(
+                                    ErrorKind::Fail(format_error!(
+                                        "Failed to load {module_load_path} from filesystem ({disk_error}), and embedded prelude file was not found: {relative_path}"
+                                    )),
+                                    load.span.span,
+                                    &load.span.file,
+                                ));
+                            }
+                            Err(embedded_error) => {
+                                use starlark::{Error, ErrorKind};
+                                return Err(Error::new_spanned(
+                                    ErrorKind::Fail(format_error!(
+                                        "Failed to load {module_load_path} from filesystem ({disk_error}), and embedded prelude lookup failed for {relative_path}: {embedded_error}"
+                                    )),
+                                    load.span.span,
+                                    &load.span.file,
+                                ));
+                            }
+                        }
+                    } else {
+                        use starlark::{Error, ErrorKind};
+                        return Err(Error::new_spanned(
+                            ErrorKind::Fail(format_error!(
+                                "Failed to load {module_load_path} -> {disk_error}"
+                            )),
+                            load.span.span,
+                            &load.span.file,
+                        ));
+                    }
+                } else {
+                    use starlark::{Error, ErrorKind};
+                    return Err(Error::new_spanned(
+                        ErrorKind::Fail(format_error!(
+                            "Failed to load {module_load_path} -> {disk_error}"
+                        )),
+                        load.span.span,
+                        &load.span.file,
+                    ));
+                }
+            }
+        };
 
         // Normalize the load path to workspace-relative format (no leading slashes)
-        let normalized_path: Arc<str> = module_load_path
-            .strip_prefix(workspace_path.as_ref())
-            .map(|p| p.trim_start_matches('/'))
-            .map(|p| p.into())
-            .unwrap_or_else(|| module_load_path.clone());
+        let normalized_path: Arc<str> = if let Some(relative_path) = embedded_rel {
+            format!("@star/prelude/{relative_path}").into()
+        } else {
+            module_load_path
+                .strip_prefix(workspace_path.as_ref())
+                .map(|p| p.trim_start_matches('/'))
+                .map(|p| p.into())
+                .unwrap_or_else(|| module_load_path.clone())
+        };
 
         let result = evaluate_module(
             workspace.clone(),
@@ -248,7 +304,7 @@ pub fn evaluate_loads(
             ModuleEvalParams {
                 globals_config,
                 name: normalized_path.clone(),
-                content: contents.into(),
+                content: contents,
                 checkout_state_digest: Arc::from(""),
             },
             workspace_env.clone(),
@@ -759,6 +815,9 @@ pub fn evaluate_starlark_modules(
 
     if phase == task::Phase::Checkout {
         workspace.write().clear_members();
+        prelude::generate_checkout_prelude(console.clone(), workspace.clone()).context(
+            format_context!("Failed to generate prelude checkout assets"),
+        )?;
     }
 
     let mut module_queue = std::collections::VecDeque::new();

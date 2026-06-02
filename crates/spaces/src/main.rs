@@ -10,6 +10,7 @@ mod evaluator;
 mod executor;
 mod label;
 mod lsp_context;
+mod prelude;
 mod rules;
 mod runner;
 mod singleton;
