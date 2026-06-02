@@ -1,7 +1,7 @@
 #!/usr/bin/env spaces
 
 load(
-    "//@star/sdk/star/std/fs.star",
+    "//@star/prelude/exec/fs.star",
     "fs_append_text",
     "fs_chmod",
     "fs_copy",
@@ -36,11 +36,11 @@ load(
     "fs_write_yaml",
 )
 load(
-    "//@star/sdk/star/std/json.star",
+    "//@star/prelude/exec/json.star",
     "json_dumps",
 )
 load(
-    "//@star/sdk/star/std/tmp.star",
+    "//@star/prelude/exec/tmp.star",
     "tmp_cleanup_all",
     "tmp_dir",
 )

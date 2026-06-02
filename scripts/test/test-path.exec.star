@@ -1,11 +1,11 @@
 #!/usr/bin/env spaces
 
 load(
-    "//@star/sdk/star/std/json.star",
+    "//@star/prelude/exec/json.star",
     "json_dumps",
 )
 load(
-    "//@star/sdk/star/std/path.star",
+    "//@star/prelude/exec/path.star",
     "path_absolute",
     "path_basename",
     "path_components",

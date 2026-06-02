@@ -1,11 +1,11 @@
 #!/usr/bin/env spaces
 
 load(
-    "//@star/sdk/star/std/json.star",
+    "//@star/prelude/exec/json.star",
     "json_dumps",
 )
 load(
-    "//@star/sdk/star/std/time.star",
+    "//@star/prelude/exec/time.star",
     "time_format_datetime",
     "time_monotonic",
     "time_now",

@@ -1,8 +1,8 @@
 #!/usr/bin/env spaces
 
-load("//@star/sdk/star/std/fs.star", "fs_write_text")
+load("//@star/prelude/exec/fs.star", "fs_write_text")
 load(
-    "//@star/sdk/star/std/hash.star",
+    "//@star/prelude/exec/hash.star",
     "hash_base64_decode",
     "hash_base64_encode",
     "hash_blake3",
@@ -23,14 +23,14 @@ load(
     "hash_sha512_file",
 )
 load(
-    "//@star/sdk/star/std/json.star",
+    "//@star/prelude/exec/json.star",
     "json_dumps",
 )
 load(
-    "//@star/sdk/star/std/sys.star",
+    "//@star/prelude/exec/sys.star",
     "sys_exit",
 )
-load("//@star/sdk/star/std/tmp.star", "tmp_cleanup", "tmp_file")
+load("//@star/prelude/exec/tmp.star", "tmp_cleanup", "tmp_file")
 
 # ============================================================================
 # Assertion helper

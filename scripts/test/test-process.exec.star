@@ -1,11 +1,11 @@
 #!/usr/bin/env spaces
 
 load(
-    "//@star/sdk/star/std/json.star",
+    "//@star/prelude/exec/json.star",
     "json_dumps",
 )
 load(
-    "//@star/sdk/star/std/process.star",
+    "//@star/prelude/exec/process.star",
     "process_capture",
     "process_is_running",
     "process_kill",

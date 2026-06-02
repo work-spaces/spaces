@@ -40,8 +40,9 @@ fn format_value(format: AssetFormat, value: &serde_json::Value) -> anyhow::Resul
     match format {
         AssetFormat::Json => serde_json::to_string_pretty(value)
             .context(format_context!("Failed to serialize asset file as JSON",)),
-        AssetFormat::Toml => toml::to_string_pretty(value)
-            .context(format_context!("Failed to serialize asset file as TOML",)),
+        AssetFormat::Toml => toml::to_string_pretty(value).context(format_context!(
+            "Failed to serialize asset file as TOML for {value:?}",
+        )),
         AssetFormat::Yaml => serde_yaml::to_string(value)
             .context(format_context!("Failed to serialize asset file as YAML",)),
     }

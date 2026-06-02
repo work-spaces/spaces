@@ -1,9 +1,9 @@
 #!/usr/bin/env spaces
 
-"""Tests for the @star/sdk/star/std/args.star module."""
+"""Tests for the @star/prelude/exec/args.star module."""
 
 load(
-    "//@star/sdk/star/std/args.star",
+    "//@star/prelude/exec/args.star",
     "args_argv",
     "args_flag",
     "args_list",
@@ -16,8 +16,7 @@ load(
 
 def assert_eq(actual, expected, label):
     """Fails with a descriptive message if actual != expected."""
-    if actual != expected:
-        fail("FAIL [{}]: expected {!r}, got {!r}".format(label, expected, actual))
+    assert_on(actual == expected, "FAIL [{}]: expected {!r}, got {!r}".format(label, expected, actual))
 
 def assert_true(condition, label):
     """Fails if condition is not truthy."""

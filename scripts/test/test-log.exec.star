@@ -1,11 +1,11 @@
 #!/usr/bin/env spaces
 
 load(
-    "//@star/sdk/star/std/json.star",
+    "//@star/prelude/exec/json.star",
     "json_dumps",
 )
 load(
-    "//@star/sdk/star/std/log.star",
+    "//@star/prelude/exec/log.star",
     "log_debug",
     "log_error",
     "log_fatal",
@@ -114,7 +114,7 @@ log_results["log_info_logging"]["log_info_works"] = True
 # log_fatal is NOT called here because it terminates execution.
 # To test it manually:
 #   echo '#!/usr/bin/env spaces
-#   load("//@star/sdk/star/std/log.star","log_fatal")
+#   load("//@star/prelude/exec/log.star","log_fatal")
 #   log_fatal("deliberate abort")' > /tmp/t.exec.star
 #   chmod +x /tmp/t.exec.star && /tmp/t.exec.star; echo "exit: $?"
 # Expected: ERROR line logged to stderr, non-zero exit code.

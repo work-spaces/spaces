@@ -1,18 +1,18 @@
 #!/usr/bin/env spaces
 
 load(
-    "//@star/sdk/star/std/fs.star",
+    "//@star/prelude/exec/fs.star",
     "fs_mkdir",
     "fs_remove",
     "fs_write_text",
 )
 load(
-    "//@star/sdk/star/std/json.star",
+    "//@star/prelude/exec/json.star",
     "json_dumps",
 )
-load("//@star/sdk/star/std/log.star", "log_info")
+load("//@star/prelude/exec/log.star", "log_info")
 load(
-    "//@star/sdk/star/std/text.star",
+    "//@star/prelude/exec/text.star",
     "text_dedent",
     "text_dedup_diagnostics",
     "text_diagnostic",
@@ -32,7 +32,7 @@ load(
     "text_tail",
 )
 load(
-    "//@star/sdk/star/std/tmp.star",
+    "//@star/prelude/exec/tmp.star",
     "tmp_dir",
 )
 

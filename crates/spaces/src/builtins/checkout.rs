@@ -126,9 +126,40 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// )
     /// ```
     ///
+    /// This function is deprecated in favor of [`checkout.add`].
+    ///
     /// # Arguments
     /// * `rule`: A `dict` containing the rule definition (e.g., `name`, `deps`, `platforms`, `type`, and `help`).
     fn add_target(
+        #[starlark(require = named)] rule: starlark::values::Value,
+        eval: &mut Evaluator,
+    ) -> anyhow::Result<NoneType> {
+        let ctx = get_eval_context_mut(eval)?;
+        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+            .context(format_context!("bad options for add target rule"))?;
+
+        let rule_name = rule.name.clone();
+        rules::insert_task_for_module(
+            task::Task::new(rule, task::Phase::Checkout, executor::Task::Target),
+            &ctx.module_name,
+            ctx.default_module_visibility.clone(),
+            Some(ctx),
+        )
+        .context(format_context!("Failed to register rule {rule_name}"))?;
+        Ok(NoneType)
+    }
+
+    /// Adds a rule to organize dependencies.
+    ///
+    /// ```python
+    /// checkout.add(
+    ///     rule = {"name": "my_rule", "deps": ["my_other_rule"]},
+    /// )
+    /// ```
+    ///
+    /// # Arguments
+    /// * `rule`: A `dict` containing the rule definition (e.g., `name`, `deps`, `platforms`, `type`, and `help`).
+    fn add(
         #[starlark(require = named)] rule: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
