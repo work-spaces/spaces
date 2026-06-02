@@ -239,29 +239,40 @@ pub fn evaluate_loads(
         let contents: Arc<str> = match std::fs::read_to_string(module_load_path.as_ref()) {
             Ok(contents) => contents.into(),
             Err(disk_error) => {
-                if let Some(relative_path) = embedded_rel {
-                    match prelude::get_embedded_prelude_content(relative_path) {
-                        Ok(Some(embedded_contents)) => embedded_contents,
-                        Ok(None) => {
-                            use starlark::{Error, ErrorKind};
-                            return Err(Error::new_spanned(
-                                ErrorKind::Fail(format_error!(
-                                    "Failed to load {module_load_path} from filesystem ({disk_error}), and embedded prelude file was not found: {relative_path}"
-                                )),
-                                load.span.span,
-                                &load.span.file,
-                            ));
+                if disk_error.kind() == std::io::ErrorKind::NotFound {
+                    if let Some(relative_path) = embedded_rel {
+                        match prelude::get_embedded_prelude_content(relative_path) {
+                            Ok(Some(embedded_contents)) => embedded_contents,
+                            Ok(None) => {
+                                use starlark::{Error, ErrorKind};
+                                return Err(Error::new_spanned(
+                                    ErrorKind::Fail(format_error!(
+                                        "Failed to load {module_load_path} from filesystem ({disk_error}), and embedded prelude file was not found: {relative_path}"
+                                    )),
+                                    load.span.span,
+                                    &load.span.file,
+                                ));
+                            }
+                            Err(embedded_error) => {
+                                use starlark::{Error, ErrorKind};
+                                return Err(Error::new_spanned(
+                                    ErrorKind::Fail(format_error!(
+                                        "Failed to load {module_load_path} from filesystem ({disk_error}), and embedded prelude lookup failed for {relative_path}: {embedded_error}"
+                                    )),
+                                    load.span.span,
+                                    &load.span.file,
+                                ));
+                            }
                         }
-                        Err(embedded_error) => {
-                            use starlark::{Error, ErrorKind};
-                            return Err(Error::new_spanned(
-                                ErrorKind::Fail(format_error!(
-                                    "Failed to load {module_load_path} from filesystem ({disk_error}), and embedded prelude lookup failed for {relative_path}: {embedded_error}"
-                                )),
-                                load.span.span,
-                                &load.span.file,
-                            ));
-                        }
+                    } else {
+                        use starlark::{Error, ErrorKind};
+                        return Err(Error::new_spanned(
+                            ErrorKind::Fail(format_error!(
+                                "Failed to load {module_load_path} -> {disk_error}"
+                            )),
+                            load.span.span,
+                            &load.span.file,
+                        ));
                     }
                 } else {
                     use starlark::{Error, ErrorKind};

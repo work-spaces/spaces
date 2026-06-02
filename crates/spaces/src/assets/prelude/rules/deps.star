@@ -1,8 +1,8 @@
 """
-Staces starklark function module for adding deps to a rule.
+Spaces Starlark function module for adding deps to a rule.
 
-Dependencies defined all the the inputs to a rule. To calculate
-the rule digest, all the depenencies are hashed and hashed with
+Dependencies define all inputs to a rule. To calculate
+the rule digest, all dependencies are hashed and then hashed with
 the rule's definition.
 
 Types:
