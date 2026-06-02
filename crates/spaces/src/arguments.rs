@@ -184,11 +184,10 @@ pub fn execute() -> anyhow::Result<()> {
         if let Some(logs) = singleton::get_logs_for_failed_rules()
             && verbosity_level > console::Level::Message
         {
+            singleton::process_anyhow_error(error);
+            singleton::show_latest_error(effective_console.clone());
             if !logs.is_empty() {
                 let _ = effective_console.error("see also", format!("\n  {}", logs.join("\n  ")));
-            } else {
-                singleton::process_anyhow_error(error);
-                singleton::show_latest_error(effective_console.clone());
             }
         } else {
             singleton::process_anyhow_error(error);
