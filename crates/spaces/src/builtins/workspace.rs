@@ -619,6 +619,63 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         }
     }
 
+    /// Loads all values matching a key from the checkout store.
+    ///
+    /// This returns values for `key` from the underlying checkout store that
+    /// `workspace.load_value()` reads from, across all URLs and paths.
+    ///
+    /// ```python
+    /// values = workspace.load_values("my_key")
+    /// for item in values:
+    ///     print(item["url"], item["path"], item["value"])
+    /// ```
+    ///
+    /// # Arguments
+    /// * `key`: The string key to look up in all checkout store entries.
+    ///
+    /// # Returns
+    /// * `list[dict]`: A list of dictionaries with `url` (`str`), `path` (`str`),
+    ///   and `value` (JSON-compatible value).
+    fn load_values<'v>(key: &str, eval: &mut Evaluator<'v, '_, '_>) -> anyhow::Result<Value<'v>> {
+        let ctx = get_eval_context(eval)?;
+        let workspace_arc = ctx
+            .workspace
+            .clone()
+            .ok_or_else(|| format_error!("No active workspace found"))?;
+        let workspace = workspace_arc.read();
+
+        let mut items: Vec<(String, String, serde_json::Value)> = workspace
+            .settings
+            .checkout_store
+            .entries
+            .iter()
+            .filter_map(|(path, entry)| {
+                entry
+                    .values
+                    .get(key)
+                    .map(|value| (path.to_string(), entry.url.to_string(), value.clone()))
+            })
+            .collect();
+
+        // Return a deterministic order for callers.
+        items.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+
+        let output: Vec<_> = items
+            .into_iter()
+            .map(|(path, url, value)| {
+                serde_json::json!({
+                    "url": url,
+                    "path": path,
+                    "value": value,
+                })
+            })
+            .collect();
+
+        let heap = eval.heap();
+        let alloc_value = heap.alloc(serde_json::Value::Array(output));
+        Ok(alloc_value)
+    }
+
     /// Returns the relative workspace path to the workspce HOME directory.
     ///
     ///

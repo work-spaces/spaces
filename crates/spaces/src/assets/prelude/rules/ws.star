@@ -7,6 +7,9 @@ the linter treats starlark files with workspace in the name.
 """
 
 WORKSPACE_SYSROOT = "sysroot"
+WORKSPACE_LOAD_VALUES_URL = "url"
+WORKSPACE_LOAD_VALUES_PATH = "path"
+WORKSPACE_LOAD_VALUES_VALUE = "value"
 
 def workspace_get_absolute_path() -> str:
     """
@@ -347,6 +350,21 @@ def workspace_load_value(name: str):
         The stored value, or None if no value is stored under the key.
     """
     return workspace.load_value(name)
+
+def workspace_load_values(name: str) -> list[dict]:
+    """
+    Loads all values matching a key from the checkout store.
+
+    This returns values from the underlying checkout store that
+    workspace_load_value() reads from, across all URLs and paths.
+
+    Args:
+        name: The key to load values under.
+
+    Returns:
+        A list of dicts with `url`, `path`, and `value` keys.
+    """
+    return workspace.load_values(name)
 
 def workspace_load_value_or(name: str, or_value):
     """
