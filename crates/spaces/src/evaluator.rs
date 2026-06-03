@@ -225,15 +225,47 @@ pub fn evaluate_loads(
     workspace_env: Arc<HashMap<Arc<str>, Arc<str>>>,
     console: Option<console::Console>,
 ) -> starlark::Result<Vec<LoadResult>> {
+    let is_allow_internal_load = if let Some(workspace) = workspace.as_ref() {
+        let workspace_read = workspace.read();
+        workspace_read
+            .features
+            .is_enabled(features::Feature::AllowInternalLoad)
+    } else {
+        false
+    };
+
     // We can get the loaded modules from `ast.loads`.
     // And ultimately produce a `loader` capable of giving those modules to Starlark.
     let mut loads = Vec::new();
     for load in ast.loads() {
         let embedded_rel = embedded_prelude_relative_path(load.module_id);
+        if !is_allow_internal_load
+            && load.module_id.starts_with("//")
+            && load.module_id.contains("/internal/")
+        {
+            singleton::set_evaluation_failure();
+            use starlark::{Error, ErrorKind};
+            return Err(Error::new_spanned(
+                ErrorKind::Fail(anyhow::anyhow!(
+                    "\nAttempting to load internal module using workspace path (//).\nInternal modules can only be loaded using relative paths."
+                )),
+                load.span.span,
+                &load.span.file,
+            ));
+        }
+
         let module_load_path =
             workspace::get_workspace_path(workspace_path.as_ref(), name.as_ref(), load.module_id);
         if module_load_path.ends_with(workspace::SPACES_MODULE_NAME) {
-            return Err(format_error!("Error: Attempting to load module ending with `spaces.star` module. This is a reserved module name.").into());
+            singleton::set_evaluation_failure();
+            use starlark::{Error, ErrorKind};
+            return Err(Error::new_spanned(
+                ErrorKind::Fail(anyhow::anyhow!(
+                    "\nAttempting to load module ending with `spaces.star` module. This is a reserved module name."
+                )),
+                load.span.span,
+                &load.span.file,
+            ));
         }
 
         let contents: Arc<str> = match std::fs::read_to_string(module_load_path.as_ref()) {
