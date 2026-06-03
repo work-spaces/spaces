@@ -32,6 +32,7 @@ pub enum Feature {
     AllowShellConfig,
     EnableAllBuiltins,
     CloneWithCommitGraph,
+    AllowInternalLoad,
 }
 
 impl Feature {
@@ -72,6 +73,7 @@ impl Feature {
                 r"Clone repositories and fetch the full commit graph.
                 This can cause errors with some versions of git."
             }
+            Feature::AllowInternalLoad => r"Allow internal load statements to be used in rules.",
         }
     }
 }
