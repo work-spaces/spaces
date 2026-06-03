@@ -73,7 +73,9 @@ impl Feature {
                 r"Clone repositories and fetch the full commit graph.
                 This can cause errors with some versions of git."
             }
-            Feature::AllowInternalLoad => r"Allow loading `/internal/` modules via workspace-absolute (//...) load paths (disables the relative-only restriction)."
+            Feature::AllowInternalLoad => {
+                r"Allow loading `/internal/` modules via workspace-absolute (//...) load paths (disables the relative-only restriction)."
+            }
         }
     }
 }
