@@ -392,11 +392,7 @@ pub fn execute_rule(
                 log_status.status = logs::Expect::Success;
             } else {
                 log_status.status = logs::Expect::Failure;
-                progress.set_finalize_lines(logger::make_finalize_line(
-                    logger::FinalType::Failed,
-                    None,
-                    displayed_rule.as_ref(),
-                ));
+                progress.set_finalize_none();
 
                 // Cancel all pending tasks - exit gracefully
                 for task in tasks.values_mut() {

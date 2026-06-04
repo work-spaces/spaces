@@ -1,4 +1,4 @@
-use crossterm::style::{Attribute, Attributes, Color, ContentStyle};
+use crossterm::style::{Attribute, Attributes, Color, ContentStyle, StyledContent};
 use superconsole::{Component, Dimensions, DrawMode, Line, Lines, Span};
 
 use crate::verbosity::Level;
@@ -101,17 +101,13 @@ impl ActiveProgress {
         line.push(Span::new_unstyled_lossy(&elapsed_str));
         line.push(Span::new_unstyled_lossy("|"));
 
-        let bar_span =
-            Span::new_styled_lossy(crossterm::style::StyledContent::new(bar_style, bar_str));
+        let bar_span = Span::new_styled_lossy(StyledContent::new(bar_style, bar_str));
         line.push(bar_span);
 
         line.push(Span::new_unstyled_lossy("|"));
 
         let prefix_text = format!("{}: ", self.prefix);
-        let prefix_span = Span::new_styled_lossy(crossterm::style::StyledContent::new(
-            prefix_style,
-            prefix_text,
-        ));
+        let prefix_span = Span::new_styled_lossy(StyledContent::new(prefix_style, prefix_text));
         line.push(prefix_span);
 
         // Truncate message to fit remaining width
