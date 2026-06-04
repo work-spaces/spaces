@@ -68,6 +68,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             "Failed to convert value to JSON for key '{key}'"
         ))?;
 
+        if path.as_deref() == Some("//") {
+            return Err(format_error!(
+                "path `//` is reserved for command-line --store values"
+            ));
+        }
+
         let ctx = get_eval_context_mut(eval)?;
 
         if !ctx.is_checkout && !ctx.is_sync {
@@ -132,6 +138,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<NoneType> {
         let ctx = get_eval_context_mut(eval)?;
+
+        if path.as_deref() == Some("//") {
+            return Err(format_error!(
+                "path `//` is reserved for command-line --store values"
+            ));
+        }
 
         if !ctx.is_checkout && !ctx.is_sync {
             return Ok(NoneType);
