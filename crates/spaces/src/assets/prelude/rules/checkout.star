@@ -592,6 +592,25 @@ def checkout_store_value(name: str, value, path: str | None = None):
     else:
         checkout.store_value(name, value)
 
+def checkout_modify_value(name: str, modifier, path: str | None = None):
+    """
+    Modifies a stored value by applying a callback to the current value.
+
+    The callback receives the current stored value for `name` (or None if
+    it does not exist yet). The callback return value is then stored.
+
+    Args:
+        name: The key to update.
+        modifier: A function/lambda taking one argument (current value).
+        path: Optional path to store under. When omitted, the member
+            path for the calling module is used.
+    """
+
+    if path:
+        checkout.modify_value(name, modifier, path = path)
+    else:
+        checkout.modify_value(name, modifier)
+
 def checkout_add_home_store_env(name: str):
     """
     Assigns HOME to a user specific location in the spaces store.

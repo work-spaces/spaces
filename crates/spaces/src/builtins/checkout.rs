@@ -106,6 +106,95 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(NoneType)
     }
 
+    /// Modifies a stored value by applying a lambda to the current value.
+    ///
+    /// The current value for `key` (or `None` if missing) is passed to `modifier`.
+    /// The lambda return value is stored back in the checkout store.
+    ///
+    /// ```python
+    /// checkout.modify_value("build_count", lambda current: (current or 0) + 1)
+    /// checkout.modify_value(
+    ///     "settings",
+    ///     lambda current: {"enabled": True} if current == None else current,
+    ///     path = "my/custom/path",
+    /// )
+    /// ```
+    ///
+    /// # Arguments
+    /// * `key`: A string key to identify the stored value.
+    /// * `modifier`: A lambda/function taking one argument (the current value).
+    /// * `path`: Optional path to store under. When omitted, the member
+    ///   path for the calling module is used.
+    fn modify_value<'v>(
+        key: &str,
+        modifier: starlark::values::Value<'v>,
+        #[starlark(require = named)] path: Option<String>,
+        eval: &mut Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<NoneType> {
+        let ctx = get_eval_context_mut(eval)?;
+
+        if !ctx.is_checkout && !ctx.is_sync {
+            return Ok(NoneType);
+        }
+
+        let module_path = ctx.module_name.clone();
+        let workspace_arc = ctx
+            .workspace
+            .clone()
+            .ok_or_else(|| format_error!("No active workspace found"))?;
+
+        let (path, current_value_json): (Arc<str>, Option<serde_json::Value>) = {
+            let workspace = workspace_arc.read();
+            let resolved_path: Arc<str> = path.map(Into::into).unwrap_or_else(|| {
+                workspace
+                    .settings
+                    .json
+                    .get_member_from_module_path(module_path.clone())
+                    .map(|member| member.path.clone())
+                    .unwrap_or(module_path.clone())
+            });
+
+            let current_value = workspace
+                .settings
+                .checkout_store
+                .entries
+                .get(resolved_path.as_ref())
+                .and_then(|entry| entry.values.get(key))
+                .cloned();
+
+            (resolved_path, current_value)
+        };
+
+        let current_value = match current_value_json {
+            Some(value) => eval.heap().alloc(value),
+            None => starlark::values::Value::new_none(),
+        };
+
+        let modified_value = eval
+            .eval_function(modifier, &[current_value], &[])
+            .map_err(|e| format_error!("Failed to call modifier for key '{key}': {e}"))?;
+
+        let json_value = modified_value.to_json_value().context(format_context!(
+            "Failed to convert modified value to JSON for key '{key}'"
+        ))?;
+
+        let url: Arc<str> = "".into();
+        let mut workspace = workspace_arc.write();
+        let entry = workspace
+            .settings
+            .checkout_store
+            .entries
+            .entry(path)
+            .or_insert_with(|| utils::ws::CheckoutStoreEntry {
+                url: url.clone(),
+                values: std::collections::HashMap::new(),
+            });
+        entry.url = url;
+        entry.values.insert(key.into(), json_value);
+
+        Ok(NoneType)
+    }
+
     /// Abort script evaluation with a message.
     ///
     /// ```python
