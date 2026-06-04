@@ -587,7 +587,7 @@ def checkout_store_value(name: str, value, path: str | None = None):
             path for the calling module is used.
     """
 
-    if path:
+    if path != None:
         checkout.store_value(name, value, path = path)
     else:
         checkout.store_value(name, value)
@@ -606,7 +606,7 @@ def checkout_modify_value(name: str, modifier, path: str | None = None):
             path for the calling module is used.
     """
 
-    if path:
+    if path != None:
         checkout.modify_value(name, modifier, path = path)
     else:
         checkout.modify_value(name, modifier)

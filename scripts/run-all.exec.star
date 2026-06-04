@@ -1,4 +1,7 @@
 #!/usr/bin/env spaces
+"""
+Run all the tests.
+"""
 
 load(
     "//@star/prelude/exec/args.star",

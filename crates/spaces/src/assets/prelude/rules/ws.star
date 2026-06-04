@@ -345,14 +345,16 @@ def workspace_load_value(name: str, path: str | None = None, url: str | None = N
 
     Args:
         name: The key to load the value under.
+        path: The path to load the value from, if any.
+        url: The URL to load the value from, if any.
 
     Returns:
         The stored value, or None if no value is stored under the key.
     """
 
-    if path:
+    if path != None:
         return workspace.load_value(name, path = path)
-    if url:
+    if url != None:
         return workspace.load_value(name, url = url)
 
     return workspace.load_value(name)
