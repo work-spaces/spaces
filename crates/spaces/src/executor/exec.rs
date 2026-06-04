@@ -314,7 +314,7 @@ impl Exec {
                         "No log file is available (log files disabled with the --ci option)",
                     );
                 }
-                return Err(format_error!(
+                return Err(anyhow::anyhow!(
                     "Command `{}` failed with exit code: {}",
                     self.command,
                     result.exit_code

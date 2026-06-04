@@ -615,8 +615,7 @@ fn run_starlark_modules_with_workspace(
                 phase,
                 target,
                 is_execute_tasks,
-            )
-            .context(format_context!("while executing workspace rules"))?
+            )?
         }
         RunWorkspace::Script(scripts) => {
             for (name, _) in scripts.iter() {
@@ -723,8 +722,7 @@ pub fn run_starlark_modules_in_workspace(
         run_workspace,
         is_create_lock_file,
         is_execute_tasks,
-    )
-    .context(format_context!("while running with workspace"))?;
+    )?;
 
     drop(workspace_lock);
 

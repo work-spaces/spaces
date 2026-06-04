@@ -1105,8 +1105,7 @@ pub fn evaluate_starlark_modules(
     // Join any remaining parallel eval threads (non-checkout phase).
     for (n, h) in eval_handles.drain(..) {
         h.join()
-            .map_err(|_| format_error!("eval thread panicked for {n}"))?
-            .with_context(|| format_context!("Failed to evaluate module {n}"))?;
+            .map_err(|_| format_error!("eval thread panicked for {n}"))??;
     }
 
     if let Some(stardoc) = singleton::get_inspect_options().stardoc {
@@ -1637,8 +1636,7 @@ pub fn run_starlark_modules(
             } else {
                 logger.message("always evaluate during checkout/sync");
             }
-            evaluate_starlark_modules(console.clone(), workspace.clone(), &modules, phase)
-                .context(format_context!("evaluating modules"))?;
+            evaluate_starlark_modules(console.clone(), workspace.clone(), &modules, phase)?;
 
             logger.message("Inserting //:setup, //:all, //:test, //:clean rules");
             let run_target = insert_setup_and_all_rules(workspace.clone(), target.clone())

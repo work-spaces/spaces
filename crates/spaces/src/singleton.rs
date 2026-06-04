@@ -100,11 +100,6 @@ pub fn show_error_chain(console: console::Console) {
 
 pub fn show_latest_error(console: console::Console) {
     let mut state = get_state().write();
-    let args = std::env::args().collect::<Vec<String>>();
-    let _ = console.error(
-        "While executing (use `--verbosity=message` for more details)",
-        args.join(" "),
-    );
     state.error_chain.reverse();
     if let Some(last_error) = state.error_chain.last() {
         let show_error = last_error.to_string().replace('\n', "\n    ");

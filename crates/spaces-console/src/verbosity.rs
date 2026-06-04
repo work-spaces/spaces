@@ -1,4 +1,4 @@
-use crossterm::style::{Attribute, Attributes, Color, ContentStyle};
+use crossterm::style::{Attribute, Attributes, Color, ContentStyle, StyledContent};
 use serde::{Deserialize, Serialize};
 
 #[derive(
@@ -81,9 +81,10 @@ pub(crate) fn format_log(
             first.push(superconsole::Span::new_unstyled_lossy(app_message));
         } else {
             let level_label = level.to_string().to_lowercase();
-            first.push(superconsole::Span::new_styled_lossy(
-                crossterm::style::StyledContent::new(bold_style, level_label),
-            ));
+            first.push(superconsole::Span::new_styled_lossy(StyledContent::new(
+                bold_style,
+                level_label,
+            )));
         }
         first.push(superconsole::Span::new_unstyled_lossy(format!(
             ":{first_line}"

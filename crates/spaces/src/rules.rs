@@ -392,11 +392,7 @@ pub fn execute_rule(
                 log_status.status = logs::Expect::Success;
             } else {
                 log_status.status = logs::Expect::Failure;
-                progress.set_finalize_lines(logger::make_finalize_line(
-                    logger::FinalType::Failed,
-                    None,
-                    displayed_rule.as_ref(),
-                ));
+                progress.set_finalize_none();
 
                 // Cancel all pending tasks - exit gracefully
                 for task in tasks.values_mut() {
@@ -518,10 +514,8 @@ impl State {
         }
 
         let mut tasks = self.tasks.write();
-        if let Some(task) = tasks.get(&rule_label) {
-            return Err(format_error!(
-                "Rule already exists {rule_label} with {task:?}"
-            ));
+        if tasks.get(&rule_label).is_some() {
+            return Err(format_error!("Rule already exists {rule_label}"));
         } else {
             tasks.insert(rule_label.clone(), task_to_insert);
         }
