@@ -518,10 +518,8 @@ impl State {
         }
 
         let mut tasks = self.tasks.write();
-        if let Some(task) = tasks.get(&rule_label) {
-            return Err(format_error!(
-                "Rule already exists {rule_label} with {task:?}"
-            ));
+        if tasks.get(&rule_label).is_some() {
+            return Err(format_error!("Rule already exists {rule_label}"));
         } else {
             tasks.insert(rule_label.clone(), task_to_insert);
         }
