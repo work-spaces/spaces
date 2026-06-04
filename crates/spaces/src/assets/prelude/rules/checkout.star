@@ -572,7 +572,7 @@ def checkout_add_env_vars(
         },
     )
 
-def checkout_store_value(name: str, value):
+def checkout_store_value(name: str, value, path: str | None = None):
     """
     Stores a value that can be retrieved using workspace_load_value().
 
@@ -583,9 +583,33 @@ def checkout_store_value(name: str, value):
     Args:
         name: The key to store the value under.
         value: The value to store. Can be any type.
+        path: Optional path to store under. When omitted, the member
+            path for the calling module is used.
     """
 
-    checkout.store_value(name, value)
+    if path != None:
+        checkout.store_value(name, value, path = path)
+    else:
+        checkout.store_value(name, value)
+
+def checkout_modify_value(name: str, modifier, path: str | None = None):
+    """
+    Modifies a stored value by applying a callback to the current value.
+
+    The callback receives the current stored value for `name` (or None if
+    it does not exist yet). The callback return value is then stored.
+
+    Args:
+        name: The key to update.
+        modifier: A function/lambda taking one argument (current value).
+        path: Optional path to store under. When omitted, the member
+            path for the calling module is used.
+    """
+
+    if path != None:
+        checkout.modify_value(name, modifier, path = path)
+    else:
+        checkout.modify_value(name, modifier)
 
 def checkout_add_home_store_env(name: str):
     """
