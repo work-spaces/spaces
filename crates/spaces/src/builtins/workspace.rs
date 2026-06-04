@@ -507,7 +507,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// 3. **`checkout.store_value()`**: Called from starlark scripts during checkout or sync.
     ///
     /// Returns the stored value associated with the given key, or `None` if the key
-    /// does not exist. Values are namespaced by the member path in the workspace.
+    /// does not exist. Values are namespaced by the value written by
+    /// `checkout.store_value(..., path = ...)`, or by member path when no
+    /// path is provided.
     ///
     /// Exactly one of `url` or `path` may be specified. If neither is given, all
     /// members are searched and the first match is returned. Note that command-line
@@ -528,8 +530,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Arguments
     /// * `key`: The string key to look up.
     /// * `url`: Optional member URL to load from (ignored when a command-line value exists for the key).
-    /// * `path`: Optional workspace path to identify the member. The member with the longest
-    ///   matching path prefix is used (ignored when a command-line value exists for the key).
+    /// * `path`: Optional namespace or workspace path to identify the store entry.
+    ///   For member paths, the member with the longest matching path prefix is used
+    ///   (ignored when a command-line value exists for the key).
     ///
     /// # Returns
     /// * The stored JSON value (string, number, bool, list, dict), or `None` if the key is not found.

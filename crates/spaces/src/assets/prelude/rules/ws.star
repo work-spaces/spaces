@@ -339,7 +339,7 @@ def workspace_set_always_evaluate(value: bool):
     """
     return workspace.set_always_evaluate(value)
 
-def workspace_load_value(name: str):
+def workspace_load_value(name: str, path: str | None = None, url: str | None = None):
     """
     Loads a value stored using checkout_store_value().
 
@@ -349,6 +349,12 @@ def workspace_load_value(name: str):
     Returns:
         The stored value, or None if no value is stored under the key.
     """
+
+    if path:
+        return workspace.load_value(name, path = path)
+    if url:
+        return workspace.load_value(name, url = url)
+
     return workspace.load_value(name)
 
 def workspace_load_values(name: str) -> list[dict]:

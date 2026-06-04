@@ -41,8 +41,8 @@ struct CargoBin {
 // This defines the function that is visible to Starlark
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
-    /// Stores a key-value pair in the workspace settings, namespaced by the
-    /// calling module's member path in the workspace.
+    /// Stores a key-value pair in the workspace settings, namespaced by either
+    /// a provided path or the calling module's member path in the workspace.
     ///
     /// The value is available immediately after storing and persists across
     /// checkout evaluations. Use `workspace.load_value()` to retrieve stored values.
@@ -50,15 +50,18 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// ```python
     /// checkout.store_value("my_key", {"version": "1.0", "enabled": True})
     /// checkout.store_value("build_count", 42)
-    /// checkout.store_value("name", "my_project")
+    /// checkout.store_value("name", "my_project", path = "my/custom/path")
     /// ```
     ///
     /// # Arguments
     /// * `key`: A string key to identify the stored value.
     /// * `value`: Any JSON-compatible value (string, number, bool, list, dict, None).
+    /// * `path`: Optional path to store under. When omitted, the member
+    ///   path for the calling module is used.
     fn store_value(
         key: &str,
         value: starlark::values::Value,
+        #[starlark(require = named)] path: Option<String>,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
         let json_value = value.to_json_value().context(format_context!(
@@ -78,18 +81,21 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .ok_or_else(|| format_error!("No active workspace found"))?;
         let mut workspace = workspace_arc.write();
 
-        let (member_path, url): (Arc<str>, Arc<str>) = workspace
-            .settings
-            .json
-            .get_member_from_module_path(module_path.clone())
-            .map(|member| (member.path.clone(), member.url.clone()))
-            .unwrap_or_else(|| (module_path.clone(), module_path.clone()));
+        let path: Arc<str> = path.map(Into::into).unwrap_or_else(|| {
+            workspace
+                .settings
+                .json
+                .get_member_from_module_path(module_path.clone())
+                .map(|member| member.path.clone())
+                .unwrap_or(module_path.clone())
+        });
+        let url: Arc<str> = "".into();
 
         let entry = workspace
             .settings
             .checkout_store
             .entries
-            .entry(member_path)
+            .entry(path)
             .or_insert_with(|| utils::ws::CheckoutStoreEntry {
                 url: url.clone(),
                 values: std::collections::HashMap::new(),
