@@ -189,7 +189,6 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 url: url.clone(),
                 values: std::collections::HashMap::new(),
             });
-        entry.url = url;
         entry.values.insert(key.into(), json_value);
 
         Ok(NoneType)
