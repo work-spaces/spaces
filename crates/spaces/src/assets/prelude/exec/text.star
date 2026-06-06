@@ -416,7 +416,7 @@ def text_match_to_diagnostic(
         match,
         severity: str = "error",
         default_message: str = "",
-        default_file: str = "unknown",
+        default_file = None,
         source = None,
         related = None):
     """
@@ -440,7 +440,7 @@ def text_match_to_diagnostic(
         match: Regex match result from text_regex_scan_tagged or similar
         severity: Severity level ("error", "warning", "info", "hint", or "note")
         default_message: Message to use if no "message" capture group exists
-        default_file: File to use if no "file" capture group exists
+        default_file: Optional file to use if no "file" capture group exists
         source: Source identifier for the diagnostic (e.g., "eslint", "rustc")
         related: List of related diagnostics (optional)
 
@@ -471,8 +471,9 @@ def text_match_to_diagnostic(
         "match": match,
         "severity": severity,
         "default_message": default_message,
-        "default_file": default_file,
     }
+    if default_file != None:
+        options["default_file"] = default_file
     if source != None:
         options["source"] = source
     if related != None:

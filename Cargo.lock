@@ -3986,7 +3986,6 @@ dependencies = [
  "chrono",
  "clap",
  "crc32fast",
- "crossterm",
  "dirs",
  "env_logger",
  "hex",

@@ -1,7 +1,6 @@
 use crate::is_lsp_mode;
 use anyhow::{Context, anyhow};
 use anyhow_source_location::format_context;
-use crossterm::style::{Color, Stylize};
 use regex::{Regex, RegexSet};
 use serde::{Deserialize, Serialize};
 use serde_json;
@@ -101,17 +100,12 @@ pub struct MatchToDiagnosticOptions {
     pub severity: String,
     #[serde(default)]
     pub default_message: String,
-    #[serde(default = "default_file_value")]
-    pub default_file: String,
+    pub default_file: Option<String>,
     pub source: Option<String>,
 }
 
 fn default_severity() -> String {
     "error".to_string()
-}
-
-fn default_file_value() -> String {
-    "unknown".to_string()
 }
 
 /// Helper function to extract tags and pattern strings from pattern list.
@@ -1532,7 +1526,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///   * `match` (dict, required): A regex match result from `regex_scan_tagged` or similar
     ///   * `severity` (string, optional): Severity level ("error", "warning", "info", "hint", or "note"). Default: "error"
     ///   * `default_message` (string, optional): Message to use if no "message" capture group exists. Default: uses the full match string
-    ///   * `default_file` (string, optional): File to use if no "file" capture group exists. Default: "unknown"
+    ///   * `default_file` (string, optional): File to use if no "file" capture group exists. If omitted, file is not rendered.
     ///   * `source` (string, optional): Source identifier for the diagnostic (e.g., "eslint", "rustc")
     /// * `related` - Optional related diagnostics
     ///
@@ -1606,8 +1600,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .get("file")
             .map(|s| s.as_str())
             .filter(|s| !s.is_empty())
-            .unwrap_or(&opts.default_file)
-            .to_string();
+            .map(str::to_string)
+            .or_else(|| {
+                opts.default_file
+                    .as_deref()
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+            })
+            .unwrap_or_default();
 
         let line = named
             .get("line")
@@ -1801,25 +1801,11 @@ fn strip_newline_str(s: &str) -> String {
     }
 }
 
-fn styled_diagnostic_header(severity: &str) -> String {
-    let label = format!(" {} ", severity.to_ascii_uppercase());
-
-    let styled = match severity.to_ascii_lowercase().as_str() {
-        "error" => label.with(Color::White).on(Color::Red).bold(),
-        "warning" | "warn" => label.with(Color::Black).on(Color::Yellow).bold(),
-        "info" => label.with(Color::White).on(Color::Blue).bold(),
-        "note" => label.with(Color::Black).on(Color::Grey).bold(),
-        _ => label.with(Color::Magenta).bold(),
-    };
-
-    format!("{}", styled)
-}
-
 /// Render diagnostics in human-readable format
 fn render_human(diagnostics: Vec<Value>) -> anyhow::Result<String> {
     let mut lines = Vec::new();
 
-    for (idx, diag) in diagnostics.iter().enumerate() {
+    for (_idx, diag) in diagnostics.iter().enumerate() {
         let json_value = diag
             .to_json_value()
             .context(format_context!("failed to convert diagnostic to JSON"))?;
@@ -1836,22 +1822,25 @@ fn render_human(diagnostics: Vec<Value>) -> anyhow::Result<String> {
         let line = obj.get("line").and_then(|v| v.as_i64());
         let column = obj.get("column").and_then(|v| v.as_i64());
 
-        // Add separator between diagnostics (not before the first one)
-        if idx > 0 {
-            lines.push(String::new()); // blank line
-            lines.push(styled_diagnostic_header(severity));
-            lines.push(String::new()); // blank line
-        }
+        // Header line: [<type of diag>]
+        lines.push(format!("[{}]", severity));
 
-        let mut output = file.to_string();
-        if let Some(l) = line {
-            output.push_str(&format!(":{}", l));
-            if let Some(c) = column {
-                output.push_str(&format!(":{}", c));
+        // Location line: file:<location if available:line:col><context>
+        let mut location_line = String::new();
+        if !file.is_empty() {
+            location_line.push_str("file:");
+            location_line.push_str(file);
+            if let Some(l) = line {
+                location_line.push_str(&format!(":{}", l));
+                if let Some(c) = column {
+                    location_line.push_str(&format!(":{}", c));
+                }
             }
+            location_line.push_str(&format!(" {}", message));
+        } else {
+            location_line.push_str(message);
         }
-        output.push_str(&format!(": {}: {}", severity, message));
-        lines.push(output);
+        lines.push(location_line);
 
         // Handle related diagnostics
         if let Some(related) = obj.get("related")
@@ -1947,15 +1936,20 @@ fn render_github(diagnostics: Vec<Value>) -> anyhow::Result<String> {
         };
 
         let mut output = format!("::{}", level);
-        let mut params = vec![format!("file={}", escape_github_value(file, true))];
+        let mut params = Vec::new();
+        if !file.is_empty() {
+            params.push(format!("file={}", escape_github_value(file, true)));
+        }
         if let Some(l) = line {
             params.push(format!("line={}", l));
         }
         if let Some(c) = column {
             params.push(format!("col={}", c));
         }
-        output.push(' ');
-        output.push_str(&params.join(","));
+        if !params.is_empty() {
+            output.push(' ');
+            output.push_str(&params.join(","));
+        }
         output.push_str("::");
         output.push_str(&escape_github_value(message, false));
         lines.push(output);
@@ -1990,16 +1984,20 @@ fn render_github(diagnostics: Vec<Value>) -> anyhow::Result<String> {
                     };
 
                     let mut rel_output = format!("::{}", rel_level);
-                    let mut rel_params =
-                        vec![format!("file={}", escape_github_value(rel_file, true))];
+                    let mut rel_params = Vec::new();
+                    if !rel_file.is_empty() {
+                        rel_params.push(format!("file={}", escape_github_value(rel_file, true)));
+                    }
                     if let Some(l) = rel_line {
                         rel_params.push(format!("line={}", l));
                     }
                     if let Some(c) = rel_column {
                         rel_params.push(format!("col={}", c));
                     }
-                    rel_output.push(' ');
-                    rel_output.push_str(&rel_params.join(","));
+                    if !rel_params.is_empty() {
+                        rel_output.push(' ');
+                        rel_output.push_str(&rel_params.join(","));
+                    }
                     rel_output.push_str("::");
                     rel_output.push_str(&escape_github_value(rel_message, false));
                     lines.push(rel_output);
@@ -2070,15 +2068,16 @@ fn render_sarif(diagnostics: Vec<Value>) -> anyhow::Result<String> {
             }
         });
 
-        // Add location if we have file info
-        if !file.is_empty() || line.is_some() {
-            let mut location = serde_json::json!({
-                "physicalLocation": {
-                    "artifactLocation": {
-                        "uri": file
-                    }
-                }
-            });
+        // Add location if we have any location info
+        if !file.is_empty() || line.is_some() || column.is_some() {
+            let mut physical_location = serde_json::Map::new();
+
+            if !file.is_empty() {
+                physical_location.insert(
+                    "artifactLocation".to_string(),
+                    serde_json::json!({ "uri": file }),
+                );
+            }
 
             if line.is_some() || column.is_some() {
                 let mut region = serde_json::Map::new();
@@ -2088,8 +2087,12 @@ fn render_sarif(diagnostics: Vec<Value>) -> anyhow::Result<String> {
                 if let Some(c) = column {
                     region.insert("startColumn".to_string(), serde_json::json!(c));
                 }
-                location["physicalLocation"]["region"] = serde_json::json!(region);
+                physical_location.insert("region".to_string(), serde_json::json!(region));
             }
+
+            let location = serde_json::json!({
+                "physicalLocation": physical_location
+            });
 
             result["locations"] = serde_json::json!([location]);
         }
