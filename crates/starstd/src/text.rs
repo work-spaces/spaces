@@ -1805,7 +1805,7 @@ fn strip_newline_str(s: &str) -> String {
 fn render_human(diagnostics: Vec<Value>) -> anyhow::Result<String> {
     let mut lines = Vec::new();
 
-    for (_idx, diag) in diagnostics.iter().enumerate() {
+    for diag in diagnostics.iter() {
         let json_value = diag
             .to_json_value()
             .context(format_context!("failed to convert diagnostic to JSON"))?;

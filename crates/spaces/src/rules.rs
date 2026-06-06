@@ -657,7 +657,7 @@ impl State {
 
                 for rule_dep in all_rules.iter() {
                     let result = self.graph.add_dependency(&task.rule.name, rule_dep);
-                    if let Err(_) = result {
+                    if result.is_err() {
                         singleton::set_evaluation_failure();
                         return Err(format_error!(
                             "Failed to add dependency {rule_dep} to rule {}\n{}",
