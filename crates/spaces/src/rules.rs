@@ -1120,10 +1120,14 @@ impl State {
             task_pending_set.insert(task_name);
         }
 
-        let max_queue_count = if phase == task::Phase::Checkout {
-            workspace.read().settings.json.max_checkout_queue
-        } else {
-            workspace.read().settings.json.max_run_queue
+        let max_queue_count = {
+            let read_workspace = workspace.read();
+            if phase == task::Phase::Checkout {
+                read_workspace.settings.json.max_checkout_queue
+            } else {
+                read_workspace.settings.json.max_run_queue
+            }
+            .clamp(1, 64)
         };
 
         for node_index in self.sorted.iter() {
