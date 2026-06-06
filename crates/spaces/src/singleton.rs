@@ -19,7 +19,6 @@ struct State {
     is_use_locks: bool,
     is_skip_deps: bool,
     logs_for_failed_rules: Option<Vec<Arc<str>>>,
-    max_queue_count: i64,
     error_chain: Vec<String>,
     args_env: HashMap<Arc<str>, Arc<str>>,
     args_store: HashMap<Arc<str>, serde_json::Value>,
@@ -58,7 +57,6 @@ fn get_state() -> &'static lock::StateLock<State> {
         is_skip_deps: false,
         is_use_locks: false,
         logs_for_failed_rules: None,
-        max_queue_count: 8,
         error_chain: Vec::new(),
         new_branches: Vec::new(),
         removed_branches: Vec::new(),
@@ -261,11 +259,6 @@ pub fn set_is_sync() {
     state.is_sync = true;
 }
 
-pub fn get_max_queue_count() -> i64 {
-    let state = get_state().read();
-    state.max_queue_count
-}
-
 pub fn set_inspect_options(options: inspect::Options) {
     let mut state = get_state().write();
     state.inspect = options;
@@ -351,11 +344,6 @@ pub fn get_is_logging_disabled() -> bool {
 pub fn set_rescan(is_rescan: bool) {
     let mut state = get_state().write();
     state.is_rescan = is_rescan;
-}
-
-pub fn set_max_queue_count(max_queue_count: i64) {
-    let mut state = get_state().write();
-    state.max_queue_count = max_queue_count;
 }
 
 pub fn get_is_ci() -> bool {

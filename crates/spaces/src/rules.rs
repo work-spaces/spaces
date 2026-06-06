@@ -1120,6 +1120,16 @@ impl State {
             task_pending_set.insert(task_name);
         }
 
+        let max_queue_count = {
+            let read_workspace = workspace.read();
+            if phase == task::Phase::Checkout {
+                read_workspace.settings.json.max_checkout_queue
+            } else {
+                read_workspace.settings.json.max_run_queue
+            }
+            .clamp(1, 64)
+        };
+
         for node_index in self.sorted.iter() {
             let task_name = self.graph.get_task(*node_index);
             let task = {
@@ -1177,7 +1187,7 @@ impl State {
                     progress.set_message(active_tasks.join(",").as_str());
 
                     // this could be configured with a another global starlark function
-                    if number_running < singleton::get_max_queue_count() {
+                    if number_running < max_queue_count {
                         break;
                     } else {
                         std::thread::sleep(std::time::Duration::from_millis(1));
