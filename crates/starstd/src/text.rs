@@ -1939,12 +1939,13 @@ fn render_github(diagnostics: Vec<Value>) -> anyhow::Result<String> {
         let mut params = Vec::new();
         if !file.is_empty() {
             params.push(format!("file={}", escape_github_value(file, true)));
-        }
-        if let Some(l) = line {
-            params.push(format!("line={}", l));
-        }
-        if let Some(c) = column {
-            params.push(format!("col={}", c));
+            // Only emit line/col when we have a file to associate them with
+            if let Some(l) = line {
+                params.push(format!("line={}", l));
+            }
+            if let Some(c) = column {
+                params.push(format!("col={}", c));
+            }
         }
         if !params.is_empty() {
             output.push(' ');
@@ -1987,12 +1988,13 @@ fn render_github(diagnostics: Vec<Value>) -> anyhow::Result<String> {
                     let mut rel_params = Vec::new();
                     if !rel_file.is_empty() {
                         rel_params.push(format!("file={}", escape_github_value(rel_file, true)));
-                    }
-                    if let Some(l) = rel_line {
-                        rel_params.push(format!("line={}", l));
-                    }
-                    if let Some(c) = rel_column {
-                        rel_params.push(format!("col={}", c));
+                        // Only emit line/col when we have a file to associate them with
+                        if let Some(l) = rel_line {
+                            rel_params.push(format!("line={}", l));
+                        }
+                        if let Some(c) = rel_column {
+                            rel_params.push(format!("col={}", c));
+                        }
                     }
                     if !rel_params.is_empty() {
                         rel_output.push(' ');
