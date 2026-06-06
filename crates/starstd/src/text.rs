@@ -1878,8 +1878,8 @@ fn render_human(diagnostics: Vec<Value>) -> anyhow::Result<String> {
                 }
             }
         }
+        lines.push(String::from("-"));
     }
-    lines.push(String::from("-"));
 
     Ok(lines.join("\n"))
 }
