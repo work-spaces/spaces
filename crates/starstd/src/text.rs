@@ -1827,8 +1827,7 @@ fn render_human(diagnostics: Vec<Value>) -> anyhow::Result<String> {
 
         // Location line: file:<location if available:line:col><context>
         let mut location_line = String::new();
-        if !file.is_empty() {
-            location_line.push_str("file:");
+        if !file.is_empty() && file != "unknown" {
             location_line.push_str(file);
             if let Some(l) = line {
                 location_line.push_str(&format!(":{}", l));
@@ -1880,6 +1879,7 @@ fn render_human(diagnostics: Vec<Value>) -> anyhow::Result<String> {
             }
         }
     }
+    lines.push(String::new());
 
     Ok(lines.join("\n"))
 }
