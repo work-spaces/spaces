@@ -1,6 +1,7 @@
 use crate::is_lsp_mode;
 use anyhow::{Context, anyhow};
 use anyhow_source_location::format_context;
+use crossterm::style::{Color, Stylize};
 use regex::{Regex, RegexSet};
 use serde::{Deserialize, Serialize};
 use serde_json;
@@ -1800,17 +1801,25 @@ fn strip_newline_str(s: &str) -> String {
     }
 }
 
+fn styled_diagnostic_header(severity: &str) -> String {
+    let label = format!(" {} ", severity.to_ascii_uppercase());
+
+    let styled = match severity.to_ascii_lowercase().as_str() {
+        "error" => label.with(Color::White).on(Color::Red).bold(),
+        "warning" | "warn" => label.with(Color::Black).on(Color::Yellow).bold(),
+        "info" => label.with(Color::White).on(Color::Blue).bold(),
+        "note" => label.with(Color::Black).on(Color::Grey).bold(),
+        _ => label.with(Color::Magenta).bold(),
+    };
+
+    format!("{}", styled)
+}
+
 /// Render diagnostics in human-readable format
 fn render_human(diagnostics: Vec<Value>) -> anyhow::Result<String> {
     let mut lines = Vec::new();
 
     for (idx, diag) in diagnostics.iter().enumerate() {
-        // Add separator between diagnostics (not before the first one)
-        if idx > 0 {
-            lines.push(String::new()); // blank line
-            lines.push("=".repeat(80)); // separator line
-            lines.push(String::new()); // blank line
-        }
         let json_value = diag
             .to_json_value()
             .context(format_context!("failed to convert diagnostic to JSON"))?;
@@ -1826,6 +1835,13 @@ fn render_human(diagnostics: Vec<Value>) -> anyhow::Result<String> {
         let message = obj.get("message").and_then(|v| v.as_str()).unwrap_or("");
         let line = obj.get("line").and_then(|v| v.as_i64());
         let column = obj.get("column").and_then(|v| v.as_i64());
+
+        // Add separator between diagnostics (not before the first one)
+        if idx > 0 {
+            lines.push(String::new()); // blank line
+            lines.push(styled_diagnostic_header(severity));
+            lines.push(String::new()); // blank line
+        }
 
         let mut output = file.to_string();
         if let Some(l) = line {
