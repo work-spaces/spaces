@@ -69,7 +69,7 @@ impl Graph {
             .collect::<Vec<String>>();
 
         format!(
-            "{target} not found. Similar targets include:\n{}",
+            "Rule not found [{target}]. Did you mean?\n{}",
             suggestions.join("\n")
         )
         .into()
@@ -94,7 +94,7 @@ impl Graph {
                 .node_index_cache
                 .get(target.as_ref())
                 .copied()
-                .ok_or(self.get_target_not_found_error(target))?;
+                .ok_or_else(|| self.get_target_not_found_error(target))?;
 
             let mut tasks: Vec<petgraph::prelude::NodeIndex> = Vec::new();
             let mut dfs = petgraph::visit::DfsPostOrder::new(&self.directed_graph, target_node);

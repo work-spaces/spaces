@@ -46,11 +46,10 @@ fn get_task_signal_deps(task: &task::Task) -> anyhow::Result<Vec<task::SignalArc
     for dep in rule_deps.iter() {
         // # tasks * # deps + hashmap access is EXPENSIVE
         // this causes a substantial delay when starting spaces
-        let dep_task = tasks.get(dep).ok_or(format_error!(
-            "Rule dependency {} not found for {}",
-            dep,
-            task.rule.name
-        ))?;
+        let dep_task = tasks.get(dep).ok_or_else(|| {
+            singleton::set_evaluation_failure();
+            format_error!("Rule dependency {} not found for {}", dep, task.rule.name)
+        })?;
 
         if dep_task.phase == task::Phase::Complete || task::Phase::Cancelled == dep_task.phase {
             continue;
@@ -59,6 +58,7 @@ fn get_task_signal_deps(task: &task::Task) -> anyhow::Result<Vec<task::SignalArc
         match task.phase {
             task::Phase::Run => {
                 if dep_task.phase != task::Phase::Run {
+                    singleton::set_evaluation_failure();
                     return Err(format_error!(
                         "Rule {} (phase: Run) cannot depend on rule {} in phase {}",
                         task.rule.name,
@@ -69,6 +69,7 @@ fn get_task_signal_deps(task: &task::Task) -> anyhow::Result<Vec<task::SignalArc
                 if task.rule.type_ == Some(rule::RuleType::Setup)
                     && dep_task.rule.type_ != Some(rule::RuleType::Setup)
                 {
+                    singleton::set_evaluation_failure();
                     return Err(format_error!(
                         "Rule {} (type: Setup) cannot depend on non-setup rule {} in phase {}",
                         task.rule.name,
@@ -78,6 +79,7 @@ fn get_task_signal_deps(task: &task::Task) -> anyhow::Result<Vec<task::SignalArc
                 }
             }
             task::Phase::Checkout if dep_task.phase != task::Phase::Checkout => {
+                singleton::set_evaluation_failure();
                 return Err(format_error!(
                     "Rule {} (phase: Checkout) cannot depend on rule {} in phase {}",
                     task.rule.name,
@@ -478,6 +480,7 @@ impl State {
         if let Some(ws_dest) = workspace_destination {
             let mut workspace_destinations = self.workspace_destinations.write();
             if let Some(rule_name) = workspace_destinations.get(&ws_dest) {
+                singleton::set_evaluation_failure();
                 return Err(format_error!(
                     "The workspace destination `{ws_dest}` is already being used by rule `{rule_name}`"
                 ));
@@ -515,6 +518,7 @@ impl State {
 
         let mut tasks = self.tasks.write();
         if tasks.get(&rule_label).is_some() {
+            singleton::set_evaluation_failure();
             return Err(format_error!("Rule already exists {rule_label}"));
         } else {
             tasks.insert(rule_label.clone(), task_to_insert);
@@ -568,6 +572,7 @@ impl State {
                             }
                         }
                         if !is_match {
+                            singleton::set_evaluation_failure();
                             return Err(format_error!(
                                 "Dependency {} (rules) is NOT visible to {}.",
                                 dep_task.rule.name,
@@ -580,6 +585,7 @@ impl State {
                         if labels::get_path_label_from_rule_label(dep_task.rule.name.as_ref())
                             != task_path
                         {
+                            singleton::set_evaluation_failure();
                             return Err(format_error!(
                                 "Dependency {} (private) is NOT visible to {}.",
                                 dep_task.rule.name,
@@ -650,15 +656,15 @@ impl State {
                 let all_rules = task.collect_rule_deps();
 
                 for rule_dep in all_rules.iter() {
-                    self.graph
-                        .add_dependency(&task.rule.name, rule_dep)
-                        .with_context(|| {
-                            format_context!(
-                                "Failed to add dependency {rule_dep} to rule {}: {}",
-                                task.rule.name,
-                                self.graph.get_target_not_found(rule_dep.clone())
-                            )
-                        })?;
+                    let result = self.graph.add_dependency(&task.rule.name, rule_dep);
+                    if result.is_err() {
+                        singleton::set_evaluation_failure();
+                        return Err(format_error!(
+                            "Failed to add dependency {rule_dep} to rule {}\n{}",
+                            task.rule.name,
+                            self.graph.get_target_not_found(rule_dep.clone())
+                        ));
+                    }
                 }
             }
         }
@@ -684,10 +690,15 @@ impl State {
     ) -> anyhow::Result<()> {
         let logger = rules_printer_logger(console.clone());
         logger.debug(format!("sorting graph with for {target:?}...").as_str());
-        self.sorted = self
-            .graph
-            .get_sorted_tasks(target.clone())
-            .context(format_context!("Failed to sort rules"))?;
+        let sort_result = self.graph.get_sorted_tasks(target.clone());
+
+        self.sorted = match sort_result {
+            Ok(sorted) => sorted,
+            Err(e) => {
+                singleton::set_evaluation_failure();
+                return Err(e);
+            }
+        };
 
         logger.debug(format!("done with {} nodes", self.sorted.len()).as_str());
 
@@ -774,6 +785,7 @@ impl State {
                         if let Some(existing_rule) =
                             file_map.insert(file.clone(), rule_name.clone())
                         {
+                            singleton::set_evaluation_failure();
                             return Err(format_error!(
                                 "Target `{file}` is claimed by both rule `{existing_rule}` and rule `{rule_name}`",
                             ));
@@ -782,6 +794,7 @@ impl State {
                     targets::Target::Directory(file) => {
                         if let Some(existing_rule) = dir_map.insert(file.clone(), rule_name.clone())
                         {
+                            singleton::set_evaluation_failure();
                             return Err(format_error!(
                                 "Target `{file}` is claimed by both rule `{existing_rule}` and rule `{rule_name}`",
                             ));
@@ -799,6 +812,7 @@ impl State {
                     format!("{dir_path_label}/")
                 };
                 if file_path_label.starts_with(dir_prefix.as_str()) {
+                    singleton::set_evaluation_failure();
                     return Err(format_error!(
                         "Target `{file_path_label}` from {file_rule} is contained in target {dir_path_label} from {dir_rule}",
                     ));

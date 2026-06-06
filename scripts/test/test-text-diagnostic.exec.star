@@ -258,7 +258,21 @@ no_file_human = text_render_diagnostics([diag_with_no_file_related], format = "h
 diagnostic_results["related"]["human_related_no_file"] = "  note: This is a general hint" in no_file_human
 
 no_file_github = text_render_diagnostics([diag_with_no_file_related], format = "github")
-diagnostic_results["related"]["github_related_no_file"] = "::notice file=::This is a general hint" in no_file_github
+diagnostic_results["related"]["github_related_no_file"] = "::notice::This is a general hint" in no_file_github
+
+# Test that line/col are omitted when file is empty
+diag_no_file_with_line = text_diagnostic(
+    "",
+    "error",
+    "error without file",
+    line = 10,
+    column = 5,
+)
+
+no_file_with_line_github = text_render_diagnostics([diag_no_file_with_line], format = "github")
+diagnostic_results["related"]["github_no_file_no_line_col"] = "::error::error without file" in no_file_with_line_github
+diagnostic_results["related"]["github_no_spurious_line"] = "line=" not in no_file_with_line_github
+diagnostic_results["related"]["github_no_spurious_col"] = "col=" not in no_file_with_line_github
 
 # ============================================================================
 # Output Results
