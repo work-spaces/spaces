@@ -7,9 +7,6 @@ workspace.set_locks(locks = {
     "@star/packages": "v0.2.51",
 })
 
-checkout.set_max_run_queue(16)
-checkout.set_max_checkout_queue(16)
-
 # Ensure tools checked out to sysroot/bin are available
 # during checkout_add_exec() calls
 checkout.add_env_vars(
