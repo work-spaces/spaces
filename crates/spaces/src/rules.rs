@@ -650,15 +650,15 @@ impl State {
                 let all_rules = task.collect_rule_deps();
 
                 for rule_dep in all_rules.iter() {
-                    self.graph
-                        .add_dependency(&task.rule.name, rule_dep)
-                        .with_context(|| {
-                            format_context!(
-                                "Failed to add dependency {rule_dep} to rule {}: {}",
-                                task.rule.name,
-                                self.graph.get_target_not_found(rule_dep.clone())
-                            )
-                        })?;
+                    let result = self.graph.add_dependency(&task.rule.name, rule_dep);
+                    if let Err(_) = result {
+                        singleton::set_evaluation_failure();
+                        return Err(format_error!(
+                            "Failed to add dependency {rule_dep} to rule {}\n{}",
+                            task.rule.name,
+                            self.graph.get_target_not_found(rule_dep.clone())
+                        ));
+                    }
                 }
             }
         }
@@ -684,10 +684,15 @@ impl State {
     ) -> anyhow::Result<()> {
         let logger = rules_printer_logger(console.clone());
         logger.debug(format!("sorting graph with for {target:?}...").as_str());
-        self.sorted = self
-            .graph
-            .get_sorted_tasks(target.clone())
-            .context(format_context!("Failed to sort rules"))?;
+        let sort_result = self.graph.get_sorted_tasks(target.clone());
+
+        self.sorted = match sort_result {
+            Ok(sorted) => sorted,
+            Err(e) => {
+                singleton::set_evaluation_failure();
+                return Err(e);
+            }
+        };
 
         logger.debug(format!("done with {} nodes", self.sorted.len()).as_str());
 

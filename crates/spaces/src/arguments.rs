@@ -181,6 +181,8 @@ pub fn execute() -> anyhow::Result<()> {
 
     let result = if let Err(error) = result {
         let verbosity_level = effective_console.get_level();
+        let args = std::env::args().collect::<Vec<String>>();
+        let _ = effective_console.error("While executing", args.join(" "));
         if let Some(logs) = singleton::get_logs_for_failed_rules()
             && verbosity_level > console::Level::Message
         {
