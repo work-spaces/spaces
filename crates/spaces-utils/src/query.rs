@@ -72,14 +72,22 @@ pub enum QueryCommand {
         #[arg(long, value_enum, default_value_t = console::Format::Yaml)]
         format: console::Format,
     },
-    #[command(about = r"Search for rules using fuzzy matching.
+    #[command(about = r"Search for rules using fuzzy matching and filters.
   - `spaces query search build`: return top 10 matches for 'build'
   - `spaces query search build test`: return top 10 matches across all terms
+  - `spaces query search //my-pkg`: filter rules starting with //my-pkg
+  - `spaces query search some/path`: filter rules whose source contains some/path
+  - `spaces query search :build`: filter rules containing :build
+  - `spaces query search //pkg build`: filter by //pkg prefix, then fuzzy search 'build'
   - `spaces query search build --deps`: include expanded deps and targets in results
   - `spaces query search build --limit=20`: return top 20 matches
   - `spaces query search build --checkout`: include checkout-phase rules in search")]
     Search {
-        /// One or more search terms; a rule matches if any term matches
+        /// One or more search terms and filters.
+        /// - Terms starting with '//' filter by rule name prefix
+        /// - Terms with '/' filter by source path substring
+        /// - Terms with ':' filter by rule name substring
+        /// - Other terms are fuzzy-matched against name and help text
         #[arg(required = true, num_args = 1..)]
         query: Vec<Arc<str>>,
         /// Include expanded deps and targets in results
@@ -970,47 +978,136 @@ impl QueryCommand {
 
                 let mut scored: Vec<Scored> = Vec::new();
 
+                // Separate query terms into filters and search terms
+                // - Terms starting with "//" are prefix filters for rule names
+                // - Terms containing "/" are substring filters for source paths
+                // - Terms containing ":" are substring filters for rule names
+                // - Other terms are fuzzy-searched against name and help text
+                let mut prefix_filters: Vec<&str> = Vec::new();
+                let mut path_filters: Vec<&str> = Vec::new();
+                let mut search_terms: Vec<&str> = Vec::new();
+
+                for q in query.iter() {
+                    let term = q.as_ref();
+                    if term.starts_with("//") {
+                        prefix_filters.push(term);
+                    } else if term.contains('/') || term.contains(':') {
+                        path_filters.push(term);
+                    } else {
+                        search_terms.push(term);
+                    }
+                }
+
+                // Helper function to compute score with exact/prefix/substring bonuses
+                let score_match = |query_term: &str, target: &str| -> isize {
+                    let query_lower = query_term.to_lowercase();
+                    let target_lower = target.to_lowercase();
+
+                    // Check for exact case-sensitive match (best)
+                    if target == query_term {
+                        return 15000;
+                    }
+
+                    // Check for exact case-insensitive match
+                    if target_lower == query_lower {
+                        return 10000;
+                    }
+
+                    // Check for prefix match
+                    if target_lower.starts_with(&query_lower) {
+                        return 5000;
+                    }
+
+                    // Check for word boundary match (e.g., "test" matches "build-test", "pkg:test")
+                    if target_lower.contains(&format!("-{}", query_lower))
+                        || target_lower.contains(&format!("_{}", query_lower))
+                        || target_lower.contains(&format!(":{}", query_lower))
+                    {
+                        return 3000;
+                    }
+
+                    // Check for substring match
+                    if target_lower.contains(&query_lower) {
+                        return 2000;
+                    }
+
+                    // Fall back to fuzzy match
+                    sublime_fuzzy::best_match(query_term, target)
+                        .map(|m| m.score())
+                        .unwrap_or(0)
+                };
+
                 let mut score_rule = |qr: &QueryRule| {
                     let raw_name = qr.rule.name.as_ref();
-                    // Score the rule against every term; keep the best match.
-                    // Help-text matches are penalised (halved) so name matches rank higher.
-                    let best_score = query
-                        .iter()
-                        .filter_map(|q| {
-                            let name_score =
-                                sublime_fuzzy::best_match(q.as_ref(), raw_name).map(|m| m.score());
-                            let help_score = qr
-                                .rule
-                                .help
-                                .as_deref()
-                                .and_then(|h| sublime_fuzzy::best_match(q.as_ref(), h))
-                                .map(|m| m.score() / 2);
-                            name_score.max(help_score).or(name_score).or(help_score)
-                        })
-                        .max();
+                    let help_text = qr.rule.help.as_deref().unwrap_or("");
 
-                    if let Some(score) = best_score {
-                        let (rule_deps, rule_targets) = if *deps {
-                            (qr.expanded_deps.clone(), Some(extract_targets(&qr.rule)))
-                        } else {
-                            (None, None)
-                        };
-                        scored.push(Scored {
-                            score,
-                            name: qr.rule.name.clone(),
-                            info: ScoredInfo {
-                                source: qr.source.clone(),
-                                help: qr
-                                    .rule
-                                    .help
-                                    .as_deref()
-                                    .unwrap_or("<Not Provided>")
-                                    .to_string(),
-                                deps: rule_deps,
-                                targets: rule_targets,
-                            },
-                        });
+                    // Apply hard filters first - rule must pass all of these
+
+                    // Filter 1: Rule name must start with "//" prefix if specified
+                    for prefix in &prefix_filters {
+                        if !raw_name.starts_with(prefix) {
+                            return;
+                        }
                     }
+
+                    // Filter 2: Source path must contain "/" pattern if specified
+                    for path_pattern in &path_filters {
+                        if !raw_name.contains(path_pattern) {
+                            return;
+                        }
+                    }
+
+                    let mut total_score: isize = 0;
+                    let mut matched_terms = 0;
+
+                    // Aggregate score across all search terms (non-filter terms)
+                    for query_term in &search_terms {
+                        // Score against name (higher weight)
+                        let name_score = score_match(query_term, raw_name);
+
+                        // Score against help text (lower weight: 1/3 of name)
+                        let help_score = score_match(query_term, help_text) / 3;
+
+                        // Take the better of the two
+                        let term_score = name_score.max(help_score);
+
+                        if term_score > 0 {
+                            total_score += term_score;
+                            matched_terms += 1;
+                        }
+                    }
+
+                    // If there are search terms, require at least one to match
+                    // If there are only filters (no search terms), pass through with a default score
+                    if !search_terms.is_empty() && matched_terms == 0 {
+                        return;
+                    }
+
+                    // If there are no search terms (only filters), use a neutral default score
+                    if search_terms.is_empty() {
+                        total_score = 1000;
+                        matched_terms = 1;
+                    }
+
+                    // Apply bonus for matching more terms (rewards broader matches)
+                    let final_score = total_score * matched_terms as isize;
+
+                    let (rule_deps, rule_targets) = if *deps {
+                        (qr.expanded_deps.clone(), Some(extract_targets(&qr.rule)))
+                    } else {
+                        (None, None)
+                    };
+
+                    scored.push(Scored {
+                        score: final_score,
+                        name: qr.rule.name.clone(),
+                        info: ScoredInfo {
+                            source: qr.source.clone(),
+                            help: help_text.to_string(),
+                            deps: rule_deps,
+                            targets: rule_targets,
+                        },
+                    });
                 };
 
                 if *checkout {
@@ -1022,10 +1119,21 @@ impl QueryCommand {
                     score_rule(qr);
                 }
 
-                scored.sort_by_key(|b| std::cmp::Reverse(b.score));
+                // Sort by score ascending (lowest first), then by name length, then alphabetically
+                // This puts best matches at the bottom of the terminal output
+                scored.sort_by(|a, b| {
+                    a.score
+                        .cmp(&b.score)
+                        .then_with(|| b.name.len().cmp(&a.name.len()))
+                        .then_with(|| b.name.cmp(&a.name))
+                });
+
+                // Take the top N results from the end (highest scores)
                 let top: IndexMap<Arc<str>, ScoredInfo> = scored
                     .into_iter()
+                    .rev()
                     .take(*limit)
+                    .rev()
                     .map(|s| (s.name, s.info))
                     .collect();
 
