@@ -58,9 +58,6 @@ pub struct EvalContext {
     /// Cached workspace short digest
     pub workspace_short_digest: Arc<str>,
 
-    /// Whether workspace is reproducible
-    pub workspace_is_reproducible: bool,
-
     /// Cached workspace environment variables
     /// Stored to avoid repeated lock acquisitions and env var computation
     /// In checkout mode, this needs to be refreshed after each module's rules execute
@@ -93,7 +90,6 @@ impl EvalContext {
             cargo_binstall_root,
             digest,
             short_digest,
-            is_reproducible,
         ) = if let Some(ref ws) = workspace {
             let ws_read = ws.read();
             (
@@ -108,7 +104,6 @@ impl EvalContext {
                     .clone()
                     .unwrap_or_else(|| Arc::from("")),
                 ws_read.get_short_digest(),
-                ws_read.is_reproducible(),
             )
         } else {
             (
@@ -118,7 +113,6 @@ impl EvalContext {
                 Arc::from("."),
                 Arc::from(""),
                 Arc::from(""),
-                false,
             )
         };
 
@@ -139,7 +133,6 @@ impl EvalContext {
             workspace_cargo_binstall_root: cargo_binstall_root,
             workspace_digest: digest,
             workspace_short_digest: short_digest,
-            workspace_is_reproducible: is_reproducible,
             workspace_env_vars: workspace_env,
             logger: console.map(|c| logger::Logger::new(c, module_name)),
         }

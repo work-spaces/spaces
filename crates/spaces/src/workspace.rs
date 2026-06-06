@@ -25,7 +25,6 @@ const SPACES_SYSROOT_NAME: &str = "sysroot";
 
 const AUTOMATIC_WORKSPACE_ABSOLUTE_PATH: &str = "SPACES_WORKSPACE_ABSOLUTE_PATH";
 const AUTOMATIC_WORKSPACE_DIGEST: &str = "SPACES_WORKSPACE_DIGEST";
-const AUTOMATIC_WORKSPACE_IS_REPRODUCIBLE: &str = "SPACES_IS_WORKSPACE_REPRODUCIBLE";
 const AUTOMATIC_WORKSPACE_STORE_PATH: &str = "SPACES_WORKSPACE_STORE_PATH";
 
 pub const WORKSPACE_FILE_HEADER: &str = r#"
@@ -282,7 +281,6 @@ pub struct Workspace {
     env: environment::AnyEnvironment, // set during eval
     pub is_dirty: bool,               // true if any star files have changed
     pub is_bin_dirty: bool,           // true if any star files have changed
-    pub is_reproducible: bool,        // true if workspace has no repos checked out on branches
     pub target: Option<Arc<str>>,     // target called from the command line
     pub trailing_args: Vec<Arc<str>>,
     pub updated_assets: HashSet<Arc<str>>, // used by assets to keep track of exclusive access
@@ -389,14 +387,6 @@ impl Workspace {
         } else {
             format!("//{}/{}", self.relative_invoked_path, target).into()
         }
-    }
-
-    pub fn is_reproducible(&self) -> bool {
-        self.is_reproducible
-    }
-
-    pub fn set_is_not_reproducible(&mut self) {
-        self.is_reproducible = false;
     }
 
     pub fn find_workspace_root(current_working_directory: &str) -> anyhow::Result<Arc<str>> {
@@ -856,7 +846,6 @@ impl Workspace {
             modules,
             absolute_path,
             log_directory,
-            is_reproducible: true,
             is_create_lock_file: false,
             locks,
             env,
@@ -966,10 +955,6 @@ impl Workspace {
         vars.insert(AUTOMATIC_WORKSPACE_ABSOLUTE_PATH, self.get_absolute_path());
         vars.insert(AUTOMATIC_WORKSPACE_DIGEST, self.get_short_digest());
         vars.insert(AUTOMATIC_WORKSPACE_STORE_PATH, self.get_store_path());
-        vars.insert(
-            AUTOMATIC_WORKSPACE_IS_REPRODUCIBLE,
-            self.is_reproducible().to_string().into(),
-        );
         vars
     }
 
@@ -979,14 +964,7 @@ impl Workspace {
                 AUTOMATIC_WORKSPACE_ABSOLUTE_PATH,
                 "Abosolute path to the workspace",
             ),
-            (
-                AUTOMATIC_WORKSPACE_DIGEST,
-                "Workspace digest (empty if no reproducible)",
-            ),
-            (
-                AUTOMATIC_WORKSPACE_IS_REPRODUCIBLE,
-                "`true` if the workspace is reproducible",
-            ),
+            (AUTOMATIC_WORKSPACE_DIGEST, "Workspace digest"),
             (
                 AUTOMATIC_WORKSPACE_STORE_PATH,
                 "Absolute path to the spaces store used by this workspace",
@@ -1069,15 +1047,11 @@ impl Workspace {
         )
         .context(format_context!("Failed to save workspace env file"))?;
 
-        if self.is_reproducible() {
-            self.settings.json.digest = Some(calculate_digest(
-                &env_str,
-                modules,
-                &self.settings.checkout_store,
-            ));
-        } else {
-            self.settings.json.digest = None;
-        }
+        self.settings.json.digest = Some(calculate_digest(
+            &env_str,
+            modules,
+            &self.settings.checkout_store,
+        ));
 
         Ok(())
     }

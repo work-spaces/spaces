@@ -755,24 +755,15 @@ impl Git {
                 "Failed to create new branch for {}",
                 self.spaces_key
             ))?;
-
-            workspace.write().set_is_not_reproducible();
         }
 
-        // after possibly checking out the lock commit, check for reproducibility
+        // after possibly checking out the lock commit, check if on a branch or commit
         if !is_locked {
-            // check if checkout is on a branch or commit
             let is_branch =
                 git::is_branch(progress, &self.url, working_directory.as_ref(), &ref_name);
             if is_branch {
-                logger(progress.console.clone(), self.url.clone()).info(
-                    format!(
-                        "{} is a branch - workspace is not reproducible",
-                        self.spaces_key
-                    )
-                    .as_str(),
-                );
-                workspace.write().set_is_not_reproducible();
+                logger(progress.console.clone(), self.url.clone())
+                    .debug(format!("{} is a branch", self.spaces_key).as_str());
             }
         }
 

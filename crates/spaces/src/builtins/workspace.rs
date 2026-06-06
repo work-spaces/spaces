@@ -13,17 +13,18 @@ use utils::{environment, rule, ws};
 pub fn globals(builder: &mut GlobalsBuilder) {
     /// Returns true if the workspace is reproducible.
     ///
+    /// This function is deprecated and always returns `False`.
+    ///
     /// ```python
     /// if workspace.is_reproducible():
     ///     # ...
     /// ```
     ///
     /// # Returns
-    /// * `bool`: True if the workspace is reproducible, False otherwise.
-    fn is_reproducible(eval: &mut Evaluator) -> anyhow::Result<bool> {
-        let ctx = get_eval_context(eval)?;
+    /// * `bool`: False (deprecated functionality).
+    fn is_reproducible() -> anyhow::Result<bool> {
         // Use cached value from EvalContext to avoid lock contention
-        Ok(ctx.workspace_is_reproducible)
+        Ok(false)
     }
 
     /// Returns the path to the shell config file.

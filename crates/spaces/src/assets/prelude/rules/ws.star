@@ -139,7 +139,7 @@ def workspace_is_reproducible() -> bool:
     Returns:
         True if the workspace is reproducible, False otherwise
     """
-    return workspace.is_reproducible()
+    return False
 
 def _get_member_requirement(url: str, rev: str | None = None, semver: str | None = None) -> dict:
     version_requirment = {}
