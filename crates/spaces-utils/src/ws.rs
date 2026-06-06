@@ -283,6 +283,10 @@ fn get_unknown_version() -> Arc<str> {
     "unknown".into()
 }
 
+fn default_max_queue() -> i64 {
+    8
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JsonSettings {
     pub store_path: Arc<str>,
@@ -301,6 +305,10 @@ pub struct JsonSettings {
     pub assets: HashMap<Arc<str>, Asset>,
     #[serde(default = "Vec::new")]
     pub dev_branches: Vec<Arc<str>>,
+    #[serde(default = "default_max_queue")]
+    pub max_run_queue: i64,
+    #[serde(default = "default_max_queue")]
+    pub max_checkout_queue: i64,
     #[serde(skip)]
     pub bin_settings: BinSettings,
 }
@@ -326,6 +334,8 @@ impl JsonSettings {
             assets: HashMap::new(),
             minimum_version: None,
             dev_branches: Vec::new(),
+            max_run_queue: 8,
+            max_checkout_queue: 8,
             bin_settings: Default::default(),
         }
     }

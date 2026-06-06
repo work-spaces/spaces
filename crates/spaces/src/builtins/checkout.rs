@@ -1,4 +1,4 @@
-use crate::builtins::eval_context::get_eval_context_mut;
+use crate::builtins::eval_context::{get_eval_context, get_eval_context_mut};
 use crate::executor::asset;
 use crate::workspace::WorkspaceArc;
 use crate::{executor, rules, task};
@@ -1188,6 +1188,60 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         )
         .context(format_context!("Failed to register rule {rule_name}"))?;
 
+        Ok(NoneType)
+    }
+
+    /// Sets the maximum number of concurrent tasks during the run phase.
+    ///
+    /// This overrides the default max_queue_count for tasks in the Run phase.
+    ///
+    /// ```python
+    /// checkout.set_max_run_queue(16)
+    /// ```
+    ///
+    /// # Arguments
+    /// * `count`: Maximum number of concurrent run tasks.
+    fn set_max_run_queue(count: i64, eval: &mut Evaluator) -> anyhow::Result<NoneType> {
+        if count < 1 {
+            return Err(anyhow::anyhow!("max_run_queue must be greater than 0"));
+        }
+        if count > 64 {
+            return Err(anyhow::anyhow!("max_run_queue must be less than 65"));
+        }
+        let ctx = get_eval_context(eval)?;
+        let workspace_arc = ctx
+            .workspace
+            .clone()
+            .ok_or_else(|| format_error!("Internal Error: No active workspace found"))?;
+        let mut workspace = workspace_arc.write();
+        workspace.settings.json.max_run_queue = count;
+        Ok(NoneType)
+    }
+
+    /// Sets the maximum number of concurrent tasks during the checkout phase.
+    ///
+    /// This overrides the default max_queue_count for tasks in the Checkout phase.
+    ///
+    /// ```python
+    /// checkout.set_max_checkout_queue(8)
+    /// ```
+    ///
+    /// # Arguments
+    /// * `count`: Maximum number of concurrent checkout tasks.
+    fn set_max_checkout_queue(count: i64, eval: &mut Evaluator) -> anyhow::Result<NoneType> {
+        if count < 1 {
+            return Err(anyhow::anyhow!("max_checkout_queue must be greater than 0"));
+        }
+        if count > 64 {
+            return Err(anyhow::anyhow!("max_checkout_queue must be less than 65"));
+        }
+        let ctx = get_eval_context(eval)?;
+        let workspace_arc = ctx
+            .workspace
+            .clone()
+            .ok_or_else(|| format_error!("Internal Error: No active workspace found"))?;
+        let mut workspace = workspace_arc.write();
+        workspace.settings.json.max_checkout_queue = count;
         Ok(NoneType)
     }
 }

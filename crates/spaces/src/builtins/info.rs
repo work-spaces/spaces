@@ -353,20 +353,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
     /// Sets the maximum number of items that can be queued at one time.
     ///
+    /// This is deprecated. Use checkout.set_max_run_queue() and checkout.set_max_checkout_queue() instead.
+    ///
     /// ```python
     /// info.set_max_queue_count(10)
     /// ```
     ///
     /// # Arguments
     /// * `count`: The maximum number of items to allow in the queue.
-    fn set_max_queue_count(count: i64) -> anyhow::Result<NoneType> {
-        if count < 1 {
-            return Err(anyhow::anyhow!("max_queue_count must be greater than 0"));
-        }
-        if count > 64 {
-            return Err(anyhow::anyhow!("max_queue_count must be less than 65"));
-        }
-        singleton::set_max_queue_count(count);
+    fn set_max_queue_count(_count: i64) -> anyhow::Result<NoneType> {
         Ok(NoneType)
     }
 }
