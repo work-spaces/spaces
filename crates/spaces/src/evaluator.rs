@@ -1199,22 +1199,14 @@ fn execute_tasks(
 
             logger.message("--Run Phase--");
 
-            let is_reproducible = workspace.read().is_reproducible();
-            let repro_message = format!(
-                "Is Workspace reproducible: {is_reproducible} -> {}",
-                workspace
-                    .read()
-                    .settings
-                    .json
-                    .digest
-                    .clone()
-                    .unwrap_or_default()
-            );
-            if is_reproducible {
-                logger.message(repro_message.as_str());
-            } else {
-                logger.info(repro_message.as_str());
-            }
+            let digest = workspace
+                .read()
+                .settings
+                .json
+                .digest
+                .clone()
+                .unwrap_or_default();
+            logger.message(format!("Workspace digest: {digest}").as_str());
 
             rules::debug_sorted_tasks(console.clone(), phase)
                 .context(format_context!("Failed to debug sorted tasks"))?;
