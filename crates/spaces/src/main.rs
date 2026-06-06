@@ -19,6 +19,8 @@ mod task;
 mod tools;
 mod workspace;
 
-fn main() -> anyhow::Result<()> {
-    arguments::execute()
+fn main() {
+    if arguments::execute().is_err() {
+        std::process::exit(1);
+    }
 }

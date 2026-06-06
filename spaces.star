@@ -95,6 +95,14 @@ run_add_exec(
 )
 
 run_add_exec(
+    "fail",
+    command = "bash",
+    args = ["-c", "echo 'Writing to stderr' >&2 && false"],
+    help = "Fail the build",
+    visibility = visibility_private(),
+)
+
+run_add_exec(
     "clippy",
     command = "cargo",
     args = ["clippy"],
