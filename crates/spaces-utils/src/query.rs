@@ -991,9 +991,7 @@ impl QueryCommand {
                     let term = q.as_ref();
                     if term.starts_with("//") {
                         prefix_filters.push(term);
-                    } else if term.contains('/') {
-                        path_filters.push(term);
-                    } else if term.contains(':') {
+                    } else if term.contains('/') || term.contains(':') {
                         path_filters.push(term);
                     } else {
                         search_terms.push(term);
