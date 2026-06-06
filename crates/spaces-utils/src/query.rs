@@ -76,7 +76,7 @@ pub enum QueryCommand {
   - `spaces query search build`: return top 10 matches for 'build'
   - `spaces query search build test`: return top 10 matches across all terms
   - `spaces query search //my-pkg`: filter rules starting with //my-pkg
-  - `spaces query search some/path`: filter rules whose source contains some/path
+  - `spaces query search some/path`: filter rules that contain some/path
   - `spaces query search :build`: filter rules containing :build
   - `spaces query search //pkg build`: filter by //pkg prefix, then fuzzy search 'build'
   - `spaces query search build --deps`: include expanded deps and targets in results
