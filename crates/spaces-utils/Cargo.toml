@@ -28,6 +28,8 @@ homedir = "0.3"
 arboard = "3"
 serde_with = "3"
 enum-map = { version = "2", features = ["serde"] }
+nono = { version = "0.62"}
+
 
 indexmap.workspace = true
 
