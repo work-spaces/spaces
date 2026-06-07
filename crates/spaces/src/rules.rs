@@ -474,7 +474,6 @@ impl State {
             task_to_insert.rule.name,
             module_opt.clone(),
             workspace::SPACES_MODULE_NAME,
-            labels::IsDep::No,
         );
 
         if let Some(ws_dest) = workspace_destination {
@@ -510,7 +509,6 @@ impl State {
                 trailing_args_rule.clone(),
                 module_opt,
                 workspace::SPACES_MODULE_NAME,
-                labels::IsDep::Yes,
             );
             let mut trailing_args_rule_map = self.trailing_args_rule_map.write();
             let _ = trailing_args_rule_map.insert(rule_label.clone(), sane_trailing_args_label);
@@ -1314,7 +1312,6 @@ pub fn get_sanitized_rule_name_for_module(rule_name: Arc<str>, module_name: &Arc
         rule_name,
         Some(module_name.clone()),
         workspace::SPACES_MODULE_NAME,
-        labels::IsDep::No,
     )
 }
 
