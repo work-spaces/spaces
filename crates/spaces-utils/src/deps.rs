@@ -63,7 +63,6 @@ impl AnyDep {
                         dep.clone(),
                         starlark_module.clone(),
                         spaces_module_suffix,
-                        labels::IsDep::Yes,
                     );
                 }
             }
@@ -230,7 +229,6 @@ impl Deps {
                         dep.clone(),
                         starlark_module.clone(),
                         spaces_module_suffix,
-                        labels::IsDep::Yes,
                     );
                 }
             }

@@ -157,7 +157,6 @@ impl Rule {
                     vis_rule.clone(),
                     latest_starlark_module.clone(),
                     spaces_module_suffix,
-                    labels::IsDep::Yes,
                 );
             }
         }
