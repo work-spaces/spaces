@@ -84,12 +84,12 @@ checkout_add_any_assets(
     "cargo_workspace_assets",
     assets = [
         asset_hard_link(
-            source = RUST_TOOLCHAIN_SOURCE,
-            destination = "rust-toolchain.toml",
+            source = "//" + RUST_TOOLCHAIN_SOURCE,
+            destination = "//rust-toolchain.toml",
         ),
         asset_hard_link(
-            source = "{}/Cargo.workspace.toml".format(SPACES_CHECKOUT_PATH),
-            destination = "Cargo.toml",
+            source = "//{}/Cargo.workspace.toml".format(SPACES_CHECKOUT_PATH),
+            destination = "//Cargo.toml",
         ),
     ],
 )

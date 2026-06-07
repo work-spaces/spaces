@@ -41,7 +41,10 @@ GLOB_DEPS = glob(includes = [
     "//spaces/target/**",
 ])
 
-rustup_files = ["//spaces/rust-toolchain.toml"]
+rustup_files = [
+    "//spaces/default.rust-toolchain.toml",
+    "//spaces/musl.rust-toolchain.toml",
+]
 
 run_add_exec(
     "rustup_update",
@@ -171,8 +174,14 @@ run_add_exec(
 
 run_add_exec(
     "install_dev",
-    command = "bash",
-    args = ["-c", "cargo install --force --path=spaces/crates/spaces --profile=dev --root={}".format(root)],
+    command = "cargo",
+    args = [
+        "install",
+        "--force",
+        "--path=spaces/crates/spaces",
+        "--profile=dev",
+        "--root={}".format(root),
+    ],
     deps = [":cargo_tree"],
     visibility = visibility_private(),
     help = "Install dev build on local system",
@@ -200,7 +209,9 @@ if info_is_platform_linux():
 
 run_add_exec(
     "install_release",
-    script = "cargo install --target-dir=build/target --force --path=spaces/crates/spaces --profile=release --root={}".format(root),
+    command = "cargo",
+    args = _install_release_args,
+    env = _install_release_env,
     deps = [":cargo_tree"],
     visibility = visibility_public(),
 )
@@ -216,7 +227,16 @@ if info_is_platform_linux():
 
 run_add_exec(
     "install_dev_lsp",
-    script = "cargo install --target-dir=build/target --features=lsp-debug --force --path=spaces/crates/spaces --profile=dev --root={}".format(root),
+    command = "cargo",
+    args = [
+        "install",
+        "--target-dir=build/target",
+        "--features=lsp-debug",
+        "--force",
+        "--path=spaces/crates/spaces",
+        "--profile=dev",
+        "--root={}".format(root),
+    ],
     deps = [":cargo_tree"],
     visibility = visibility_private(),
 )
