@@ -143,7 +143,7 @@ checkout_add_env_vars(
         env_assign(
             "GIT_CONFIG_GLOBAL",
             workspace_get_absolute_path() + "/.spaces/.gitconfig",
-            help = "Assign git config to workspace home fholder",
+            help = "Assign git config to workspace home folder",
         ),
     ],
 )
@@ -152,7 +152,7 @@ GH_RULE = package_add("github.com", "cli", "cli", "v2.88.1")
 
 # Required for dbus and nono (linux only)
 
-if info_is_platform_linux() or workspace_load_value("SPACES_ENABLE_DBUS") == "ON":
+if info_is_platform_linux() or workspace_load_value("SPACES_ENABLE_SANDBOX") == "ON":
     checkout_store_value("SPACES_DBUS_ENABLED", True)
     cmake_add("cmake4", "v4.3.1")
     package_add("github.com", "ninja-build", "ninja", "v1.13.2")
@@ -193,11 +193,10 @@ if info_is_platform_linux() or workspace_load_value("SPACES_ENABLE_DBUS") == "ON
     checkout_add_repo(
         "deps/dbus",
         url = "https://github.com/work-spaces/dbus.git",
-        rev = "2d4506d18527b430c77116bd5832a284c378f584",
+        rev = "ff0666ad9ad4d996d2de6a257ade5244b623510c",
         clone = checkout_clone_default(),
     )
 
-if workspace_load_value("SPACES_ENABLE_SANDBOX") == True:
     checkout_add_home_store_env("home_store_env")
     checkout_add_home_assets(
         "home_assets",

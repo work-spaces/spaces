@@ -1382,7 +1382,7 @@ fn sanitize_any_assets_paths(
         #[starlark(require = named)] sandbox: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context(eval)?;
+        let ctx = get_eval_context_mut(eval)?;
 
         let sandbox_value: utils::sandbox::Sandbox =
             serde_json::from_value(sandbox.to_json_value()?)
