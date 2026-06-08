@@ -1617,11 +1617,10 @@ pub fn run_starlark_modules(
 ) -> anyhow::Result<()> {
     let logger = star_logger(console.clone());
     let is_dirty = workspace.read().is_dirty;
-    let is_ci = singleton::get_is_ci();
     let is_always_evaluate = workspace.read().settings.bin.is_always_evaluate;
 
     let (run_target, is_save_bin) =
-        if is_dirty || is_ci || is_always_evaluate || phase == task::Phase::Checkout {
+        if is_dirty || is_always_evaluate || phase == task::Phase::Checkout {
             if is_always_evaluate {
                 logger.message("always evaluate modules enabled");
             } else if is_dirty {
