@@ -325,7 +325,6 @@ impl Git {
                 logger(progress.console.clone(), self.url.clone())
                     .debug("Fetching updates in existing workspace");
 
-                // Check if force fetch tags is enabled (disabled by feature flag)
                 let force_fetch_tags = !workspace
                     .read()
                     .features

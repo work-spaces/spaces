@@ -78,7 +78,7 @@ impl Feature {
                 r"Allow loading `/internal/` modules via workspace-absolute (//...) load paths (disables the relative-only restriction)."
             }
             Feature::SkipForceFetchTags => {
-                r"Skip force-fetching tags during git fetch operations.
+                r"Skip force-fetching tags on workspace repos when running spaces sync.
                 By default, tags are force-fetched to ensure local tags match remote tags."
             }
         }
