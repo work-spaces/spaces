@@ -1059,7 +1059,20 @@ impl Repository {
     }
 
     pub fn fetch(&self, progress_bar: &mut console::Progress) -> anyhow::Result<()> {
-        self.execute(progress_bar, vec!["fetch".into()])
+        self.fetch_with_tags(progress_bar, false)
+    }
+
+    pub fn fetch_with_tags(
+        &self,
+        progress_bar: &mut console::Progress,
+        force_tags: bool,
+    ) -> anyhow::Result<()> {
+        let mut args = vec!["fetch".into()];
+        if force_tags {
+            args.push("--tags".into());
+            args.push("--force".into());
+        }
+        self.execute(progress_bar, args)
             .context(format_context!("while fetching from {}", self.full_path))?;
         Ok(())
     }

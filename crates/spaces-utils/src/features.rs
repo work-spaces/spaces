@@ -33,6 +33,7 @@ pub enum Feature {
     EnableAllBuiltins,
     CloneWithCommitGraph,
     AllowInternalLoad,
+    SkipForceFetchTags,
 }
 
 impl Feature {
@@ -75,6 +76,10 @@ impl Feature {
             }
             Feature::AllowInternalLoad => {
                 r"Allow loading `/internal/` modules via workspace-absolute (//...) load paths (disables the relative-only restriction)."
+            }
+            Feature::SkipForceFetchTags => {
+                r"Skip force-fetching tags on workspace repos when running spaces sync.
+                By default, tags are force-fetched to ensure local tags match remote tags."
             }
         }
     }

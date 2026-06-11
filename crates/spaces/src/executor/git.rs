@@ -325,10 +325,17 @@ impl Git {
                 logger(progress.console.clone(), self.url.clone())
                     .debug("Fetching updates in existing workspace");
 
-                existing_repo.fetch(progress).context(format_context!(
-                    "{name} - Failed to fetch repository {}",
-                    self.spaces_key
-                ))?;
+                let force_fetch_tags = !workspace
+                    .read()
+                    .features
+                    .is_enabled(features::Feature::SkipForceFetchTags);
+
+                existing_repo
+                    .fetch_with_tags(progress, force_fetch_tags)
+                    .context(format_context!(
+                        "{name} - Failed to fetch repository {}",
+                        self.spaces_key
+                    ))?;
 
                 // Checkout the desired revision
                 existing_repo
