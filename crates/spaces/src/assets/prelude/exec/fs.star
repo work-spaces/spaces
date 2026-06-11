@@ -8,8 +8,7 @@ This module provides ergonomic wrappers around filesystem operations. It support
 - Metadata queries (size, modification time, permissions)
 - Symbolic links and permissions management
 
-All paths are relative to the workspace root. Use these functions for safe,
-consistent filesystem access in your Starlark scripts.
+Use these functions for safe, consistent filesystem access in your Starlark scripts.
 
 Examples:
     # Read and parse a JSON file
@@ -35,7 +34,7 @@ def fs_read_text(path: str) -> str:
     Read the entire contents of a text file.
 
     Args:
-        path: Path to the text file (relative to workspace root)
+        path: Path to the text file
 
     Returns:
         str: The complete file contents as a string
@@ -62,7 +61,7 @@ def fs_write_text(path: str, content: str) -> None:
     its contents will be completely replaced.
 
     Args:
-        path: Path to the file (relative to workspace root)
+        path: Path to the file
         content: Text content to write
 
     Returns:
@@ -89,7 +88,7 @@ def fs_append_text(path: str, content: str) -> None:
     building up log files or accumulating data.
 
     Args:
-        path: Path to the file (relative to workspace root)
+        path: Path to the file
         content: Text content to append
 
     Returns:
@@ -117,7 +116,7 @@ def fs_write_string_atomic(path: str, content: str, mode: int = 0o644) -> None:
     corrupt state. Useful for configuration files or critical data.
 
     Args:
-        path: Path to the file (relative to workspace root)
+        path: Path to the file
         content: Text content to write
         mode: Unix file permissions as octal number (default: 0o644)
 
@@ -145,7 +144,7 @@ def fs_read_bytes(path: str) -> list:
     Read a file as a list of byte values (0-255).
 
     Args:
-        path: Path to the file (relative to workspace root)
+        path: Path to the file
 
     Returns:
         list: List of integers representing bytes (0-255)
@@ -165,7 +164,7 @@ def fs_write_bytes(path: str, data: list) -> None:
     Write a list of byte values to a file.
 
     Args:
-        path: Path to the file (relative to workspace root)
+        path: Path to the file
         data: List of integers (0-255) representing bytes
 
     Returns:
@@ -186,7 +185,7 @@ def fs_read_lines(path: str) -> list:
     Read a text file as a list of lines (newlines stripped).
 
     Args:
-        path: Path to the text file (relative to workspace root)
+        path: Path to the text file
 
     Returns:
         list: List of strings, one per line (without newline characters)
@@ -214,7 +213,7 @@ def fs_write_lines(path: str, lines: list) -> None:
     becomes one line in the output file.
 
     Args:
-        path: Path to the file (relative to workspace root)
+        path: Path to the file
         lines: List of strings to write
 
     Returns:
@@ -243,7 +242,7 @@ def fs_read_json(path: str) -> dict:
     Read and parse a JSON file into a dictionary.
 
     Args:
-        path: Path to the JSON file (relative to workspace root)
+        path: Path to the JSON file
 
     Returns:
         dict: Parsed JSON data as a Starlark dictionary
@@ -268,7 +267,7 @@ def fs_write_json(path: str, data: dict, pretty: bool = True) -> None:
     Write a dictionary to a JSON file.
 
     Args:
-        path: Path to the JSON file (relative to workspace root)
+        path: Path to the JSON file
         data: Dictionary or list to serialize
         pretty: If True (default), write formatted JSON with indentation
 
@@ -297,7 +296,7 @@ def fs_read_yaml(path: str) -> dict:
     Read and parse a YAML file into a dictionary.
 
     Args:
-        path: Path to the YAML file (relative to workspace root)
+        path: Path to the YAML file
 
     Returns:
         dict: Parsed YAML data as a Starlark dictionary
@@ -320,7 +319,7 @@ def fs_write_yaml(path: str, data: dict) -> None:
     Write a dictionary to a YAML file.
 
     Args:
-        path: Path to the YAML file (relative to workspace root)
+        path: Path to the YAML file
         data: Dictionary or list to serialize as YAML
 
     Returns:
@@ -351,7 +350,7 @@ def fs_read_toml(path: str) -> dict:
     Read and parse a TOML file into a dictionary.
 
     Args:
-        path: Path to the TOML file (relative to workspace root)
+        path: Path to the TOML file
 
     Returns:
         dict: Parsed TOML data as a Starlark dictionary
@@ -371,7 +370,7 @@ def fs_write_toml(path: str, data: dict) -> None:
     Write a dictionary to a TOML file.
 
     Args:
-        path: Path to the TOML file (relative to workspace root)
+        path: Path to the TOML file
         data: Dictionary to serialize as TOML
 
     Returns:
@@ -402,7 +401,7 @@ def fs_exists(path: str) -> bool:
     Check if a file or directory exists.
 
     Args:
-        path: Path to check (relative to workspace root)
+        path: Path to check
 
     Returns:
         bool: True if the path exists, False otherwise
@@ -425,7 +424,7 @@ def fs_is_file(path: str) -> bool:
     Check if a path is a regular file.
 
     Args:
-        path: Path to check (relative to workspace root)
+        path: Path to check
 
     Returns:
         bool: True if the path is a regular file, False otherwise
@@ -442,7 +441,7 @@ def fs_is_directory(path: str) -> bool:
     Check if a path is a directory.
 
     Args:
-        path: Path to check (relative to workspace root)
+        path: Path to check
 
     Returns:
         bool: True if the path is a directory, False otherwise
@@ -463,7 +462,7 @@ def fs_is_symlink(path: str) -> bool:
     Check if a path is a symbolic link.
 
     Args:
-        path: Path to check (relative to workspace root)
+        path: Path to check
 
     Returns:
         bool: True if the path is a symbolic link, False otherwise
@@ -480,7 +479,7 @@ def fs_is_text_file(path: str) -> bool:
     Check if a file is a text file (vs binary).
 
     Args:
-        path: Path to the file (relative to workspace root)
+        path: Path to the file
 
     Returns:
         bool: True if the file appears to be text, False if binary
@@ -509,7 +508,7 @@ def fs_read_directory(path: str) -> list:
     is not sorted and includes both files and subdirectories.
 
     Args:
-        path: Path to the directory (relative to workspace root)
+        path: Path to the directory
 
     Returns:
         list: List of full paths to directory entries
@@ -536,7 +535,7 @@ def fs_mkdir(path: str, parents: bool = False, exist_ok: bool = False) -> None:
     Create a directory.
 
     Args:
-        path: Path to the directory to create (relative to workspace root)
+        path: Path to the directory to create
         parents: If True, create parent directories as needed (like mkdir -p)
         exist_ok: If True, don't error if directory already exists
 
@@ -622,7 +621,7 @@ def fs_remove(path: str, recursive: bool = False, missing_ok: bool = True) -> No
     Remove a file or directory.
 
     Args:
-        path: Path to remove (relative to workspace root)
+        path: Path to remove
         recursive: If True, recursively remove directories and contents
         missing_ok: If True, don't error if path doesn't exist
 
@@ -656,7 +655,7 @@ def fs_symlink(target: str, link: str) -> None:
 
     Args:
         target: The target path that the symlink points to
-        link: The symlink path to create (relative to workspace root)
+        link: The symlink path to create
 
     Returns:
         None
@@ -678,7 +677,7 @@ def fs_read_link(path: str) -> str:
     Read the target of a symbolic link.
 
     Args:
-        path: Path to the symbolic link (relative to workspace root)
+        path: Path to the symbolic link
 
     Returns:
         str: The target path that the symlink points to
@@ -705,7 +704,7 @@ def fs_metadata(path: str) -> dict:
     type, and permissions.
 
     Args:
-        path: Path to the file or directory (relative to workspace root)
+        path: Path to the file or directory
 
     Returns:
         dict: Dictionary with keys:
@@ -738,7 +737,7 @@ def fs_size(path: str) -> int:
     Get the size of a file in bytes.
 
     Args:
-        path: Path to the file (relative to workspace root)
+        path: Path to the file
 
     Returns:
         int: File size in bytes
@@ -763,7 +762,7 @@ def fs_modified(path: str) -> float:
     Get the modification time of a file.
 
     Args:
-        path: Path to the file (relative to workspace root)
+        path: Path to the file
 
     Returns:
         float: Modification time as seconds since Unix epoch (January 1, 1970)
@@ -789,7 +788,7 @@ def fs_touch(path: str, create: bool = True, update_mtime: bool = True) -> None:
     Update file modification time or create an empty file.
 
     Args:
-        path: Path to the file (relative to workspace root)
+        path: Path to the file
         create: If True, create file if it doesn't exist
         update_mtime: If True, update modification time to now
 
@@ -820,7 +819,7 @@ def fs_set_permissions(path: str, mode: int) -> None:
     Set file permissions using numeric mode (Unix octal notation).
 
     Args:
-        path: Path to the file (relative to workspace root)
+        path: Path to the file
         mode: Numeric permissions in octal (e.g., 0o644, 0o755, 0o600)
 
     Returns:
@@ -849,7 +848,7 @@ def fs_chmod(path: str, spec: str) -> None:
     Only available on Unix-like systems.
 
     Args:
-        path: Path to the file (relative to workspace root)
+        path: Path to the file
         spec: Chmod specification as string ([ugoa][+-=][rwx]+), e.g., "u+x", "u+rx", "a-w"
 
     Returns:
@@ -876,7 +875,7 @@ def fs_chown(path: str, user: str, group: str) -> None:
     Change file ownership (Unix-like systems only).
 
     Args:
-        path: Path to the file (relative to workspace root)
+        path: Path to the file
         user: Username to set as owner
         group: Group name to set as group owner
 
