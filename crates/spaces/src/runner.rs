@@ -146,6 +146,22 @@ pub fn check_repos_before_sync(
                             &format!("//{}: failed to stash changes: {e}", member.path),
                         );
                         repo_progress.set_finalize_lines(lines);
+
+                        // Pop any stashes that were successfully created before this failure
+                        if !stashed_repos.is_empty() {
+                            let pop_result = pop_stashed_repos(
+                                console.clone(),
+                                workspace_arc.clone(),
+                                stashed_repos.clone(),
+                            );
+                            if let Err(pop_err) = pop_result {
+                                console.warning(
+                                    "Failed to pop stashes",
+                                    format!("Some stashes could not be popped: {pop_err}. You may need to manually run 'git stash pop'."),
+                                )?;
+                            }
+                        }
+
                         return Err(format_error!(
                             "//{}: failed to stash changes: {e}",
                             member.path,
@@ -195,6 +211,22 @@ pub fn check_repos_before_sync(
                             &format!("//{}: failed to fetch: {e}", member.path),
                         );
                         repo_progress.set_finalize_lines(lines);
+
+                        // Pop any stashes before returning error
+                        if !stashed_repos.is_empty() {
+                            let pop_result = pop_stashed_repos(
+                                console.clone(),
+                                workspace_arc.clone(),
+                                stashed_repos.clone(),
+                            );
+                            if let Err(pop_err) = pop_result {
+                                console.warning(
+                                    "Failed to pop stashes",
+                                    format!("Some stashes could not be popped: {pop_err}. You may need to manually run 'git stash pop'."),
+                                )?;
+                            }
+                        }
+
                         return Err(format_error!(
                             "//{}: failed to fetch updates: {e}",
                             member.path,
@@ -227,6 +259,22 @@ pub fn check_repos_before_sync(
                                 &format!("//{} Failed to check conflicts: {}", member.path, e),
                             );
                             repo_progress.set_finalize_lines(lines);
+
+                            // Pop any stashes before returning error
+                            if !stashed_repos.is_empty() {
+                                let pop_result = pop_stashed_repos(
+                                    console.clone(),
+                                    workspace_arc.clone(),
+                                    stashed_repos.clone(),
+                                );
+                                if let Err(pop_err) = pop_result {
+                                    console.warning(
+                                        "Failed to pop stashes",
+                                        format!("Some stashes could not be popped: {pop_err}. You may need to manually run 'git stash pop'."),
+                                    )?;
+                                }
+                            }
+
                             return Err(format_error!(
                                 "//{} Failed to check rebase conflicts: {e}",
                                 member.path,
@@ -312,7 +360,7 @@ pub fn check_repos_before_sync(
         if !detached_dirty.is_empty() {
             for repo in &detached_dirty {
                 let mut repo_line = console::Line::default();
-                repo_line.push(console::Span::new_unstyled_lossy("  - ".to_string()));
+                repo_line.push(console::Span::new_unstyled_lossy("- ".to_string()));
                 repo_line.push(console::Span::new_styled_lossy(
                     console::style::StyledContent::new(console::name_style(), format!("//{repo}")),
                 ));
@@ -347,16 +395,64 @@ pub fn check_repos_before_sync(
 
     // If there are any repos with rebase conflicts, report them all and fail
     if !rebase_conflicts.is_empty() {
-        let conflict_list: Vec<String> = rebase_conflicts
-            .iter()
-            .map(|(path, upstream_branch)| {
-                format!("{} (rebasing onto origin/{})", path, upstream_branch)
-            })
-            .collect();
-        let conflict_str = conflict_list.join("\n  - ");
+        singleton::set_evaluation_failure();
+
+        // Pop stashes before returning error
+        if !stashed_repos.is_empty() {
+            let pop_result = pop_stashed_repos(
+                console.clone(),
+                workspace_arc.clone(),
+                stashed_repos.clone(),
+            );
+            if let Err(e) = pop_result {
+                console.warning(
+                    "Failed to pop stashes",
+                    format!("Some stashes could not be popped: {e}. You may need to manually run 'git stash pop'."),
+                )?;
+            }
+        }
+
+        // Emit styled error message to console
+        console.emit_line(console::Line::default());
+
+        let mut error_line = console::Line::default();
+        error_line.push(console::Span::new_styled_lossy(
+            console::style::StyledContent::new(
+                console::keyword_style(),
+                "Cannot sync:".to_string(),
+            ),
+        ));
+        error_line.push(console::Span::new_unstyled_lossy(
+            " the following dev-branch repositories would have rebase conflicts:".to_string(),
+        ));
+        console.emit_line(error_line);
+
+        // Report each repository with rebase conflicts
+        for (path, upstream_branch) in &rebase_conflicts {
+            let mut repo_line = console::Line::default();
+            repo_line.push(console::Span::new_unstyled_lossy("- ".to_string()));
+            repo_line.push(console::Span::new_styled_lossy(
+                console::style::StyledContent::new(console::name_style(), format!("//{}", path)),
+            ));
+            repo_line.push(console::Span::new_unstyled_lossy(format!(
+                " (rebasing onto origin/{})",
+                upstream_branch
+            )));
+            console.emit_line(repo_line);
+        }
+
+        console.emit_line(console::Line::default());
+        let mut help_line = console::Line::default();
+        help_line.push(console::Span::new_unstyled_lossy(
+            "Please manually resolve conflicts by rebasing these repositories.".to_string(),
+        ));
+        console.emit_line(help_line);
+
+        console.emit_line(console::Line::default());
+
         return Err(format_error!(
-            "Cannot sync: the following dev-branch repositories would have rebase conflicts:\n  - {}\n\nPlease manually resolve conflicts by rebasing these repositories.",
-            conflict_str
+            "Cannot sync: {} dev-branch repositories would have rebase conflicts",
+            rebase_conflicts.len()
         ));
     }
 
