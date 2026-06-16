@@ -99,6 +99,222 @@ fn evaluate_environment(
     Ok(())
 }
 
+/// Check all repositories for cleanliness and perform pre-sync validations.
+/// Returns an error if any repos are not clean or if rebase operations would fail.
+pub fn check_repos_before_sync(
+    console: console::Console,
+    workspace_arc: workspace::WorkspaceArc,
+) -> anyhow::Result<()> {
+    let workspace_members = workspace_arc.read().settings.json.members.clone();
+    let dev_branch_rules = workspace_arc.read().settings.json.dev_branches.clone();
+
+    let mut dirty_repos = Vec::new();
+    let mut rebase_conflicts = Vec::new();
+
+    // First pass: check all repos for cleanliness
+    for (url, member_list) in workspace_members.iter() {
+        for member in member_list.iter() {
+            let mut repo_progress = console::Progress::new(
+                console.clone(),
+                format!("//{}", member.path),
+                Some(100),
+                Some(format!("[{}] Checking repository status", member.path)),
+            );
+
+            let repo = git::Repository::new(url.clone(), member.path.clone());
+
+            // Check if repo is dirty
+            if repo.is_dirty(&mut repo_progress) {
+                dirty_repos.push(member.path.clone());
+                let lines = console::make_finalize_line(
+                    console::FinalType::Failed,
+                    None,
+                    &format!("[{}] Repository has uncommitted changes", member.path),
+                );
+                repo_progress.set_finalize_lines(lines);
+                continue;
+            }
+
+            // If this is a dev branch repo, check if rebase would have conflicts
+            if dev_branch_rules.contains(&member.path) {
+                if let Ok(Some(_current_branch)) = repo.get_current_branch(&mut repo_progress) {
+                    // Use the original rev from the member as the upstream branch
+                    let upstream_branch = format!("origin/{}", member.rev);
+
+                    // First fetch to ensure we have latest remote changes
+                    if let Err(e) = repo.fetch_with_prune(&mut repo_progress) {
+                        let lines = console::make_finalize_line(
+                            console::FinalType::Failed,
+                            None,
+                            &format!("[{}] Failed to fetch: {}", member.path, e),
+                        );
+                        repo_progress.set_finalize_lines(lines);
+                        return Err(format_error!(
+                            "[{}] Failed to fetch updates: {e}",
+                            member.path,
+                        ));
+                    }
+
+                    // Check if rebase would have conflicts
+                    match repo.can_rebase_without_conflicts(&mut repo_progress, &upstream_branch) {
+                        Ok(true) => {
+                            let lines = console::make_finalize_line(
+                                console::FinalType::Completed,
+                                None,
+                                &format!("[{}] Ready for rebase", member.path),
+                            );
+                            repo_progress.set_finalize_lines(lines);
+                        }
+                        Ok(false) => {
+                            rebase_conflicts.push((member.path.clone(), member.rev.clone()));
+                            let lines = console::make_finalize_line(
+                                console::FinalType::Failed,
+                                None,
+                                &format!("[{}] Rebase would have conflicts", member.path),
+                            );
+                            repo_progress.set_finalize_lines(lines);
+                        }
+                        Err(e) => {
+                            let lines = console::make_finalize_line(
+                                console::FinalType::Failed,
+                                None,
+                                &format!("[{}] Failed to check conflicts: {}", member.path, e),
+                            );
+                            repo_progress.set_finalize_lines(lines);
+                            return Err(format_error!(
+                                "[{}]Failed to check rebase conflicts: {e}",
+                                member.path,
+                            ));
+                        }
+                    }
+                } else {
+                    let lines = console::make_finalize_line(
+                        console::FinalType::NotRequired,
+                        None,
+                        format!("[{}] Not on a branch", member.path).as_str(),
+                    );
+                    repo_progress.set_finalize_lines(lines);
+                }
+            } else {
+                let lines = console::make_finalize_line(
+                    console::FinalType::Completed,
+                    None,
+                    format!("[{}] Clean", member.path).as_str(),
+                );
+                repo_progress.set_finalize_lines(lines);
+            }
+        }
+    }
+
+    // If there are any dirty repos, report them all and fail
+    if !dirty_repos.is_empty() {
+        let repo_list = dirty_repos.join("\n  - ");
+        singleton::set_evaluation_failure();
+        return Err(format_error!(
+            "Cannot sync: the following repositories have uncommitted changes:\n  - {}\n\nPlease commit or stash your changes before running sync.",
+            repo_list
+        ));
+    }
+
+    // If there are any repos with rebase conflicts, report them all and fail
+    if !rebase_conflicts.is_empty() {
+        let conflict_list: Vec<String> = rebase_conflicts
+            .iter()
+            .map(|(path, upstream_branch)| {
+                format!("{} (rebasing onto origin/{})", path, upstream_branch)
+            })
+            .collect();
+        let conflict_str = conflict_list.join("\n  - ");
+        return Err(format_error!(
+            "Cannot sync: the following dev-branch repositories would have rebase conflicts:\n  - {}\n\nPlease manually resolve conflicts by rebasing these repositories.",
+            conflict_str
+        ));
+    }
+
+    Ok(())
+}
+
+/// Perform rebase operations on dev-branch repositories.
+pub fn rebase_dev_branches(
+    console: console::Console,
+    workspace_arc: workspace::WorkspaceArc,
+) -> anyhow::Result<()> {
+    let workspace_members = workspace_arc.read().settings.json.members.clone();
+    let dev_branch_rules = workspace_arc.read().settings.json.dev_branches.clone();
+
+    for (url, member_list) in workspace_members.iter() {
+        for member in member_list.iter() {
+            // Only process dev branch repos
+            if !dev_branch_rules.contains(&member.path) {
+                continue;
+            }
+
+            let mut repo_progress = console::Progress::new(
+                console.clone(),
+                format!("//{}", member.path),
+                Some(100),
+                Some("Rebasing dev branch".to_string()),
+            );
+
+            let repo = git::Repository::new(url.clone(), member.path.clone());
+
+            // Get current branch to verify we're on a branch
+            if let Ok(Some(_current_branch)) = repo.get_current_branch(&mut repo_progress) {
+                // Use the original rev from the member as the upstream branch
+                let upstream_branch = format!("origin/{}", member.rev);
+
+                // Fetch with prune
+                repo.fetch_with_prune(&mut repo_progress)
+                    .context(format_context!(
+                        "Failed to fetch updates for {}",
+                        member.path
+                    ))?;
+
+                // Check if upstream branch exists after fetch
+                let check_branch = git::execute_git_command(
+                    &mut repo_progress,
+                    &url,
+                    console::ExecuteOptions {
+                        working_directory: Some(member.path.clone()),
+                        arguments: vec![
+                            "rev-parse".into(),
+                            "--verify".into(),
+                            upstream_branch.clone().into(),
+                        ],
+                        ..Default::default()
+                    },
+                );
+
+                if check_branch.is_err() {
+                    // Upstream branch doesn't exist - skip rebase
+                    repo_progress.set_finalize("Remote branch not found, skipping rebase");
+                    continue;
+                }
+
+                // Perform rebase
+                match repo.rebase_onto(&mut repo_progress, &upstream_branch) {
+                    Ok(_) => {
+                        repo_progress.set_finalize("Rebased successfully");
+                    }
+                    Err(e) => {
+                        repo_progress.set_finalize(format!("Rebase failed: {}", e).as_str());
+                        return Err(format_error!(
+                            "Failed to rebase {} onto {}: {}",
+                            member.path,
+                            upstream_branch,
+                            e
+                        ));
+                    }
+                }
+            } else {
+                repo_progress.set_finalize("Not on a branch, skipping rebase");
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn emit_foreach_separator(console: &console::Console) {
     console.emit_line(console::Line::default());
 }
@@ -714,6 +930,19 @@ pub fn run_starlark_modules_in_workspace(
     };
 
     let workspace_arc = workspace::WorkspaceArc::new(lock::StateLock::new(workspace));
+
+    // If this is a sync operation, check all repos before proceeding
+    // We check repos based on the existing workspace settings (from previous checkout/sync)
+    if phase == task::Phase::Checkout && singleton::get_is_sync() {
+        // Check all repos for cleanliness and potential rebase conflicts
+        // This uses the existing members from the workspace settings
+        check_repos_before_sync(console.clone(), workspace_arc.clone())
+            .context(format_context!("while checking repositories before sync"))?;
+
+        // Perform rebase operations on dev-branch repos
+        rebase_dev_branches(console.clone(), workspace_arc.clone())
+            .context(format_context!("while rebasing dev branches"))?;
+    }
 
     run_starlark_modules_with_workspace(
         console,
