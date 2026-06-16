@@ -436,7 +436,6 @@ pub fn check_repos_before_sync(
 
     if !rebase_conflicts.is_empty() || dirty_repo_count > 0 {
         if rebase_conflicts.is_empty() {
-            console.emit_line(console::Line::default());
             let mut help_line = console::Line::default();
             help_line.push(console::Span::new_unstyled_lossy("Use ".to_string()));
             help_line.push(console::Span::new_styled_lossy(
@@ -449,6 +448,7 @@ pub fn check_repos_before_sync(
                 " to automatically stash/pop changes.".to_string(),
             ));
             console.emit_line(help_line);
+            console.emit_line(console::Line::default());
         }
 
         return Err(format_error!(
