@@ -313,7 +313,7 @@ impl Git {
 
                 let existing_repo = git::Repository::new(self.url.clone(), self.spaces_key.clone());
 
-                if existing_repo.is_dirty(progress) {
+                if existing_repo.is_dirty(progress, git::IgnoreSubmodules::No) {
                     logger(progress.console.clone(), self.url.clone()).warning(
                         format!(
                             "{} already exists and is dirty - not updating",

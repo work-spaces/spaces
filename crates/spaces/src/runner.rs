@@ -138,7 +138,7 @@ pub fn check_repos_before_sync(
             let repo = git::Repository::new(url.clone(), member.path.clone());
 
             // Check if repo is dirty
-            if repo.is_dirty(&mut repo_progress) {
+            if repo.is_dirty(&mut repo_progress, git::IgnoreSubmodules::Yes) {
                 if use_stash {
                     // Stash the changes
                     if let Err(e) = repo.stash(&mut repo_progress) {
@@ -718,7 +718,7 @@ pub fn foreach_repo(
                     if repo.is_currently_on_a_branch(&mut repo_progress) {
                         if is_run_on_dirty_branches {
                             // check if the branch is dirty
-                            if repo.is_dirty(&mut repo_progress) {
+                            if repo.is_dirty(&mut repo_progress, git::IgnoreSubmodules::No) {
                                 repos.push(member.clone());
                             } else {
                                 repo_progress.set_finalize("Skipping: branch is clean");
@@ -1250,12 +1250,7 @@ pub fn run_starlark_modules_in_workspace(
         && singleton::get_is_sync()
         && !singleton::get_sync_force()
     {
-        let mut pre_sync_progress = console::Progress::new(
-            console.clone(),
-            "pre-sync => ",
-            None,
-            Some("Complete".to_string()),
-        );
+        let mut pre_sync_progress = console::Progress::new(console.clone(), "pre-sync", None, None);
         // Check all repos for cleanliness and potential rebase conflicts
         // This uses the existing members from the workspace settings
         let stashed = check_repos_before_sync(
@@ -1292,12 +1287,8 @@ pub fn run_starlark_modules_in_workspace(
 
     // Pop stashes after sync is complete
     if phase == task::Phase::Checkout && singleton::get_is_sync() && !stashed_repos.is_empty() {
-        let mut stash_pop_progress = console::Progress::new(
-            console.clone(),
-            "pop stashes after sync",
-            None,
-            Some("Complete".to_string()),
-        );
+        let mut stash_pop_progress =
+            console::Progress::new(console.clone(), "pop stashes after sync", None, None);
         pop_stashed_repos(console, workspace_arc, stashed_repos)
             .context(format_context!("while popping stashes after sync"))?;
         stash_pop_progress.set_finalize_lines(console::make_finalize_line(

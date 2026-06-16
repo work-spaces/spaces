@@ -6,6 +6,12 @@ use std::collections::HashSet;
 use std::sync::{Arc, RwLock};
 use strum::Display;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum IgnoreSubmodules {
+    No,
+    Yes,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CheckoutOption {
     Revision,
@@ -402,10 +408,19 @@ pub fn is_currently_on_a_branch(
     execute_git_command(progress_bar, url, options).is_ok()
 }
 
-pub fn is_dirty(progress_bar: &mut console::Progress, url: &str, directory: &str) -> bool {
+pub fn is_dirty(
+    progress_bar: &mut console::Progress,
+    url: &str,
+    directory: &str,
+    ignore_submodules: IgnoreSubmodules,
+) -> bool {
+    let mut arguments = vec!["status".into(), "--porcelain".into()];
+    if matches!(ignore_submodules, IgnoreSubmodules::Yes) {
+        arguments.push("--ignore-submodules".into());
+    }
     let options = console::ExecuteOptions {
         working_directory: Some(directory.into()),
-        arguments: vec!["status".into(), "--porcelain".into()],
+        arguments,
         is_return_stdout: true,
         ..Default::default()
     };
@@ -1228,8 +1243,12 @@ impl Repository {
         is_currently_on_a_branch(progress_bar, &self.url, &self.full_path)
     }
 
-    pub fn is_dirty(&self, progress_bar: &mut console::Progress) -> bool {
-        is_dirty(progress_bar, &self.url, &self.full_path)
+    pub fn is_dirty(
+        &self,
+        progress_bar: &mut console::Progress,
+        ignore_submodules: IgnoreSubmodules,
+    ) -> bool {
+        is_dirty(progress_bar, &self.url, &self.full_path, ignore_submodules)
     }
 
     pub fn get_commit_tag(&self, progress_bar: &mut console::Progress) -> Option<Arc<str>> {
