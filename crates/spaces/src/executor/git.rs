@@ -284,8 +284,10 @@ impl Git {
         );
 
         if is_new_branch == IsNewBranch::Yes && singleton::get_is_sync() {
-            logger(progress.console.clone(), self.url.clone())
-                .warning("Skipping update for dev branch during sync operation.");
+            if singleton::get_sync_force() {
+                logger(progress.console.clone(), self.url.clone())
+                    .warning("Skipping update for dev branch during sync operation.");
+            }
             return Ok(());
         }
 
@@ -311,7 +313,7 @@ impl Git {
 
                 let existing_repo = git::Repository::new(self.url.clone(), self.spaces_key.clone());
 
-                if existing_repo.is_dirty(progress) {
+                if existing_repo.is_dirty(progress, git::IgnoreSubmodules::No) {
                     logger(progress.console.clone(), self.url.clone()).warning(
                         format!(
                             "{} already exists and is dirty - not updating",

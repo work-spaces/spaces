@@ -77,7 +77,7 @@ impl Options {
             }
 
             let repo = git::Repository::new(git_task.url.clone(), dir_name.clone());
-            if repo.is_dirty(&mut progress) {
+            if repo.is_dirty(&mut progress, git::IgnoreSubmodules::No) {
                 if self.force {
                     logger(progress.console.clone()).warning(&format!(
                         "[{}] {} is dirty - checkout command may not be reproducible.",

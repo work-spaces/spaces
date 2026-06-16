@@ -11,6 +11,8 @@ use utils::query;
 #[derive(Debug)]
 struct State {
     is_sync: bool,
+    sync_stash: bool,
+    sync_force: bool,
     is_ci: bool,
     is_checkout: bool,
     is_logging_disabled: bool,
@@ -52,6 +54,8 @@ fn get_state() -> &'static lock::StateLock<State> {
         is_checkout: false,
         is_logging_disabled: false,
         is_sync: false,
+        sync_stash: false,
+        sync_force: false,
         is_rescan: false,
         is_lsp: false,
         is_skip_deps: false,
@@ -384,4 +388,24 @@ pub fn set_query_context(ctx: query::QueryContext) {
 pub fn take_query_context() -> Option<query::QueryContext> {
     let mut state = get_state().write();
     state.query_context.take()
+}
+
+pub fn get_sync_stash() -> bool {
+    let state = get_state().read();
+    state.sync_stash
+}
+
+pub fn set_sync_stash(stash: bool) {
+    let mut state = get_state().write();
+    state.sync_stash = stash;
+}
+
+pub fn get_sync_force() -> bool {
+    let state = get_state().read();
+    state.sync_force
+}
+
+pub fn set_sync_force(force: bool) {
+    let mut state = get_state().write();
+    state.sync_force = force;
 }

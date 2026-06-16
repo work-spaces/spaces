@@ -1,6 +1,6 @@
 [package]
 name = "spaces-utils"
-version = "0.15.49"
+version = "0.15.50"
 edition = "2024"
 
 [dependencies]

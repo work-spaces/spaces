@@ -6,6 +6,12 @@ use std::collections::HashSet;
 use std::sync::{Arc, RwLock};
 use strum::Display;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum IgnoreSubmodules {
+    No,
+    Yes,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CheckoutOption {
     Revision,
@@ -302,7 +308,9 @@ pub fn execute_git_command(
                     );
                     continue;
                 }
-                return Err(err.context(format!("Git command failed for repository: {url}")));
+                return Err(format_error!(
+                    "Git command failed for repository: {url}: {err:#}"
+                ));
             }
         }
     }
@@ -402,10 +410,19 @@ pub fn is_currently_on_a_branch(
     execute_git_command(progress_bar, url, options).is_ok()
 }
 
-pub fn is_dirty(progress_bar: &mut console::Progress, url: &str, directory: &str) -> bool {
+pub fn is_dirty(
+    progress_bar: &mut console::Progress,
+    url: &str,
+    directory: &str,
+    ignore_submodules: IgnoreSubmodules,
+) -> bool {
+    let mut arguments = vec!["status".into(), "--porcelain".into()];
+    if matches!(ignore_submodules, IgnoreSubmodules::Yes) {
+        arguments.push("--ignore-submodules".into());
+    }
     let options = console::ExecuteOptions {
         working_directory: Some(directory.into()),
-        arguments: vec!["status".into(), "--porcelain".into()],
+        arguments,
         is_return_stdout: true,
         ..Default::default()
     };
@@ -497,6 +514,150 @@ pub fn fetch_bare_repo(progress_bar: &mut console::Progress, path: &str) -> bool
         ..Default::default()
     };
     execute_git_command(progress_bar, path, options).is_ok()
+}
+
+/// Get the current branch name for a repository
+pub fn get_current_branch(
+    progress_bar: &mut console::Progress,
+    url: &str,
+    directory: &str,
+) -> anyhow::Result<Option<Arc<str>>> {
+    let options = console::ExecuteOptions {
+        working_directory: Some(directory.into()),
+        arguments: vec!["branch".into(), "--show-current".into()],
+        is_return_stdout: true,
+        ..Default::default()
+    };
+    if let Some(output) = execute_git_command(progress_bar, url, options)? {
+        let branch = output.trim();
+        if branch.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(branch.into()))
+        }
+    } else {
+        Ok(None)
+    }
+}
+
+/// Check if a rebase would have conflicts without actually performing it.
+/// Returns Ok(true) if rebase would succeed, Ok(false) if there would be conflicts.
+pub fn can_rebase_without_conflicts(
+    progress_bar: &mut console::Progress,
+    url: &str,
+    directory: &str,
+    upstream_branch: &str,
+) -> anyhow::Result<bool> {
+    // First check if the upstream branch exists
+    let check_branch_options = console::ExecuteOptions {
+        working_directory: Some(directory.into()),
+        arguments: vec![
+            "rev-parse".into(),
+            "--verify".into(),
+            upstream_branch.into(),
+        ],
+        ..Default::default()
+    };
+
+    if execute_git_command(progress_bar, url, check_branch_options).is_err() {
+        // Upstream branch doesn't exist - this means we can't rebase
+        // Return true since there's nothing to rebase onto (branch hasn't been pushed)
+        return Ok(true);
+    }
+
+    // Now do a merge-tree dry-run to check for conflicts
+    // This is the safest way to check without modifying the working tree
+    let options = console::ExecuteOptions {
+        working_directory: Some(directory.into()),
+        arguments: vec![
+            "merge-tree".into(),
+            "--write-tree".into(),
+            "HEAD".into(),
+            upstream_branch.into(),
+        ],
+        is_return_stdout: true,
+        ..Default::default()
+    };
+
+    match execute_git_command(progress_bar, url, options) {
+        Ok(Some(output)) => {
+            // If merge-tree succeeds, there are no conflicts
+            // The output will be a tree hash if successful
+            Ok(!output.trim().is_empty())
+        }
+        Ok(None) => Ok(false),
+        Err(_) => {
+            // If merge-tree fails, there are conflicts
+            Ok(false)
+        }
+    }
+}
+
+/// Perform a fetch with prune on a repository
+pub fn fetch_with_prune(
+    progress_bar: &mut console::Progress,
+    url: &str,
+    directory: &str,
+    ignore_submodules: IgnoreSubmodules,
+) -> anyhow::Result<()> {
+    let mut arguments = vec!["fetch".into(), "--prune".into()];
+    if matches!(ignore_submodules, IgnoreSubmodules::Yes) {
+        arguments.push("--recurse-submodules=no".into());
+    }
+    let options = console::ExecuteOptions {
+        working_directory: Some(directory.into()),
+        arguments,
+        ..Default::default()
+    };
+    execute_git_command(progress_bar, url, options)?;
+    Ok(())
+}
+
+/// Rebase the current branch onto the specified upstream branch
+pub fn rebase_onto(
+    progress_bar: &mut console::Progress,
+    url: &str,
+    directory: &str,
+    upstream_branch: &str,
+) -> anyhow::Result<()> {
+    let options = console::ExecuteOptions {
+        working_directory: Some(directory.into()),
+        arguments: vec!["rebase".into(), upstream_branch.into()],
+        ..Default::default()
+    };
+    execute_git_command(progress_bar, url, options)
+        .context(format_context!("Failed to rebase onto {}", upstream_branch))?;
+    Ok(())
+}
+
+pub fn stash(
+    progress_bar: &mut console::Progress,
+    url: &str,
+    directory: &str,
+) -> anyhow::Result<()> {
+    let options = console::ExecuteOptions {
+        working_directory: Some(directory.into()),
+        arguments: vec!["stash".into(), "push".into(), "-u".into()],
+        ..Default::default()
+    };
+    execute_git_command(progress_bar, url, options)
+        .context(format_context!("Failed to stash changes"))?;
+    Ok(())
+}
+
+pub fn stash_pop(
+    progress_bar: &mut console::Progress,
+    url: &str,
+    directory: &str,
+) -> anyhow::Result<()> {
+    let options = console::ExecuteOptions {
+        working_directory: Some(directory.into()),
+        arguments: vec!["stash".into(), "pop".into()],
+        ..Default::default()
+    };
+    execute_git_command(progress_bar, url, options)
+        .context(format_context!("Failed to pop stash"))?;
+    Ok(())
 }
 
 fn get_branch_log(
@@ -1089,8 +1250,12 @@ impl Repository {
         is_currently_on_a_branch(progress_bar, &self.url, &self.full_path)
     }
 
-    pub fn is_dirty(&self, progress_bar: &mut console::Progress) -> bool {
-        is_dirty(progress_bar, &self.url, &self.full_path)
+    pub fn is_dirty(
+        &self,
+        progress_bar: &mut console::Progress,
+        ignore_submodules: IgnoreSubmodules,
+    ) -> bool {
+        is_dirty(progress_bar, &self.url, &self.full_path, ignore_submodules)
     }
 
     pub fn get_commit_tag(&self, progress_bar: &mut console::Progress) -> Option<Arc<str>> {
@@ -1106,6 +1271,45 @@ impl Repository {
 
     pub fn is_head_branch(&self, progress_bar: &mut console::Progress) -> bool {
         is_head_branch(progress_bar, &self.url, &self.full_path)
+    }
+
+    pub fn get_current_branch(
+        &self,
+        progress_bar: &mut console::Progress,
+    ) -> anyhow::Result<Option<Arc<str>>> {
+        get_current_branch(progress_bar, &self.url, &self.full_path)
+    }
+
+    pub fn fetch_with_prune(
+        &self,
+        progress_bar: &mut console::Progress,
+        ignore_submodules: IgnoreSubmodules,
+    ) -> anyhow::Result<()> {
+        fetch_with_prune(progress_bar, &self.url, &self.full_path, ignore_submodules)
+    }
+
+    pub fn can_rebase_without_conflicts(
+        &self,
+        progress_bar: &mut console::Progress,
+        upstream_branch: &str,
+    ) -> anyhow::Result<bool> {
+        can_rebase_without_conflicts(progress_bar, &self.url, &self.full_path, upstream_branch)
+    }
+
+    pub fn rebase_onto(
+        &self,
+        progress_bar: &mut console::Progress,
+        upstream_branch: &str,
+    ) -> anyhow::Result<()> {
+        rebase_onto(progress_bar, &self.url, &self.full_path, upstream_branch)
+    }
+
+    pub fn stash(&self, progress_bar: &mut console::Progress) -> anyhow::Result<()> {
+        stash(progress_bar, &self.url, &self.full_path)
+    }
+
+    pub fn stash_pop(&self, progress_bar: &mut console::Progress) -> anyhow::Result<()> {
+        stash_pop(progress_bar, &self.url, &self.full_path)
     }
 
     pub fn checkout(

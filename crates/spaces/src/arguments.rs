@@ -339,6 +339,8 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             no_store,
             dev_branch,
             no_dev_branch,
+            stash,
+            force,
         } => {
             singleton::set_execution_phase(task::Phase::Checkout);
 
@@ -372,6 +374,8 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             // Always need to evaluate when doing a sync
             singleton::set_rescan(true);
             singleton::set_is_sync();
+            singleton::set_sync_stash(stash);
+            singleton::set_sync_force(force);
 
             runner::run_starlark_modules_in_workspace(
                 effective_console,
@@ -974,6 +978,18 @@ create-lock-file = false # optionally create a lock file
   This has the opposite effect of --dev-branch."#
         )]
         no_dev_branch: Vec<Arc<str>>,
+        #[arg(
+            long,
+            help = r#"Stash uncommitted changes before sync and pop the stash after sync.
+  This allows syncing dirty repositories without manually stashing."#
+        )]
+        stash: bool,
+        #[arg(
+            long,
+            help = r#"Skip repository status checks and rebase operations.
+  Use with caution: this bypasses safety checks for dirty repos and rebase conflicts."#
+        )]
+        force: bool,
     },
     #[command(about = r"Runs a spaces run rule.
   - `spaces run`: Run all non-optional rules with dependencies
