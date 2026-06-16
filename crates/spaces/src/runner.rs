@@ -310,9 +310,8 @@ pub fn check_repos_before_sync(
     }
 
     // If there are any dirty repos and stash is not enabled, report them all and fail
-    let has_dirty_repos =
-        !dev_branch_dirty.is_empty() || !branch_dirty.is_empty() || !detached_dirty.is_empty();
-    if has_dirty_repos {
+    let dirty_repo_count = dev_branch_dirty.len() + branch_dirty.len() + detached_dirty.len();
+    if dirty_repo_count > 0 {
         singleton::set_evaluation_failure();
 
         // Emit styled error message to console
@@ -435,7 +434,7 @@ pub fn check_repos_before_sync(
         console.emit_line(console::Line::default());
     }
 
-    if !rebase_conflicts.is_empty() || has_dirty_repos {
+    if !rebase_conflicts.is_empty() || dirty_repo_count > 0 {
         if rebase_conflicts.is_empty() {
             console.emit_line(console::Line::default());
             let mut help_line = console::Line::default();
@@ -454,7 +453,7 @@ pub fn check_repos_before_sync(
 
         return Err(format_error!(
             "Cannot sync: {} repositories need to be resolved manually",
-            rebase_conflicts.len()
+            rebase_conflicts.len() + dirty_repo_count
         ));
     }
 
