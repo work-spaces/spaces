@@ -308,7 +308,9 @@ pub fn execute_git_command(
                     );
                     continue;
                 }
-                return Err(err.context(format!("Git command failed for repository: {url}")));
+                return Err(format_error!(
+                    "Git command failed for repository: {url}: {err:#}"
+                ));
             }
         }
     }
