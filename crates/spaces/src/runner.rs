@@ -521,7 +521,10 @@ pub fn rebase_dev_branches(
                     let lines = console::make_finalize_line(
                         console::FinalType::NotRequired,
                         repo_progress.elapsed(),
-                        &format!("//{} Remote branch not found, skipping rebase", member.path),
+                        &format!(
+                            "//{} remote branch {upstream_branch} not found, skipping rebase",
+                            member.path
+                        ),
                     );
                     repo_progress.set_finalize_lines(lines);
                     continue;
