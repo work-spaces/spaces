@@ -1279,16 +1279,18 @@ pub fn run_starlark_modules_in_workspace(
         Vec::new()
     };
 
-    run_starlark_modules_with_workspace(
+    // Capture the sync result so we can always pop stashes, even if sync fails
+    let sync_result = run_starlark_modules_with_workspace(
         console.clone(),
         workspace_arc.clone(),
         phase,
         run_workspace,
         is_create_lock_file,
         is_execute_tasks,
-    )?;
+    );
 
-    // Pop stashes after sync is complete
+    // Pop stashes after sync is complete (or failed)
+    // This must happen regardless of sync success to avoid leaving the workspace in a stashed state
     if phase == task::Phase::Checkout && singleton::get_is_sync() && !stashed_repos.is_empty() {
         let mut stash_pop_progress =
             console::Progress::new(console.clone(), "pop stashes after sync", None, None);
@@ -1303,7 +1305,8 @@ pub fn run_starlark_modules_in_workspace(
 
     drop(workspace_lock);
 
-    Ok(())
+    // Now return the original sync result
+    sync_result
 }
 
 pub fn run_lsp(console: console::Console) -> anyhow::Result<()> {
