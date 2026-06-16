@@ -340,6 +340,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             dev_branch,
             no_dev_branch,
             stash,
+            force,
         } => {
             singleton::set_execution_phase(task::Phase::Checkout);
 
@@ -374,6 +375,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             singleton::set_rescan(true);
             singleton::set_is_sync();
             singleton::set_sync_stash(stash);
+            singleton::set_sync_force(force);
 
             runner::run_starlark_modules_in_workspace(
                 effective_console,
@@ -982,6 +984,12 @@ create-lock-file = false # optionally create a lock file
   This allows syncing dirty repositories without manually stashing."#
         )]
         stash: bool,
+        #[arg(
+            long,
+            help = r#"Skip repository status checks and rebase operations.
+  Use with caution: this bypasses safety checks for dirty repos and rebase conflicts."#
+        )]
+        force: bool,
     },
     #[command(about = r"Runs a spaces run rule.
   - `spaces run`: Run all non-optional rules with dependencies

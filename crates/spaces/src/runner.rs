@@ -1246,7 +1246,10 @@ pub fn run_starlark_modules_in_workspace(
 
     // If this is a sync operation, check all repos before proceeding
     // We check repos based on the existing workspace settings (from previous checkout/sync)
-    let stashed_repos = if phase == task::Phase::Checkout && singleton::get_is_sync() {
+    let stashed_repos = if phase == task::Phase::Checkout
+        && singleton::get_is_sync()
+        && !singleton::get_sync_force()
+    {
         let mut pre_sync_progress = console::Progress::new(
             console.clone(),
             "pre-sync repo check",

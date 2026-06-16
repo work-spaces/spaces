@@ -284,8 +284,10 @@ impl Git {
         );
 
         if is_new_branch == IsNewBranch::Yes && singleton::get_is_sync() {
-            logger(progress.console.clone(), self.url.clone())
-                .warning("Skipping update for dev branch during sync operation.");
+            if singleton::get_sync_force() {
+                logger(progress.console.clone(), self.url.clone())
+                    .warning("Skipping update for dev branch during sync operation.");
+            }
             return Ok(());
         }
 
