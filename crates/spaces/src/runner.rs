@@ -145,7 +145,7 @@ pub fn check_repos_before_sync(
                         let lines = console::make_finalize_line(
                             console::FinalType::Failed,
                             None,
-                            &format!("//{}: failed to stash changes: {e}", member.path),
+                            &format!("//{}: failed to stash changes", member.path),
                         );
                         repo_progress.set_finalize_lines(lines);
 
@@ -206,11 +206,13 @@ pub fn check_repos_before_sync(
                     let upstream_branch = format!("origin/{}", member.rev);
 
                     // First fetch to ensure we have latest remote changes
-                    if let Err(e) = repo.fetch_with_prune(&mut repo_progress) {
+                    if let Err(e) =
+                        repo.fetch_with_prune(&mut repo_progress, git::IgnoreSubmodules::Yes)
+                    {
                         let lines = console::make_finalize_line(
                             console::FinalType::Failed,
                             None,
-                            &format!("//{}: failed to fetch: {e}", member.path),
+                            &format!("//{}: failed to fetch", member.path),
                         );
                         repo_progress.set_finalize_lines(lines);
 
@@ -495,7 +497,7 @@ pub fn rebase_dev_branches(
                 let upstream_branch = format!("origin/{}", member.rev);
 
                 // Fetch with prune
-                repo.fetch_with_prune(&mut repo_progress)
+                repo.fetch_with_prune(&mut repo_progress, git::IgnoreSubmodules::Yes)
                     .context(format_context!(
                         "Failed to fetch updates for {}",
                         member.path
@@ -547,7 +549,7 @@ pub fn rebase_dev_branches(
                         let lines = console::make_finalize_line(
                             console::FinalType::Failed,
                             repo_progress.elapsed(),
-                            &format!("//{} Rebase failed: {}", member.path, e),
+                            &format!("//{} rebase failed", member.path),
                         );
                         repo_progress.set_finalize_lines(lines);
                         return Err(format_error!(
@@ -612,7 +614,7 @@ pub fn pop_stashed_repos(
                     let lines = console::make_finalize_line(
                         console::FinalType::Failed,
                         None,
-                        &format!("[{}] Failed to pop stash: {e}", member.path),
+                        &format!("//{} failed to pop stash", member.path),
                     );
                     repo_progress.set_finalize_lines(lines);
                     // Don't fail the entire operation, just warn

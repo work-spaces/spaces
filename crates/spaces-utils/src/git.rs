@@ -598,10 +598,15 @@ pub fn fetch_with_prune(
     progress_bar: &mut console::Progress,
     url: &str,
     directory: &str,
+    ignore_submodules: IgnoreSubmodules,
 ) -> anyhow::Result<()> {
+    let mut arguments = vec!["fetch".into(), "--prune".into()];
+    if matches!(ignore_submodules, IgnoreSubmodules::Yes) {
+        arguments.push("--recurse-submodules=no".into());
+    }
     let options = console::ExecuteOptions {
         working_directory: Some(directory.into()),
-        arguments: vec!["fetch".into(), "--prune".into()],
+        arguments,
         ..Default::default()
     };
     execute_git_command(progress_bar, url, options)?;
@@ -1275,8 +1280,12 @@ impl Repository {
         get_current_branch(progress_bar, &self.url, &self.full_path)
     }
 
-    pub fn fetch_with_prune(&self, progress_bar: &mut console::Progress) -> anyhow::Result<()> {
-        fetch_with_prune(progress_bar, &self.url, &self.full_path)
+    pub fn fetch_with_prune(
+        &self,
+        progress_bar: &mut console::Progress,
+        ignore_submodules: IgnoreSubmodules,
+    ) -> anyhow::Result<()> {
+        fetch_with_prune(progress_bar, &self.url, &self.full_path, ignore_submodules)
     }
 
     pub fn can_rebase_without_conflicts(
