@@ -608,6 +608,36 @@ pub fn rebase_onto(
     Ok(())
 }
 
+pub fn stash(
+    progress_bar: &mut console::Progress,
+    url: &str,
+    directory: &str,
+) -> anyhow::Result<()> {
+    let options = console::ExecuteOptions {
+        working_directory: Some(directory.into()),
+        arguments: vec!["stash".into(), "push".into(), "-u".into()],
+        ..Default::default()
+    };
+    execute_git_command(progress_bar, url, options)
+        .context(format_context!("Failed to stash changes"))?;
+    Ok(())
+}
+
+pub fn stash_pop(
+    progress_bar: &mut console::Progress,
+    url: &str,
+    directory: &str,
+) -> anyhow::Result<()> {
+    let options = console::ExecuteOptions {
+        working_directory: Some(directory.into()),
+        arguments: vec!["stash".into(), "pop".into()],
+        ..Default::default()
+    };
+    execute_git_command(progress_bar, url, options)
+        .context(format_context!("Failed to pop stash"))?;
+    Ok(())
+}
+
 fn get_branch_log(
     progress_bar: &mut console::Progress,
     url: &str,
@@ -1242,6 +1272,14 @@ impl Repository {
         upstream_branch: &str,
     ) -> anyhow::Result<()> {
         rebase_onto(progress_bar, &self.url, &self.full_path, upstream_branch)
+    }
+
+    pub fn stash(&self, progress_bar: &mut console::Progress) -> anyhow::Result<()> {
+        stash(progress_bar, &self.url, &self.full_path)
+    }
+
+    pub fn stash_pop(&self, progress_bar: &mut console::Progress) -> anyhow::Result<()> {
+        stash_pop(progress_bar, &self.url, &self.full_path)
     }
 
     pub fn checkout(
