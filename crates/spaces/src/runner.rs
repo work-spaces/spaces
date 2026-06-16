@@ -105,6 +105,7 @@ fn evaluate_environment(
 /// Returns an error if repos are dirty without --stash or if rebase operations would fail.
 pub fn check_repos_before_sync(
     console: console::Console,
+    top_progress: &mut console::Progress,
     workspace_arc: workspace::WorkspaceArc,
 ) -> anyhow::Result<Vec<Arc<str>>> {
     let workspace_members = workspace_arc.read().settings.json.members.clone();
@@ -120,6 +121,7 @@ pub fn check_repos_before_sync(
     // First pass: check all repos for cleanliness
     for (url, member_list) in workspace_members.iter() {
         for member in member_list.iter() {
+            top_progress.set_message(format!("checking {}", member.path).as_str());
             // Check if the member directory has a .git directory
             let member_git_path = std::path::Path::new(member.path.as_ref()).join(".git");
             if !member_git_path.exists() {
@@ -372,25 +374,6 @@ pub fn check_repos_before_sync(
         }
 
         console.emit_line(console::Line::default());
-        let mut help_line = console::Line::default();
-        help_line.push(console::Span::new_unstyled_lossy("Use ".to_string()));
-        help_line.push(console::Span::new_styled_lossy(
-            console::style::StyledContent::new(
-                console::name_style(),
-                "spaces sync --stash".to_string(),
-            ),
-        ));
-        help_line.push(console::Span::new_unstyled_lossy(
-            " to automatically stash/pop changes.".to_string(),
-        ));
-        console.emit_line(help_line);
-
-        console.emit_line(console::Line::default());
-
-        return Err(format_error!(
-            "Cannot sync: {} repositories have uncommitted changes",
-            dev_branch_dirty.len() + branch_dirty.len() + detached_dirty.len()
-        ));
     }
 
     // If there are any repos with rebase conflicts, report them all and fail
@@ -447,11 +430,28 @@ pub fn check_repos_before_sync(
             "Please manually resolve conflicts by rebasing these repositories.".to_string(),
         ));
         console.emit_line(help_line);
-
         console.emit_line(console::Line::default());
+    }
+
+    if !rebase_conflicts.is_empty() || has_dirty_repos {
+        if rebase_conflicts.is_empty() {
+            console.emit_line(console::Line::default());
+            let mut help_line = console::Line::default();
+            help_line.push(console::Span::new_unstyled_lossy("Use ".to_string()));
+            help_line.push(console::Span::new_styled_lossy(
+                console::style::StyledContent::new(
+                    console::name_style(),
+                    "spaces sync --stash".to_string(),
+                ),
+            ));
+            help_line.push(console::Span::new_unstyled_lossy(
+                " to automatically stash/pop changes.".to_string(),
+            ));
+            console.emit_line(help_line);
+        }
 
         return Err(format_error!(
-            "Cannot sync: {} dev-branch repositories would have rebase conflicts",
+            "Cannot sync: {} repositories need to be resolved manually",
             rebase_conflicts.len()
         ));
     }
@@ -1252,14 +1252,18 @@ pub fn run_starlark_modules_in_workspace(
     {
         let mut pre_sync_progress = console::Progress::new(
             console.clone(),
-            "pre-sync repo check",
+            "pre-sync => ",
             None,
             Some("Complete".to_string()),
         );
         // Check all repos for cleanliness and potential rebase conflicts
         // This uses the existing members from the workspace settings
-        let stashed = check_repos_before_sync(console.clone(), workspace_arc.clone())
-            .context(format_context!("while checking repositories before sync"))?;
+        let stashed = check_repos_before_sync(
+            console.clone(),
+            &mut pre_sync_progress,
+            workspace_arc.clone(),
+        )
+        .context(format_context!("while checking repositories before sync"))?;
 
         pre_sync_progress.set_message("rebasing branches");
         // Perform rebase operations on dev-branch repos
