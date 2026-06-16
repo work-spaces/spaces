@@ -132,7 +132,7 @@ pub fn check_repos_before_sync(
                 console.clone(),
                 format!("//{}", member.path),
                 None,
-                Some(format!("//{}: checking repository status", member.path)),
+                Some(format!("//{} checking repository status", member.path)),
             );
 
             let repo = git::Repository::new(url.clone(), member.path.clone());
@@ -145,7 +145,7 @@ pub fn check_repos_before_sync(
                         let lines = console::make_finalize_line(
                             console::FinalType::Failed,
                             None,
-                            &format!("//{}: failed to stash changes", member.path),
+                            &format!("//{} failed to stash changes", member.path),
                         );
                         repo_progress.set_finalize_lines(lines);
 
@@ -165,7 +165,7 @@ pub fn check_repos_before_sync(
                         }
 
                         return Err(format_error!(
-                            "//{}: failed to stash changes: {e}",
+                            "//{} failed to stash changes: {e}",
                             member.path,
                         ));
                     }
@@ -173,7 +173,7 @@ pub fn check_repos_before_sync(
                     let lines = console::make_finalize_line(
                         console::FinalType::Completed,
                         None,
-                        &format!("//{}: stashed uncommitted changes", member.path),
+                        &format!("//{} stashed uncommitted changes", member.path),
                     );
                     repo_progress.set_finalize_lines(lines);
                 } else {
@@ -192,7 +192,7 @@ pub fn check_repos_before_sync(
                     let lines = console::make_finalize_line(
                         console::FinalType::Failed,
                         None,
-                        &format!("//{}: has uncommitted changes", member.path),
+                        &format!("//{} has uncommitted changes", member.path),
                     );
                     repo_progress.set_finalize_lines(lines);
                     continue;
@@ -212,7 +212,7 @@ pub fn check_repos_before_sync(
                         let lines = console::make_finalize_line(
                             console::FinalType::Failed,
                             None,
-                            &format!("//{}: failed to fetch", member.path),
+                            &format!("//{} failed to fetch", member.path),
                         );
                         repo_progress.set_finalize_lines(lines);
 
@@ -232,7 +232,7 @@ pub fn check_repos_before_sync(
                         }
 
                         return Err(format_error!(
-                            "//{}: failed to fetch updates: {e}",
+                            "//{} failed to fetch updates: {e}",
                             member.path,
                         ));
                     }
@@ -243,7 +243,7 @@ pub fn check_repos_before_sync(
                             let lines = console::make_finalize_line(
                                 console::FinalType::Completed,
                                 repo_progress.elapsed(),
-                                &format!("//{}: ready for rebase", member.path),
+                                &format!("//{} ready for rebase", member.path),
                             );
                             repo_progress.set_finalize_lines(lines);
                         }
@@ -252,7 +252,7 @@ pub fn check_repos_before_sync(
                             let lines = console::make_finalize_line(
                                 console::FinalType::Failed,
                                 None,
-                                &format!("//{}: rebase would have conflicts", member.path),
+                                &format!("//{} rebase would have conflicts", member.path),
                             );
                             repo_progress.set_finalize_lines(lines);
                         }
@@ -260,7 +260,7 @@ pub fn check_repos_before_sync(
                             let lines = console::make_finalize_line(
                                 console::FinalType::Failed,
                                 None,
-                                &format!("//{} Failed to check conflicts: {}", member.path, e),
+                                &format!("//{} failed to check conflicts: {}", member.path, e),
                             );
                             repo_progress.set_finalize_lines(lines);
 
@@ -280,7 +280,7 @@ pub fn check_repos_before_sync(
                             }
 
                             return Err(format_error!(
-                                "//{} Failed to check rebase conflicts: {e}",
+                                "//{} failed to check rebase conflicts: {e}",
                                 member.path,
                             ));
                         }
@@ -289,15 +289,15 @@ pub fn check_repos_before_sync(
                     let lines = console::make_finalize_line(
                         console::FinalType::NotRequired,
                         repo_progress.elapsed(),
-                        format!("//{}: not on a branch", member.path).as_str(),
+                        format!("//{} not on a branch", member.path).as_str(),
                     );
                     repo_progress.set_finalize_lines(lines);
                 }
             } else {
                 let status_msg = if stashed_repos.contains(&member.path) {
-                    format!("//{}: stashed changes", member.path)
+                    format!("//{} stashed changes", member.path)
                 } else {
-                    format!("//{}: clean git repo", member.path)
+                    format!("//{} clean git repo", member.path)
                 };
                 let lines = console::make_finalize_line(
                     console::FinalType::Completed,
@@ -538,8 +538,8 @@ pub fn rebase_dev_branches(
                             console::FinalType::Completed,
                             repo_progress.elapsed(),
                             &format!(
-                                "//{} rebased successfully on {}",
-                                member.path, upstream_branch
+                                "//{} rebased successfully on {upstream_branch}",
+                                member.path
                             ),
                         );
                         repo_progress.set_finalize_lines(lines);
@@ -552,9 +552,8 @@ pub fn rebase_dev_branches(
                         );
                         repo_progress.set_finalize_lines(lines);
                         return Err(format_error!(
-                            "//{} Failed to rebase onto {}: {e}",
+                            "//{} failed to rebase onto {upstream_branch}: {e}",
                             member.path,
-                            upstream_branch,
                         ));
                     }
                 }
@@ -562,7 +561,7 @@ pub fn rebase_dev_branches(
                 let lines = console::make_finalize_line(
                     console::FinalType::NotRequired,
                     repo_progress.elapsed(),
-                    &format!("//{} Not on a branch, skipping rebase", member.path),
+                    &format!("//{} not on a branch, skipping rebase", member.path),
                 );
                 repo_progress.set_finalize_lines(lines);
             }
@@ -595,7 +594,7 @@ pub fn pop_stashed_repos(
                 console.clone(),
                 format!("//{}", member.path),
                 None,
-                Some(format!("//{}: popping stash", member.path)),
+                Some(format!("//{} popping stash", member.path)),
             );
 
             let repo = git::Repository::new(url.clone(), member.path.clone());
@@ -605,7 +604,7 @@ pub fn pop_stashed_repos(
                     let lines = console::make_finalize_line(
                         console::FinalType::Completed,
                         repo_progress.elapsed(),
-                        &format!("//{}: popped stash successfully", member.path),
+                        &format!("//{} popped stash successfully", member.path),
                     );
                     repo_progress.set_finalize_lines(lines);
                 }
@@ -620,7 +619,7 @@ pub fn pop_stashed_repos(
                     console.warning(
                         "Failed to pop stash",
                         format!(
-                            "//{}: {e}. You may need to manually run 'git stash pop' in this repository.",
+                            "//{} {e}. Manually check this repo with 'git status'",
                             member.path
                         ),
                     )?;
