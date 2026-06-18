@@ -71,7 +71,7 @@ fn save_artifact_to_cache(
             "Failed to create stage directory for cache entry"
         ))?;
         let staged_path = stage_dir.join(&artifact_hash);
-        reflink_copy::reflink_or_copy(artifact_path, &staged_path).with_context(|| {
+        std::fs::copy(artifact_path, &staged_path).with_context(|| {
             format_context!(
                 "Failed to copy artifact to staged cache path {}",
                 staged_path.display()
@@ -148,7 +148,7 @@ impl CachedTarget {
         }
 
         let path_in_cache = get_artifact_cache_path(path_to_cache, &self.path_in_cache);
-        reflink_copy::reflink_or_copy(&path_in_cache, path_in_workspace).with_context(|| {
+        std::fs::copy(&path_in_cache, path_in_workspace).with_context(|| {
             format_context!(
                 "Failed to restore artifact to workspace at {} from {}",
                 path_in_workspace.display(),
