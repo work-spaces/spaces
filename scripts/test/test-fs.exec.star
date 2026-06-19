@@ -1,7 +1,16 @@
 #!/usr/bin/env spaces
 
 load(
-    "//@star/prelude/exec/fs.star",
+    "//@star/prelude/exec/json.star",
+    "json_dumps",
+)
+load(
+    "//@star/prelude/exec/tmp.star",
+    "tmp_cleanup_all",
+    "tmp_dir",
+)
+load(
+    "//spaces/crates/spaces/src/assets/prelude/exec/fs.star",
     "fs_append_text",
     "fs_chmod",
     "fs_copy",
@@ -16,6 +25,7 @@ load(
     "fs_move",
     "fs_read_bytes",
     "fs_read_directory",
+    "fs_read_globs",
     "fs_read_json",
     "fs_read_lines",
     "fs_read_link",
@@ -27,6 +37,7 @@ load(
     "fs_size",
     "fs_symlink",
     "fs_touch",
+    "fs_walk_directory",
     "fs_write_bytes",
     "fs_write_json",
     "fs_write_lines",
@@ -34,15 +45,6 @@ load(
     "fs_write_text",
     "fs_write_toml",
     "fs_write_yaml",
-)
-load(
-    "//@star/prelude/exec/json.star",
-    "json_dumps",
-)
-load(
-    "//@star/prelude/exec/tmp.star",
-    "tmp_cleanup_all",
-    "tmp_dir",
 )
 
 # ============================================================================
@@ -67,6 +69,8 @@ results = {
     "format_io": {},
     "existence_checks": {},
     "directory_ops": {},
+    "globbing": {},
+    "walk_directory": {},
     "copy_move": {},
     "remove": {},
     "symlinks": {},
@@ -177,6 +181,161 @@ fs_write_text(p("dir1/file_a.txt"), "a")
 fs_write_text(p("dir1/file_b.txt"), "b")
 dir_contents = fs_read_directory(p("dir1"))
 results["directory_ops"]["read_directory_count"] = len(dir_contents) == 2
+
+# ============================================================================
+# Globbing (fs_read_globs)
+# ============================================================================
+
+fs_mkdir(p("glob/src/nested"), parents = True)
+fs_mkdir(p("glob/docs"), parents = True)
+fs_mkdir(p("glob/src/empty_dir"), parents = True)
+
+fs_write_text(p("glob/src/app.star"), "app")
+fs_write_text(p("glob/src/helper.txt"), "helper")
+fs_write_text(p("glob/src/nested/child.txt"), "child")
+fs_write_text(p("glob/docs/readme.md"), "docs")
+
+glob_txt = fs_read_globs(
+    includes = ["glob/**/*.txt"],
+    root = work_dir,
+)
+results["globbing"]["include_txt_files"] = (
+    len(glob_txt) == 2 and
+    p("glob/src/helper.txt") in glob_txt and
+    p("glob/src/nested/child.txt") in glob_txt
+)
+
+glob_excluded = fs_read_globs(
+    includes = ["glob/**/*.txt"],
+    excludes = ["glob/src/nested/**"],
+    root = work_dir,
+)
+results["globbing"]["exclude_pattern"] = (
+    len(glob_excluded) == 1 and
+    p("glob/src/helper.txt") in glob_excluded and
+    p("glob/src/nested/child.txt") not in glob_excluded
+)
+
+glob_dirs = fs_read_globs(
+    includes = ["glob/src/**"],
+    root = work_dir,
+    include_files = False,
+    include_dirs = True,
+)
+results["globbing"]["include_dirs_only"] = (
+    p("glob/src/nested") in glob_dirs and
+    p("glob/src/empty_dir") in glob_dirs and
+    p("glob/src/helper.txt") not in glob_dirs
+)
+
+glob_depth_limited = fs_read_globs(
+    includes = ["glob/src/**/*.txt"],
+    root = work_dir,
+    max_depth = 1,
+)
+results["globbing"]["max_depth_limits_walk"] = (
+    len(glob_depth_limited) == 1 and
+    p("glob/src/helper.txt") in glob_depth_limited and
+    p("glob/src/nested/child.txt") not in glob_depth_limited
+)
+
+glob_dedup = fs_read_globs(
+    includes = ["glob/**/*.txt", "glob/src/**/*.txt"],
+    root = work_dir,
+)
+helper_count = len([x for x in glob_dedup if x == p("glob/src/helper.txt")])
+child_count = len([x for x in glob_dedup if x == p("glob/src/nested/child.txt")])
+results["globbing"]["deduplicates_overlapping_patterns"] = helper_count == 1 and child_count == 1
+
+# ============================================================================
+# Directory walk callbacks (fs_walk_directory)
+# ============================================================================
+
+fs_mkdir(p("walk/dir_a/sub"), parents = True)
+fs_mkdir(p("walk/dir_b"), parents = True)
+fs_write_text(p("walk/root.txt"), "root")
+fs_write_text(p("walk/dir_a/a.txt"), "a")
+fs_write_text(p("walk/dir_a/sub/deep.txt"), "deep")
+fs_write_text(p("walk/dir_b/b.md"), "b")
+
+def walk_collect_txt_rel(entry):
+    if entry.get("is_file") and entry.get("name").endswith(".txt"):
+        return entry.get("relative_path")
+    return None
+
+walk_txt = fs_walk_directory(p("walk"), walk_collect_txt_rel)
+results["walk_directory"]["collect_txt_files_recursive"] = (
+    len(walk_txt) == 3 and
+    "root.txt" in walk_txt and
+    "dir_a/a.txt" in walk_txt and
+    "dir_a/sub/deep.txt" in walk_txt
+)
+
+def walk_collect_relative(entry):
+    return entry.get("relative_path")
+
+walk_top = fs_walk_directory(
+    path = p("walk"),
+    callback = walk_collect_relative,
+    recursive = False,
+    include_dirs = True,
+)
+results["walk_directory"]["non_recursive_top_level_only"] = (
+    len(walk_top) == 3 and
+    "root.txt" in walk_top and
+    "dir_a" in walk_top and
+    "dir_b" in walk_top and
+    "dir_a/a.txt" not in walk_top
+)
+
+walk_dirs_only = fs_walk_directory(
+    path = p("walk"),
+    callback = walk_collect_relative,
+    include_files = False,
+    include_dirs = True,
+)
+results["walk_directory"]["include_dirs_only"] = (
+    "dir_a" in walk_dirs_only and
+    "dir_a/sub" in walk_dirs_only and
+    "root.txt" not in walk_dirs_only
+)
+
+walk_depth1 = fs_walk_directory(
+    path = p("walk"),
+    callback = walk_collect_relative,
+    include_dirs = True,
+    max_depth = 1,
+)
+results["walk_directory"]["max_depth_limits_walk"] = (
+    len(walk_depth1) == 3 and
+    "root.txt" in walk_depth1 and
+    "dir_a" in walk_depth1 and
+    "dir_b" in walk_depth1 and
+    "dir_a/a.txt" not in walk_depth1
+)
+
+def walk_validate_entry_shape(entry):
+    has_required = (
+        entry.get("path") != None and
+        entry.get("relative_path") != None and
+        entry.get("name") != None and
+        entry.get("depth") != None and
+        entry.get("is_file") != None and
+        entry.get("is_dir") != None and
+        entry.get("is_symlink") != None
+    )
+    return has_required
+
+walk_shape_checks = fs_walk_directory(
+    path = p("walk"),
+    callback = walk_validate_entry_shape,
+    include_dirs = True,
+)
+shape_all_ok = len(walk_shape_checks) > 0
+for v in walk_shape_checks:
+    if v == False:
+        shape_all_ok = False
+results["walk_directory"]["entry_shape"] = shape_all_ok
 
 # ============================================================================
 # Copy
