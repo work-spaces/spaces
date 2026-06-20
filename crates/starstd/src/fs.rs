@@ -372,8 +372,17 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let opts: ReadGlobsOptions = serde_json::from_value(options.to_json_value()?)
             .context(format_context!("bad options for read_globs"))?;
 
-        let includes = opts.includes;
-        let excludes = opts.excludes.unwrap_or_default();
+        let includes = opts
+            .includes
+            .into_iter()
+            .map(|pattern| normalize_glob_pattern(&pattern))
+            .collect::<Vec<_>>();
+        let excludes = opts
+            .excludes
+            .unwrap_or_default()
+            .into_iter()
+            .map(|pattern| normalize_glob_pattern(&pattern))
+            .collect::<Vec<_>>();
 
         let root = PathBuf::from(opts.root.unwrap_or_else(|| ".".to_string()));
         let include_files = opts.include_files.unwrap_or(true);
@@ -391,12 +400,30 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 root.join(candidate_walk_root)
             };
 
+            match std::fs::symlink_metadata(&walk_root) {
+                Ok(_) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(err) => {
+                    return Err(err).context(format_context!(
+                        "Failed to access glob walk root {} for include pattern {}",
+                        walk_root.display(),
+                        include
+                    ));
+                }
+            }
+
             let mut walker = walkdir::WalkDir::new(&walk_root).follow_links(follow_symlinks);
             if let Some(depth) = max_depth {
                 walker = walker.max_depth(depth);
             }
 
-            for entry in walker.into_iter().filter_map(Result::ok) {
+            for entry in walker {
+                let entry = entry.context(format_context!(
+                    "Failed while traversing include pattern {} from root {}",
+                    include,
+                    walk_root.display()
+                ))?;
+
                 if entry.depth() == 0 && entry.file_type().is_dir() {
                     continue;
                 }

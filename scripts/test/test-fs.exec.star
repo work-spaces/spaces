@@ -1,16 +1,7 @@
 #!/usr/bin/env spaces
 
 load(
-    "//@star/prelude/exec/json.star",
-    "json_dumps",
-)
-load(
-    "//@star/prelude/exec/tmp.star",
-    "tmp_cleanup_all",
-    "tmp_dir",
-)
-load(
-    "//spaces/crates/spaces/src/assets/prelude/exec/fs.star",
+    "//@star/prelude/exec/fs.star",
     "fs_append_text",
     "fs_chmod",
     "fs_copy",
@@ -45,6 +36,15 @@ load(
     "fs_write_text",
     "fs_write_toml",
     "fs_write_yaml",
+)
+load(
+    "//@star/prelude/exec/json.star",
+    "json_dumps",
+)
+load(
+    "//@star/prelude/exec/tmp.star",
+    "tmp_cleanup_all",
+    "tmp_dir",
 )
 
 # ============================================================================
