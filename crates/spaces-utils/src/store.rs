@@ -613,6 +613,7 @@ impl Store {
         // Counters accumulated across all fix phases for the finalize summary.
         let keys_normalised: usize;
 
+        let mut bare_repos_repair_attempted: usize = 0;
         let mut bare_repos_repaired: usize = 0;
 
         {
@@ -674,6 +675,7 @@ impl Store {
 
         let unmanaged_candidates =
             get_unmanaged_dir_entries(&path_to_store, &managed_top_level_dirs);
+        let unmanaged_refreshed = unmanaged_candidates.len();
 
         // Compute bare-repo paths before creating the progress bar so that
         // their ticks can be included in the initial total, keeping a single
@@ -845,6 +847,7 @@ impl Store {
                 log.message(
                     format!("Would run gc on {} bare repos", bare_repo_paths.len()).as_str(),
                 );
+                bare_repos_repair_attempted = repos_needing_repair.len();
                 if !repos_needing_repair.is_empty() {
                     log.message(
                         format!(
@@ -886,6 +889,7 @@ impl Store {
 
                 // Phase 3: repair (fetch) – extend the declared total now
                 // that we know how many repos need repair.
+                bare_repos_repair_attempted = repos_needing_repair.len();
                 if !repos_needing_repair.is_empty() {
                     total += repos_needing_repair.len() as u64;
                     progress.update_progress(0, total);
@@ -977,11 +981,29 @@ impl Store {
                 format!("fixed: {}", parts.join(", "))
             }
         };
+        let fix_report = FixActionReport {
+            is_dry_run,
+            run_git_fsck,
+            keys_normalised,
+            entries_removed,
+            unmanaged_refreshed,
+            stale_links_cleaned,
+            bare_repos_discovered: bare_repo_paths.len(),
+            bare_repos_repair_attempted,
+            bare_repos_repaired,
+        };
+
         progress.set_finalize_lines(logger::make_finalize_line(
             logger::FinalType::Finished,
             progress.elapsed(),
             finalize_message.as_str(),
         ));
+
+        emit_pretty_fix_report(&console, &fix_report);
+
+        bare_separator(&console, 72);
+        // Finalize progress output first, then render a stable pretty report.
+        drop(progress);
 
         Ok(())
     }
@@ -996,11 +1018,19 @@ impl Store {
         let _group = ci::GithubLogGroup::new_group(console.clone(), is_ci, "Spaces Store Prune")?;
         let mut remove_entries = Vec::new();
 
+        let mut progress = console::Progress::new(
+            console.clone(),
+            "pruning the store",
+            Some(remove_entries.len() as u64),
+            None,
+        );
+
         let path_to_store = self.path_to_store.clone();
         if !is_dry_run {
             make_path_dirs_user_writable(path_to_store.as_path());
         }
 
+        progress.set_message("gathering entries to prune");
         let mut total_size_removed = ByteSize(0);
         for (key, entry) in self.entries.iter() {
             let path = path_to_store.join(key.as_ref());
@@ -1029,13 +1059,6 @@ impl Store {
                 remove_entries.push((key.clone(), entry_age, bytesize, path.clone()));
             }
         }
-
-        let mut progress = console::Progress::new(
-            console.clone(),
-            "store-prune",
-            Some(remove_entries.len() as u64),
-            None,
-        );
 
         for (key, age, size, path) in remove_entries {
             let mut item_progress =
@@ -1088,6 +1111,142 @@ impl Store {
         logger(console.clone()).message(finalize_message.as_str());
 
         Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// store fix pretty report
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+struct FixActionReport {
+    is_dry_run: bool,
+    run_git_fsck: bool,
+    keys_normalised: usize,
+    entries_removed: usize,
+    unmanaged_refreshed: usize,
+    stale_links_cleaned: usize,
+    bare_repos_discovered: usize,
+    bare_repos_repair_attempted: usize,
+    bare_repos_repaired: usize,
+}
+
+fn emit_pretty_fix_report(console: &console::Console, report: &FixActionReport) {
+    let title = if report.is_dry_run {
+        "Store Fix Report (dry run)"
+    } else {
+        "Store Fix Report"
+    };
+
+    console.emit_lines(
+        components::Header::h1(title)
+            .variant(Variant::Default)
+            .render(),
+    );
+
+    let mut rows = Vec::new();
+
+    let key_outcome = if report.keys_normalised == 0 {
+        "no malformed manifest keys found".to_string()
+    } else if report.is_dry_run {
+        format!("would normalise {} key(s)", report.keys_normalised)
+    } else {
+        format!("normalised {} key(s)", report.keys_normalised)
+    };
+    rows.push(vec!["Manifest keys".to_string(), key_outcome]);
+
+    let entry_outcome = if report.entries_removed == 0 {
+        "no missing/corrupted entries found".to_string()
+    } else if report.is_dry_run {
+        format!("would remove {} entr(ies)", report.entries_removed)
+    } else {
+        format!("removed {} entr(ies)", report.entries_removed)
+    };
+    rows.push(vec!["Entries".to_string(), entry_outcome]);
+
+    let unmanaged_outcome = if report.unmanaged_refreshed == 0 {
+        "no unmanaged directories found".to_string()
+    } else {
+        format!(
+            "rescanned {} unmanaged director(y/ies)",
+            report.unmanaged_refreshed
+        )
+    };
+    rows.push(vec!["Unmanaged metadata".to_string(), unmanaged_outcome]);
+
+    let stale_links_outcome = if report.stale_links_cleaned == 0 {
+        "no stale workspace links".to_string()
+    } else if report.is_dry_run {
+        format!("would remove {} stale link(s)", report.stale_links_cleaned)
+    } else {
+        format!("removed {} stale link(s)", report.stale_links_cleaned)
+    };
+    rows.push(vec!["Workspace links".to_string(), stale_links_outcome]);
+
+    let bare_gc_outcome = if report.bare_repos_discovered == 0 {
+        "no bare repos found".to_string()
+    } else if report.is_dry_run {
+        if report.run_git_fsck {
+            format!(
+                "would run gc on {} bare repo(s)",
+                report.bare_repos_discovered
+            )
+        } else {
+            "skipped (dry run without --git-fsck)".to_string()
+        }
+    } else {
+        format!("ran gc on {} bare repo(s)", report.bare_repos_discovered)
+    };
+    rows.push(vec!["Bare repo gc".to_string(), bare_gc_outcome]);
+
+    let bare_fsck_outcome = if !report.run_git_fsck {
+        "skipped (--git-fsck not set)".to_string()
+    } else if report.bare_repos_discovered == 0 {
+        "no bare repos found".to_string()
+    } else {
+        format!("checked {} bare repo(s)", report.bare_repos_discovered)
+    };
+    rows.push(vec!["Bare repo fsck".to_string(), bare_fsck_outcome]);
+
+    let bare_repair_outcome = if !report.run_git_fsck {
+        "skipped (--git-fsck not set)".to_string()
+    } else if report.bare_repos_repair_attempted == 0 {
+        "no repairs required".to_string()
+    } else if report.is_dry_run {
+        format!(
+            "would attempt fetch repair on {} bare repo(s)",
+            report.bare_repos_repair_attempted
+        )
+    } else if report.bare_repos_repair_attempted == report.bare_repos_repaired {
+        format!("repaired {} bare repo(s)", report.bare_repos_repaired)
+    } else {
+        format!(
+            "attempted {} repair(s), repaired {}",
+            report.bare_repos_repair_attempted, report.bare_repos_repaired
+        )
+    };
+    rows.push(vec!["Bare repo repair".to_string(), bare_repair_outcome]);
+
+    let table = components::Table::new()
+        .headers(vec!["Action".to_string(), "Outcome".to_string()])
+        .alignments(vec![components::Align::Left, components::Align::Left])
+        .rows(rows)
+        .width(72);
+
+    console.emit_lines(table.render());
+
+    if !report.is_dry_run
+        && report.bare_repos_repair_attempted > report.bare_repos_repaired
+        && report.run_git_fsck
+    {
+        let failed_repairs = report.bare_repos_repair_attempted - report.bare_repos_repaired;
+        let warning = components::Alert::new(format!(
+            "{failed_repairs} bare repo repair(s) failed. Consider re-cloning affected repositories."
+        ))
+        .title("Bare repo repair warning")
+        .variant(Variant::Warning)
+        .width(72);
+        console.emit_lines(warning.render());
     }
 }
 
@@ -1184,25 +1343,23 @@ fn emit_pretty_summary(
             ByteSize(unmanaged_size).display().to_string(),
         ]);
 
-    // Add workspace links row if applicable
+    // Build workspace links summary (emitted after the table if applicable)
     let entries_with_links = entries.iter().filter(|e| e.workspace_count > 0).count();
     let total_links: usize = entries.iter().map(|e| e.workspace_count).sum();
     let entries_with_stale: usize = entries.iter().filter(|e| e.stale_links > 0).count();
 
-    if entries_with_links > 0 || entries_with_stale > 0 {
-        let mut workspace_info = format!(
+    let workspace_info = if entries_with_links > 0 || entries_with_stale > 0 {
+        let mut info = format!(
             "{} links across {} entries",
             total_links, entries_with_links
         );
         if entries_with_stale > 0 {
-            workspace_info.push_str(&format!(" ({} with stale links)", entries_with_stale));
+            info.push_str(&format!(" ({} with stale links)", entries_with_stale));
         }
-        table = table.row(vec![
-            "Workspaces".to_string(),
-            String::new(),
-            workspace_info,
-        ]);
-    }
+        Some(info)
+    } else {
+        None
+    };
 
     // Add footer with total and fix warning if needed
     let mut footer_right = format!(
@@ -1218,6 +1375,20 @@ fn emit_pretty_summary(
     // Render the table
     for line in table.render() {
         console.emit_line(line);
+    }
+
+    if let Some(workspace_info) = workspace_info {
+        let icon = console::components::icon_info();
+        let workspace_line = if icon.is_empty() {
+            format!("Workspaces: {workspace_info}")
+        } else {
+            format!("{icon} Workspaces: {workspace_info}")
+        };
+        console.emit_line(
+            components::Paragraph::new(workspace_line)
+                .variant(Variant::Info)
+                .render(),
+        );
     }
 }
 
@@ -1237,8 +1408,8 @@ fn emit_pretty_age_histogram(console: &console::Console, entries: &[StoreInfoEnt
     // Create histogram bars with appropriate variants
     let histogram = components::Histogram::new("Age distribution")
         .bar_width(34)
-        .bar(components::HistogramBar::new("fresh  < 7d ", fresh).variant(Variant::Success))
-        .bar(components::HistogramBar::new("aging 7-30d ", aging).variant(Variant::Warning))
+        .bar(components::HistogramBar::new("fresh   < 7d", fresh).variant(Variant::Primary))
+        .bar(components::HistogramBar::new("aging  7-30d", aging).variant(Variant::Warning))
         .bar(components::HistogramBar::new("stale  > 30d", stale).variant(Variant::Danger));
 
     for line in histogram.render() {
@@ -1479,7 +1650,7 @@ fn emit_pretty_bare_info(
 
     // Add health status
     let health_status = if repos_with_problems == 0 {
-        "ok".to_string()
+        format!("{} ok", console::components::icon_success())
     } else {
         format!(
             "{} {} repos have problems. re-clone affected repos",
