@@ -35,7 +35,6 @@ pub enum Format {
 // Shared ContentStyle helpers
 // ---------------------------------------------------------------------------
 
-// Bootstrap: Primary - Blue
 pub fn primary_style() -> style::ContentStyle {
     style::ContentStyle {
         foreground_color: Some(style::Color::Blue),
@@ -45,7 +44,6 @@ pub fn primary_style() -> style::ContentStyle {
     }
 }
 
-// Bootstrap: Default - Dark Grey
 pub fn default_style() -> style::ContentStyle {
     style::ContentStyle {
         foreground_color: Some(style::Color::DarkGrey),
@@ -55,7 +53,6 @@ pub fn default_style() -> style::ContentStyle {
     }
 }
 
-// Bootstrap: Info - Grey
 pub fn info_style() -> style::ContentStyle {
     style::ContentStyle {
         foreground_color: Some(style::Color::Cyan),
@@ -65,7 +62,6 @@ pub fn info_style() -> style::ContentStyle {
     }
 }
 
-// Bootstrap: Success - Dark Green
 pub fn success_style() -> style::ContentStyle {
     style::ContentStyle {
         foreground_color: Some(style::Color::DarkGreen),
@@ -75,7 +71,6 @@ pub fn success_style() -> style::ContentStyle {
     }
 }
 
-// Bootstrap: Warning - Dark Yellow
 pub fn warning_style() -> style::ContentStyle {
     style::ContentStyle {
         foreground_color: Some(style::Color::DarkYellow),
@@ -85,7 +80,6 @@ pub fn warning_style() -> style::ContentStyle {
     }
 }
 
-// Bootstrap: Danger - Dark Red
 pub fn danger_style() -> style::ContentStyle {
     style::ContentStyle {
         foreground_color: Some(style::Color::DarkRed),
