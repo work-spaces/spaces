@@ -29,6 +29,7 @@ load(
     "fs_symlink",
     "fs_touch",
     "fs_walk_directory",
+    "fs_with_file_lock",
     "fs_write_bytes",
     "fs_write_json",
     "fs_write_lines",
@@ -78,6 +79,7 @@ results = {
     "permissions": {},
     "is_text_file": {},
     "atomic_write": {},
+    "locks": {},
     "touch": {},
 }
 
@@ -467,6 +469,19 @@ results["atomic_write"]["file_exists"] = fs_exists(p("atomic.conf"))
 dir_after = fs_read_directory(work_dir)
 tmp_files = [f for f in dir_after if f.endswith(".tmp")]
 results["atomic_write"]["no_leftover_tmp"] = len(tmp_files) == 0
+
+# ============================================================================
+# File locking
+# ============================================================================
+
+def _lock_callback():
+    fs_append_text(p("lock_target.txt"), "locked write\n")
+    return "lock-ok"
+
+lock_result = fs_with_file_lock(p("resource.lock"), _lock_callback)
+results["locks"]["callback_returned"] = lock_result == "lock-ok"
+results["locks"]["lock_file_exists"] = fs_exists(p("resource.lock"))
+results["locks"]["critical_section_ran"] = fs_read_text(p("lock_target.txt")) == "locked write\n"
 
 # ============================================================================
 # Touch

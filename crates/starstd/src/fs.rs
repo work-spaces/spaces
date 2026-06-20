@@ -1394,6 +1394,111 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         Ok(NoneType)
     }
+
+    /// Acquire an advisory file lock for the duration of a callback.
+    ///
+    /// The callback is invoked while the lock is held, and the lock is always
+    /// released before this function returns (even if the callback errors).
+    ///
+    /// This is implemented using the `fd-lock` crate and is advisory: other
+    /// processes must also use advisory locking to participate.
+    ///
+    /// Example:
+    ///
+    /// ```python
+    /// def critical_section():
+    ///     fs.append_string_to_file(path = "build.log", content = "locked write\n")
+    ///
+    /// fs.with_file_lock(".spaces/build.log.lock", critical_section)
+    /// ```
+    fn with_file_lock<'v>(
+        path: &str,
+        callback: Value<'v>,
+        #[starlark(require = named, default = true)] exclusive: bool,
+        #[starlark(require = named, default = true)] blocking: bool,
+        #[starlark(require = named, default = true)] create: bool,
+        eval: &mut Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<Value<'v>> {
+        if is_lsp_mode() {
+            return Ok(Value::new_none());
+        }
+
+        let lock_path = std::path::Path::new(path);
+        if create
+            && let Some(parent) = lock_path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent).context(format_context!(
+                "Failed to create parent directory for lock {}",
+                parent.display()
+            ))?;
+        }
+
+        let mut open_options = std::fs::OpenOptions::new();
+        if create {
+            // `OpenOptions::create` requires write or append mode.
+            open_options.read(true).write(true).create(true);
+        } else if exclusive {
+            open_options.read(true).write(true);
+        } else {
+            open_options.read(true);
+        }
+
+        let file = open_options
+            .open(lock_path)
+            .context(format_context!("Failed to open lock file {}", path))?;
+        let mut lock = fd_lock::RwLock::new(file);
+
+        if exclusive {
+            if blocking {
+                let _guard = lock.write().context(format_context!(
+                    "Failed to acquire exclusive lock on {}",
+                    path
+                ))?;
+                return eval.eval_function(callback, &[], &[]).map_err(|e| {
+                    anyhow::anyhow!("Failed to execute lock callback for {}: {}", path, e)
+                });
+            }
+
+            let _guard = match lock.try_write() {
+                Ok(guard) => guard,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    anyhow::bail!("Lock is currently held and blocking=False: {}", path)
+                }
+                Err(e) => {
+                    return Err(e).context(format_context!(
+                        "Failed to acquire exclusive lock on {}",
+                        path
+                    ));
+                }
+            };
+            return eval.eval_function(callback, &[], &[]).map_err(|e| {
+                anyhow::anyhow!("Failed to execute lock callback for {}: {}", path, e)
+            });
+        }
+
+        if blocking {
+            let _guard = lock
+                .read()
+                .context(format_context!("Failed to acquire shared lock on {path}"))?;
+            return eval
+                .eval_function(callback, &[], &[])
+                .map_err(|e| anyhow::anyhow!("Failed to execute lock callback for {path}: {e}"));
+        }
+
+        let _guard = match lock.try_read() {
+            Ok(guard) => guard,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                anyhow::bail!("Lock is currently held and blocking=False: {path}")
+            }
+            Err(e) => {
+                return Err(e).context(format_context!("Failed to acquire shared lock on {path}"));
+            }
+        };
+
+        eval.eval_function(callback, &[], &[])
+            .map_err(|e| anyhow::anyhow!("Failed to execute lock callback for {path}: {e}"))
+    }
 }
 
 fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> anyhow::Result<()> {
