@@ -192,7 +192,7 @@ pub fn execute() -> anyhow::Result<()> {
                 let mut line = console::Line::default();
                 line.push(console::Span::new_styled_lossy(
                     console::style::StyledContent::new(
-                        console::keyword_style(),
+                        console::danger_style(),
                         "see also:".to_string(),
                     ),
                 ));

@@ -216,7 +216,7 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
 
         let write_header = |title: &str| -> anyhow::Result<()> {
             let styled_title =
-                console::style::StyledContent::new(console::total_style(), title.to_owned());
+                console::style::StyledContent::new(console::bold_style(), title.to_owned());
             console.raw(format!("{divider}\n"))?;
             console.raw(format!("{styled_title}\n"))?;
             Ok(())
@@ -224,7 +224,7 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
 
         let write_subheader = |title: &str| -> anyhow::Result<()> {
             let styled_title =
-                console::style::StyledContent::new(console::name_style(), title.to_owned());
+                console::style::StyledContent::new(console::primary_style(), title.to_owned());
             console.raw(format!("{divider}\n"))?;
             console.raw(format!("{styled_title}\n"))?;
             Ok(())
@@ -239,9 +239,9 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
             ))?;
 
             let config_path_label =
-                console::style::StyledContent::new(console::key_style(), "Config path: ");
+                console::style::StyledContent::new(console::default_style(), "Config path: ");
             let config_path_value = console::style::StyledContent::new(
-                console::keyword_style(),
+                console::danger_style(),
                 config_path.display().to_string(),
             );
             console.raw(format!("{config_path_label}{config_path_value}\n\n"))?;
@@ -250,12 +250,13 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
             console.raw(format!("{contents}\n"))?;
         } else {
             let no_config_label = console::style::StyledContent::new(
-                console::warning_style(),
+                console::danger_style(),
                 "No custom config found at:",
             );
-            let no_config_bullet = console::style::StyledContent::new(console::key_style(), "- ");
+            let no_config_bullet =
+                console::style::StyledContent::new(console::default_style(), "- ");
             let no_config_path = console::style::StyledContent::new(
-                console::keyword_style(),
+                console::danger_style(),
                 config_path.display().to_string(),
             );
             console.raw(format!(
@@ -263,31 +264,31 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
             ))?;
 
             let default_config_label = console::style::StyledContent::new(
-                console::total_style(),
+                console::bold_style(),
                 "Default config uses gh to fetch releases from:",
             );
             console.raw(format!("{default_config_label}\n"))?;
 
-            let bullet_prefix = console::style::StyledContent::new(console::key_style(), "- ");
+            let bullet_prefix = console::style::StyledContent::new(console::default_style(), "- ");
             let gh_host_env =
-                console::style::StyledContent::new(console::keyword_style(), manifest::GH_HOST_ENV);
-            let separator = console::style::StyledContent::new(console::key_style(), ": ");
+                console::style::StyledContent::new(console::danger_style(), manifest::GH_HOST_ENV);
+            let separator = console::style::StyledContent::new(console::default_style(), ": ");
             let gh_host_default =
-                console::style::StyledContent::new(console::name_style(), "github.com");
+                console::style::StyledContent::new(console::primary_style(), "github.com");
             console.raw(format!(
                 "{bullet_prefix}{gh_host_env}{separator}{gh_host_default}\n"
             ))?;
 
             let gh_repo_env =
-                console::style::StyledContent::new(console::keyword_style(), manifest::GH_REPO);
+                console::style::StyledContent::new(console::danger_style(), manifest::GH_REPO);
             let gh_repo_default =
-                console::style::StyledContent::new(console::name_style(), "work-spaces/spaces");
+                console::style::StyledContent::new(console::primary_style(), "work-spaces/spaces");
             console.raw(format!(
                 "{bullet_prefix}{gh_repo_env}{separator}{gh_repo_default}\n"
             ))?;
 
             let customize_message = console::style::StyledContent::new(
-                console::total_style(),
+                console::bold_style(),
                 "Update ^ env values to change where gh looks for releases",
             );
             console.raw(format!("{customize_message}\n\n"))?;
@@ -314,25 +315,25 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
             .create_hard_links_to_tools(console.clone())
             .context(format_context!("Failed to create hard links to tools"))?;
 
-        let divider = console::style::StyledContent::new(console::key_style(), "─".repeat(56));
+        let divider = console::style::StyledContent::new(console::default_style(), "─".repeat(56));
 
         for release in manifest.releases() {
             console.raw(format!("{divider}\n"))?;
 
             // Release tag name + prerelease badge
             let tag = console::style::StyledContent::new(
-                console::name_style(),
+                console::primary_style(),
                 release.tag_name.to_string(),
             );
             if release.prerelease {
                 let badge = console::style::StyledContent::new(
-                    console::warning_style(),
+                    console::danger_style(),
                     " [pre-release]".to_owned(),
                 );
                 console.raw(format!("{tag}{badge}\n"))?;
             } else {
                 let badge = console::style::StyledContent::new(
-                    console::keyword_style(),
+                    console::danger_style(),
                     " [stable]".to_owned(),
                 );
                 console.raw(format!("{tag}{badge}\n"))?;
@@ -341,45 +342,45 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
             // Per-asset details
             for asset in release.assets.values() {
                 let asset_name = console::style::StyledContent::new(
-                    console::total_style(),
+                    console::bold_style(),
                     format!("  {}", asset.name),
                 );
                 console.raw(format!("{asset_name}\n"))?;
 
                 let url_label = console::style::StyledContent::new(
-                    console::key_style(),
+                    console::default_style(),
                     "    url:    ".to_owned(),
                 );
                 let url_value = console::style::StyledContent::new(
-                    console::keyword_style(),
+                    console::danger_style(),
                     asset.url.to_string(),
                 );
                 console.raw(format!("{url_label}{url_value}\n"))?;
 
                 let sha_label = console::style::StyledContent::new(
-                    console::key_style(),
+                    console::default_style(),
                     "    sha256: ".to_owned(),
                 );
                 let sha_value = console::style::StyledContent::new(
-                    console::keyword_style(),
+                    console::danger_style(),
                     asset.sha256.to_string(),
                 );
                 console.raw(format!("{sha_label}{sha_value}\n"))?;
 
                 if let Some(path) = manifest.get_store_path_to_release(console.clone(), asset) {
                     let store_label = console::style::StyledContent::new(
-                        console::key_style(),
+                        console::default_style(),
                         "    store:  ".to_owned(),
                     );
                     if path.exists() {
                         let status = console::style::StyledContent::new(
-                            console::name_style(),
+                            console::primary_style(),
                             "Available".to_owned(),
                         );
                         console.raw(format!("{store_label}{status}\n"))?;
                     } else {
                         let status = console::style::StyledContent::new(
-                            console::warning_style(),
+                            console::danger_style(),
                             "Not available".to_owned(),
                         );
                         console.raw(format!("{store_label}{status}\n"))?;
@@ -389,17 +390,19 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
 
             // Tools binary path
             let binary_path = manifest.get_tools_path_to_binary(release.tag_name.as_ref());
-            let tools_label =
-                console::style::StyledContent::new(console::key_style(), "  tools: ".to_owned());
+            let tools_label = console::style::StyledContent::new(
+                console::default_style(),
+                "  tools: ".to_owned(),
+            );
             if binary_path.exists() {
                 let tools_value = console::style::StyledContent::new(
-                    console::keyword_style(),
+                    console::danger_style(),
                     binary_path.display().to_string(),
                 );
                 console.raw(format!("{tools_label}{tools_value}\n"))?;
             } else {
                 let tools_status = console::style::StyledContent::new(
-                    console::warning_style(),
+                    console::danger_style(),
                     "Not available in tools path".to_owned(),
                 );
                 console.raw(format!("{tools_label}{tools_status}\n"))?;
@@ -450,37 +453,38 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
                 .context(format_context!("Failed to get current executable path"))?;
             let command = format!("cp -lf {} {}", binary_path.display(), exec_path.display());
 
-            let divider = console::style::StyledContent::new(console::key_style(), "─".repeat(56));
+            let divider =
+                console::style::StyledContent::new(console::default_style(), "─".repeat(56));
             console.raw(format!("{divider}\n"))?;
 
             let tag_label = console::style::StyledContent::new(
-                console::key_style(),
+                console::default_style(),
                 "Fetched release: ".to_owned(),
             );
             let tag_value = console::style::StyledContent::new(
-                console::name_style(),
+                console::primary_style(),
                 release.tag_name.to_string(),
             );
             console.raw(format!("{tag_label}{tag_value}\n"))?;
 
             let tools_label = console::style::StyledContent::new(
-                console::key_style(),
+                console::default_style(),
                 "  tools path:   ".to_owned(),
             );
             let tools_value = console::style::StyledContent::new(
-                console::keyword_style(),
+                console::danger_style(),
                 binary_path.display().to_string(),
             );
             console.raw(format!("{tools_label}{tools_value}\n"))?;
 
             let install_header = console::style::StyledContent::new(
-                console::total_style(),
+                console::bold_style(),
                 "\nRun the following command to install the fetched release:".to_owned(),
             );
             console.raw(format!("{install_header}\n"))?;
 
             let cmd_value =
-                console::style::StyledContent::new(console::keyword_style(), command.clone());
+                console::style::StyledContent::new(console::danger_style(), command.clone());
             console.raw(format!("{cmd_value}\n"))?;
 
             if let Ok(mut clipboard) = arboard::Clipboard::new()
@@ -490,7 +494,7 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
                     .is_ok()
             {
                 let clipboard_msg = console::style::StyledContent::new(
-                    console::name_style(),
+                    console::primary_style(),
                     "Command copied to clipboard".to_owned(),
                 );
                 console.raw(format!("\n{clipboard_msg}\n"))?;
@@ -504,11 +508,12 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
                 format!("downloaded release {}", release.tag_name).as_str(),
             ));
         } else {
-            let divider = console::style::StyledContent::new(console::key_style(), "─".repeat(56));
+            let divider =
+                console::style::StyledContent::new(console::default_style(), "─".repeat(56));
             console.raw(format!("{divider}\n"))?;
 
             let error_msg = console::style::StyledContent::new(
-                console::warning_style(),
+                console::danger_style(),
                 format!(
                     "Release for {} is not available",
                     tag.as_deref().unwrap_or("latest")

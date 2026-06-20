@@ -319,10 +319,7 @@ pub fn check_repos_before_sync(
 
         let mut error_line = console::Line::default();
         error_line.push(console::Span::new_styled_lossy(
-            console::style::StyledContent::new(
-                console::keyword_style(),
-                "Cannot sync:".to_string(),
-            ),
+            console::style::StyledContent::new(console::danger_style(), "Cannot sync:".to_string()),
         ));
         error_line.push(console::Span::new_unstyled_lossy(
             " the following repositories have uncommitted changes:".to_string(),
@@ -335,7 +332,10 @@ pub fn check_repos_before_sync(
                 let mut repo_line = console::Line::default();
                 repo_line.push(console::Span::new_unstyled_lossy("- ".to_string()));
                 repo_line.push(console::Span::new_styled_lossy(
-                    console::style::StyledContent::new(console::name_style(), format!("//{repo}")),
+                    console::style::StyledContent::new(
+                        console::primary_style(),
+                        format!("//{repo}"),
+                    ),
                 ));
                 repo_line.push(console::Span::new_unstyled_lossy(
                     ": [dev-branch] is dirty and not ready for rebase",
@@ -350,7 +350,10 @@ pub fn check_repos_before_sync(
                 let mut repo_line = console::Line::default();
                 repo_line.push(console::Span::new_unstyled_lossy("- ".to_string()));
                 repo_line.push(console::Span::new_styled_lossy(
-                    console::style::StyledContent::new(console::name_style(), format!("//{repo}")),
+                    console::style::StyledContent::new(
+                        console::primary_style(),
+                        format!("//{repo}"),
+                    ),
                 ));
                 repo_line.push(console::Span::new_unstyled_lossy(
                     ": [branch] is dirty and not ready for pull",
@@ -365,7 +368,10 @@ pub fn check_repos_before_sync(
                 let mut repo_line = console::Line::default();
                 repo_line.push(console::Span::new_unstyled_lossy("- ".to_string()));
                 repo_line.push(console::Span::new_styled_lossy(
-                    console::style::StyledContent::new(console::name_style(), format!("//{repo}")),
+                    console::style::StyledContent::new(
+                        console::primary_style(),
+                        format!("//{repo}"),
+                    ),
                 ));
                 repo_line.push(console::Span::new_unstyled_lossy(
                     ": [detached HEAD] is dirty and not ready for sync",
@@ -401,10 +407,7 @@ pub fn check_repos_before_sync(
 
         let mut error_line = console::Line::default();
         error_line.push(console::Span::new_styled_lossy(
-            console::style::StyledContent::new(
-                console::keyword_style(),
-                "Cannot sync:".to_string(),
-            ),
+            console::style::StyledContent::new(console::danger_style(), "Cannot sync:".to_string()),
         ));
         error_line.push(console::Span::new_unstyled_lossy(
             " the following dev-branch repositories would have rebase conflicts:".to_string(),
@@ -416,7 +419,7 @@ pub fn check_repos_before_sync(
             let mut repo_line = console::Line::default();
             repo_line.push(console::Span::new_unstyled_lossy("- ".to_string()));
             repo_line.push(console::Span::new_styled_lossy(
-                console::style::StyledContent::new(console::name_style(), format!("//{}", path)),
+                console::style::StyledContent::new(console::primary_style(), format!("//{}", path)),
             ));
             repo_line.push(console::Span::new_unstyled_lossy(format!(
                 " (rebasing onto origin/{})",
@@ -440,7 +443,7 @@ pub fn check_repos_before_sync(
             help_line.push(console::Span::new_unstyled_lossy("Use ".to_string()));
             help_line.push(console::Span::new_styled_lossy(
                 console::style::StyledContent::new(
-                    console::name_style(),
+                    console::primary_style(),
                     "spaces sync --stash".to_string(),
                 ),
             ));
