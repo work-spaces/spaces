@@ -211,7 +211,7 @@ fn get_blockquote_prefix() -> &'static str {
 
 /// Icon characters for status indicators.
 const ICON_SUCCESS_UNICODE: &str = "✓";
-const ICON_DANGER_UNICODE: &str = "✗";
+const ICON_DANGER_UNICODE: &str = "x";
 const ICON_WARNING_UNICODE: &str = "▲";
 const ICON_INFO_UNICODE: &str = "ℹ";
 

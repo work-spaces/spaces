@@ -1256,7 +1256,6 @@ fn emit_top_entries_group(console: &console::Console, heading: &str, entries: &[
         return;
     }
 
-    // Use H3 header for the section
     let header = components::Header::h2(heading);
     for line in header.render() {
         console.emit_line(line);
@@ -1463,7 +1462,6 @@ fn emit_pretty_bare_info(
     repos_checked: usize,
     repos_with_problems: usize,
 ) {
-    // Use H3 header for the section
     let header = components::Header::h2("Bare Repositories");
     for line in header.render() {
         console.emit_line(line);
