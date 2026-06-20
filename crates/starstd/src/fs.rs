@@ -1,10 +1,13 @@
 use crate::is_lsp_mode;
 use anyhow::Context;
 use anyhow_source_location::format_context;
+use serde::Deserialize;
 use starlark::environment::GlobalsBuilder;
 use starlark::eval::Evaluator;
 use starlark::values::Value;
 use starlark::values::none::NoneType;
+use std::collections::BTreeSet;
+use std::path::PathBuf;
 
 #[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
@@ -42,6 +45,94 @@ fn system_time_to_epoch_seconds(t: std::time::SystemTime) -> anyhow::Result<f64>
             }
         }
     }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReadGlobsOptions {
+    includes: Vec<String>,
+    excludes: Option<Vec<String>>,
+    root: Option<String>,
+    include_files: Option<bool>,
+    include_dirs: Option<bool>,
+    follow_symlinks: Option<bool>,
+    max_depth: Option<usize>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WalkDirectoryOptions {
+    path: String,
+    recursive: Option<bool>,
+    follow_symlinks: Option<bool>,
+    include_files: Option<bool>,
+    include_dirs: Option<bool>,
+    max_depth: Option<usize>,
+}
+
+fn normalize_path_for_glob_match(input: &str) -> String {
+    let normalized = input.replace('\\', "/");
+    if let Some(stripped) = normalized.strip_prefix("./") {
+        stripped.to_string()
+    } else {
+        normalized
+    }
+}
+
+fn normalize_glob_pattern(pattern: &str) -> String {
+    pattern.replace('\\', "/")
+}
+
+fn first_glob_char_index(input: &str) -> Option<usize> {
+    input
+        .char_indices()
+        .find(|(_, c)| matches!(c, '*' | '?' | '['))
+        .map(|(i, _)| i)
+}
+
+fn glob_walk_root(pattern: &str) -> PathBuf {
+    let normalized = normalize_glob_pattern(pattern);
+
+    if let Some(glob_index) = first_glob_char_index(&normalized) {
+        let prefix = &normalized[..glob_index];
+
+        if let Some(last_slash) = prefix.rfind('/') {
+            let base = &prefix[..last_slash];
+            if base.is_empty() {
+                PathBuf::from(".")
+            } else {
+                PathBuf::from(base)
+            }
+        } else {
+            PathBuf::from(".")
+        }
+    } else if normalized.is_empty() {
+        PathBuf::from(".")
+    } else {
+        PathBuf::from(normalized)
+    }
+}
+
+fn is_glob_match(pattern: &str, rel_path: &str, full_path: &str) -> bool {
+    glob_match::glob_match(pattern, rel_path) || glob_match::glob_match(pattern, full_path)
+}
+
+fn globs_match_path(
+    includes: &[String],
+    excludes: &[String],
+    rel_path: &str,
+    full_path: &str,
+) -> bool {
+    if !includes
+        .iter()
+        .any(|pattern| is_glob_match(pattern, rel_path, full_path))
+    {
+        return false;
+    }
+
+    !excludes
+        .iter()
+        .any(|pattern| is_glob_match(pattern, rel_path, full_path))
 }
 
 // This defines the function that is visible to Starlark
@@ -261,6 +352,224 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         }
 
         Ok(result)
+    }
+
+    /// Resolves include/exclude glob expressions to a deduplicated list of filesystem paths.
+    ///
+    /// `options` must contain:
+    /// - `includes` (list[str], required): include patterns.
+    /// - `excludes` (list[str], optional, default []): exclude patterns.
+    /// - `root` (str, optional, default "."): base path for relative glob roots.
+    /// - `include_files` (bool, optional, default true): include non-directory entries.
+    /// - `include_dirs` (bool, optional, default false): include directory entries.
+    /// - `follow_symlinks` (bool, optional, default false): follow symlinks while walking.
+    /// - `max_depth` (int, optional): maximum walk depth relative to each walked include root.
+    fn read_globs(options: Value) -> anyhow::Result<Vec<String>> {
+        if is_lsp_mode() {
+            return Ok(Vec::new());
+        }
+
+        let opts: ReadGlobsOptions = serde_json::from_value(options.to_json_value()?)
+            .context(format_context!("bad options for read_globs"))?;
+
+        let includes = opts
+            .includes
+            .into_iter()
+            .map(|pattern| normalize_glob_pattern(&pattern))
+            .collect::<Vec<_>>();
+        let excludes = opts
+            .excludes
+            .unwrap_or_default()
+            .into_iter()
+            .map(|pattern| normalize_glob_pattern(&pattern))
+            .collect::<Vec<_>>();
+
+        let root = PathBuf::from(opts.root.unwrap_or_else(|| ".".to_string()));
+        let include_files = opts.include_files.unwrap_or(true);
+        let include_dirs = opts.include_dirs.unwrap_or(false);
+        let follow_symlinks = opts.follow_symlinks.unwrap_or(false);
+        let max_depth = opts.max_depth;
+
+        let mut output = BTreeSet::new();
+
+        for include in &includes {
+            let candidate_walk_root = glob_walk_root(include);
+            let walk_root = if candidate_walk_root.is_absolute() {
+                candidate_walk_root
+            } else {
+                root.join(candidate_walk_root)
+            };
+
+            match std::fs::symlink_metadata(&walk_root) {
+                Ok(_) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(err) => {
+                    return Err(err).context(format_context!(
+                        "Failed to access glob walk root {} for include pattern {}",
+                        walk_root.display(),
+                        include
+                    ));
+                }
+            }
+
+            let mut walker = walkdir::WalkDir::new(&walk_root).follow_links(follow_symlinks);
+            if let Some(depth) = max_depth {
+                walker = walker.max_depth(depth);
+            }
+
+            for entry in walker {
+                let entry = entry.context(format_context!(
+                    "Failed while traversing include pattern {} from root {}",
+                    include,
+                    walk_root.display()
+                ))?;
+
+                if entry.depth() == 0 && entry.file_type().is_dir() {
+                    continue;
+                }
+
+                let is_dir = entry.file_type().is_dir();
+                if is_dir {
+                    if !include_dirs {
+                        continue;
+                    }
+                } else if !include_files {
+                    continue;
+                }
+
+                let full_path = entry.path();
+                let full_path_str = full_path.to_str().context(format_context!(
+                    "Non-UTF-8 path encountered while reading globs: {}",
+                    full_path.display()
+                ))?;
+
+                let full_norm = normalize_path_for_glob_match(full_path_str);
+                let rel_norm = full_path
+                    .strip_prefix(&root)
+                    .ok()
+                    .and_then(|p| p.to_str())
+                    .map(normalize_path_for_glob_match)
+                    .unwrap_or_else(|| full_norm.clone());
+
+                if globs_match_path(&includes, &excludes, &rel_norm, &full_norm) {
+                    output.insert(full_path_str.to_string());
+                }
+            }
+        }
+
+        Ok(output.into_iter().collect())
+    }
+
+    /// Walks a directory and invokes a callback with metadata for each entry.
+    ///
+    /// `options` must contain:
+    /// - `path` (str, required): directory path to walk.
+    /// - `recursive` (bool, optional, default true): recurse into subdirectories.
+    /// - `follow_symlinks` (bool, optional, default false): follow symlinks while walking.
+    /// - `include_files` (bool, optional, default true): include non-directory entries.
+    /// - `include_dirs` (bool, optional, default false): include directory entries.
+    /// - `max_depth` (int, optional): maximum walk depth. Ignored when `recursive` is false.
+    ///
+    /// Callback signature:
+    /// - `callback(entry: dict) -> any`
+    ///
+    /// The `entry` dictionary contains:
+    /// - `path`, `relative_path`, `name`, `depth`, `is_file`, `is_dir`, `is_symlink`
+    ///
+    /// Return `None` from callback to skip an entry in the returned result list.
+    fn walk_directory<'v>(
+        options: Value<'v>,
+        callback: Value<'v>,
+        eval: &mut Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<Vec<Value<'v>>> {
+        if is_lsp_mode() {
+            return Ok(Vec::new());
+        }
+
+        let opts: WalkDirectoryOptions = serde_json::from_value(options.to_json_value()?)
+            .context(format_context!("bad options for walk_directory"))?;
+
+        let root = PathBuf::from(&opts.path);
+        let recursive = opts.recursive.unwrap_or(true);
+        let follow_symlinks = opts.follow_symlinks.unwrap_or(false);
+        let include_files = opts.include_files.unwrap_or(true);
+        let include_dirs = opts.include_dirs.unwrap_or(false);
+
+        let mut walker = walkdir::WalkDir::new(&root).follow_links(follow_symlinks);
+        if !recursive {
+            walker = walker.max_depth(1);
+        } else if let Some(depth) = opts.max_depth {
+            walker = walker.max_depth(depth);
+        }
+
+        let mut results = Vec::new();
+
+        for entry in walker {
+            let entry = entry.context(format_context!(
+                "Failed to walk directory {}",
+                opts.path.as_str()
+            ))?;
+
+            if entry.depth() == 0 && entry.file_type().is_dir() {
+                continue;
+            }
+
+            let is_dir = entry.file_type().is_dir();
+            if is_dir {
+                if !include_dirs {
+                    continue;
+                }
+            } else if !include_files {
+                continue;
+            }
+
+            let path = entry.path();
+            let path_str = path.to_str().context(format_context!(
+                "Non-UTF-8 directory entry while walking {}: {}",
+                opts.path,
+                path.display()
+            ))?;
+
+            let relative_path = path
+                .strip_prefix(&root)
+                .ok()
+                .and_then(|p| p.to_str())
+                .map(|s| {
+                    if s.is_empty() {
+                        ".".to_string()
+                    } else {
+                        s.to_string()
+                    }
+                })
+                .unwrap_or_else(|| path_str.to_string());
+
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+
+            let depth = i32::try_from(entry.depth()).unwrap_or(i32::MAX);
+            let heap = eval.heap();
+            let entry_value = heap.alloc(serde_json::json!({
+                "path": path_str,
+                "relative_path": relative_path,
+                "name": name,
+                "depth": depth,
+                "is_file": entry.file_type().is_file(),
+                "is_dir": is_dir,
+                "is_symlink": entry.file_type().is_symlink(),
+            }));
+
+            let callback_result = eval
+                .eval_function(callback, &[entry_value], &[])
+                .map_err(|e| anyhow::anyhow!(format_context!("callback failed: {}", e)))?;
+
+            if !callback_result.is_none() {
+                results.push(callback_result);
+            }
+        }
+
+        Ok(results)
     }
 
     // -------------------------

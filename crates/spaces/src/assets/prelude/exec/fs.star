@@ -530,6 +530,128 @@ def fs_read_directory(path: str) -> list:
     """
     return fs.read_directory(path)
 
+def fs_read_globs(
+        includes: list,
+        excludes: list | None = None,
+        root: str = ".",
+        include_files: bool = True,
+        include_dirs: bool = False,
+        follow_symlinks: bool = False,
+        max_depth: int | None = None) -> list:
+    """
+    Resolve include/exclude glob patterns to matching filesystem paths.
+
+    This function walks include roots and returns a deduplicated list of paths
+    matching any include pattern and no exclude patterns.
+
+    Args:
+        includes: Required list of glob patterns to include.
+        excludes: Optional list of glob patterns to exclude.
+        root: Base directory used for relative include roots and matching.
+        include_files: Include file entries in results (default: True).
+        include_dirs: Include directory entries in results (default: False).
+        follow_symlinks: Follow symlinks while walking (default: False).
+        max_depth: Optional maximum walk depth relative to each include root.
+
+    Returns:
+        list: Deduplicated list of matching paths
+
+    Raises:
+        Error: If options are invalid or directory walking fails
+
+    Examples:
+        # Find all Python files under src
+        files = fs_read_globs(["src/**/*.py"])
+
+        # Include directories and exclude tests
+        paths = fs_read_globs(
+            includes = ["src/**"],
+            excludes = ["**/tests/**"],
+            include_dirs = True,
+        )
+    """
+    options = {
+        "includes": includes,
+        "root": root,
+        "include_files": include_files,
+        "include_dirs": include_dirs,
+        "follow_symlinks": follow_symlinks,
+    }
+
+    if excludes != None:
+        options["excludes"] = excludes
+
+    if max_depth != None:
+        options["max_depth"] = max_depth
+
+    return fs.read_globs(options)
+
+def fs_walk_directory(
+        path: str,
+        callback,
+        recursive: bool = True,
+        follow_symlinks: bool = False,
+        include_files: bool = True,
+        include_dirs: bool = False,
+        max_depth: int | None = None) -> list:
+    """
+    Walk a directory and invoke a callback for each matching entry.
+
+    The callback receives an entry dictionary with:
+        - path: Full entry path
+        - relative_path: Path relative to `path`
+        - name: Basename of the entry
+        - depth: Walk depth from root directory
+        - is_file: True for files
+        - is_dir: True for directories
+        - is_symlink: True for symbolic links
+
+    If the callback returns None, that entry is skipped in the returned list.
+    Any other callback return value is collected in the output list.
+
+    Args:
+        path: Root directory to walk.
+        callback: Function called as callback(entry_dict) -> any.
+        recursive: Recurse into subdirectories (default: True).
+        follow_symlinks: Follow symlinks while walking (default: False).
+        include_files: Include file entries (default: True).
+        include_dirs: Include directory entries (default: False).
+        max_depth: Optional maximum walk depth (ignored when recursive=False).
+
+    Returns:
+        list: List of non-None values returned by the callback
+
+    Raises:
+        Error: If options are invalid, walking fails, or callback raises
+
+    Examples:
+        # Collect Python files only
+        py_files = fs_walk_directory(
+            path = "src",
+            callback = lambda e: e["path"] if e["is_file"] and e["name"].endswith(".py") else None,
+        )
+
+        # Collect top-level entries only
+        top_level = fs_walk_directory(
+            path = ".",
+            callback = lambda e: e,
+            recursive = False,
+            include_dirs = True,
+        )
+    """
+    options = {
+        "path": path,
+        "recursive": recursive,
+        "follow_symlinks": follow_symlinks,
+        "include_files": include_files,
+        "include_dirs": include_dirs,
+    }
+
+    if max_depth != None:
+        options["max_depth"] = max_depth
+
+    return fs.walk_directory(options, callback)
+
 def fs_mkdir(path: str, parents: bool = False, exist_ok: bool = False) -> None:
     """
     Create a directory.
