@@ -556,22 +556,21 @@ fn emit_pretty_rcache_info(
     // heading
     console.emit_lines(components::h2("Rule cache"));
 
-    // Create unordered list with cache info
-    let list = components::List::unordered()
-        .item(format!(
-            "{}: {}",
+    // Create description list with cache info
+    let description_list = components::DescriptionList::new()
+        .item(
             ARTIFACT_CACHE_DIR,
-            ByteSize(artifacts_size).display()
-        ))
-        .item(format!(
-            "{}: {}",
+            format!("{}", ByteSize(artifacts_size).display()),
+        )
+        .item(
             RULE_DIGEST_CACHE_DIR,
-            ByteSize(rule_digests_size).display()
-        ))
-        .item(format!("Total: {}", ByteSize(total_size).display()))
-        .variant(Variant::Default);
+            format!("{}", ByteSize(rule_digests_size).display()),
+        )
+        .item("Total", format!("{}", ByteSize(total_size).display()))
+        .variant(Variant::Default)
+        .compact(true);
 
-    console.emit_lines(list.render());
+    console.emit_lines(description_list.render());
 }
 
 fn remove_targets(targets: &[targets::Target]) -> anyhow::Result<()> {
