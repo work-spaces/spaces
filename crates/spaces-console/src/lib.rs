@@ -2,24 +2,24 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use std::sync::{Arc, Mutex, RwLock};
 
+pub mod components;
 mod file;
 mod null;
 mod process;
 mod secrets;
 mod super_console;
-pub mod typography;
 pub mod ui;
 mod verbosity;
 mod writer;
 
+pub use components::{
+    bold_style, danger_style, dark_style, default_style, format_duration, info_style, light_style,
+    primary_style, secondary_style, success_style, warning_style,
+};
 pub use crossterm::style;
 pub use process::{ExecuteOptions, ExecuteResult, LogHeader, get_log_divider};
 pub use secrets::Secrets;
 pub use superconsole::{Line, Span};
-pub use typography::{
-    bold_style, danger_style, dark_style, default_style, format_duration, info_style, light_style,
-    primary_style, secondary_style, success_style, warning_style,
-};
 pub use verbosity::{Level, Verbosity};
 use writer::ConsoleWriter;
 
@@ -267,6 +267,13 @@ impl Console {
 
     pub fn emit_line(&self, line: superconsole::Line) {
         self.writer.lock().unwrap().emit_line(line);
+    }
+
+    pub fn emit_lines(&self, lines: Vec<superconsole::Line>) {
+        let mut writer = self.writer.lock().unwrap();
+        for line in lines {
+            writer.emit_line(line);
+        }
     }
 
     pub(crate) fn emit_progress_line(&self, line: superconsole::Line) {

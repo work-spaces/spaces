@@ -2,7 +2,7 @@ use crate::{age, ci, git, http_archive, logger};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use bytesize::ByteSize;
-use console::style::{Color, ContentStyle, StyledContent};
+use console::components::{self, Variant};
 use serde::{Deserialize, Serialize};
 use serde_with::{TimestampSeconds, serde_as};
 use std::collections::HashMap;
@@ -1143,31 +1143,6 @@ fn serialise_store_info_yaml(
 // store info pretty output
 // ---------------------------------------------------------------------------
 
-fn age_style(age_days: u128) -> ContentStyle {
-    let color = if age_days < 7 {
-        Color::Green
-    } else if age_days <= 30 {
-        Color::DarkYellow
-    } else {
-        Color::DarkRed
-    };
-    ContentStyle {
-        foreground_color: Some(color),
-        background_color: None,
-        underline_color: None,
-        attributes: Default::default(),
-    }
-}
-
-fn emit_separator(console: &console::Console, width: usize) {
-    let mut line = console::Line::default();
-    line.push(console::Span::new_styled_lossy(StyledContent::new(
-        console::default_style(),
-        "─".repeat(width),
-    )));
-    console.emit_line(line);
-}
-
 fn emit_pretty_summary(
     console: &console::Console,
     entries: &[StoreInfoEntry],
@@ -1183,80 +1158,65 @@ fn emit_pretty_summary(
         .sum();
     let unmanaged_size = total_size - managed_size;
 
-    // Managed row
-    {
-        let mut line = console::Line::default();
-        line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::default_style(),
-            format!("  {:<12}", "Managed"),
-        )));
-        line.push(console::Span::new_unstyled_lossy(format!(
-            "{:>4} entries   {}",
-            managed_count,
-            ByteSize(managed_size).display()
-        )));
-        console.emit_line(line);
-    }
+    // Build table rows
+    let mut table = components::Table::new()
+        .headers(vec![
+            "Type".to_string(),
+            "Entries".to_string(),
+            "Size".to_string(),
+        ])
+        .alignments(vec![
+            components::Align::Left,
+            components::Align::Right,
+            components::Align::Right,
+        ])
+        .width(56);
 
-    // Unmanaged row
-    {
-        let mut line = console::Line::default();
-        line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::default_style(),
-            format!("  {:<12}", "Unmanaged"),
-        )));
-        line.push(console::Span::new_unstyled_lossy(format!(
-            "{:>4} entries   {}",
-            unmanaged_count,
-            ByteSize(unmanaged_size).display()
-        )));
-        console.emit_line(line);
-    }
+    table = table
+        .row(vec![
+            "Managed".to_string(),
+            managed_count.to_string(),
+            ByteSize(managed_size).display().to_string(),
+        ])
+        .row(vec![
+            "Unmanaged".to_string(),
+            unmanaged_count.to_string(),
+            ByteSize(unmanaged_size).display().to_string(),
+        ]);
 
-    // Workspace links row
-    {
-        let entries_with_links = entries.iter().filter(|e| e.workspace_count > 0).count();
-        let total_links: usize = entries.iter().map(|e| e.workspace_count).sum();
-        let entries_with_stale: usize = entries.iter().filter(|e| e.stale_links > 0).count();
+    // Add workspace links row if applicable
+    let entries_with_links = entries.iter().filter(|e| e.workspace_count > 0).count();
+    let total_links: usize = entries.iter().map(|e| e.workspace_count).sum();
+    let entries_with_stale: usize = entries.iter().filter(|e| e.stale_links > 0).count();
 
-        if entries_with_links > 0 || entries_with_stale > 0 {
-            let mut line = console::Line::default();
-            line.push(console::Span::new_styled_lossy(StyledContent::new(
-                console::default_style(),
-                format!("  {:<12}", "Workspaces"),
-            )));
-            line.push(console::Span::new_unstyled_lossy(format!(
-                "{:>4} links across {} entries",
-                total_links, entries_with_links
-            )));
-            if entries_with_stale > 0 {
-                line.push(console::Span::new_styled_lossy(StyledContent::new(
-                    console::danger_style(),
-                    format!("   ({} with stale links)", entries_with_stale),
-                )));
-            }
-            console.emit_line(line);
+    if entries_with_links > 0 || entries_with_stale > 0 {
+        let mut workspace_info = format!(
+            "{} links across {} entries",
+            total_links, entries_with_links
+        );
+        if entries_with_stale > 0 {
+            workspace_info.push_str(&format!(" ({} with stale links)", entries_with_stale));
         }
+        table = table.row(vec![
+            "Workspaces".to_string(),
+            String::new(),
+            workspace_info,
+        ]);
     }
 
-    // Total row
-    {
-        let mut line = console::Line::default();
-        line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::bold_style(),
-            format!(
-                "  {:<12}{:>4} entries   {}",
-                "Total",
-                entries.len(),
-                ByteSize(total_size).display()
-            ),
-        )));
-        if is_fix_needed {
-            line.push(console::Span::new_styled_lossy(StyledContent::new(
-                console::danger_style(),
-                "   !! run `spaces store fix`".to_owned(),
-            )));
-        }
+    // Add footer with total and fix warning if needed
+    let mut footer_right = format!(
+        "{} entries   {}",
+        entries.len(),
+        ByteSize(total_size).display()
+    );
+    if is_fix_needed {
+        footer_right.push_str("   run `spaces store fix`");
+    }
+    table = table.footers(vec!["Total".to_string(), String::new(), footer_right]);
+
+    // Render the table
+    for line in table.render() {
         console.emit_line(line);
     }
 }
@@ -1273,33 +1233,15 @@ fn emit_pretty_age_histogram(console: &console::Console, entries: &[StoreInfoEnt
         .filter(|e| e.age_days >= 7 && e.age_days <= 30)
         .count();
     let stale = managed.iter().filter(|e| e.age_days > 30).count();
-    let max_count = fresh.max(aging).max(stale).max(1);
-    const BAR_WIDTH: usize = 20;
 
-    let mut heading = console::Line::default();
-    heading.push(console::Span::new_styled_lossy(StyledContent::new(
-        console::bold_style(),
-        "Age distribution".to_owned(),
-    )));
-    console.emit_line(heading);
+    // Create histogram bars with appropriate variants
+    let histogram = components::Histogram::new("Age distribution")
+        .bar_width(34)
+        .bar(components::HistogramBar::new("fresh  < 7d ", fresh).variant(Variant::Success))
+        .bar(components::HistogramBar::new("aging 7-30d ", aging).variant(Variant::Warning))
+        .bar(components::HistogramBar::new("stale  > 30d", stale).variant(Variant::Danger));
 
-    for (label, count, representative_age) in [
-        ("fresh  < 7d ", fresh, 0u128),
-        ("aging 7-30d ", aging, 14u128),
-        ("stale  > 30d", stale, 60u128),
-    ] {
-        let bar_len = count * BAR_WIDTH / max_count;
-        let bar = "█".repeat(bar_len);
-        let mut line = console::Line::default();
-        line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::default_style(),
-            format!("  {label}  "),
-        )));
-        line.push(console::Span::new_styled_lossy(StyledContent::new(
-            age_style(representative_age),
-            format!("{bar:<BAR_WIDTH$}"),
-        )));
-        line.push(console::Span::new_unstyled_lossy(format!("  {count}")));
+    for line in histogram.render() {
         console.emit_line(line);
     }
 }
@@ -1314,31 +1256,27 @@ fn emit_top_entries_group(console: &console::Console, heading: &str, entries: &[
         return;
     }
 
-    let mut heading_line = console::Line::default();
-    heading_line.push(console::Span::new_styled_lossy(StyledContent::new(
-        console::bold_style(),
-        heading.to_owned(),
-    )));
-    console.emit_line(heading_line);
+    // Use H3 header for the section
+    let header = components::Header::h2(heading);
+    for line in header.render() {
+        console.emit_line(line);
+    }
 
-    let name_width = top.iter().map(|e| e.path.len()).max().unwrap_or(10).max(10);
+    let mut list = components::DescriptionList::new()
+        .variant(components::Variant::Primary)
+        .compact(true);
 
     for entry in top {
         let size_str = ByteSize(entry.size_bytes).display().to_string();
-        let mut line = console::Line::default();
-        line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::primary_style(),
-            format!("  {:<name_width$}", entry.path),
-        )));
-        line.push(console::Span::new_unstyled_lossy(format!(
-            "  {size_str:<10}"
-        )));
-        if entry.path_missing || entry.size_bytes == 0 {
-            line.push(console::Span::new_styled_lossy(StyledContent::new(
-                console::danger_style(),
-                "  !!".to_owned(),
-            )));
-        }
+        let warning = if entry.path_missing || entry.size_bytes == 0 {
+            "  !!"
+        } else {
+            ""
+        };
+        list = list.item(&entry.path, format!("{size_str}{warning}"));
+    }
+
+    for line in list.render() {
         console.emit_line(line);
     }
 }
@@ -1359,27 +1297,29 @@ fn emit_pretty_issues(console: &console::Console, entries: &[StoreInfoEntry]) {
     }
 
     console.emit_line(console::Line::default());
-    emit_separator(console, 56);
 
-    let mut heading = console::Line::default();
-    heading.push(console::Span::new_styled_lossy(StyledContent::new(
-        console::danger_style(),
-        format!("Issues  ({} entries need attention)", issues.len()),
-    )));
-    console.emit_line(heading);
-
-    for entry in issues {
-        let mut line = console::Line::default();
+    // Build issue summary as a formatted list
+    let mut issue_details = String::new();
+    for entry in &issues {
         let reason = if entry.path_missing {
             "path does not exist"
         } else {
             "size is zero"
         };
-        line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::danger_style(),
-            format!("  !! {reason:<22}"),
-        )));
-        line.push(console::Span::new_unstyled_lossy(&entry.path));
+        issue_details.push_str(&format!("{:<22} {}\n", reason, entry.path));
+    }
+
+    // Use Alert for the issues section
+    let alert = components::Alert::new(issue_details.trim_end())
+        .title(format!(
+            "{} Issues - {} entries need attention",
+            console::components::icon_warning(),
+            issues.len()
+        ))
+        .variant(Variant::Warning)
+        .width(56);
+
+    for line in alert.render() {
         console.emit_line(line);
     }
 }
@@ -1390,15 +1330,13 @@ fn emit_pretty_info(
     total_size: u64,
     is_fix_needed: bool,
 ) {
-    emit_separator(console, 56);
+    console.emit_lines(console::components::h1("Store Info"));
     emit_pretty_summary(console, entries, total_size, is_fix_needed);
-    emit_separator(console, 56);
     console.emit_line(console::Line::default());
     emit_pretty_age_histogram(console, entries);
     console.emit_line(console::Line::default());
     emit_pretty_top_entries(console, entries);
     emit_pretty_issues(console, entries);
-    console.emit_line(console::Line::default());
 }
 
 fn get_unmanaged_dir_entries(
@@ -1514,12 +1452,8 @@ fn serialise_bare_info_yaml(
 }
 
 fn bare_separator(console: &console::Console, width: usize) {
-    let mut line = console::Line::default();
-    line.push(console::Span::new_styled_lossy(StyledContent::new(
-        console::default_style(),
-        "─".repeat(width),
-    )));
-    console.emit_line(line);
+    let divider = components::Divider::new().width(width);
+    console.emit_line(divider.render());
 }
 
 fn emit_pretty_bare_info(
@@ -1529,76 +1463,40 @@ fn emit_pretty_bare_info(
     repos_checked: usize,
     repos_with_problems: usize,
 ) {
-    // heading
-    {
-        let mut line = console::Line::default();
-        line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::bold_style(),
-            "Bare Repositories".to_owned(),
-        )));
+    // Use H3 header for the section
+    let header = components::Header::h2("Bare Repositories");
+    for line in header.render() {
         console.emit_line(line);
     }
 
-    // size row
-    {
-        let mut line = console::Line::default();
-        line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::default_style(),
-            format!("  {:<14}", "Total Size"),
-        )));
-        line.push(console::Span::new_unstyled_lossy(format!(
-            "{}",
-            ByteSize(bare_size).display()
-        )));
-        console.emit_line(line);
-    }
+    // Build the description list items
+    let mut items = vec![
+        (
+            "Total Size".to_string(),
+            format!("{}", ByteSize(bare_size).display()),
+        ),
+        ("Workspaces".to_string(), format!("{}", workspace_count)),
+        ("Repos Checked".to_string(), format!("{}", repos_checked)),
+    ];
 
-    // workspace count row
-    {
-        let mut line = console::Line::default();
-        line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::default_style(),
-            format!("  {:<14}", "Workspaces"),
-        )));
-        line.push(console::Span::new_unstyled_lossy(format!(
-            "{}",
-            workspace_count
-        )));
-        console.emit_line(line);
-    }
+    // Add health status
+    let health_status = if repos_with_problems == 0 {
+        "ok".to_string()
+    } else {
+        format!(
+            "{} {} repos have problems. re-clone affected repos",
+            console::components::icon_warning(),
+            repos_with_problems
+        )
+    };
+    items.push(("Health".to_string(), health_status));
 
-    // repos checked row
-    {
-        let mut line = console::Line::default();
-        line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::default_style(),
-            format!("  {:<14}", "Repos Checked"),
-        )));
-        line.push(console::Span::new_unstyled_lossy(format!(
-            "{}",
-            repos_checked
-        )));
-        console.emit_line(line);
-    }
+    // Render the description list
+    let desc_list = components::DescriptionList::new()
+        .items(items)
+        .compact(true);
 
-    // health row
-    {
-        let mut line = console::Line::default();
-        line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::default_style(),
-            format!("  {:<14}", "Health"),
-        )));
-        if repos_with_problems == 0 {
-            line.push(console::Span::new_unstyled_lossy("ok"));
-        } else {
-            line.push(console::Span::new_styled_lossy(StyledContent::new(
-                console::danger_style(),
-                format!(
-                    "{} repos have problems   !! re-clone affected repos",
-                    repos_with_problems
-                ),
-            )));
-        }
+    for line in desc_list.render() {
         console.emit_line(line);
     }
 

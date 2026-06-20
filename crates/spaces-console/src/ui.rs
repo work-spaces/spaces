@@ -3,7 +3,7 @@ use superconsole::{Component, Dimensions, DrawMode, Line, Lines, Span};
 use crate::verbosity::Level;
 
 // Re-export ActiveProgress and Variant so existing code can still use ui::ActiveProgress and ui::Variant
-pub use crate::typography::{ActiveProgress, Variant};
+pub use crate::components::{ActiveProgress, Variant};
 
 /// A single pending log line to be emitted above the progress bars.
 pub struct LogLine {
