@@ -3781,6 +3781,7 @@ dependencies = [
  "strum",
  "superconsole",
  "tempfile",
+ "termwiz",
  "wiremock",
 ]
 

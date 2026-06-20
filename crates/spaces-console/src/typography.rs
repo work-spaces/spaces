@@ -1,69 +1,203 @@
-//! Typography components for console output with Bootstrap-inspired styling.
-//!
-//! This module provides a comprehensive set of typography components and styling utilities
-//! for building rich console UIs. The API is inspired by Bootstrap's typography system,
-//! offering semantic color variants and common text/layout components.
-//!
-//! # Style Functions
-//!
-//! Pre-defined style functions for consistent coloring across your console output:
-//!
-//! - [`primary_style()`] - Blue, bold (primary actions)
-//! - [`secondary_style()`] - Grey (secondary content)
-//! - [`success_style()`] - Dark green, bold (success states)
-//! - [`danger_style()`] - Dark red, bold (errors, destructive actions)
-//! - [`warning_style()`] - Dark yellow, bold (warnings)
-//! - [`info_style()`] - Cyan (informational content)
-//! - [`light_style()`] - White (light text on dark backgrounds)
-//! - [`dark_style()`] - Black, bold (dark text on light backgrounds)
-//! - [`default_style()`] - Dark grey (default/muted text)
-//! - [`bold_style()`] - No color, just bold
-//!
-//! # Variant Enum
-//!
-//! The [`Variant`] enum provides a convenient way to work with these styles:
-//!
-//! ```rust
-//! use spaces_console::typography::Variant;
-//!
-//! let style = Variant::Success.style();
-//! // This is equivalent to calling success_style()
-//! ```
-//!
-//! # Components
-//!
-//! Rich typography components for structured console output:
-//!
-//! - [`Header`] - Section headers (H1-H6) with underlines
-//! - [`Paragraph`] - Body text with variant styling
-//! - [`Divider`] - Visual separators with multiple line styles
-//! - [`List`] - Ordered and unordered lists
-//! - [`Table`] - Tabular data with borders and alignment
-//! - [`Card`] - Boxed content with optional titles
-//! - [`Blockquote`] - Quoted text with left border
-//! - [`Link`] - Underlined links with optional URLs
-//! - [`Histogram`] - Bar charts for data visualization
-//! - [`ActiveProgress`] - Progress bars for long-running operations
-//!
-//! # Examples
-//!
-//! ```rust
-//! use spaces_console::typography::{Header, List, Variant};
-//!
-//! // Create a header with a variant
-//! let header = Header::h1("Welcome").variant(Variant::Primary);
-//! let lines = header.render();
-//!
-//! // Create a success-colored list
-//! let list = List::unordered()
-//!     .item("Item 1")
-//!     .item("Item 2")
-//!     .variant(Variant::Success);
-//! let lines = list.render();
-//! ```
-
 use crossterm::style::{self, Attribute, Attributes, Color, ContentStyle, StyledContent, Stylize};
+use std::sync::OnceLock;
 use superconsole::{Line, Span};
+use termwiz::cell::Hyperlink;
+
+// ---------------------------------------------------------------------------
+// Typography Mode Configuration
+// ---------------------------------------------------------------------------
+
+/// The character set mode for typography rendering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TypographyMode {
+    /// ASCII-only characters (maximum compatibility)
+    Ascii,
+    /// Full Unicode box-drawing and special characters
+    #[default]
+    Unicode,
+    /// Unicode with Nerd Fonts icons (future extension)
+    #[allow(dead_code)]
+    NerdFonts,
+}
+
+static TYPOGRAPHY_MODE: OnceLock<TypographyMode> = OnceLock::new();
+
+/// Sets the global typography mode. This can only be called once.
+/// Returns `Ok(())` if the mode was set successfully, or `Err(())` if it was already set.
+pub fn set_typography_mode(mode: TypographyMode) -> anyhow::Result<()> {
+    TYPOGRAPHY_MODE
+        .set(mode)
+        .map_err(|_| anyhow::anyhow!("Typography mode already set"))
+}
+
+/// Gets the current typography mode. Defaults to Unicode if not explicitly set.
+pub fn typography_mode() -> TypographyMode {
+    *TYPOGRAPHY_MODE.get_or_init(TypographyMode::default)
+}
+
+// ---------------------------------------------------------------------------
+// Character Set Definitions
+// ---------------------------------------------------------------------------
+
+/// Characters used for a bounded progress bar: filled, tip, empty.
+struct BarCharsBounded {
+    filled: char,
+    tip: char,
+    empty: char,
+}
+
+const BAR_CHARS_BOUNDED_ASCII: BarCharsBounded = BarCharsBounded {
+    filled: '#',
+    tip: '>',
+    empty: '-',
+};
+
+const BAR_CHARS_BOUNDED_UNICODE: BarCharsBounded = BarCharsBounded {
+    filled: '█',
+    tip: '▒',
+    empty: '░',
+};
+
+fn get_bar_chars_bounded() -> &'static BarCharsBounded {
+    match typography_mode() {
+        TypographyMode::Ascii => &BAR_CHARS_BOUNDED_ASCII,
+        TypographyMode::Unicode | TypographyMode::NerdFonts => &BAR_CHARS_BOUNDED_UNICODE,
+    }
+}
+
+/// Spinner frames for indeterminate progress.
+const SPINNER_FRAMES_ASCII: &[char] = &['|', '/', '-', '\\'];
+const SPINNER_FRAMES_UNICODE: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
+fn get_spinner_frames() -> &'static [char] {
+    match typography_mode() {
+        TypographyMode::Ascii => SPINNER_FRAMES_ASCII,
+        TypographyMode::Unicode | TypographyMode::NerdFonts => SPINNER_FRAMES_UNICODE,
+    }
+}
+
+/// Box-drawing characters for tables and cards.
+struct BoxChars {
+    // Corners
+    top_left: &'static str,
+    top_right: &'static str,
+    bottom_left: &'static str,
+    bottom_right: &'static str,
+    // Lines
+    horizontal: &'static str,
+    vertical: &'static str,
+    // T-junctions
+    left_t: &'static str,
+    right_t: &'static str,
+    top_t: &'static str,
+    bottom_t: &'static str,
+    cross: &'static str,
+}
+
+const BOX_CHARS_ASCII: BoxChars = BoxChars {
+    top_left: "+",
+    top_right: "+",
+    bottom_left: "+",
+    bottom_right: "+",
+    horizontal: "-",
+    vertical: "|",
+    left_t: "+",
+    right_t: "+",
+    top_t: "+",
+    bottom_t: "+",
+    cross: "+",
+};
+
+const BOX_CHARS_UNICODE: BoxChars = BoxChars {
+    top_left: "╭",
+    top_right: "╮",
+    bottom_left: "╰",
+    bottom_right: "╯",
+    horizontal: "─",
+    vertical: "│",
+    left_t: "├",
+    right_t: "┤",
+    top_t: "┬",
+    bottom_t: "┴",
+    cross: "┼",
+};
+
+fn get_box_chars() -> &'static BoxChars {
+    match typography_mode() {
+        TypographyMode::Ascii => &BOX_CHARS_ASCII,
+        TypographyMode::Unicode | TypographyMode::NerdFonts => &BOX_CHARS_UNICODE,
+    }
+}
+
+/// Characters for divider styles.
+struct DividerChars {
+    solid: &'static str,
+    dashed: &'static str,
+    dotted: &'static str,
+    double: &'static str,
+}
+
+const DIVIDER_CHARS_ASCII: DividerChars = DividerChars {
+    solid: "-",
+    dashed: "-",
+    dotted: ".",
+    double: "=",
+};
+
+const DIVIDER_CHARS_UNICODE: DividerChars = DividerChars {
+    solid: "─",
+    dashed: "╌",
+    dotted: "·",
+    double: "═",
+};
+
+fn get_divider_chars() -> &'static DividerChars {
+    match typography_mode() {
+        TypographyMode::Ascii => &DIVIDER_CHARS_ASCII,
+        TypographyMode::Unicode | TypographyMode::NerdFonts => &DIVIDER_CHARS_UNICODE,
+    }
+}
+
+/// Characters for histogram bars.
+const HISTOGRAM_BAR_ASCII: char = '#';
+const HISTOGRAM_BAR_UNICODE: char = '█';
+
+fn get_histogram_bar_char() -> char {
+    match typography_mode() {
+        TypographyMode::Ascii => HISTOGRAM_BAR_ASCII,
+        TypographyMode::Unicode | TypographyMode::NerdFonts => HISTOGRAM_BAR_UNICODE,
+    }
+}
+
+/// Characters for header underlines.
+struct HeaderUnderlineChars {
+    h1: &'static str,
+    h2: &'static str,
+}
+
+const HEADER_UNDERLINE_ASCII: HeaderUnderlineChars = HeaderUnderlineChars { h1: "=", h2: "-" };
+
+const HEADER_UNDERLINE_UNICODE: HeaderUnderlineChars = HeaderUnderlineChars {
+    h1: "═", h2: "─"
+};
+
+fn get_header_underline_chars() -> &'static HeaderUnderlineChars {
+    match typography_mode() {
+        TypographyMode::Ascii => &HEADER_UNDERLINE_ASCII,
+        TypographyMode::Unicode | TypographyMode::NerdFonts => &HEADER_UNDERLINE_UNICODE,
+    }
+}
+
+/// Characters for blockquote prefix.
+const BLOCKQUOTE_PREFIX_ASCII: &str = "| ";
+const BLOCKQUOTE_PREFIX_UNICODE: &str = "▐ ";
+
+fn get_blockquote_prefix() -> &'static str {
+    match typography_mode() {
+        TypographyMode::Ascii => BLOCKQUOTE_PREFIX_ASCII,
+        TypographyMode::Unicode | TypographyMode::NerdFonts => BLOCKQUOTE_PREFIX_UNICODE,
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Duration formatting
@@ -103,12 +237,6 @@ pub struct ActiveProgress {
 /// Width of the bar fill section in characters.
 const BAR_WIDTH: usize = 16;
 
-/// Characters used for a bounded bar: filled, tip, empty.
-const BAR_CHARS_BOUNDED: (char, char, char) = ('#', '>', '-');
-
-/// Frames for the indeterminate spinner, cycled by time elapsed.
-const SPINNER_FRAMES: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-
 /// How many milliseconds each spinner frame is shown.
 const SPINNER_FRAME_MS: u128 = 100;
 
@@ -142,30 +270,33 @@ impl ActiveProgress {
         let elapsed_str = format!("  {}", format_duration(secs));
 
         let bar_str: String = if let Some(total) = self.total {
-            let (filled_char, tip_char, empty_char) = BAR_CHARS_BOUNDED;
+            let bar_chars = get_bar_chars_bounded();
             let filled_count = if total == 0 {
                 0
             } else {
                 (self.position as usize * BAR_WIDTH / total as usize).min(BAR_WIDTH)
             };
-            let filled = filled_char
+            let filled = bar_chars
+                .filled
                 .to_string()
                 .repeat(filled_count.saturating_sub(1));
             let tip = if filled_count > 0 && filled_count < BAR_WIDTH {
-                tip_char.to_string()
+                bar_chars.tip.to_string()
             } else if filled_count > 0 {
-                filled_char.to_string()
+                bar_chars.filled.to_string()
             } else {
                 String::new()
             };
-            let empty = empty_char
+            let empty = bar_chars
+                .empty
                 .to_string()
                 .repeat(BAR_WIDTH.saturating_sub(filled_count));
             format!("{filled}{tip}{empty}")
         } else {
+            let spinner_frames = get_spinner_frames();
             let frame_idx =
-                (elapsed.as_millis() / SPINNER_FRAME_MS) as usize % SPINNER_FRAMES.len();
-            SPINNER_FRAMES[frame_idx].to_string()
+                (elapsed.as_millis() / SPINNER_FRAME_MS) as usize % spinner_frames.len();
+            spinner_frames[frame_idx].to_string()
         };
 
         let bar_width = if self.total.is_some() { BAR_WIDTH } else { 1 };
@@ -371,6 +502,11 @@ fn unstyled_span(text: String) -> Span {
     Span::new_unstyled_lossy(text)
 }
 
+fn hyperlinked_span(style: ContentStyle, text: String, url: String) -> Span {
+    let span = Span::new_styled_lossy(style::StyledContent::new(style, text));
+    span.with_hyperlink(Some(Hyperlink::new(url)))
+}
+
 // ---------------------------------------------------------------------------
 // Header component
 // ---------------------------------------------------------------------------
@@ -465,15 +601,22 @@ impl Header {
         lines.push(header_line);
 
         // Underline for H1 and H2
+        let underline_chars = get_header_underline_chars();
         match self.level {
             HeaderLevel::H1 => {
                 let mut underline = Line::default();
-                underline.push(styled_span(style, "=".repeat(self.text.len())));
+                underline.push(styled_span(
+                    style,
+                    underline_chars.h1.repeat(self.text.len()),
+                ));
                 lines.push(underline);
             }
             HeaderLevel::H2 => {
                 let mut underline = Line::default();
-                underline.push(styled_span(style, "-".repeat(self.text.len())));
+                underline.push(styled_span(
+                    style,
+                    underline_chars.h2.repeat(self.text.len()),
+                ));
                 lines.push(underline);
             }
             _ => {}
@@ -531,11 +674,12 @@ impl Divider {
     }
 
     fn get_char(&self) -> &str {
+        let divider_chars = get_divider_chars();
         match self.style {
-            DividerStyle::Solid => "─",
-            DividerStyle::Dashed => "╌",
-            DividerStyle::Dotted => "·",
-            DividerStyle::Double => "═",
+            DividerStyle::Solid => divider_chars.solid,
+            DividerStyle::Dashed => divider_chars.dashed,
+            DividerStyle::Dotted => divider_chars.dotted,
+            DividerStyle::Double => divider_chars.double,
         }
     }
 
@@ -588,6 +732,82 @@ impl Paragraph {
 }
 
 // ---------------------------------------------------------------------------
+// Text Alignment Utilities
+// ---------------------------------------------------------------------------
+
+/// Aligns text within a specified width
+pub struct AlignedText {
+    text: String,
+    width: usize,
+    align: Align,
+    variant: Variant,
+}
+
+impl AlignedText {
+    /// Create a new aligned text with specified width and alignment
+    pub fn new(text: impl Into<String>, width: usize, align: Align) -> Self {
+        Self {
+            text: text.into(),
+            width,
+            align,
+            variant: Variant::Default,
+        }
+    }
+
+    /// Set the variant/style
+    pub fn variant(mut self, variant: Variant) -> Self {
+        self.variant = variant;
+        self
+    }
+
+    /// Render the aligned text
+    pub fn render(&self) -> Line {
+        let style = self.variant.style();
+        let text_len = self.text.chars().count();
+
+        let aligned = if text_len >= self.width {
+            // Text is too long, just return it as is
+            self.text.clone()
+        } else {
+            let padding = self.width - text_len;
+            match self.align {
+                Align::Left => format!("{}{}", self.text, " ".repeat(padding)),
+                Align::Right => format!("{}{}", " ".repeat(padding), self.text),
+                Align::Center => {
+                    let left_padding = padding / 2;
+                    let right_padding = padding - left_padding;
+                    format!(
+                        "{}{}{}",
+                        " ".repeat(left_padding),
+                        self.text,
+                        " ".repeat(right_padding)
+                    )
+                }
+            }
+        };
+
+        let mut line = Line::default();
+        line.push(styled_span(style, aligned));
+        line
+    }
+}
+
+/// Left-align text within the specified width
+pub fn align_left(text: impl Into<String>, width: usize) -> AlignedText {
+    AlignedText::new(text, width, Align::Left)
+}
+
+/// Center-align text within the specified width
+pub fn align_center(text: impl Into<String>, width: usize) -> AlignedText {
+    AlignedText::new(text, width, Align::Center)
+}
+
+/// Right-align text within the specified width
+pub fn align_right(text: impl Into<String>, width: usize) -> AlignedText {
+    AlignedText::new(text, width, Align::Right)
+}
+
+// ---------------------------------------------------------------------------
 // List component
 // ---------------------------------------------------------------------------
 
@@ -598,11 +818,38 @@ pub enum ListStyle {
     Ordered,
 }
 
+/// Represents a list item that can be either text or a nested list
+pub enum ListItem {
+    /// Simple text item
+    Text(String),
+    /// Nested list (for creating hierarchical lists)
+    Nested(List),
+}
+
+impl From<String> for ListItem {
+    fn from(s: String) -> Self {
+        ListItem::Text(s)
+    }
+}
+
+impl From<&str> for ListItem {
+    fn from(s: &str) -> Self {
+        ListItem::Text(s.to_string())
+    }
+}
+
+impl From<List> for ListItem {
+    fn from(list: List) -> Self {
+        ListItem::Nested(list)
+    }
+}
+
 /// List component for displaying items
 pub struct List {
-    items: Vec<String>,
+    items: Vec<ListItem>,
     style: ListStyle,
     variant: Variant,
+    indent_level: usize,
 }
 
 impl List {
@@ -611,6 +858,7 @@ impl List {
             items: Vec::new(),
             style,
             variant: Variant::Default,
+            indent_level: 0,
         }
     }
 
@@ -622,13 +870,23 @@ impl List {
         Self::new(ListStyle::Ordered)
     }
 
-    pub fn item(mut self, item: impl Into<String>) -> Self {
+    pub fn item(mut self, item: impl Into<ListItem>) -> Self {
         self.items.push(item.into());
         self
     }
 
-    pub fn items(mut self, items: Vec<String>) -> Self {
+    pub fn items(mut self, items: Vec<ListItem>) -> Self {
         self.items = items;
+        self
+    }
+
+    /// Add a nested list as a list item
+    pub fn nested(mut self, nested_list: List) -> Self {
+        // Inherit indent level from parent
+        let mut nested = nested_list;
+        nested.indent_level = self.indent_level + 1;
+        nested.variant = self.variant;
+        self.items.push(ListItem::Nested(nested));
         self
     }
 
@@ -640,18 +898,37 @@ impl List {
     pub fn render(&self) -> Vec<Line> {
         let style = self.variant.style();
         let mut lines = Vec::new();
+        let base_indent = "  ".repeat(self.indent_level);
 
-        for (idx, item) in self.items.iter().enumerate() {
-            let mut line = Line::default();
+        let mut text_item_index = 0;
 
-            let prefix = match self.style {
-                ListStyle::Unordered => "  • ".to_string(),
-                ListStyle::Ordered => format!("  {}. ", idx + 1),
-            };
+        for item in &self.items {
+            match item {
+                ListItem::Text(text) => {
+                    text_item_index += 1;
+                    let mut line = Line::default();
 
-            line.push(unstyled_span(prefix));
-            line.push(styled_span(style, item.clone()));
-            lines.push(line);
+                    let prefix = match self.style {
+                        ListStyle::Unordered => {
+                            let bullet = match typography_mode() {
+                                TypographyMode::Ascii => "-",
+                                TypographyMode::Unicode | TypographyMode::NerdFonts => "•",
+                            };
+                            format!("{}  {} ", base_indent, bullet)
+                        }
+                        ListStyle::Ordered => format!("{}  {}. ", base_indent, text_item_index),
+                    };
+
+                    line.push(unstyled_span(prefix));
+                    line.push(styled_span(style, text.clone()));
+                    lines.push(line);
+                }
+                ListItem::Nested(nested_list) => {
+                    // Render nested list with increased indent
+                    let nested_lines = nested_list.render();
+                    lines.extend(nested_lines);
+                }
+            }
         }
 
         lines
@@ -662,7 +939,26 @@ impl List {
 // Link component
 // ---------------------------------------------------------------------------
 
-/// Link component for displaying URLs or references
+/// Link component for displaying URLs or references.
+///
+/// When a URL is provided via `.url()`, this component uses OSC 8 escape sequences
+/// to create clickable hyperlinks in compatible terminals (e.g., iTerm2, WezTerm,
+/// Windows Terminal, GNOME Terminal).
+///
+/// # Examples
+///
+/// ```rust
+/// use spaces_console::typography::Link;
+///
+/// // Create a clickable link
+/// let link = Link::new("Visit our docs")
+///     .url("https://example.com/docs");
+/// let line = link.render();
+///
+/// // Or just styled text without a URL
+/// let text = Link::new("See above");
+/// let line = text.render();
+/// ```
 pub struct Link {
     text: String,
     url: Option<String>,
@@ -693,10 +989,13 @@ impl Link {
         style.attributes = style.attributes.with(Attribute::Underlined);
 
         let mut line = Line::default();
-        line.push(styled_span(style, self.text.clone()));
 
+        // If a URL is provided, use OSC 8 hyperlink support for clickable links
         if let Some(url) = &self.url {
-            line.push(unstyled_span(format!(" ({})", url)));
+            line.push(hyperlinked_span(style, self.text.clone(), url.clone()));
+        } else {
+            // No URL provided, just render styled text
+            line.push(styled_span(style, self.text.clone()));
         }
 
         line
@@ -729,16 +1028,389 @@ impl Blockquote {
     pub fn render(&self) -> Vec<Line> {
         let style = self.variant.style();
         let mut lines = Vec::new();
+        let prefix = get_blockquote_prefix();
 
         for text_line in self.text.lines() {
             let mut line = Line::default();
-            line.push(unstyled_span("│ ".to_string()));
+            line.push(unstyled_span(prefix.to_string()));
             line.push(styled_span(style, text_line.to_string()));
             lines.push(line);
         }
 
         lines
     }
+}
+
+// ---------------------------------------------------------------------------
+// Description List component
+// ---------------------------------------------------------------------------
+
+/// A term-description pair for use in description lists.
+#[derive(Debug, Clone)]
+pub struct DescriptionItem {
+    term: String,
+    description: String,
+}
+
+impl DescriptionItem {
+    pub fn new(term: impl Into<String>, description: impl Into<String>) -> Self {
+        Self {
+            term: term.into(),
+            description: description.into(),
+        }
+    }
+}
+
+/// Description list for displaying term-description pairs (common in CLI tools).
+/// Similar to HTML's `<dl>`, `<dt>`, `<dd>` structure.
+///
+/// # Examples
+///
+/// ```rust
+/// use spaces_console::typography::DescriptionList;
+///
+/// let dl = DescriptionList::new()
+///     .item("Name", "Zed")
+///     .item("Version", "0.1.0")
+///     .item("License", "MIT");
+/// let lines = dl.render();
+/// ```
+pub struct DescriptionList {
+    items: Vec<DescriptionItem>,
+    variant: Variant,
+    compact: bool,
+}
+
+impl DescriptionList {
+    pub fn new() -> Self {
+        Self {
+            items: Vec::new(),
+            variant: Variant::Default,
+            compact: false,
+        }
+    }
+
+    /// Add a term-description pair to the list.
+    pub fn item(mut self, term: impl Into<String>, description: impl Into<String>) -> Self {
+        self.items.push(DescriptionItem::new(term, description));
+        self
+    }
+
+    /// Add multiple term-description pairs at once.
+    pub fn items<T, D>(mut self, items: impl IntoIterator<Item = (T, D)>) -> Self
+    where
+        T: Into<String>,
+        D: Into<String>,
+    {
+        for (term, desc) in items {
+            self.items.push(DescriptionItem::new(term, desc));
+        }
+        self
+    }
+
+    /// Set the color variant for the terms.
+    pub fn variant(mut self, variant: Variant) -> Self {
+        self.variant = variant;
+        self
+    }
+
+    /// Enable compact mode (no blank lines between items).
+    pub fn compact(mut self, compact: bool) -> Self {
+        self.compact = compact;
+        self
+    }
+
+    pub fn render(&self) -> Vec<Line> {
+        let style = self.variant.style();
+        let mut lines = Vec::new();
+
+        for (idx, item) in self.items.iter().enumerate() {
+            // Render term (bold and colored)
+            let mut term_line = Line::default();
+            term_line.push(styled_span(style.bold(), item.term.clone()));
+            lines.push(term_line);
+
+            // Render description (indented)
+            for desc_line in item.description.lines() {
+                let mut line = Line::default();
+                line.push(unstyled_span("  ".to_string()));
+                line.push(unstyled_span(desc_line.to_string()));
+                lines.push(line);
+            }
+
+            // Add spacing between items (unless compact mode or last item)
+            if !self.compact && idx < self.items.len() - 1 {
+                lines.push(Line::default());
+            }
+        }
+
+        lines
+    }
+}
+
+impl Default for DescriptionList {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Inline Text Styling
+// ---------------------------------------------------------------------------
+
+/// Inline code text (monospace).
+///
+/// # Examples
+///
+/// ```rust
+/// use spaces_console::typography::code;
+///
+/// let span = code("npm install");
+/// ```
+pub fn code(text: impl Into<String>) -> Span {
+    let style = ContentStyle {
+        foreground_color: Some(Color::Magenta),
+        background_color: Some(Color::Black),
+        attributes: Attributes::default(),
+        underline_color: None,
+    };
+    styled_span(style, text.into())
+}
+
+/// Highlighted/marked text.
+///
+/// # Examples
+///
+/// ```rust
+/// use spaces_console::typography::mark;
+///
+/// let span = mark("important");
+/// ```
+pub fn mark(text: impl Into<String>) -> Span {
+    let style = ContentStyle {
+        foreground_color: Some(Color::Black),
+        background_color: Some(Color::Yellow),
+        attributes: Attributes::default(),
+        underline_color: None,
+    };
+    styled_span(style, text.into())
+}
+
+/// Small/fine print text.
+///
+/// # Examples
+///
+/// ```rust
+/// use spaces_console::typography::small;
+///
+/// let span = small("© 2024");
+/// ```
+pub fn small(text: impl Into<String>) -> Span {
+    let style = ContentStyle {
+        foreground_color: Some(Color::DarkGrey),
+        background_color: None,
+        attributes: Attributes::default(),
+        underline_color: None,
+    };
+    styled_span(style, text.into())
+}
+
+/// Deleted/strikethrough text.
+///
+/// # Examples
+///
+/// ```rust
+/// use spaces_console::typography::del;
+///
+/// let span = del("obsolete");
+/// ```
+pub fn del(text: impl Into<String>) -> Span {
+    let style = ContentStyle {
+        foreground_color: Some(Color::DarkGrey),
+        background_color: None,
+        attributes: Attributes::from(Attribute::CrossedOut),
+        underline_color: None,
+    };
+    styled_span(style, text.into())
+}
+
+/// Inserted/underlined text.
+///
+/// # Examples
+///
+/// ```rust
+/// use spaces_console::typography::ins;
+///
+/// let span = ins("new feature");
+/// ```
+pub fn ins(text: impl Into<String>) -> Span {
+    let style = ContentStyle {
+        foreground_color: Some(Color::Green),
+        background_color: None,
+        attributes: Attributes::from(Attribute::Underlined),
+        underline_color: None,
+    };
+    styled_span(style, text.into())
+}
+
+/// Subscript text (using Unicode subscript characters where possible).
+///
+/// # Examples
+///
+/// ```rust
+/// use spaces_console::typography::sub_text;
+///
+/// let span = sub_text("2"); // For H₂O
+/// ```
+pub fn sub_text(text: impl Into<String>) -> Span {
+    let text_str = text.into();
+    let subscript = convert_to_subscript(&text_str);
+    let style = ContentStyle {
+        foreground_color: None,
+        background_color: None,
+        attributes: Attributes::default(),
+        underline_color: None,
+    };
+    styled_span(style, subscript)
+}
+
+/// Superscript text (using Unicode superscript characters where possible).
+///
+/// # Examples
+///
+/// ```rust
+/// use spaces_console::typography::sup_text;
+///
+/// let span = sup_text("2"); // For E=mc²
+/// ```
+pub fn sup_text(text: impl Into<String>) -> Span {
+    let text_str = text.into();
+    let superscript = convert_to_superscript(&text_str);
+    let style = ContentStyle {
+        foreground_color: None,
+        background_color: None,
+        attributes: Attributes::default(),
+        underline_color: None,
+    };
+    styled_span(style, superscript)
+}
+
+/// Keyboard input text.
+///
+/// # Examples
+///
+/// ```rust
+/// use spaces_console::typography::kbd;
+///
+/// let span = kbd("Ctrl+C");
+/// ```
+pub fn kbd(text: impl Into<String>) -> Span {
+    let style = ContentStyle {
+        foreground_color: Some(Color::White),
+        background_color: Some(Color::DarkGrey),
+        attributes: Attributes::from(Attribute::Bold),
+        underline_color: None,
+    };
+    styled_span(style, text.into())
+}
+
+/// Variable name text.
+///
+/// # Examples
+///
+/// ```rust
+/// use spaces_console::typography::var;
+///
+/// let span = var("user_name");
+/// ```
+pub fn var(text: impl Into<String>) -> Span {
+    let style = ContentStyle {
+        foreground_color: Some(Color::Cyan),
+        background_color: None,
+        attributes: Attributes::from(Attribute::Italic),
+        underline_color: None,
+    };
+    styled_span(style, text.into())
+}
+
+/// Sample output text.
+///
+/// # Examples
+///
+/// ```rust
+/// use spaces_console::typography::samp;
+///
+/// let span = samp("Command output");
+/// ```
+pub fn samp(text: impl Into<String>) -> Span {
+    let style = ContentStyle {
+        foreground_color: Some(Color::Green),
+        background_color: Some(Color::Black),
+        attributes: Attributes::default(),
+        underline_color: None,
+    };
+    styled_span(style, text.into())
+}
+
+// Helper functions for subscript/superscript conversion
+fn convert_to_subscript(text: &str) -> String {
+    text.chars()
+        .map(|c| match c {
+            '0' => '₀',
+            '1' => '₁',
+            '2' => '₂',
+            '3' => '₃',
+            '4' => '₄',
+            '5' => '₅',
+            '6' => '₆',
+            '7' => '₇',
+            '8' => '₈',
+            '9' => '₉',
+            '+' => '₊',
+            '-' => '₋',
+            '=' => '₌',
+            '(' => '₍',
+            ')' => '₎',
+            'a' => 'ₐ',
+            'e' => 'ₑ',
+            'o' => 'ₒ',
+            'x' => 'ₓ',
+            'h' => 'ₕ',
+            'k' => 'ₖ',
+            'l' => 'ₗ',
+            'm' => 'ₘ',
+            'n' => 'ₙ',
+            'p' => 'ₚ',
+            's' => 'ₛ',
+            't' => 'ₜ',
+            _ => c,
+        })
+        .collect()
+}
+
+fn convert_to_superscript(text: &str) -> String {
+    text.chars()
+        .map(|c| match c {
+            '0' => '⁰',
+            '1' => '¹',
+            '2' => '²',
+            '3' => '³',
+            '4' => '⁴',
+            '5' => '⁵',
+            '6' => '⁶',
+            '7' => '⁷',
+            '8' => '⁸',
+            '9' => '⁹',
+            '+' => '⁺',
+            '-' => '⁻',
+            '=' => '⁼',
+            '(' => '⁽',
+            ')' => '⁾',
+            'i' => 'ⁱ',
+            'n' => 'ⁿ',
+            _ => c,
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -843,71 +1515,72 @@ impl Table {
             attributes: style.attributes.with(Attribute::Bold),
         };
 
+        let box_chars = get_box_chars();
         let mut lines = Vec::new();
 
         // Top border
         let mut top_line = Line::default();
-        let mut top_str = String::from("┌");
+        let mut top_str = String::from(box_chars.top_left);
         for (i, width) in widths.iter().enumerate() {
-            top_str.push_str(&"─".repeat(width + 2));
+            top_str.push_str(&box_chars.horizontal.repeat(width + 2));
             if i < widths.len() - 1 {
-                top_str.push('┬');
+                top_str.push_str(box_chars.top_t);
             }
         }
-        top_str.push('┐');
+        top_str.push_str(box_chars.top_right);
         top_line.push(unstyled_span(top_str));
         lines.push(top_line);
 
         // Headers
         let mut header_line = Line::default();
-        header_line.push(unstyled_span("│".to_string()));
+        header_line.push(unstyled_span(box_chars.vertical.to_string()));
         for (i, (header, width)) in self.headers.iter().zip(widths.iter()).enumerate() {
             let align = self.alignments.get(i).copied().unwrap_or(Align::Left);
             let formatted = self.format_cell(header, *width, align);
             header_line.push(unstyled_span(" ".to_string()));
             header_line.push(styled_span(header_style, formatted));
-            header_line.push(unstyled_span(" │".to_string()));
+            header_line.push(unstyled_span(format!(" {}", box_chars.vertical)));
         }
         lines.push(header_line);
 
         // Header separator
         let mut sep_line = Line::default();
-        let mut sep_str = String::from("├");
+        let mut sep_str = String::from(box_chars.left_t);
         for (i, width) in widths.iter().enumerate() {
-            sep_str.push_str(&"─".repeat(width + 2));
+            sep_str.push_str(&box_chars.horizontal.repeat(width + 2));
             if i < widths.len() - 1 {
-                sep_str.push('┼');
+                sep_str.push_str(box_chars.cross);
             }
         }
-        sep_str.push('┤');
+        sep_str.push_str(box_chars.right_t);
         sep_line.push(unstyled_span(sep_str));
         lines.push(sep_line);
 
         // Rows
         for row in &self.rows {
             let mut row_line = Line::default();
-            row_line.push(unstyled_span("│".to_string()));
+            row_line.push(unstyled_span(box_chars.vertical.to_string()));
             for (i, width) in widths.iter().enumerate() {
                 let cell = row.get(i).map(|s| s.as_str()).unwrap_or("");
                 let align = self.alignments.get(i).copied().unwrap_or(Align::Left);
                 let formatted = self.format_cell(cell, *width, align);
                 row_line.push(unstyled_span(" ".to_string()));
                 row_line.push(styled_span(style, formatted));
-                row_line.push(unstyled_span(" │".to_string()));
+                row_line.push(unstyled_span(format!(" {}", box_chars.vertical)));
             }
             lines.push(row_line);
         }
 
         // Bottom border
         let mut bottom_line = Line::default();
-        let mut bottom_str = String::from("└");
+        let mut bottom_str = String::from(box_chars.bottom_left);
         for (i, width) in widths.iter().enumerate() {
-            bottom_str.push_str(&"─".repeat(width + 2));
+            bottom_str.push_str(&box_chars.horizontal.repeat(width + 2));
             if i < widths.len() - 1 {
-                bottom_str.push('┴');
+                bottom_str.push_str(box_chars.bottom_t);
             }
         }
-        bottom_str.push('┘');
+        bottom_str.push_str(box_chars.bottom_right);
         bottom_line.push(unstyled_span(bottom_str));
         lines.push(bottom_line);
 
@@ -969,44 +1642,60 @@ impl Card {
             attributes: style.attributes.with(Attribute::Bold),
         };
 
+        let box_chars = get_box_chars();
         let mut lines = Vec::new();
 
         // Top border
         let mut top_line = Line::default();
-        top_line.push(unstyled_span(format!("┌{}┐", "─".repeat(width - 2))));
+        top_line.push(unstyled_span(format!(
+            "{}{}{}",
+            box_chars.top_left,
+            box_chars.horizontal.repeat(width - 2),
+            box_chars.top_right
+        )));
         lines.push(top_line);
 
         // Title
         if let Some(title) = &self.title {
             let mut title_line = Line::default();
-            title_line.push(unstyled_span("│ ".to_string()));
+            title_line.push(unstyled_span(format!("{} ", box_chars.vertical)));
             title_line.push(styled_span(
                 title_style,
                 format!("{:<width$}", title, width = width - 4),
             ));
-            title_line.push(unstyled_span(" │".to_string()));
+            title_line.push(unstyled_span(format!(" {}", box_chars.vertical)));
             lines.push(title_line);
 
             let mut sep_line = Line::default();
-            sep_line.push(unstyled_span(format!("├{}┤", "─".repeat(width - 2))));
+            sep_line.push(unstyled_span(format!(
+                "{}{}{}",
+                box_chars.left_t,
+                box_chars.horizontal.repeat(width - 2),
+                box_chars.right_t
+            )));
             lines.push(sep_line);
         }
 
         // Body
         for body_line in self.body.lines() {
             let mut line = Line::default();
-            line.push(unstyled_span("│ ".to_string()));
+            line.push(unstyled_span(format!("{} ", box_chars.vertical)));
             line.push(styled_span(
                 style,
                 format!("{:<width$}", body_line, width = width - 4),
             ));
-            line.push(unstyled_span(" │".to_string()));
+            line.push(unstyled_span(format!(" {}", box_chars.vertical)));
             lines.push(line);
         }
 
         // Bottom border
         let mut bottom_line = Line::default();
-        bottom_line.push(unstyled_span(format!("└{}┘", "─".repeat(width - 2))));
+        bottom_line.push(unstyled_span(format!(
+            "{}{}{}",
+            box_chars.bottom_left,
+            box_chars.horizontal.repeat(width - 2),
+            box_chars.bottom_right
+        )));
         lines.push(bottom_line);
 
         lines
@@ -1098,14 +1787,14 @@ impl Histogram {
         // Find the longest label for alignment
         let max_label_len = self.bars.iter().map(|b| b.label.len()).max().unwrap_or(0);
 
+        let bar_char = get_histogram_bar_char();
+
         // Render each bar
         for bar in &self.bars {
-            let bar_len = if max_value > 0 {
-                bar.value * self.bar_width / max_value
-            } else {
-                0
-            };
-            let bar_str = "█".repeat(bar_len);
+            let bar_len = (bar.value * self.bar_width)
+                .checked_div(max_value)
+                .unwrap_or(0);
+            let bar_str = bar_char.to_string().repeat(bar_len);
 
             let mut bar_line = Line::default();
 
@@ -1126,6 +1815,164 @@ impl Histogram {
 
             lines.push(bar_line);
         }
+
+        lines
+    }
+}
+
+/// An alert/callout component for displaying notices, warnings, and important messages.
+///
+/// Alerts provide prominent visual feedback with colored borders and titles based on their variant.
+/// The border and title use the variant color, while the body text remains in the default style.
+///
+/// # Examples
+///
+/// ```rust
+/// use spaces_console::typography::{Alert, Variant};
+///
+/// // Create an info alert
+/// let alert = Alert::new("Server restarted successfully")
+///     .title("Information")
+///     .variant(Variant::Info);
+///
+/// // Create a warning alert
+/// let alert = Alert::new("This action cannot be undone")
+///     .title("Warning")
+///     .variant(Variant::Warning);
+///
+/// // Create a danger alert with multi-line content
+/// let alert = Alert::new("Connection failed\nPlease check your network settings")
+///     .title("Error")
+///     .variant(Variant::Danger);
+/// ```
+pub struct Alert {
+    title: Option<String>,
+    body: String,
+    variant: Variant,
+    width: Option<usize>,
+}
+
+impl Alert {
+    /// Creates a new Alert with the given body text.
+    ///
+    /// Defaults to the Info variant.
+    pub fn new(body: impl Into<String>) -> Self {
+        Self {
+            title: None,
+            body: body.into(),
+            variant: Variant::Info,
+            width: None,
+        }
+    }
+
+    /// Sets the title for the alert.
+    pub fn title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
+        self
+    }
+
+    /// Sets the variant (color scheme) for the alert.
+    pub fn variant(mut self, variant: Variant) -> Self {
+        self.variant = variant;
+        self
+    }
+
+    /// Sets the width of the alert box.
+    pub fn width(mut self, width: usize) -> Self {
+        self.width = Some(width);
+        self
+    }
+
+    /// Renders the alert as a vector of Lines.
+    pub fn render(&self) -> Vec<Line> {
+        // Clamp width to minimum of 4 to prevent underflow in border/padding calculations
+        let width = self.width.unwrap_or(60).max(4);
+        let border_style = self.variant.style();
+        let title_style = ContentStyle {
+            foreground_color: border_style.foreground_color,
+            background_color: border_style.background_color,
+            underline_color: border_style.underline_color,
+            attributes: border_style.attributes.with(Attribute::Bold),
+        };
+        let body_style = default_style();
+
+        let box_chars = get_box_chars();
+        let mut lines = Vec::new();
+
+        // Top border (colored)
+        let mut top_line = Line::default();
+        top_line.push(styled_span(
+            border_style,
+            format!(
+                "{}{}{}",
+                box_chars.top_left,
+                box_chars.horizontal.repeat(width - 2),
+                box_chars.top_right
+            ),
+        ));
+        lines.push(top_line);
+
+        // Title (colored border + colored title text)
+        if let Some(title) = &self.title {
+            let mut title_line = Line::default();
+            title_line.push(styled_span(
+                border_style,
+                format!("{} ", box_chars.vertical),
+            ));
+            title_line.push(styled_span(
+                title_style,
+                format!("{:<width$}", title, width = width - 4),
+            ));
+            title_line.push(styled_span(
+                border_style,
+                format!(" {}", box_chars.vertical),
+            ));
+            lines.push(title_line);
+
+            // Separator (colored)
+            let mut sep_line = Line::default();
+            sep_line.push(styled_span(
+                border_style,
+                format!(
+                    "{}{}{}",
+                    box_chars.left_t,
+                    box_chars.horizontal.repeat(width - 2),
+                    box_chars.right_t
+                ),
+            ));
+            lines.push(sep_line);
+        }
+
+        // Body (colored border + default text)
+        for body_line in self.body.lines() {
+            let mut line = Line::default();
+            line.push(styled_span(
+                border_style,
+                format!("{} ", box_chars.vertical),
+            ));
+            line.push(styled_span(
+                body_style,
+                format!("{:<width$}", body_line, width = width - 4),
+            ));
+            line.push(styled_span(
+                border_style,
+                format!(" {}", box_chars.vertical),
+            ));
+            lines.push(line);
+        }
+
+        // Bottom border (colored)
+        let mut bottom_line = Line::default();
+        bottom_line.push(styled_span(
+            border_style,
+            format!(
+                "{}{}{}",
+                box_chars.bottom_left,
+                box_chars.horizontal.repeat(width - 2),
+                box_chars.bottom_right
+            ),
+        ));
+        lines.push(bottom_line);
 
         lines
     }
@@ -1179,6 +2026,10 @@ pub fn link_with_url(text: impl Into<String>, url: impl Into<String>) -> Line {
     Link::new(text).url(url).render()
 }
 
+pub fn alert(body: impl Into<String>) -> Vec<Line> {
+    Alert::new(body).render()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1203,6 +2054,109 @@ mod tests {
         let list = List::unordered().item("First").item("Second").item("Third");
         let lines = list.render();
         assert_eq!(lines.len(), 3);
+    }
+
+    #[test]
+    fn test_nested_list_unordered() {
+        let nested = List::unordered().item("Nested 1").item("Nested 2");
+        let list = List::unordered().item("First").nested(nested).item("Third");
+        let lines = list.render();
+        // 1 for "First", 2 for nested items, 1 for "Third" = 4 total
+        assert_eq!(lines.len(), 4);
+    }
+
+    #[test]
+    fn test_nested_list_ordered() {
+        let nested = List::ordered().item("Nested A").item("Nested B");
+        let list = List::ordered().item("First").nested(nested).item("Second");
+        let lines = list.render();
+        assert_eq!(lines.len(), 4);
+    }
+
+    #[test]
+    fn test_nested_list_multiple_levels() {
+        let level2 = List::unordered().item("Level 2A").item("Level 2B");
+        let level1 = List::unordered().item("Level 1A").nested(level2);
+        let list = List::unordered().item("Root").nested(level1).item("End");
+        let lines = list.render();
+        // Root + Level 1A + Level 2A + Level 2B + End = 5
+        assert_eq!(lines.len(), 5);
+    }
+
+    #[test]
+    fn test_align_left() {
+        let aligned = align_left("Hello", 10);
+        let line = aligned.render();
+        let spans: Vec<_> = line.iter().collect();
+        assert_eq!(spans.len(), 1);
+    }
+
+    #[test]
+    fn test_align_center() {
+        let aligned = align_center("Hi", 10);
+        let line = aligned.render();
+        let spans: Vec<_> = line.iter().collect();
+        assert_eq!(spans.len(), 1);
+    }
+
+    #[test]
+    fn test_align_right() {
+        let aligned = align_right("Test", 10);
+        let line = aligned.render();
+        let spans: Vec<_> = line.iter().collect();
+        assert_eq!(spans.len(), 1);
+    }
+
+    #[test]
+    fn test_aligned_text_with_variant() {
+        let aligned = AlignedText::new("Success", 20, Align::Center).variant(Variant::Success);
+        let line = aligned.render();
+        let spans: Vec<_> = line.iter().collect();
+        assert_eq!(spans.len(), 1);
+    }
+
+    #[test]
+    fn test_aligned_text_too_long() {
+        // Text longer than width should not be truncated
+        let aligned = align_left("This is a very long text", 10);
+        let line = aligned.render();
+        let spans: Vec<_> = line.iter().collect();
+        assert_eq!(spans.len(), 1);
+    }
+
+    #[test]
+    fn test_link_without_url() {
+        let link = Link::new("Click here");
+        let line = link.render();
+        let spans: Vec<_> = line.iter().collect();
+        assert_eq!(spans.len(), 1);
+        let span = spans[0];
+        assert_eq!(span.content(), "Click here");
+        assert!(span.hyperlink.is_none());
+    }
+
+    #[test]
+    fn test_link_with_url() {
+        let link = Link::new("Visit docs").url("https://example.com/docs");
+        let line = link.render();
+        let spans: Vec<_> = line.iter().collect();
+        assert_eq!(spans.len(), 1);
+        let span = spans[0];
+        assert_eq!(span.content(), "Visit docs");
+        assert!(span.hyperlink.is_some());
+        if let Some(ref hyperlink) = span.hyperlink {
+            assert_eq!(hyperlink.uri(), "https://example.com/docs");
+        }
+    }
+
+    #[test]
+    fn test_link_helper_function() {
+        let line = link_with_url("GitHub", "https://github.com");
+        let spans: Vec<_> = line.iter().collect();
+        assert_eq!(spans.len(), 1);
+        let span = spans[0];
+        assert_eq!(span.content(), "GitHub");
+        assert!(span.hyperlink.is_some());
     }
 
     #[test]
@@ -1240,6 +2194,77 @@ mod tests {
         let card4 = Card::new("Test").title("Title").width(4);
         let lines4 = card4.render();
         assert!(!lines4.is_empty());
+    }
+
+    #[test]
+    fn test_alert() {
+        let alert = Alert::new("This is an alert message")
+            .title("Alert Title")
+            .variant(Variant::Warning)
+            .width(40);
+        let lines = alert.render();
+        assert!(!lines.is_empty());
+        // Should have at least: top border, title, separator, body, bottom border
+        assert!(lines.len() >= 5);
+    }
+
+    #[test]
+    fn test_alert_no_title() {
+        let alert = Alert::new("Message without title").variant(Variant::Info);
+        let lines = alert.render();
+        assert!(!lines.is_empty());
+        // Should have: top border, body, bottom border
+        assert!(lines.len() >= 3);
+    }
+
+    #[test]
+    fn test_alert_multiline() {
+        let alert = Alert::new("Line 1\nLine 2\nLine 3")
+            .title("Multi-line Alert")
+            .variant(Variant::Danger);
+        let lines = alert.render();
+        // Should have: top border, title, separator, 3 body lines, bottom border
+        assert_eq!(lines.len(), 7);
+    }
+
+    #[test]
+    fn test_alert_minimum_width() {
+        // Test that small widths don't cause underflow panics
+        let alert1 = Alert::new("Test").width(0);
+        let lines1 = alert1.render();
+        assert!(!lines1.is_empty());
+
+        let alert2 = Alert::new("Test").width(1);
+        let lines2 = alert2.render();
+        assert!(!lines2.is_empty());
+
+        let alert3 = Alert::new("Test").width(3);
+        let lines3 = alert3.render();
+        assert!(!lines3.is_empty());
+
+        let alert4 = Alert::new("Test").title("Title").width(4);
+        let lines4 = alert4.render();
+        assert!(!lines4.is_empty());
+    }
+
+    #[test]
+    fn test_alert_variants() {
+        // Test that all variants work with alerts
+        for variant in [
+            Variant::Primary,
+            Variant::Secondary,
+            Variant::Success,
+            Variant::Danger,
+            Variant::Warning,
+            Variant::Info,
+            Variant::Light,
+            Variant::Dark,
+            Variant::Default,
+        ] {
+            let alert = Alert::new("Test message").variant(variant);
+            let lines = alert.render();
+            assert!(!lines.is_empty());
+        }
     }
 
     #[test]
@@ -1397,5 +2422,197 @@ mod tests {
 
         // The key invariant: after our fix, the message portion will never exceed msg_max
         // This prevents the overflow issue where "...  " was always appended
+    }
+
+    #[test]
+    fn test_typography_mode_default() {
+        // The default mode should be Unicode
+        assert_eq!(typography_mode(), TypographyMode::Unicode);
+    }
+
+    #[test]
+    fn test_ascii_mode_characters() {
+        // This test demonstrates what the ASCII mode characters would be
+        // Note: We can't actually set the mode in tests due to OnceLock,
+        // but we can verify the character sets exist and are different
+        assert_ne!(
+            BAR_CHARS_BOUNDED_ASCII.filled,
+            BAR_CHARS_BOUNDED_UNICODE.filled
+        );
+        assert_ne!(SPINNER_FRAMES_ASCII, SPINNER_FRAMES_UNICODE);
+        assert_ne!(BOX_CHARS_ASCII.top_left, BOX_CHARS_UNICODE.top_left);
+        assert_ne!(DIVIDER_CHARS_ASCII.solid, DIVIDER_CHARS_UNICODE.solid);
+        assert_ne!(HISTOGRAM_BAR_ASCII, HISTOGRAM_BAR_UNICODE);
+    }
+
+    #[test]
+    fn test_ascii_mode_uses_only_ascii() {
+        // Verify that ASCII mode characters are all within ASCII range
+        assert!(BAR_CHARS_BOUNDED_ASCII.filled.is_ascii());
+        assert!(BAR_CHARS_BOUNDED_ASCII.tip.is_ascii());
+        assert!(BAR_CHARS_BOUNDED_ASCII.empty.is_ascii());
+
+        for &frame in SPINNER_FRAMES_ASCII {
+            assert!(frame.is_ascii());
+        }
+
+        assert!(BOX_CHARS_ASCII.top_left.chars().all(|c| c.is_ascii()));
+        assert!(BOX_CHARS_ASCII.horizontal.chars().all(|c| c.is_ascii()));
+        assert!(BOX_CHARS_ASCII.vertical.chars().all(|c| c.is_ascii()));
+
+        assert!(DIVIDER_CHARS_ASCII.solid.chars().all(|c| c.is_ascii()));
+        assert!(HISTOGRAM_BAR_ASCII.is_ascii());
+    }
+
+    #[test]
+    fn test_description_list() {
+        let dl = DescriptionList::new()
+            .item("Name", "Zed")
+            .item("Version", "0.1.0")
+            .item("License", "MIT");
+        let lines = dl.render();
+
+        // Should have 3 terms + 3 descriptions + 2 blank lines = 8 lines
+        assert_eq!(lines.len(), 8);
+    }
+
+    #[test]
+    fn test_description_list_compact() {
+        let dl = DescriptionList::new()
+            .item("Name", "Zed")
+            .item("Version", "0.1.0")
+            .compact(true);
+        let lines = dl.render();
+
+        // Compact mode: 2 terms + 2 descriptions = 4 lines (no blank lines)
+        assert_eq!(lines.len(), 4);
+    }
+
+    #[test]
+    fn test_description_list_variant() {
+        let dl = DescriptionList::new()
+            .item("Key", "Value")
+            .variant(Variant::Success);
+        let lines = dl.render();
+
+        assert!(!lines.is_empty());
+    }
+
+    #[test]
+    fn test_description_list_multiline_description() {
+        let dl = DescriptionList::new().item("Description", "Line 1\nLine 2\nLine 3");
+        let lines = dl.render();
+
+        // 1 term + 3 description lines = 4 lines
+        assert_eq!(lines.len(), 4);
+    }
+
+    #[test]
+    fn test_description_list_items_method() {
+        let items = vec![("Key1", "Value1"), ("Key2", "Value2")];
+        let dl = DescriptionList::new().items(items);
+        let lines = dl.render();
+
+        // 2 terms + 2 descriptions + 1 blank line = 5 lines
+        assert_eq!(lines.len(), 5);
+    }
+
+    #[test]
+    fn test_code_inline() {
+        let span = code("npm install");
+        // Verify it returns a Span (compilation test mainly)
+        assert!(span.content().len() > 0);
+    }
+
+    #[test]
+    fn test_mark_inline() {
+        let span = mark("important");
+        assert!(span.content().len() > 0);
+    }
+
+    #[test]
+    fn test_small_inline() {
+        let span = small("© 2024");
+        assert!(span.content().len() > 0);
+    }
+
+    #[test]
+    fn test_del_inline() {
+        let span = del("obsolete");
+        assert!(span.content().len() > 0);
+    }
+
+    #[test]
+    fn test_ins_inline() {
+        let span = ins("new feature");
+        assert!(span.content().len() > 0);
+    }
+
+    #[test]
+    fn test_kbd_inline() {
+        let span = kbd("Ctrl+C");
+        assert!(span.content().len() > 0);
+    }
+
+    #[test]
+    fn test_var_inline() {
+        let span = var("user_name");
+        assert!(span.content().len() > 0);
+    }
+
+    #[test]
+    fn test_samp_inline() {
+        let span = samp("Command output");
+        assert!(span.content().len() > 0);
+    }
+
+    #[test]
+    fn test_subscript_conversion() {
+        let result = convert_to_subscript("0123456789");
+        assert_eq!(result, "₀₁₂₃₄₅₆₇₈₉");
+
+        let result = convert_to_subscript("H2O");
+        assert_eq!(result, "H₂O");
+
+        // Note: 'x' and 'n' both have subscript equivalents
+        let result = convert_to_subscript("x(n+1)");
+        assert_eq!(result, "ₓ₍ₙ₊₁₎");
+    }
+
+    #[test]
+    fn test_superscript_conversion() {
+        let result = convert_to_superscript("0123456789");
+        assert_eq!(result, "⁰¹²³⁴⁵⁶⁷⁸⁹");
+
+        let result = convert_to_superscript("E=mc2");
+        assert_eq!(result, "E⁼mc²");
+
+        // Note: 'n' has superscript equivalent, but not other letters
+        let result = convert_to_superscript("x(n+1)");
+        assert_eq!(result, "x⁽ⁿ⁺¹⁾");
+    }
+
+    #[test]
+    fn test_sub_text_inline() {
+        let span = sub_text("2");
+        assert_eq!(span.content(), "₂");
+    }
+
+    #[test]
+    fn test_sup_text_inline() {
+        let span = sup_text("2");
+        assert_eq!(span.content(), "²");
+    }
+
+    #[test]
+    fn test_subscript_preserves_unknown_chars() {
+        let result = convert_to_subscript("ABC");
+        assert_eq!(result, "ABC"); // A, B, C don't have subscript equivalents
+    }
+
+    #[test]
+    fn test_superscript_preserves_unknown_chars() {
+        let result = convert_to_superscript("ABC");
+        assert_eq!(result, "ABC"); // A, B, C don't have superscript equivalents (except i and n)
     }
 }
