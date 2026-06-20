@@ -63,6 +63,7 @@ impl ConsoleWriter for Writer {
             position: 0,
             total,
             start_time: std::time::Instant::now(),
+            variant: ui::Variant::Info,
         });
     }
 
@@ -77,6 +78,7 @@ impl ConsoleWriter for Writer {
                 position: 0,
                 total,
                 start_time: std::time::Instant::now(),
+                variant: ui::Variant::Info,
             },
         );
     }
