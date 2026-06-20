@@ -17,8 +17,8 @@ pub use process::{ExecuteOptions, ExecuteResult, LogHeader, get_log_divider};
 pub use secrets::Secrets;
 pub use superconsole::{Line, Span};
 pub use typography::{
-    bold_style, danger_style, default_style, format_duration, info_style, primary_style,
-    success_style, warning_style,
+    bold_style, danger_style, dark_style, default_style, format_duration, info_style, light_style,
+    primary_style, secondary_style, success_style, warning_style,
 };
 pub use verbosity::{Level, Verbosity};
 use writer::ConsoleWriter;

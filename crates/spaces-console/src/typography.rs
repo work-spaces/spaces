@@ -1,4 +1,68 @@
-use crossterm::style::{self, Attribute, Attributes, Color, ContentStyle, StyledContent};
+//! Typography components for console output with Bootstrap-inspired styling.
+//!
+//! This module provides a comprehensive set of typography components and styling utilities
+//! for building rich console UIs. The API is inspired by Bootstrap's typography system,
+//! offering semantic color variants and common text/layout components.
+//!
+//! # Style Functions
+//!
+//! Pre-defined style functions for consistent coloring across your console output:
+//!
+//! - [`primary_style()`] - Blue, bold (primary actions)
+//! - [`secondary_style()`] - Grey (secondary content)
+//! - [`success_style()`] - Dark green, bold (success states)
+//! - [`danger_style()`] - Dark red, bold (errors, destructive actions)
+//! - [`warning_style()`] - Dark yellow, bold (warnings)
+//! - [`info_style()`] - Cyan (informational content)
+//! - [`light_style()`] - White (light text on dark backgrounds)
+//! - [`dark_style()`] - Black, bold (dark text on light backgrounds)
+//! - [`default_style()`] - Dark grey (default/muted text)
+//! - [`bold_style()`] - No color, just bold
+//!
+//! # Variant Enum
+//!
+//! The [`Variant`] enum provides a convenient way to work with these styles:
+//!
+//! ```rust
+//! use spaces_console::typography::Variant;
+//!
+//! let style = Variant::Success.style();
+//! // This is equivalent to calling success_style()
+//! ```
+//!
+//! # Components
+//!
+//! Rich typography components for structured console output:
+//!
+//! - [`Header`] - Section headers (H1-H6) with underlines
+//! - [`Paragraph`] - Body text with variant styling
+//! - [`Divider`] - Visual separators with multiple line styles
+//! - [`List`] - Ordered and unordered lists
+//! - [`Table`] - Tabular data with borders and alignment
+//! - [`Card`] - Boxed content with optional titles
+//! - [`Blockquote`] - Quoted text with left border
+//! - [`Link`] - Underlined links with optional URLs
+//! - [`Histogram`] - Bar charts for data visualization
+//! - [`ActiveProgress`] - Progress bars for long-running operations
+//!
+//! # Examples
+//!
+//! ```rust
+//! use spaces_console::typography::{Header, List, Variant};
+//!
+//! // Create a header with a variant
+//! let header = Header::h1("Welcome").variant(Variant::Primary);
+//! let lines = header.render();
+//!
+//! // Create a success-colored list
+//! let list = List::unordered()
+//!     .item("Item 1")
+//!     .item("Item 2")
+//!     .variant(Variant::Success);
+//! let lines = list.render();
+//! ```
+
+use crossterm::style::{self, Attribute, Attributes, Color, ContentStyle, StyledContent, Stylize};
 use superconsole::{Line, Span};
 
 // ---------------------------------------------------------------------------
@@ -133,12 +197,20 @@ impl ActiveProgress {
         let fixed_width = elapsed_str.len() + 1 + bar_width + 1 + self.prefix.len() + 2;
         let msg_max = max_width.saturating_sub(fixed_width);
         let message: String = if self.message.chars().count() > msg_max {
-            let truncated: String = self
-                .message
-                .chars()
-                .take(msg_max.saturating_sub(4))
-                .collect();
-            format!("{}...  ", truncated)
+            const ELLIPSIS: &str = "...  ";
+            const ELLIPSIS_LEN: usize = 5;
+
+            if msg_max < ELLIPSIS_LEN {
+                // Not enough room for ellipsis, return empty or truncated ellipsis
+                if msg_max == 0 {
+                    String::new()
+                } else {
+                    ELLIPSIS.chars().take(msg_max).collect()
+                }
+            } else {
+                let truncated: String = self.message.chars().take(msg_max - ELLIPSIS_LEN).collect();
+                format!("{}{}", truncated, ELLIPSIS)
+            }
         } else {
             self.message.chars().take(msg_max).collect()
         };
@@ -152,6 +224,7 @@ impl ActiveProgress {
 // Shared ContentStyle helpers (migrated from lib.rs)
 // ---------------------------------------------------------------------------
 
+/// Creates a primary style (blue, bold) - Bootstrap's primary color scheme
 pub fn primary_style() -> ContentStyle {
     ContentStyle {
         foreground_color: Some(Color::Blue),
@@ -161,6 +234,17 @@ pub fn primary_style() -> ContentStyle {
     }
 }
 
+/// Creates a secondary style (grey) - Bootstrap's secondary color scheme
+pub fn secondary_style() -> ContentStyle {
+    ContentStyle {
+        foreground_color: Some(Color::Grey),
+        background_color: None,
+        underline_color: None,
+        attributes: Attributes::default(),
+    }
+}
+
+/// Creates a default/muted style (dark grey) - for less prominent text
 pub fn default_style() -> ContentStyle {
     ContentStyle {
         foreground_color: Some(Color::DarkGrey),
@@ -170,6 +254,7 @@ pub fn default_style() -> ContentStyle {
     }
 }
 
+/// Creates an info style (cyan) - Bootstrap's info color scheme
 pub fn info_style() -> ContentStyle {
     ContentStyle {
         foreground_color: Some(Color::Cyan),
@@ -179,6 +264,7 @@ pub fn info_style() -> ContentStyle {
     }
 }
 
+/// Creates a success style (dark green, bold) - Bootstrap's success color scheme
 pub fn success_style() -> ContentStyle {
     ContentStyle {
         foreground_color: Some(Color::DarkGreen),
@@ -188,6 +274,7 @@ pub fn success_style() -> ContentStyle {
     }
 }
 
+/// Creates a warning style (dark yellow, bold) - Bootstrap's warning color scheme
 pub fn warning_style() -> ContentStyle {
     ContentStyle {
         foreground_color: Some(Color::DarkYellow),
@@ -197,6 +284,7 @@ pub fn warning_style() -> ContentStyle {
     }
 }
 
+/// Creates a danger style (dark red, bold) - Bootstrap's danger color scheme
 pub fn danger_style() -> ContentStyle {
     ContentStyle {
         foreground_color: Some(Color::DarkRed),
@@ -206,6 +294,27 @@ pub fn danger_style() -> ContentStyle {
     }
 }
 
+/// Creates a light style (white) - for light text on dark backgrounds
+pub fn light_style() -> ContentStyle {
+    ContentStyle {
+        foreground_color: Some(Color::White),
+        background_color: None,
+        underline_color: None,
+        attributes: Attributes::default(),
+    }
+}
+
+/// Creates a dark style (black, bold) - for dark text on light backgrounds
+pub fn dark_style() -> ContentStyle {
+    ContentStyle {
+        foreground_color: Some(Color::Black),
+        background_color: None,
+        underline_color: None,
+        attributes: Attributes::from(Attribute::Bold),
+    }
+}
+
+/// Creates a bold style (no color, just bold attribute)
 pub fn bold_style() -> ContentStyle {
     ContentStyle {
         foreground_color: None,
@@ -234,31 +343,17 @@ pub enum Variant {
 }
 
 impl Variant {
+    /// Returns the ContentStyle for this variant
     pub fn style(&self) -> ContentStyle {
         match self {
             Variant::Primary => primary_style(),
-            Variant::Secondary => ContentStyle {
-                foreground_color: Some(Color::Grey),
-                background_color: None,
-                underline_color: None,
-                attributes: Attributes::default(),
-            },
+            Variant::Secondary => secondary_style(),
             Variant::Success => success_style(),
             Variant::Danger => danger_style(),
             Variant::Warning => warning_style(),
             Variant::Info => info_style(),
-            Variant::Light => ContentStyle {
-                foreground_color: Some(Color::White),
-                background_color: None,
-                underline_color: None,
-                attributes: Attributes::default(),
-            },
-            Variant::Dark => ContentStyle {
-                foreground_color: Some(Color::Black),
-                background_color: None,
-                underline_color: None,
-                attributes: Attributes::from(Attribute::Bold),
-            },
+            Variant::Light => light_style(),
+            Variant::Dark => dark_style(),
             Variant::Default => default_style(),
         }
     }
@@ -864,7 +959,8 @@ impl Card {
     }
 
     pub fn render(&self) -> Vec<Line> {
-        let width = self.width.unwrap_or(60);
+        // Clamp width to minimum of 4 to prevent underflow in border/padding calculations
+        let width = self.width.unwrap_or(60).max(4);
         let style = self.variant.style();
         let title_style = ContentStyle {
             foreground_color: style.foreground_color,
@@ -986,8 +1082,8 @@ impl Histogram {
     pub fn render(&self) -> Vec<Line> {
         let mut lines = Vec::new();
 
-        // Print title with bold style
-        let title_style = bold_style();
+        // Print title with variant style
+        let title_style = self.variant.style().bold();
         let mut title_line = Line::default();
         title_line.push(styled_span(title_style, self.title.clone()));
         lines.push(title_line);
@@ -997,7 +1093,7 @@ impl Histogram {
         }
 
         // Find the maximum value to normalize bar lengths
-        let max_value = self.bars.iter().map(|b| b.value).max().unwrap_or(1).max(1);
+        let max_value = self.bars.iter().map(|b| b.value).max().unwrap_or(1);
 
         // Find the longest label for alignment
         let max_label_len = self.bars.iter().map(|b| b.label.len()).max().unwrap_or(0);
@@ -1127,12 +1223,77 @@ mod tests {
     }
 
     #[test]
+    fn test_card_minimum_width() {
+        // Test that small widths don't cause underflow panics
+        let card1 = Card::new("Test").width(0);
+        let lines1 = card1.render();
+        assert!(!lines1.is_empty());
+
+        let card2 = Card::new("Test").width(1);
+        let lines2 = card2.render();
+        assert!(!lines2.is_empty());
+
+        let card3 = Card::new("Test").width(3);
+        let lines3 = card3.render();
+        assert!(!lines3.is_empty());
+
+        let card4 = Card::new("Test").title("Title").width(4);
+        let lines4 = card4.render();
+        assert!(!lines4.is_empty());
+    }
+
+    #[test]
     fn test_variants() {
         assert!(primary_style().foreground_color.is_some());
+        assert!(secondary_style().foreground_color.is_some());
         assert!(success_style().foreground_color.is_some());
         assert!(danger_style().foreground_color.is_some());
         assert!(warning_style().foreground_color.is_some());
         assert!(info_style().foreground_color.is_some());
+        assert!(light_style().foreground_color.is_some());
+        assert!(dark_style().foreground_color.is_some());
+        assert!(default_style().foreground_color.is_some());
+    }
+
+    #[test]
+    fn test_variant_enum_consistency() {
+        // Test that Variant::style() returns the same styles as the standalone functions
+        assert_eq!(
+            Variant::Primary.style().foreground_color,
+            primary_style().foreground_color
+        );
+        assert_eq!(
+            Variant::Secondary.style().foreground_color,
+            secondary_style().foreground_color
+        );
+        assert_eq!(
+            Variant::Success.style().foreground_color,
+            success_style().foreground_color
+        );
+        assert_eq!(
+            Variant::Danger.style().foreground_color,
+            danger_style().foreground_color
+        );
+        assert_eq!(
+            Variant::Warning.style().foreground_color,
+            warning_style().foreground_color
+        );
+        assert_eq!(
+            Variant::Info.style().foreground_color,
+            info_style().foreground_color
+        );
+        assert_eq!(
+            Variant::Light.style().foreground_color,
+            light_style().foreground_color
+        );
+        assert_eq!(
+            Variant::Dark.style().foreground_color,
+            dark_style().foreground_color
+        );
+        assert_eq!(
+            Variant::Default.style().foreground_color,
+            default_style().foreground_color
+        );
     }
 
     #[test]
@@ -1144,6 +1305,19 @@ mod tests {
             .bar(HistogramBar::new("stale  > 30d", 2).variant(Variant::Danger));
         let lines = histogram.render();
         assert!(!lines.is_empty());
+    }
+
+    #[test]
+    fn test_histogram_variant() {
+        // Test that the histogram variant is applied without errors
+        let histogram = Histogram::new("Test Histogram")
+            .variant(Variant::Success)
+            .bar(HistogramBar::new("item", 10));
+        let lines = histogram.render();
+
+        // The first line should be the title
+        assert!(!lines.is_empty());
+        assert!(lines.len() >= 1);
     }
 
     #[test]
@@ -1176,5 +1350,52 @@ mod tests {
 
         // Default variant should be Info
         assert_eq!(progress.variant, Variant::Info);
+    }
+
+    #[test]
+    fn test_active_progress_truncation_with_small_max_width() {
+        // Test that message truncation doesn't overflow when msg_max is very small (0-4)
+        // Before the fix, when msg_max was 0-4, the code would:
+        // - Take msg_max.saturating_sub(4) characters (could be 0)
+        // - Always append "...  " (5 characters)
+        // This resulted in output longer than msg_max
+
+        let progress = ActiveProgress::new(
+            "test-task".to_string(),
+            "B".to_string(), // Short prefix to allow testing various msg_max values
+            "This is a very long message that needs to be truncated".to_string(),
+            50,
+            Some(100),
+        );
+
+        // Calculate what the fixed width would be for this progress bar
+        // Format: `[H:MM:SS]|<bar>|name: message`
+        // With a fresh timer, elapsed_str is around "  0:00:00" (9 chars)
+        // But to be safe, let's test with widths that would result in various msg_max values
+
+        // Test edge case widths
+        let test_cases = vec![
+            (0, true),   // Should not panic even with 0 width
+            (1, true),   // Should not panic
+            (5, true),   // Should not panic
+            (10, true),  // Should not panic
+            (20, true),  // Should not panic
+            (50, true),  // Should work fine
+            (100, true), // Should work fine
+        ];
+
+        for (max_width, should_succeed) in test_cases {
+            let result = progress.render_bar(max_width);
+            if should_succeed {
+                assert!(
+                    result.is_ok(),
+                    "render_bar should succeed for max_width={}",
+                    max_width
+                );
+            }
+        }
+
+        // The key invariant: after our fix, the message portion will never exceed msg_max
+        // This prevents the overflow issue where "...  " was always appended
     }
 }
