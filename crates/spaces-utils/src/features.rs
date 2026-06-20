@@ -221,7 +221,7 @@ impl FeaturesCommand {
                     .save(store_path)
                     .context(format_context!("while saving features to store"))?;
                 let styled_message = style::StyledContent::new(
-                    console::name_style(),
+                    console::primary_style(),
                     format!("Enabled feature: {}", feature.into_kebab_case()),
                 );
                 console.info("Status", styled_message)?;
@@ -234,7 +234,7 @@ impl FeaturesCommand {
                     .save(store_path)
                     .context(format_context!("while saving features to store"))?;
                 let styled_message = style::StyledContent::new(
-                    console::name_style(),
+                    console::primary_style(),
                     format!("Disabled feature: {}", feature.into_kebab_case()),
                 );
                 console.info("Status", styled_message)?;
@@ -243,7 +243,7 @@ impl FeaturesCommand {
             FeaturesCommand::Info => {
                 let features = Features::new_from_json(store_path)?;
 
-                let title = style::StyledContent::new(console::total_style(), "Feature Status:");
+                let title = style::StyledContent::new(console::bold_style(), "Feature Status:");
                 console.raw(format!("{}\n", title))?;
                 console.raw(format!("{}\n", "━".repeat(30)))?;
 
@@ -252,20 +252,20 @@ impl FeaturesCommand {
                 for &feature in Feature::value_variants() {
                     let (enabled, source) = features.get_status_with_source(feature);
                     let feature_name = style::StyledContent::new(
-                        console::name_style(),
+                        console::primary_style(),
                         format!("{}", feature.into_kebab_case()),
                     );
 
                     let status_style = if enabled {
-                        console::name_style()
+                        console::primary_style()
                     } else {
-                        console::key_style()
+                        console::default_style()
                     };
                     let status = if enabled { "ON" } else { "OFF" };
                     let status_styled = style::StyledContent::new(status_style, status);
 
                     let source_styled =
-                        style::StyledContent::new(console::keyword_style(), format!("{}", source));
+                        style::StyledContent::new(console::danger_style(), format!("{}", source));
 
                     console.raw(format!(
                         "  {} - {} ({})\n",

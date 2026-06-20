@@ -1162,7 +1162,7 @@ fn age_style(age_days: u128) -> ContentStyle {
 fn emit_separator(console: &console::Console, width: usize) {
     let mut line = console::Line::default();
     line.push(console::Span::new_styled_lossy(StyledContent::new(
-        console::key_style(),
+        console::default_style(),
         "─".repeat(width),
     )));
     console.emit_line(line);
@@ -1187,7 +1187,7 @@ fn emit_pretty_summary(
     {
         let mut line = console::Line::default();
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::key_style(),
+            console::default_style(),
             format!("  {:<12}", "Managed"),
         )));
         line.push(console::Span::new_unstyled_lossy(format!(
@@ -1202,7 +1202,7 @@ fn emit_pretty_summary(
     {
         let mut line = console::Line::default();
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::key_style(),
+            console::default_style(),
             format!("  {:<12}", "Unmanaged"),
         )));
         line.push(console::Span::new_unstyled_lossy(format!(
@@ -1222,7 +1222,7 @@ fn emit_pretty_summary(
         if entries_with_links > 0 || entries_with_stale > 0 {
             let mut line = console::Line::default();
             line.push(console::Span::new_styled_lossy(StyledContent::new(
-                console::key_style(),
+                console::default_style(),
                 format!("  {:<12}", "Workspaces"),
             )));
             line.push(console::Span::new_unstyled_lossy(format!(
@@ -1231,7 +1231,7 @@ fn emit_pretty_summary(
             )));
             if entries_with_stale > 0 {
                 line.push(console::Span::new_styled_lossy(StyledContent::new(
-                    console::warning_style(),
+                    console::danger_style(),
                     format!("   ({} with stale links)", entries_with_stale),
                 )));
             }
@@ -1243,7 +1243,7 @@ fn emit_pretty_summary(
     {
         let mut line = console::Line::default();
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::total_style(),
+            console::bold_style(),
             format!(
                 "  {:<12}{:>4} entries   {}",
                 "Total",
@@ -1253,7 +1253,7 @@ fn emit_pretty_summary(
         )));
         if is_fix_needed {
             line.push(console::Span::new_styled_lossy(StyledContent::new(
-                console::warning_style(),
+                console::danger_style(),
                 "   !! run `spaces store fix`".to_owned(),
             )));
         }
@@ -1278,7 +1278,7 @@ fn emit_pretty_age_histogram(console: &console::Console, entries: &[StoreInfoEnt
 
     let mut heading = console::Line::default();
     heading.push(console::Span::new_styled_lossy(StyledContent::new(
-        console::total_style(),
+        console::bold_style(),
         "Age distribution".to_owned(),
     )));
     console.emit_line(heading);
@@ -1292,7 +1292,7 @@ fn emit_pretty_age_histogram(console: &console::Console, entries: &[StoreInfoEnt
         let bar = "█".repeat(bar_len);
         let mut line = console::Line::default();
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::key_style(),
+            console::default_style(),
             format!("  {label}  "),
         )));
         line.push(console::Span::new_styled_lossy(StyledContent::new(
@@ -1316,7 +1316,7 @@ fn emit_top_entries_group(console: &console::Console, heading: &str, entries: &[
 
     let mut heading_line = console::Line::default();
     heading_line.push(console::Span::new_styled_lossy(StyledContent::new(
-        console::total_style(),
+        console::bold_style(),
         heading.to_owned(),
     )));
     console.emit_line(heading_line);
@@ -1327,7 +1327,7 @@ fn emit_top_entries_group(console: &console::Console, heading: &str, entries: &[
         let size_str = ByteSize(entry.size_bytes).display().to_string();
         let mut line = console::Line::default();
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::name_style(),
+            console::primary_style(),
             format!("  {:<name_width$}", entry.path),
         )));
         line.push(console::Span::new_unstyled_lossy(format!(
@@ -1335,7 +1335,7 @@ fn emit_top_entries_group(console: &console::Console, heading: &str, entries: &[
         )));
         if entry.path_missing || entry.size_bytes == 0 {
             line.push(console::Span::new_styled_lossy(StyledContent::new(
-                console::warning_style(),
+                console::danger_style(),
                 "  !!".to_owned(),
             )));
         }
@@ -1363,7 +1363,7 @@ fn emit_pretty_issues(console: &console::Console, entries: &[StoreInfoEntry]) {
 
     let mut heading = console::Line::default();
     heading.push(console::Span::new_styled_lossy(StyledContent::new(
-        console::warning_style(),
+        console::danger_style(),
         format!("Issues  ({} entries need attention)", issues.len()),
     )));
     console.emit_line(heading);
@@ -1376,7 +1376,7 @@ fn emit_pretty_issues(console: &console::Console, entries: &[StoreInfoEntry]) {
             "size is zero"
         };
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::warning_style(),
+            console::danger_style(),
             format!("  !! {reason:<22}"),
         )));
         line.push(console::Span::new_unstyled_lossy(&entry.path));
@@ -1516,7 +1516,7 @@ fn serialise_bare_info_yaml(
 fn bare_separator(console: &console::Console, width: usize) {
     let mut line = console::Line::default();
     line.push(console::Span::new_styled_lossy(StyledContent::new(
-        console::key_style(),
+        console::default_style(),
         "─".repeat(width),
     )));
     console.emit_line(line);
@@ -1533,7 +1533,7 @@ fn emit_pretty_bare_info(
     {
         let mut line = console::Line::default();
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::total_style(),
+            console::bold_style(),
             "Bare Repositories".to_owned(),
         )));
         console.emit_line(line);
@@ -1543,7 +1543,7 @@ fn emit_pretty_bare_info(
     {
         let mut line = console::Line::default();
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::key_style(),
+            console::default_style(),
             format!("  {:<14}", "Total Size"),
         )));
         line.push(console::Span::new_unstyled_lossy(format!(
@@ -1557,7 +1557,7 @@ fn emit_pretty_bare_info(
     {
         let mut line = console::Line::default();
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::key_style(),
+            console::default_style(),
             format!("  {:<14}", "Workspaces"),
         )));
         line.push(console::Span::new_unstyled_lossy(format!(
@@ -1571,7 +1571,7 @@ fn emit_pretty_bare_info(
     {
         let mut line = console::Line::default();
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::key_style(),
+            console::default_style(),
             format!("  {:<14}", "Repos Checked"),
         )));
         line.push(console::Span::new_unstyled_lossy(format!(
@@ -1585,14 +1585,14 @@ fn emit_pretty_bare_info(
     {
         let mut line = console::Line::default();
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::key_style(),
+            console::default_style(),
             format!("  {:<14}", "Health"),
         )));
         if repos_with_problems == 0 {
             line.push(console::Span::new_unstyled_lossy("ok"));
         } else {
             line.push(console::Span::new_styled_lossy(StyledContent::new(
-                console::warning_style(),
+                console::danger_style(),
                 format!(
                     "{} repos have problems   !! re-clone affected repos",
                     repos_with_problems

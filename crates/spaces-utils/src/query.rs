@@ -626,7 +626,7 @@ fn push_highlighted_value(
         if highlighted != current_highlighted {
             if current_highlighted {
                 line.push(console::Span::new_styled_lossy(StyledContent::new(
-                    console::keyword_style(),
+                    console::danger_style(),
                     std::mem::take(&mut chunk),
                 )));
             } else {
@@ -641,7 +641,7 @@ fn push_highlighted_value(
 
     if current_highlighted {
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::keyword_style(),
+            console::danger_style(),
             chunk,
         )));
     } else {
@@ -653,7 +653,7 @@ fn make_name_line(name: &str, highlight_terms: Option<&[Arc<str>]>) -> console::
     let mut line = console::Line::default();
     let Some(highlight_terms) = highlight_terms.filter(|terms| !terms.is_empty()) else {
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::name_style(),
+            console::primary_style(),
             name.to_owned(),
         )));
         return line;
@@ -663,7 +663,7 @@ fn make_name_line(name: &str, highlight_terms: Option<&[Arc<str>]>) -> console::
     let highlights = query_highlight_mask(name, highlight_terms);
     if !highlights.iter().any(|highlighted| *highlighted) {
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::name_style(),
+            console::primary_style(),
             name.to_owned(),
         )));
         return line;
@@ -675,12 +675,12 @@ fn make_name_line(name: &str, highlight_terms: Option<&[Arc<str>]>) -> console::
         if highlighted != current_highlighted {
             if current_highlighted {
                 line.push(console::Span::new_styled_lossy(StyledContent::new(
-                    console::keyword_style(),
+                    console::danger_style(),
                     std::mem::take(&mut chunk),
                 )));
             } else {
                 line.push(console::Span::new_styled_lossy(StyledContent::new(
-                    console::name_style(),
+                    console::primary_style(),
                     std::mem::take(&mut chunk),
                 )));
             }
@@ -691,12 +691,12 @@ fn make_name_line(name: &str, highlight_terms: Option<&[Arc<str>]>) -> console::
 
     if current_highlighted {
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::keyword_style(),
+            console::danger_style(),
             chunk,
         )));
     } else {
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::name_style(),
+            console::primary_style(),
             chunk,
         )));
     }
@@ -706,7 +706,7 @@ fn make_name_line(name: &str, highlight_terms: Option<&[Arc<str>]>) -> console::
 fn make_kv_line(key: &str, value: &str, highlight_terms: Option<&[Arc<str>]>) -> console::Line {
     let mut line = console::Line::default();
     line.push(console::Span::new_styled_lossy(StyledContent::new(
-        console::key_style(),
+        console::default_style(),
         format!("  {key:<8}"),
     )));
     push_highlighted_value(&mut line, value, highlight_terms);

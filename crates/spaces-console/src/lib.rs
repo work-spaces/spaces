@@ -35,16 +35,16 @@ pub enum Format {
 // Shared ContentStyle helpers
 // ---------------------------------------------------------------------------
 
-pub fn name_style() -> style::ContentStyle {
+pub fn primary_style() -> style::ContentStyle {
     style::ContentStyle {
-        foreground_color: Some(style::Color::Cyan),
+        foreground_color: Some(style::Color::Blue),
         background_color: None,
         underline_color: None,
         attributes: style::Attributes::from(style::Attribute::Bold),
     }
 }
 
-pub fn key_style() -> style::ContentStyle {
+pub fn default_style() -> style::ContentStyle {
     style::ContentStyle {
         foreground_color: Some(style::Color::DarkGrey),
         background_color: None,
@@ -53,9 +53,18 @@ pub fn key_style() -> style::ContentStyle {
     }
 }
 
-pub fn keyword_style() -> style::ContentStyle {
+pub fn info_style() -> style::ContentStyle {
     style::ContentStyle {
-        foreground_color: Some(style::Color::DarkYellow),
+        foreground_color: Some(style::Color::Cyan),
+        background_color: None,
+        underline_color: None,
+        attributes: style::Attributes::default(),
+    }
+}
+
+pub fn success_style() -> style::ContentStyle {
+    style::ContentStyle {
+        foreground_color: Some(style::Color::DarkGreen),
         background_color: None,
         underline_color: None,
         attributes: style::Attributes::from(style::Attribute::Bold),
@@ -64,6 +73,15 @@ pub fn keyword_style() -> style::ContentStyle {
 
 pub fn warning_style() -> style::ContentStyle {
     style::ContentStyle {
+        foreground_color: Some(style::Color::DarkYellow),
+        background_color: None,
+        underline_color: None,
+        attributes: style::Attributes::from(style::Attribute::Bold),
+    }
+}
+
+pub fn danger_style() -> style::ContentStyle {
+    style::ContentStyle {
         foreground_color: Some(style::Color::DarkRed),
         background_color: None,
         underline_color: None,
@@ -71,7 +89,7 @@ pub fn warning_style() -> style::ContentStyle {
     }
 }
 
-pub fn total_style() -> style::ContentStyle {
+pub fn bold_style() -> style::ContentStyle {
     style::ContentStyle {
         foreground_color: None,
         background_color: None,
@@ -142,7 +160,7 @@ pub fn format_log_file_summary(log_contents: &str, log_file_path: &str) -> (Vec<
             let mut title_line = Line::default();
             title_line.push(Span::new_unstyled_lossy(format!("{}  ", "═".repeat(25))));
             title_line.push(Span::new_styled_lossy(style::StyledContent::new(
-                warning_style(),
+                danger_style(),
                 "Failed".to_owned(),
             )));
             title_line.push(Span::new_unstyled_lossy(format!("  {}", "═".repeat(25))));
@@ -151,19 +169,19 @@ pub fn format_log_file_summary(log_contents: &str, log_file_path: &str) -> (Vec<
             let labeled_line = |label: &str, value_style: style::ContentStyle, value: String| {
                 let styled = |s, t: String| Span::new_styled_lossy(style::StyledContent::new(s, t));
                 let mut line = Line::default();
-                line.push(styled(key_style(), label.to_owned()));
+                line.push(styled(default_style(), label.to_owned()));
                 line.push(styled(value_style, value));
                 line
             };
 
             let cmd_line = labeled_line(
                 "command: ",
-                name_style(),
+                primary_style(),
                 format!("{} {}", header.command, args),
             );
             let dir_line = labeled_line(
                 "working directory: ",
-                keyword_style(),
+                warning_style(),
                 working_dir.to_owned(),
             );
 

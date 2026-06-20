@@ -550,7 +550,7 @@ fn serialise_rcache_info_yaml(
 fn rcache_separator(console: &console::Console, width: usize) {
     let mut line = console::Line::default();
     line.push(console::Span::new_styled_lossy(StyledContent::new(
-        console::key_style(),
+        console::default_style(),
         "─".repeat(width),
     )));
     console.emit_line(line);
@@ -568,7 +568,7 @@ fn emit_pretty_rcache_info(
     {
         let mut line = console::Line::default();
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::total_style(),
+            console::bold_style(),
             "Rule cache".to_owned(),
         )));
         console.emit_line(line);
@@ -578,7 +578,7 @@ fn emit_pretty_rcache_info(
     {
         let mut line = console::Line::default();
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::key_style(),
+            console::default_style(),
             format!("  {:<14}", ARTIFACT_CACHE_DIR),
         )));
         line.push(console::Span::new_unstyled_lossy(format!(
@@ -592,7 +592,7 @@ fn emit_pretty_rcache_info(
     {
         let mut line = console::Line::default();
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::key_style(),
+            console::default_style(),
             format!("  {:<14}", RULE_DIGEST_CACHE_DIR),
         )));
         line.push(console::Span::new_unstyled_lossy(format!(
@@ -606,7 +606,7 @@ fn emit_pretty_rcache_info(
     {
         let mut line = console::Line::default();
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::total_style(),
+            console::bold_style(),
             format!("  {:<14}{}", "Total", ByteSize(total_size).display()),
         )));
         console.emit_line(line);
