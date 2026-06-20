@@ -7,6 +7,7 @@ mod null;
 mod process;
 mod secrets;
 mod super_console;
+pub mod typography;
 pub mod ui;
 mod verbosity;
 mod writer;
@@ -15,7 +16,10 @@ pub use crossterm::style;
 pub use process::{ExecuteOptions, ExecuteResult, LogHeader, get_log_divider};
 pub use secrets::Secrets;
 pub use superconsole::{Line, Span};
-pub use ui::format_duration;
+pub use typography::{
+    bold_style, danger_style, dark_style, default_style, format_duration, info_style, light_style,
+    primary_style, secondary_style, success_style, warning_style,
+};
 pub use verbosity::{Level, Verbosity};
 use writer::ConsoleWriter;
 
@@ -32,71 +36,9 @@ pub enum Format {
 }
 
 // ---------------------------------------------------------------------------
-// Shared ContentStyle helpers
+// Shared ContentStyle helpers (now in typography module)
 // ---------------------------------------------------------------------------
-
-pub fn primary_style() -> style::ContentStyle {
-    style::ContentStyle {
-        foreground_color: Some(style::Color::Blue),
-        background_color: None,
-        underline_color: None,
-        attributes: style::Attributes::from(style::Attribute::Bold),
-    }
-}
-
-pub fn default_style() -> style::ContentStyle {
-    style::ContentStyle {
-        foreground_color: Some(style::Color::DarkGrey),
-        background_color: None,
-        underline_color: None,
-        attributes: style::Attributes::default(),
-    }
-}
-
-pub fn info_style() -> style::ContentStyle {
-    style::ContentStyle {
-        foreground_color: Some(style::Color::Cyan),
-        background_color: None,
-        underline_color: None,
-        attributes: style::Attributes::default(),
-    }
-}
-
-pub fn success_style() -> style::ContentStyle {
-    style::ContentStyle {
-        foreground_color: Some(style::Color::DarkGreen),
-        background_color: None,
-        underline_color: None,
-        attributes: style::Attributes::from(style::Attribute::Bold),
-    }
-}
-
-pub fn warning_style() -> style::ContentStyle {
-    style::ContentStyle {
-        foreground_color: Some(style::Color::DarkYellow),
-        background_color: None,
-        underline_color: None,
-        attributes: style::Attributes::from(style::Attribute::Bold),
-    }
-}
-
-pub fn danger_style() -> style::ContentStyle {
-    style::ContentStyle {
-        foreground_color: Some(style::Color::DarkRed),
-        background_color: None,
-        underline_color: None,
-        attributes: style::Attributes::from(style::Attribute::Bold),
-    }
-}
-
-pub fn bold_style() -> style::ContentStyle {
-    style::ContentStyle {
-        foreground_color: None,
-        background_color: None,
-        underline_color: None,
-        attributes: style::Attributes::from(style::Attribute::Bold),
-    }
-}
+// Re-exported from typography module above
 
 #[derive(strum::Display)]
 pub enum FinalType {
