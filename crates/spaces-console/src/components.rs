@@ -4,6 +4,16 @@ use superconsole::{Line, Span};
 use termwiz::cell::Hyperlink;
 
 // ---------------------------------------------------------------------------
+// Component Trait
+// ---------------------------------------------------------------------------
+
+/// A trait for all typography components that can be rendered to lines.
+pub trait Component {
+    /// Renders the component as a vector of lines.
+    fn render(&self) -> Vec<Line>;
+}
+
+// ---------------------------------------------------------------------------
 // Typography Mode Configuration
 // ---------------------------------------------------------------------------
 
@@ -199,6 +209,44 @@ fn get_blockquote_prefix() -> &'static str {
     }
 }
 
+/// Icon characters for status indicators.
+const ICON_SUCCESS_UNICODE: &str = "✓";
+const ICON_DANGER_UNICODE: &str = "x";
+const ICON_WARNING_UNICODE: &str = "▲";
+const ICON_INFO_UNICODE: &str = "ℹ";
+
+/// Returns a success icon (checkmark) in Unicode mode, empty string in ASCII mode.
+pub fn icon_success() -> &'static str {
+    match typography_mode() {
+        TypographyMode::Ascii => "",
+        TypographyMode::Unicode | TypographyMode::NerdFonts => ICON_SUCCESS_UNICODE,
+    }
+}
+
+/// Returns a danger icon (X mark) in Unicode mode, empty string in ASCII mode.
+pub fn icon_danger() -> &'static str {
+    match typography_mode() {
+        TypographyMode::Ascii => "",
+        TypographyMode::Unicode | TypographyMode::NerdFonts => ICON_DANGER_UNICODE,
+    }
+}
+
+/// Returns a warning icon (warning sign) in Unicode mode, empty string in ASCII mode.
+pub fn icon_warning() -> &'static str {
+    match typography_mode() {
+        TypographyMode::Ascii => "",
+        TypographyMode::Unicode | TypographyMode::NerdFonts => ICON_WARNING_UNICODE,
+    }
+}
+
+/// Returns an info icon (information symbol) in Unicode mode, empty string in ASCII mode.
+pub fn icon_info() -> &'static str {
+    match typography_mode() {
+        TypographyMode::Ascii => "",
+        TypographyMode::Unicode | TypographyMode::NerdFonts => ICON_INFO_UNICODE,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Duration formatting
 // ---------------------------------------------------------------------------
@@ -378,7 +426,7 @@ pub fn secondary_style() -> ContentStyle {
 /// Creates a default/muted style (dark grey) - for less prominent text
 pub fn default_style() -> ContentStyle {
     ContentStyle {
-        foreground_color: Some(Color::DarkGrey),
+        foreground_color: None,
         background_color: None,
         underline_color: None,
         attributes: Attributes::default(),
@@ -517,9 +565,6 @@ pub enum HeaderLevel {
     H1,
     H2,
     H3,
-    H4,
-    H5,
-    H6,
 }
 
 /// Header component for displaying titles and section headers
@@ -534,7 +579,7 @@ impl Header {
         Self {
             level,
             text: text.into(),
-            variant: Variant::Primary,
+            variant: Variant::Default,
         }
     }
 
@@ -550,26 +595,14 @@ impl Header {
         Self::new(HeaderLevel::H3, text)
     }
 
-    pub fn h4(text: impl Into<String>) -> Self {
-        Self::new(HeaderLevel::H4, text)
-    }
-
-    pub fn h5(text: impl Into<String>) -> Self {
-        Self::new(HeaderLevel::H5, text)
-    }
-
-    pub fn h6(text: impl Into<String>) -> Self {
-        Self::new(HeaderLevel::H6, text)
-    }
-
     pub fn variant(mut self, variant: Variant) -> Self {
         self.variant = variant;
         self
     }
 
     /// Render header as multiple lines (includes blank line before, underline for h1/h2, blank line after)
-    pub fn render(&self) -> Vec<Line> {
-        let style = self.variant.style();
+    fn render_impl(&self) -> Vec<Line> {
+        let style = self.variant.style().attribute(Attribute::Bold);
         let mut lines = Vec::new();
 
         // Blank line before
@@ -577,27 +610,7 @@ impl Header {
 
         // Main header line
         let mut header_line = Line::default();
-        match self.level {
-            HeaderLevel::H1 | HeaderLevel::H2 => {
-                header_line.push(styled_span(style, self.text.clone()));
-            }
-            HeaderLevel::H3 => {
-                header_line.push(unstyled_span("### ".to_string()));
-                header_line.push(styled_span(style, self.text.clone()));
-            }
-            HeaderLevel::H4 => {
-                header_line.push(unstyled_span("#### ".to_string()));
-                header_line.push(styled_span(style, self.text.clone()));
-            }
-            HeaderLevel::H5 => {
-                header_line.push(unstyled_span("##### ".to_string()));
-                header_line.push(styled_span(style, self.text.clone()));
-            }
-            HeaderLevel::H6 => {
-                header_line.push(unstyled_span("###### ".to_string()));
-                header_line.push(styled_span(style, self.text.clone()));
-            }
-        }
+        header_line.push(styled_span(style, self.text.clone()));
         lines.push(header_line);
 
         // Underline for H1 and H2
@@ -622,10 +635,17 @@ impl Header {
             _ => {}
         }
 
-        // Blank line after
-        lines.push(Line::default());
-
         lines
+    }
+
+    pub fn render(&self) -> Vec<Line> {
+        self.render_impl()
+    }
+}
+
+impl Component for Header {
+    fn render(&self) -> Vec<Line> {
+        self.render_impl()
     }
 }
 
@@ -683,7 +703,7 @@ impl Divider {
         }
     }
 
-    pub fn render(&self) -> Line {
+    fn render_line(&self) -> Line {
         let width = self.width.unwrap_or(80);
         let line_str = self.get_char().repeat(width);
         let style = self.variant.style();
@@ -691,6 +711,16 @@ impl Divider {
         let mut line = Line::default();
         line.push(styled_span(style, line_str));
         line
+    }
+
+    pub fn render(&self) -> Line {
+        self.render_line()
+    }
+}
+
+impl Component for Divider {
+    fn render(&self) -> Vec<Line> {
+        vec![self.render_line()]
     }
 }
 
@@ -723,11 +753,21 @@ impl Paragraph {
         self
     }
 
-    pub fn render(&self) -> Line {
+    fn render_line(&self) -> Line {
         let style = self.variant.style();
         let mut line = Line::default();
         line.push(styled_span(style, self.text.clone()));
         line
+    }
+
+    pub fn render(&self) -> Line {
+        self.render_line()
+    }
+}
+
+impl Component for Paragraph {
+    fn render(&self) -> Vec<Line> {
+        vec![self.render_line()]
     }
 }
 
@@ -761,7 +801,7 @@ impl AlignedText {
     }
 
     /// Render the aligned text
-    pub fn render(&self) -> Line {
+    fn render_line(&self) -> Line {
         let style = self.variant.style();
         let text_len = self.text.chars().count();
 
@@ -789,6 +829,16 @@ impl AlignedText {
         let mut line = Line::default();
         line.push(styled_span(style, aligned));
         line
+    }
+
+    pub fn render(&self) -> Line {
+        self.render_line()
+    }
+}
+
+impl Component for AlignedText {
+    fn render(&self) -> Vec<Line> {
+        vec![self.render_line()]
     }
 }
 
@@ -895,7 +945,7 @@ impl List {
         self
     }
 
-    pub fn render(&self) -> Vec<Line> {
+    fn render_impl(&self) -> Vec<Line> {
         let style = self.variant.style();
         let mut lines = Vec::new();
         let base_indent = "  ".repeat(self.indent_level);
@@ -914,7 +964,7 @@ impl List {
                                 TypographyMode::Ascii => "-",
                                 TypographyMode::Unicode | TypographyMode::NerdFonts => "•",
                             };
-                            format!("{}  {} ", base_indent, bullet)
+                            format!("{}{} ", base_indent, bullet)
                         }
                         ListStyle::Ordered => format!("{}  {}. ", base_indent, text_item_index),
                     };
@@ -932,6 +982,16 @@ impl List {
         }
 
         lines
+    }
+
+    pub fn render(&self) -> Vec<Line> {
+        self.render_impl()
+    }
+}
+
+impl Component for List {
+    fn render(&self) -> Vec<Line> {
+        self.render_impl()
     }
 }
 
@@ -984,7 +1044,7 @@ impl Link {
         self
     }
 
-    pub fn render(&self) -> Line {
+    fn render_line(&self) -> Line {
         let mut style = self.variant.style();
         style.attributes = style.attributes.with(Attribute::Underlined);
 
@@ -999,6 +1059,16 @@ impl Link {
         }
 
         line
+    }
+
+    pub fn render(&self) -> Line {
+        self.render_line()
+    }
+}
+
+impl Component for Link {
+    fn render(&self) -> Vec<Line> {
+        vec![self.render_line()]
     }
 }
 
@@ -1025,7 +1095,7 @@ impl Blockquote {
         self
     }
 
-    pub fn render(&self) -> Vec<Line> {
+    fn render_impl(&self) -> Vec<Line> {
         let style = self.variant.style();
         let mut lines = Vec::new();
         let prefix = get_blockquote_prefix();
@@ -1038,6 +1108,16 @@ impl Blockquote {
         }
 
         lines
+    }
+
+    pub fn render(&self) -> Vec<Line> {
+        self.render_impl()
+    }
+}
+
+impl Component for Blockquote {
+    fn render(&self) -> Vec<Line> {
+        self.render_impl()
     }
 }
 
@@ -1120,20 +1200,42 @@ impl DescriptionList {
         self
     }
 
-    pub fn render(&self) -> Vec<Line> {
+    fn render_impl(&self) -> Vec<Line> {
         let style = self.variant.style();
         let mut lines = Vec::new();
 
-        for (idx, item) in self.items.iter().enumerate() {
-            // Render term (bold and colored)
-            let mut term_line = Line::default();
-            term_line.push(styled_span(style.bold(), item.term.clone()));
-            lines.push(term_line);
+        // Calculate the maximum term width
+        let max_term_width = self
+            .items
+            .iter()
+            .map(|item| item.term.len())
+            .max()
+            .unwrap_or(0);
 
-            // Render description (indented)
-            for desc_line in item.description.lines() {
+        for (idx, item) in self.items.iter().enumerate() {
+            let desc_lines: Vec<&str> = item.description.lines().collect();
+            let term_width = item.term.len();
+
+            // First line: 2 spaces, term (left-justified), padding, then description
+            let mut first_line = Line::default();
+            first_line.push(unstyled_span("  ".to_string()));
+            first_line.push(styled_span(style.bold(), item.term.clone()));
+
+            // Padding to align descriptions: from end of term to description start
+            let padding = max_term_width - term_width + 2;
+
+            if let Some(first_desc) = desc_lines.first() {
+                first_line.push(unstyled_span(" ".repeat(padding)));
+                first_line.push(unstyled_span(first_desc.to_string()));
+            }
+            lines.push(first_line);
+
+            // Subsequent description lines (aligned with first description line)
+            for desc_line in desc_lines.iter().skip(1) {
                 let mut line = Line::default();
-                line.push(unstyled_span("  ".to_string()));
+                // Indent to align with description: 2 spaces + max_term_width + padding
+                let indent = 2 + max_term_width + 2;
+                line.push(unstyled_span(" ".repeat(indent)));
                 line.push(unstyled_span(desc_line.to_string()));
                 lines.push(line);
             }
@@ -1145,6 +1247,16 @@ impl DescriptionList {
         }
 
         lines
+    }
+
+    pub fn render(&self) -> Vec<Line> {
+        self.render_impl()
+    }
+}
+
+impl Component for DescriptionList {
+    fn render(&self) -> Vec<Line> {
+        self.render_impl()
     }
 }
 
@@ -1429,8 +1541,10 @@ pub enum Align {
 pub struct Table {
     headers: Vec<String>,
     rows: Vec<Vec<String>>,
+    footers: Vec<String>,
     alignments: Vec<Align>,
     variant: Variant,
+    width: Option<usize>,
 }
 
 impl Table {
@@ -1438,8 +1552,10 @@ impl Table {
         Self {
             headers: Vec::new(),
             rows: Vec::new(),
+            footers: Vec::new(),
             alignments: Vec::new(),
             variant: Variant::Default,
+            width: None,
         }
     }
 
@@ -1464,8 +1580,18 @@ impl Table {
         self
     }
 
+    pub fn footers(mut self, footers: Vec<String>) -> Self {
+        self.footers = footers;
+        self
+    }
+
     pub fn variant(mut self, variant: Variant) -> Self {
         self.variant = variant;
+        self
+    }
+
+    pub fn width(mut self, width: usize) -> Self {
+        self.width = Some(width);
         self
     }
 
@@ -1480,28 +1606,111 @@ impl Table {
             }
         }
 
+        if !self.footers.is_empty() {
+            for (i, cell) in self.footers.iter().enumerate() {
+                if i < widths.len() {
+                    widths[i] = widths[i].max(cell.len());
+                }
+            }
+        }
+
+        // Apply width constraint if specified
+        if let Some(target_width) = self.width {
+            let num_cols = widths.len();
+            if num_cols > 0 {
+                // Calculate current total width including borders and padding
+                // Format: | col1 | col2 | col3 |
+                // Each column has: 1 space + content + 1 space
+                // Plus: 1 border at start, 1 border between each column, 1 border at end
+                let borders_and_padding = 1 + num_cols * 3; // 1 leading + (space + content + space + |) per column
+                let available_content_width = target_width.saturating_sub(borders_and_padding);
+                let current_content_width: usize = widths.iter().sum();
+
+                if current_content_width != available_content_width {
+                    if current_content_width > available_content_width {
+                        // Need to shrink columns proportionally
+                        let scale = available_content_width as f64 / current_content_width as f64;
+                        let mut new_widths: Vec<usize> = widths
+                            .iter()
+                            .map(|w| ((*w as f64 * scale).floor() as usize).max(1))
+                            .collect();
+
+                        // Distribute any remaining width to ensure we use the full available space
+                        let new_total: usize = new_widths.iter().sum();
+                        let diff = available_content_width.saturating_sub(new_total);
+                        if diff > 0 {
+                            // Add extra width to the last column
+                            if let Some(last) = new_widths.last_mut() {
+                                *last += diff;
+                            }
+                        }
+
+                        widths = new_widths;
+                    } else {
+                        // Need to expand columns to fill the target width
+                        let extra_width = available_content_width - current_content_width;
+                        let per_col = extra_width / num_cols;
+                        let remainder = extra_width % num_cols;
+
+                        // Distribute extra width evenly
+                        for width in widths.iter_mut() {
+                            *width += per_col;
+                        }
+
+                        // Add remainder to the last columns
+                        for i in 0..remainder {
+                            if let Some(w) = widths.get_mut(num_cols - 1 - i) {
+                                *w += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         widths
     }
 
     fn format_cell(&self, content: &str, width: usize, align: Align) -> String {
+        let ellipsis = match typography_mode() {
+            TypographyMode::Ascii => "...",
+            _ => "…",
+        };
+        let ellipsis_len = ellipsis.chars().count();
+
+        // Truncate if content is too long
+        let truncated = if content.chars().count() > width {
+            if width > ellipsis_len {
+                let take = width - ellipsis_len;
+                let truncated_part: String = content.chars().take(take).collect();
+                format!("{}{}", truncated_part, ellipsis)
+            } else {
+                // If width is too small for ellipsis, just truncate
+                content.chars().take(width).collect()
+            }
+        } else {
+            content.to_string()
+        };
+
         match align {
-            Align::Left => format!("{:<width$}", content, width = width),
+            Align::Left => format!("{:<width$}", truncated, width = width),
             Align::Center => {
-                let total_padding = width.saturating_sub(content.len());
+                let content_len = truncated.chars().count();
+                let total_padding = width.saturating_sub(content_len);
                 let left_padding = total_padding / 2;
                 let right_padding = total_padding - left_padding;
                 format!(
                     "{}{}{}",
                     " ".repeat(left_padding),
-                    content,
+                    truncated,
                     " ".repeat(right_padding)
                 )
             }
-            Align::Right => format!("{:>width$}", content, width = width),
+            Align::Right => format!("{:>width$}", truncated, width = width),
         }
     }
 
-    pub fn render(&self) -> Vec<Line> {
+    fn render_impl(&self) -> Vec<Line> {
         if self.headers.is_empty() {
             return Vec::new();
         }
@@ -1571,6 +1780,35 @@ impl Table {
             lines.push(row_line);
         }
 
+        // Footer (if present)
+        if !self.footers.is_empty() {
+            // Footer separator
+            let mut footer_sep_line = Line::default();
+            let mut footer_sep_str = String::from(box_chars.left_t);
+            for (i, width) in widths.iter().enumerate() {
+                footer_sep_str.push_str(&box_chars.horizontal.repeat(width + 2));
+                if i < widths.len() - 1 {
+                    footer_sep_str.push_str(box_chars.cross);
+                }
+            }
+            footer_sep_str.push_str(box_chars.right_t);
+            footer_sep_line.push(unstyled_span(footer_sep_str));
+            lines.push(footer_sep_line);
+
+            // Footer row
+            let mut footer_line = Line::default();
+            footer_line.push(unstyled_span(box_chars.vertical.to_string()));
+            for (i, width) in widths.iter().enumerate() {
+                let cell = self.footers.get(i).map(|s| s.as_str()).unwrap_or("");
+                let align = self.alignments.get(i).copied().unwrap_or(Align::Left);
+                let formatted = self.format_cell(cell, *width, align);
+                footer_line.push(unstyled_span(" ".to_string()));
+                footer_line.push(styled_span(header_style, formatted));
+                footer_line.push(unstyled_span(format!(" {}", box_chars.vertical)));
+            }
+            lines.push(footer_line);
+        }
+
         // Bottom border
         let mut bottom_line = Line::default();
         let mut bottom_str = String::from(box_chars.bottom_left);
@@ -1585,6 +1823,16 @@ impl Table {
         lines.push(bottom_line);
 
         lines
+    }
+
+    pub fn render(&self) -> Vec<Line> {
+        self.render_impl()
+    }
+}
+
+impl Component for Table {
+    fn render(&self) -> Vec<Line> {
+        self.render_impl()
     }
 }
 
@@ -1631,7 +1879,7 @@ impl Card {
         self
     }
 
-    pub fn render(&self) -> Vec<Line> {
+    fn render_impl(&self) -> Vec<Line> {
         // Clamp width to minimum of 4 to prevent underflow in border/padding calculations
         let width = self.width.unwrap_or(60).max(4);
         let style = self.variant.style();
@@ -1699,6 +1947,16 @@ impl Card {
         lines.push(bottom_line);
 
         lines
+    }
+
+    pub fn render(&self) -> Vec<Line> {
+        self.render_impl()
+    }
+}
+
+impl Component for Card {
+    fn render(&self) -> Vec<Line> {
+        self.render_impl()
     }
 }
 
@@ -1768,7 +2026,7 @@ impl Histogram {
         self
     }
 
-    pub fn render(&self) -> Vec<Line> {
+    fn render_impl(&self) -> Vec<Line> {
         let mut lines = Vec::new();
 
         // Print title with variant style
@@ -1817,6 +2075,16 @@ impl Histogram {
         }
 
         lines
+    }
+
+    pub fn render(&self) -> Vec<Line> {
+        self.render_impl()
+    }
+}
+
+impl Component for Histogram {
+    fn render(&self) -> Vec<Line> {
+        self.render_impl()
     }
 }
 
@@ -1884,7 +2152,7 @@ impl Alert {
     }
 
     /// Renders the alert as a vector of Lines.
-    pub fn render(&self) -> Vec<Line> {
+    fn render_impl(&self) -> Vec<Line> {
         // Clamp width to minimum of 4 to prevent underflow in border/padding calculations
         let width = self.width.unwrap_or(60).max(4);
         let border_style = self.variant.style();
@@ -1976,6 +2244,16 @@ impl Alert {
 
         lines
     }
+
+    pub fn render(&self) -> Vec<Line> {
+        self.render_impl()
+    }
+}
+
+impl Component for Alert {
+    fn render(&self) -> Vec<Line> {
+        self.render_impl()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1992,18 +2270,6 @@ pub fn h2(text: impl Into<String>) -> Vec<Line> {
 
 pub fn h3(text: impl Into<String>) -> Vec<Line> {
     Header::h3(text).render()
-}
-
-pub fn h4(text: impl Into<String>) -> Vec<Line> {
-    Header::h4(text).render()
-}
-
-pub fn h5(text: impl Into<String>) -> Vec<Line> {
-    Header::h5(text).render()
-}
-
-pub fn h6(text: impl Into<String>) -> Vec<Line> {
-    Header::h6(text).render()
 }
 
 pub fn divider() -> Line {
@@ -2167,6 +2433,75 @@ mod tests {
             .row(vec!["Bob".to_string(), "25".to_string()]);
         let lines = table.render();
         assert!(!lines.is_empty());
+    }
+
+    #[test]
+    fn test_table_with_width_padding() {
+        // Test that when width is larger than content, columns are padded evenly
+        let table = Table::new()
+            .headers(vec!["A".to_string(), "B".to_string()])
+            .row(vec!["1".to_string(), "2".to_string()])
+            .width(40);
+        let lines = table.render();
+        assert!(!lines.is_empty());
+        // First line should be the top border and should be exactly 40 chars
+        let first_line_text = lines[0]
+            .iter()
+            .map(|span| span.content())
+            .collect::<String>();
+        assert_eq!(first_line_text.chars().count(), 40);
+    }
+
+    #[test]
+    fn test_table_with_width_truncation() {
+        // Test that when width is smaller than content, text is truncated with ellipsis
+        let table = Table::new()
+            .headers(vec![
+                "Long Header Name".to_string(),
+                "Another Long Header".to_string(),
+            ])
+            .row(vec![
+                "Very long content".to_string(),
+                "More long content".to_string(),
+            ])
+            .width(30);
+        let lines = table.render();
+        assert!(!lines.is_empty());
+        // First line should be exactly 30 chars
+        let first_line_text = lines[0]
+            .iter()
+            .map(|span| span.content())
+            .collect::<String>();
+        assert_eq!(first_line_text.chars().count(), 30);
+    }
+
+    #[test]
+    fn test_table_width_matches_exactly() {
+        // Test that all lines have the exact specified width
+        let table = Table::new()
+            .headers(vec![
+                "Name".to_string(),
+                "Age".to_string(),
+                "City".to_string(),
+            ])
+            .row(vec![
+                "Alice".to_string(),
+                "30".to_string(),
+                "NYC".to_string(),
+            ])
+            .row(vec!["Bob".to_string(), "25".to_string(), "LA".to_string()])
+            .width(50);
+        let lines = table.render();
+
+        for line in lines {
+            let line_text = line.iter().map(|span| span.content()).collect::<String>();
+            assert_eq!(
+                line_text.chars().count(),
+                50,
+                "Line should be exactly 50 chars: '{}'",
+                line_text
+            );
+        }
     }
 
     #[test]
@@ -2614,5 +2949,23 @@ mod tests {
     fn test_superscript_preserves_unknown_chars() {
         let result = convert_to_superscript("ABC");
         assert_eq!(result, "ABC"); // A, B, C don't have superscript equivalents (except i and n)
+    }
+
+    #[test]
+    fn test_icon_functions_unicode_mode() {
+        // In default Unicode mode, icons should return non-empty strings
+        assert_eq!(icon_success(), "✓");
+        assert_eq!(icon_danger(), "✗");
+        assert_eq!(icon_warning(), "⚠");
+        assert_eq!(icon_info(), "ℹ");
+    }
+
+    #[test]
+    fn test_icon_functions_not_empty_in_unicode() {
+        // Verify icons are not empty in default (Unicode) mode
+        assert!(!icon_success().is_empty());
+        assert!(!icon_danger().is_empty());
+        assert!(!icon_warning().is_empty());
+        assert!(!icon_info().is_empty());
     }
 }

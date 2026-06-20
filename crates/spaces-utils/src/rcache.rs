@@ -4,7 +4,6 @@ use crate::{age, ci, hash_streaming, logger, targets};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use bytesize::ByteSize;
-use console::style::StyledContent;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -546,73 +545,33 @@ fn serialise_rcache_info_yaml(
 // ---------------------------------------------------------------------------
 // rcache info pretty output
 // ---------------------------------------------------------------------------
-
-fn rcache_separator(console: &console::Console, width: usize) {
-    let mut line = console::Line::default();
-    line.push(console::Span::new_styled_lossy(StyledContent::new(
-        console::default_style(),
-        "─".repeat(width),
-    )));
-    console.emit_line(line);
-}
-
 fn emit_pretty_rcache_info(
     console: &console::Console,
     artifacts_size: u64,
     rule_digests_size: u64,
     total_size: u64,
 ) {
-    rcache_separator(console, 56);
+    use console::components::{self, Variant};
 
     // heading
-    {
-        let mut line = console::Line::default();
-        line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::bold_style(),
-            "Rule cache".to_owned(),
-        )));
-        console.emit_line(line);
-    }
+    console.emit_lines(components::h2("Rule cache"));
 
-    // artifacts row
-    {
-        let mut line = console::Line::default();
-        line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::default_style(),
-            format!("  {:<14}", ARTIFACT_CACHE_DIR),
-        )));
-        line.push(console::Span::new_unstyled_lossy(format!(
-            "{}",
+    // Create unordered list with cache info
+    let list = components::List::unordered()
+        .item(format!(
+            "{}: {}",
+            ARTIFACT_CACHE_DIR,
             ByteSize(artifacts_size).display()
-        )));
-        console.emit_line(line);
-    }
-
-    // rule_digests row
-    {
-        let mut line = console::Line::default();
-        line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::default_style(),
-            format!("  {:<14}", RULE_DIGEST_CACHE_DIR),
-        )));
-        line.push(console::Span::new_unstyled_lossy(format!(
-            "{}",
+        ))
+        .item(format!(
+            "{}: {}",
+            RULE_DIGEST_CACHE_DIR,
             ByteSize(rule_digests_size).display()
-        )));
-        console.emit_line(line);
-    }
+        ))
+        .item(format!("Total: {}", ByteSize(total_size).display()))
+        .variant(Variant::Default);
 
-    // total row
-    {
-        let mut line = console::Line::default();
-        line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::bold_style(),
-            format!("  {:<14}{}", "Total", ByteSize(total_size).display()),
-        )));
-        console.emit_line(line);
-    }
-
-    rcache_separator(console, 56);
+    console.emit_lines(list.render());
 }
 
 fn remove_targets(targets: &[targets::Target]) -> anyhow::Result<()> {
