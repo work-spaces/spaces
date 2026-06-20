@@ -1002,8 +1002,6 @@ impl Store {
         emit_pretty_fix_report(&console, &fix_report);
 
         bare_separator(&console, 72);
-        // Finalize progress output first, then render a stable pretty report.
-        drop(progress);
 
         Ok(())
     }
@@ -1018,12 +1016,7 @@ impl Store {
         let _group = ci::GithubLogGroup::new_group(console.clone(), is_ci, "Spaces Store Prune")?;
         let mut remove_entries = Vec::new();
 
-        let mut progress = console::Progress::new(
-            console.clone(),
-            "pruning the store",
-            Some(remove_entries.len() as u64),
-            None,
-        );
+        let mut progress = console::Progress::new(console.clone(), "pruning the store", None, None);
 
         let path_to_store = self.path_to_store.clone();
         if !is_dry_run {
@@ -1059,6 +1052,7 @@ impl Store {
                 remove_entries.push((key.clone(), entry_age, bytesize, path.clone()));
             }
         }
+        progress.update_progress(0, remove_entries.len() as u64);
 
         for (key, age, size, path) in remove_entries {
             let mut item_progress =
