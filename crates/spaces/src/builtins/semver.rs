@@ -1,3 +1,4 @@
+use crate::evaluation_profile;
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use starlark::environment::GlobalsBuilder;
@@ -190,7 +191,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `bool`: True if the string is a valid semantic version, False otherwise.
     fn is_valid_version(version: &str) -> anyhow::Result<bool> {
-        Ok(version.parse::<semver::Version>().is_ok())
+        evaluation_profile::profile_builtin_call("semver", "is_valid_version", || {
+            Ok(version.parse::<semver::Version>().is_ok())
+        })
     }
 
     /// Validates that the given string is a well-formed semantic version requirement.
@@ -206,7 +209,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `bool`: True if the string is a valid semver requirement, False otherwise.
     fn is_valid_requirement(requirement: &str) -> anyhow::Result<bool> {
-        Ok(requirement.parse::<semver::VersionReq>().is_ok())
+        evaluation_profile::profile_builtin_call("semver", "is_valid_requirement", || {
+            Ok(requirement.parse::<semver::VersionReq>().is_ok())
+        })
     }
 
     /// Parses a semantic version string into its component parts.
@@ -225,15 +230,17 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         version: &str,
         eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<Value<'v>> {
-        let v = parse_version(version)?;
-        let json = serde_json::json!({
-            "major": v.major,
-            "minor": v.minor,
-            "patch": v.patch,
-            "pre": v.pre.as_str(),
-            "build": v.build.as_str(),
-        });
-        Ok(eval.heap().alloc(json))
+        evaluation_profile::profile_builtin_call("semver", "parse", || {
+            let v = parse_version(version)?;
+            let json = serde_json::json!({
+                "major": v.major,
+                "minor": v.minor,
+                "patch": v.patch,
+                "pre": v.pre.as_str(),
+                "build": v.build.as_str(),
+            });
+            Ok(eval.heap().alloc(json))
+        })
     }
 
     /// Returns true if the given version satisfies the given requirement.
@@ -250,9 +257,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `bool`: True if the version satisfies the requirement, False otherwise.
     fn matches(version: &str, requirement: &str) -> anyhow::Result<bool> {
-        let v = parse_version(version)?;
-        let req = parse_requirement(requirement)?;
-        Ok(req.matches(&v))
+        evaluation_profile::profile_builtin_call("semver", "matches", || {
+            let v = parse_version(version)?;
+            let req = parse_requirement(requirement)?;
+            Ok(req.matches(&v))
+        })
     }
 
     /// Returns true if the given version satisfies all of the given requirements.
@@ -269,9 +278,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `bool`: True if the version satisfies every requirement, False otherwise.
     fn matches_all(version: &str, requirements: UnpackList<String>) -> anyhow::Result<bool> {
-        let v = parse_version(version)?;
-        let reqs = parse_requirements(&requirements.items)?;
-        Ok(version_matches_all(&v, &reqs))
+        evaluation_profile::profile_builtin_call("semver", "matches_all", || {
+            let v = parse_version(version)?;
+            let reqs = parse_requirements(&requirements.items)?;
+            Ok(version_matches_all(&v, &reqs))
+        })
     }
 
     /// Compares two semantic versions.
@@ -288,12 +299,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `int`: -1 if `lhs < rhs`, 0 if equal, 1 if `lhs > rhs`.
     fn compare(lhs: &str, rhs: &str) -> anyhow::Result<i64> {
-        let l = parse_version(lhs)?;
-        let r = parse_version(rhs)?;
-        Ok(match l.cmp(&r) {
-            std::cmp::Ordering::Less => -1,
-            std::cmp::Ordering::Equal => 0,
-            std::cmp::Ordering::Greater => 1,
+        evaluation_profile::profile_builtin_call("semver", "compare", || {
+            let l = parse_version(lhs)?;
+            let r = parse_version(rhs)?;
+            Ok(match l.cmp(&r) {
+                std::cmp::Ordering::Less => -1,
+                std::cmp::Ordering::Equal => 0,
+                std::cmp::Ordering::Greater => 1,
+            })
         })
     }
 
@@ -312,8 +325,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `list[str]`: The sorted list of versions.
     fn sort(versions: UnpackList<String>) -> anyhow::Result<Vec<String>> {
-        let parsed = sorted_versions_asc(&versions.items)?;
-        Ok(parsed.into_iter().map(|v| v.to_string()).collect())
+        evaluation_profile::profile_builtin_call("semver", "sort", || {
+            let parsed = sorted_versions_asc(&versions.items)?;
+            Ok(parsed.into_iter().map(|v| v.to_string()).collect())
+        })
     }
 
     /// Returns the maximum version from a list of semantic versions.
@@ -329,11 +344,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `str`: The greatest version in the list.
     fn max(versions: UnpackList<String>) -> anyhow::Result<String> {
-        if versions.items.is_empty() {
-            return Err(anyhow::anyhow!("Cannot get max of an empty list"));
-        }
-        let mut parsed = sorted_versions_asc(&versions.items)?;
-        Ok(parsed.pop().unwrap().to_string())
+        evaluation_profile::profile_builtin_call("semver", "max", || {
+            if versions.items.is_empty() {
+                return Err(anyhow::anyhow!("Cannot get max of an empty list"));
+            }
+            let mut parsed = sorted_versions_asc(&versions.items)?;
+            Ok(parsed.pop().unwrap().to_string())
+        })
     }
 
     /// Returns the minimum version from a list of semantic versions.
@@ -349,11 +366,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `str`: The smallest version in the list.
     fn min(versions: UnpackList<String>) -> anyhow::Result<String> {
-        if versions.items.is_empty() {
-            return Err(anyhow::anyhow!("Cannot get min of an empty list"));
-        }
-        let parsed = sorted_versions_asc(&versions.items)?;
-        Ok(parsed.into_iter().next().unwrap().to_string())
+        evaluation_profile::profile_builtin_call("semver", "min", || {
+            if versions.items.is_empty() {
+                return Err(anyhow::anyhow!("Cannot get min of an empty list"));
+            }
+            let parsed = sorted_versions_asc(&versions.items)?;
+            Ok(parsed.into_iter().next().unwrap().to_string())
+        })
     }
 
     /// Filters a list of versions to those that satisfy all of the given requirements.
@@ -375,12 +394,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         versions: UnpackList<String>,
         requirements: UnpackList<String>,
     ) -> anyhow::Result<Vec<String>> {
-        let reqs = parse_requirements(&requirements.items)?;
-        let matched = select_matching(&versions.items, &reqs)?;
-        Ok(matched
-            .into_iter()
-            .map(|(i, _)| versions.items[i].clone())
-            .collect())
+        evaluation_profile::profile_builtin_call("semver", "filter", || {
+            let reqs = parse_requirements(&requirements.items)?;
+            let matched = select_matching(&versions.items, &reqs)?;
+            Ok(matched
+                .into_iter()
+                .map(|(i, _)| versions.items[i].clone())
+                .collect())
+        })
     }
 
     /// Resolves the highest version from a list of available versions that satisfies all of the given requirements.
@@ -404,17 +425,19 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         requirements: UnpackList<String>,
         eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<Value<'v>> {
-        let reqs = parse_requirements(&requirements.items)?;
-        let matched = select_matching(&versions.items, &reqs)?;
+        evaluation_profile::profile_builtin_call("semver", "resolve", || {
+            let reqs = parse_requirements(&requirements.items)?;
+            let matched = select_matching(&versions.items, &reqs)?;
 
-        let best = matched
-            .into_iter()
-            .max_by(|a, b| a.1.cmp(&b.1))
-            .map(|(i, _)| versions.items[i].clone());
+            let best = matched
+                .into_iter()
+                .max_by(|a, b| a.1.cmp(&b.1))
+                .map(|(i, _)| versions.items[i].clone());
 
-        Ok(match best {
-            Some(original) => eval.heap().alloc(original),
-            None => Value::new_none(),
+            Ok(match best {
+                Some(original) => eval.heap().alloc(original),
+                None => Value::new_none(),
+            })
         })
     }
 
@@ -438,13 +461,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         versions: UnpackList<String>,
         requirements: UnpackList<String>,
     ) -> anyhow::Result<Vec<String>> {
-        let reqs = parse_requirements(&requirements.items)?;
-        let mut matched = select_matching(&versions.items, &reqs)?;
-        matched.sort_by(|a, b| b.1.cmp(&a.1));
-        Ok(matched
-            .into_iter()
-            .map(|(i, _)| versions.items[i].clone())
-            .collect())
+        evaluation_profile::profile_builtin_call("semver", "resolve_all", || {
+            let reqs = parse_requirements(&requirements.items)?;
+            let mut matched = select_matching(&versions.items, &reqs)?;
+            matched.sort_by(|a, b| b.1.cmp(&a.1));
+            Ok(matched
+                .into_iter()
+                .map(|(i, _)| versions.items[i].clone())
+                .collect())
+        })
     }
 
     /// Increments the major component of a version, resetting minor, patch, pre, and build.
@@ -460,7 +485,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `str`: The bumped version.
     fn bump_major(version: &str) -> anyhow::Result<String> {
-        Ok(bump_major_version(parse_version(version)?).to_string())
+        evaluation_profile::profile_builtin_call("semver", "bump_major", || {
+            Ok(bump_major_version(parse_version(version)?).to_string())
+        })
     }
 
     /// Increments the minor component of a version, resetting patch, pre, and build.
@@ -476,7 +503,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `str`: The bumped version.
     fn bump_minor(version: &str) -> anyhow::Result<String> {
-        Ok(bump_minor_version(parse_version(version)?).to_string())
+        evaluation_profile::profile_builtin_call("semver", "bump_minor", || {
+            Ok(bump_minor_version(parse_version(version)?).to_string())
+        })
     }
 
     /// Increments the patch component of a version, resetting pre and build.
@@ -492,7 +521,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `str`: The bumped version.
     fn bump_patch(version: &str) -> anyhow::Result<String> {
-        Ok(bump_patch_version(parse_version(version)?).to_string())
+        evaluation_profile::profile_builtin_call("semver", "bump_patch", || {
+            Ok(bump_patch_version(parse_version(version)?).to_string())
+        })
     }
 
     /// Returns true if the version has a pre-release identifier (e.g., `1.2.3-rc.1`).
@@ -508,8 +539,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `bool`: True if the version is a pre-release, False otherwise.
     fn is_prerelease(version: &str) -> anyhow::Result<bool> {
-        let v = parse_version(version)?;
-        Ok(!v.pre.is_empty())
+        evaluation_profile::profile_builtin_call("semver", "is_prerelease", || {
+            let v = parse_version(version)?;
+            Ok(!v.pre.is_empty())
+        })
     }
 
     /// Extracts the first semantic version found anywhere in the given string.
@@ -545,10 +578,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named, default = UnpackList::default())] suffixes: UnpackList<String>,
         eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<Value<'v>> {
-        let trimmed = strip_suffixes(name, &suffixes.items);
-        Ok(match find_version_in(trimmed) {
-            Some(v) => eval.heap().alloc(v.to_string()),
-            None => Value::new_none(),
+        evaluation_profile::profile_builtin_call("semver", "extract_version", || {
+            let trimmed = strip_suffixes(name, &suffixes.items);
+            Ok(match find_version_in(trimmed) {
+                Some(v) => eval.heap().alloc(v.to_string()),
+                None => Value::new_none(),
+            })
         })
     }
 
@@ -582,11 +617,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         name: &str,
         #[starlark(require = named, default = UnpackList::default())] suffixes: UnpackList<String>,
     ) -> anyhow::Result<Vec<String>> {
-        let trimmed = strip_suffixes(name, &suffixes.items);
-        Ok(find_all_versions_in(trimmed)
-            .into_iter()
-            .map(|v| v.to_string())
-            .collect())
+        evaluation_profile::profile_builtin_call("semver", "extract_all_versions", || {
+            let trimmed = strip_suffixes(name, &suffixes.items);
+            Ok(find_all_versions_in(trimmed)
+                .into_iter()
+                .map(|v| v.to_string())
+                .collect())
+        })
     }
 
     /// Validates a list of semver requirements, returning an error for the first invalid entry.
@@ -598,8 +635,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Arguments
     /// * `requirements`: The list of semver requirement strings to validate.
     fn validate_requirements(requirements: UnpackList<String>) -> anyhow::Result<NoneType> {
-        parse_requirements(&requirements.items)?;
-        Ok(NoneType)
+        evaluation_profile::profile_builtin_call("semver", "validate_requirements", || {
+            parse_requirements(&requirements.items)?;
+            Ok(NoneType)
+        })
     }
 }
 

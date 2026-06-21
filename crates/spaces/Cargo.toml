@@ -61,3 +61,4 @@ tempfile = "3"
 lsp-debug = [
     "libc",
 ]
+evaluation-profiling = []

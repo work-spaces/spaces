@@ -6,6 +6,7 @@ mod builtins;
 mod co;
 mod completions;
 mod docs;
+mod evaluation_profile;
 mod evaluator;
 mod executor;
 mod label;

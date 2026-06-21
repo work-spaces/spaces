@@ -1,4 +1,5 @@
 use crate::builtins::eval_context::{get_eval_context, get_eval_context_mut};
+use crate::evaluation_profile;
 use crate::rules;
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
@@ -23,8 +24,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `bool`: False (deprecated functionality).
     fn is_reproducible() -> anyhow::Result<bool> {
-        // Use cached value from EvalContext to avoid lock contention
-        Ok(false)
+        evaluation_profile::profile_builtin_call("workspace", "is_reproducible", || {
+            // Use cached value from EvalContext to avoid lock contention
+            Ok(false)
+        })
     }
 
     /// Returns the path to the shell config file.
@@ -36,7 +39,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `str`: The path to the shell configuration file used by the workspace.
     fn get_path_to_shell_config() -> anyhow::Result<String> {
-        Ok(crate::workspace::SHELL_TOML_NAME.to_string())
+        evaluation_profile::profile_builtin_call("workspace", "get_path_to_shell_config", || {
+            Ok(crate::workspace::SHELL_TOML_NAME.to_string())
+        })
     }
 
     /// Returns the digest of the workspace.
@@ -51,9 +56,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `str`: The unique digest string of the workspace.
     fn get_digest(eval: &mut Evaluator) -> anyhow::Result<String> {
-        let ctx = get_eval_context(eval)?;
-        // Use cached value from EvalContext to avoid lock contention
-        Ok(ctx.workspace_digest.to_string())
+        evaluation_profile::profile_builtin_call("workspace", "get_digest", || {
+            let ctx = get_eval_context(eval)?;
+            // Use cached value from EvalContext to avoid lock contention
+            Ok(ctx.workspace_digest.to_string())
+        })
     }
 
     /// Returns the short digest of the workspace.
@@ -65,9 +72,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `str`: The short digest string of the workspace.
     fn get_short_digest(eval: &mut Evaluator) -> anyhow::Result<String> {
-        let ctx = get_eval_context(eval)?;
-        // Use cached value from EvalContext to avoid lock contention
-        Ok(ctx.workspace_short_digest.to_string())
+        evaluation_profile::profile_builtin_call("workspace", "get_short_digest", || {
+            let ctx = get_eval_context(eval)?;
+            // Use cached value from EvalContext to avoid lock contention
+            Ok(ctx.workspace_short_digest.to_string())
+        })
     }
 
     /// Returns true if the workspace environment variable is set.
@@ -83,11 +92,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `bool`: True if the variable exists in the workspace environment, False otherwise.
     fn is_env_var_set(var_name: &str, eval: &mut Evaluator) -> anyhow::Result<bool> {
-        if var_name == "PATH" {
-            return Ok(true);
-        }
-        let ctx = get_eval_context(eval)?;
-        Ok(ctx.workspace_env_vars.contains_key(var_name))
+        evaluation_profile::profile_builtin_call("workspace", "is_env_var_set", || {
+            if var_name == "PATH" {
+                return Ok(true);
+            }
+            let ctx = get_eval_context(eval)?;
+            Ok(ctx.workspace_env_vars.contains_key(var_name))
+        })
     }
 
     /// Returns true if the workspace environment variable is set.
@@ -108,12 +119,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         var_value: &str,
         eval: &mut Evaluator,
     ) -> anyhow::Result<bool> {
-        let ctx = get_eval_context(eval)?;
-        Ok(ctx
-            .workspace_env_vars
-            .get(var_name)
-            .map(|v| v.as_ref() == var_value)
-            .unwrap_or(false))
+        evaluation_profile::profile_builtin_call("workspace", "is_env_var_set_to", || {
+            let ctx = get_eval_context(eval)?;
+            Ok(ctx
+                .workspace_env_vars
+                .get(var_name)
+                .map(|v| v.as_ref() == var_value)
+                .unwrap_or(false))
+        })
     }
 
     /// Returns the value of a workspace environment variable.
@@ -128,17 +141,19 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `str`: The value of the environment variable.
     fn get_env_var(var_name: &str, eval: &mut Evaluator) -> anyhow::Result<String> {
-        let ctx = get_eval_context(eval)?;
+        evaluation_profile::profile_builtin_call("workspace", "get_env_var", || {
+            let ctx = get_eval_context(eval)?;
 
-        if let Some(value) = ctx.workspace_env_vars.get(var_name) {
-            Ok(value.to_string())
-        } else if ctx.is_lsp {
-            Ok("<not available to LSP>".to_string())
-        } else {
-            Err(format_error!(
-                "{var_name} is not set in the workspace environment"
-            ))
-        }
+            if let Some(value) = ctx.workspace_env_vars.get(var_name) {
+                Ok(value.to_string())
+            } else if ctx.is_lsp {
+                Ok("<not available to LSP>".to_string())
+            } else {
+                Err(format_error!(
+                    "{var_name} is not set in the workspace environment"
+                ))
+            }
+        })
     }
 
     /// Sets the workspace environment.
@@ -159,21 +174,23 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] env: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context(eval)?;
-        let workspace_arc = ctx
-            .workspace
-            .clone()
-            .ok_or_else(|| format_error!("No active workspace found"))?;
+        evaluation_profile::profile_builtin_call("workspace", "set_env", || {
+            let ctx = get_eval_context(eval)?;
+            let workspace_arc = ctx
+                .workspace
+                .clone()
+                .ok_or_else(|| format_error!("No active workspace found"))?;
 
-        let any_env = environment::AnyEnvironment::try_from(env.to_json_value()?)
-            .context(format_context!("Failed to parse set_env arguments"))?;
+            let any_env = environment::AnyEnvironment::try_from(env.to_json_value()?)
+                .context(format_context!("Failed to parse set_env arguments"))?;
 
-        let mut workspace = workspace_arc.write();
-        workspace
-            .set_env_from_workspace_builtin(any_env)
-            .context(format_context!("Failed to update workspace env"))?;
+            let mut workspace = workspace_arc.write();
+            workspace
+                .set_env_from_workspace_builtin(any_env)
+                .context(format_context!("Failed to update workspace env"))?;
 
-        Ok(NoneType)
+            Ok(NoneType)
+        })
     }
 
     /// Sets the workspace locks.
@@ -192,19 +209,21 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] locks: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let locks = serde_json::from_value(locks.to_json_value()?)
-            .context(format_context!("Failed to parse set_locks arguments"))?;
+        evaluation_profile::profile_builtin_call("workspace", "set_locks", || {
+            let locks = serde_json::from_value(locks.to_json_value()?)
+                .context(format_context!("Failed to parse set_locks arguments"))?;
 
-        let ctx = get_eval_context(eval)?;
-        let workspace_arc = ctx
-            .workspace
-            .clone()
-            .ok_or_else(|| format_error!("Internal Error: No active workspace found"))?;
-        let mut workspace = workspace_arc.write();
+            let ctx = get_eval_context(eval)?;
+            let workspace_arc = ctx
+                .workspace
+                .clone()
+                .ok_or_else(|| format_error!("Internal Error: No active workspace found"))?;
+            let mut workspace = workspace_arc.write();
 
-        workspace.update_locks(&locks);
+            workspace.update_locks(&locks);
 
-        Ok(NoneType)
+            Ok(NoneType)
+        })
     }
 
     /// Sets whether the workspace should always evaluate scripts.
@@ -219,14 +238,16 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         always_evaluate: bool,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context(eval)?;
-        let workspace_arc = ctx
-            .workspace
-            .clone()
-            .ok_or_else(|| format_error!("Internal Error: No active workspace found"))?;
-        let mut workspace = workspace_arc.write();
-        workspace.settings.bin.is_always_evaluate = always_evaluate;
-        Ok(NoneType)
+        evaluation_profile::profile_builtin_call("workspace", "set_always_evaluate", || {
+            let ctx = get_eval_context(eval)?;
+            let workspace_arc = ctx
+                .workspace
+                .clone()
+                .ok_or_else(|| format_error!("Internal Error: No active workspace found"))?;
+            let mut workspace = workspace_arc.write();
+            workspace.settings.bin.is_always_evaluate = always_evaluate;
+            Ok(NoneType)
+        })
     }
 
     /// Returns the path to the workspace member matching the specified requirement.
@@ -250,29 +271,31 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] member: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<String> {
-        let ctx = get_eval_context(eval)?;
-        let workspace_arc = ctx
-            .workspace
-            .clone()
-            .ok_or_else(|| format_error!("Internal Error: No active workspace found"))?;
-        let member_requirement_json = member.to_json_value()?;
-        let member_requirement: ws::MemberRequirement =
-            serde_json::from_value(member_requirement_json.clone())
-                .context(format_context!("bad options for workspace member"))?;
+        evaluation_profile::profile_builtin_call("workspace", "get_path_to_member", || {
+            let ctx = get_eval_context(eval)?;
+            let workspace_arc = ctx
+                .workspace
+                .clone()
+                .ok_or_else(|| format_error!("Internal Error: No active workspace found"))?;
+            let member_requirement_json = member.to_json_value()?;
+            let member_requirement: ws::MemberRequirement =
+                serde_json::from_value(member_requirement_json.clone())
+                    .context(format_context!("bad options for workspace member"))?;
 
-        let path = workspace_arc
-            .read()
-            .settings
-            .json
-            .get_path_to_member(&member_requirement);
-        match path {
-            Some(p) => Ok(p.to_string()),
-            None => Err(format_error!(
-                "`{}` not found in workspace matching {:?}",
-                member_requirement.url,
-                member_requirement.required
-            )),
-        }
+            let path = workspace_arc
+                .read()
+                .settings
+                .json
+                .get_path_to_member(&member_requirement);
+            match path {
+                Some(p) => Ok(p.to_string()),
+                None => Err(format_error!(
+                    "`{}` not found in workspace matching {:?}",
+                    member_requirement.url,
+                    member_requirement.required
+                )),
+            }
+        })
     }
 
     /// Returns true if the workspace satisfies the specified member requirements.
@@ -295,25 +318,27 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] member: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<bool> {
-        let ctx = get_eval_context(eval)?;
-        let workspace_arc = ctx
-            .workspace
-            .clone()
-            .ok_or_else(|| format_error!("Internal Error: No active workspace found"))?;
-        let member_requirement_json = member.to_json_value()?;
-        let member_requirement: ws::MemberRequirement =
-            serde_json::from_value(member_requirement_json.clone())
-                .context(format_context!("bad options for workspace member"))?;
+        evaluation_profile::profile_builtin_call("workspace", "is_path_to_member_available", || {
+            let ctx = get_eval_context(eval)?;
+            let workspace_arc = ctx
+                .workspace
+                .clone()
+                .ok_or_else(|| format_error!("Internal Error: No active workspace found"))?;
+            let member_requirement_json = member.to_json_value()?;
+            let member_requirement: ws::MemberRequirement =
+                serde_json::from_value(member_requirement_json.clone())
+                    .context(format_context!("bad options for workspace member"))?;
 
-        let path = workspace_arc
-            .read()
-            .settings
-            .json
-            .get_path_to_member(&member_requirement);
-        match path {
-            Some(_) => Ok(true),
-            None => Ok(false),
-        }
+            let path = workspace_arc
+                .read()
+                .settings
+                .json
+                .get_path_to_member(&member_requirement);
+            match path {
+                Some(_) => Ok(true),
+                None => Ok(false),
+            }
+        })
     }
 
     /// Returns the relative workspace path to the log file for the specified target.
@@ -328,18 +353,21 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `str`: The relative path to the log file within the workspace.
     fn get_path_to_log_file(rule: &str, eval: &mut Evaluator) -> anyhow::Result<String> {
-        let ctx = get_eval_context(eval)?;
-        let workspace_arc = ctx
-            .workspace
-            .clone()
-            .ok_or_else(|| format_error!("No active workspace found"))?;
-        {
-            let mut workspace = workspace_arc.write();
-            workspace.settings.bin.is_always_evaluate = true;
-        }
-        let workspace = workspace_arc.read();
-        let rule_name = rules::get_sanitized_rule_name_for_module(rule.into(), &ctx.module_name);
-        Ok(workspace.get_log_file(rule_name.as_ref()).to_string())
+        evaluation_profile::profile_builtin_call("workspace", "get_path_to_log_file", || {
+            let ctx = get_eval_context(eval)?;
+            let workspace_arc = ctx
+                .workspace
+                .clone()
+                .ok_or_else(|| format_error!("No active workspace found"))?;
+            {
+                let mut workspace = workspace_arc.write();
+                workspace.settings.bin.is_always_evaluate = true;
+            }
+            let workspace = workspace_arc.read();
+            let rule_name =
+                rules::get_sanitized_rule_name_for_module(rule.into(), &ctx.module_name);
+            Ok(workspace.get_log_file(rule_name.as_ref()).to_string())
+        })
     }
 
     /// Returns the absolute path to the workspace.
@@ -351,8 +379,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `str`: The absolute path to the workspace.
     fn get_absolute_path(eval: &mut Evaluator) -> anyhow::Result<String> {
-        let ctx = get_eval_context(eval)?;
-        Ok(ctx.workspace_absolute_path.to_string())
+        evaluation_profile::profile_builtin_call("workspace", "get_absolute_path", || {
+            let ctx = get_eval_context(eval)?;
+            Ok(ctx.workspace_absolute_path.to_string())
+        })
     }
 
     /// Returns the repository path in the workspace of the calling script.
@@ -364,8 +394,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `str`: The path to the directory containing the current script.
     fn get_path_to_checkout(eval: &mut Evaluator) -> anyhow::Result<String> {
-        let ctx = get_eval_context(eval)?;
-        Ok(rules::get_checkout_path_for_module(&ctx.module_name).to_string())
+        evaluation_profile::profile_builtin_call("workspace", "get_path_to_checkout", || {
+            let ctx = get_eval_context(eval)?;
+            Ok(rules::get_checkout_path_for_module(&ctx.module_name).to_string())
+        })
     }
 
     /// Returns the path to the workspace build folder for the current script.
@@ -383,11 +415,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule_name: &str,
         eval: &mut Evaluator,
     ) -> anyhow::Result<String> {
-        let ctx = get_eval_context(eval)?;
-        Ok(
-            rules::get_path_to_build_checkout_for_module(rule_name.into(), &ctx.module_name)
-                .to_string(),
-        )
+        evaluation_profile::profile_builtin_call("workspace", "get_path_to_build_checkout", || {
+            let ctx = get_eval_context(eval)?;
+            Ok(
+                rules::get_path_to_build_checkout_for_module(rule_name.into(), &ctx.module_name)
+                    .to_string(),
+            )
+        })
     }
 
     /// Returns the path to where `run.add_archive()` creates the output archive.
@@ -413,18 +447,20 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] archive: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<String> {
-        let ctx = get_eval_context(eval)?;
-        let create_archive: archiver::CreateArchive =
-            serde_json::from_value(archive.to_json_value()?)
-                .context(format_context!("bad options for archive"))?;
+        evaluation_profile::profile_builtin_call("workspace", "get_path_to_build_archive", || {
+            let ctx = get_eval_context(eval)?;
+            let create_archive: archiver::CreateArchive =
+                serde_json::from_value(archive.to_json_value()?)
+                    .context(format_context!("bad options for archive"))?;
 
-        let sanitized_rule_name =
-            rules::get_sanitized_rule_name_for_module(rule_name.into(), &ctx.module_name);
+            let sanitized_rule_name =
+                rules::get_sanitized_rule_name_for_module(rule_name.into(), &ctx.module_name);
 
-        Ok(format!(
-            "//build/{sanitized_rule_name}/{}",
-            create_archive.get_output_file()
-        ))
+            Ok(format!(
+                "//build/{sanitized_rule_name}/{}",
+                create_archive.get_output_file()
+            ))
+        })
     }
 
     /// Returns the archive and sha256 file paths for a build archive.
@@ -450,38 +486,40 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] archive: starlark::values::Value,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<Value<'v>> {
-        let ctx = get_eval_context(eval)?;
-        let create_archive: archiver::CreateArchive =
-            serde_json::from_value(archive.to_json_value()?)
-                .context(format_context!("bad options for archive"))?;
+        evaluation_profile::profile_builtin_call("workspace", "get_build_archive_info", || {
+            let ctx = get_eval_context(eval)?;
+            let create_archive: archiver::CreateArchive =
+                serde_json::from_value(archive.to_json_value()?)
+                    .context(format_context!("bad options for archive"))?;
 
-        let create_archive_output = create_archive.get_output_file();
-        let output_path = std::path::Path::new(create_archive_output.as_str());
-        let output_sha_suffix = output_path.with_extension("").with_extension("sha256.txt");
+            let create_archive_output = create_archive.get_output_file();
+            let output_path = std::path::Path::new(create_archive_output.as_str());
+            let output_sha_suffix = output_path.with_extension("").with_extension("sha256.txt");
 
-        let sanitized_rule_name =
-            rules::get_sanitized_rule_name_for_module(rule_name.into(), &ctx.module_name);
+            let sanitized_rule_name =
+                rules::get_sanitized_rule_name_for_module(rule_name.into(), &ctx.module_name);
 
-        let mut output = HashMap::new();
-        let rule_output_path = format!("build/{sanitized_rule_name}");
+            let mut output = HashMap::new();
+            let rule_output_path = format!("build/{sanitized_rule_name}");
 
-        output.insert(
-            "archive_path".to_string(),
-            format!("{rule_output_path}/{create_archive_output}",),
-        );
-        output.insert(
-            "sha256_path".to_string(),
-            format!("{rule_output_path}/{}", output_sha_suffix.to_string_lossy()),
-        );
+            output.insert(
+                "archive_path".to_string(),
+                format!("{rule_output_path}/{create_archive_output}",),
+            );
+            output.insert(
+                "sha256_path".to_string(),
+                format!("{rule_output_path}/{}", output_sha_suffix.to_string_lossy()),
+            );
 
-        let json_value = serde_json::to_value(&output)
-            .context(format_context!("Failed to convert Result to JSON"))?;
+            let json_value = serde_json::to_value(&output)
+                .context(format_context!("Failed to convert Result to JSON"))?;
 
-        // Convert the JSON value to a Starlark value
-        let heap = eval.heap();
-        let alloc_value = heap.alloc(json_value);
+            // Convert the JSON value to a Starlark value
+            let heap = eval.heap();
+            let alloc_value = heap.alloc(json_value);
 
-        Ok(alloc_value)
+            Ok(alloc_value)
+        })
     }
 
     /// Sets the default visibility to private for the current module.
@@ -491,9 +529,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// workspace.set_default_module_visibility_private()
     /// ```
     fn set_default_module_visibility_private(eval: &mut Evaluator) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context_mut(eval)?;
-        ctx.default_module_visibility = rule::Visibility::Private;
-        Ok(NoneType)
+        evaluation_profile::profile_builtin_call(
+            "workspace",
+            "set_default_module_visibility_private",
+            || {
+                let ctx = get_eval_context_mut(eval)?;
+                ctx.default_module_visibility = rule::Visibility::Private;
+                Ok(NoneType)
+            },
+        )
     }
 
     /// Loads a value from the checkout store.
@@ -543,84 +587,88 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named, default = NoneType)] path: Value,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<Value<'v>> {
-        if !url.is_none() && !path.is_none() {
-            return Err(format_error!(
-                "Cannot specify both `url` and `path` in workspace.load_value()"
-            ));
-        }
-
-        let ctx = get_eval_context(eval)?;
-        let workspace_arc = ctx
-            .workspace
-            .clone()
-            .ok_or_else(|| format_error!("No active workspace found"))?;
-        let workspace = workspace_arc.read();
-
-        // Command-line store values (path "//") always take priority
-        let command_line_value = workspace
-            .settings
-            .checkout_store
-            .entries
-            .get("//" as &str)
-            .and_then(|entry| entry.values.get(key));
-
-        let json_value = if command_line_value.is_some() {
-            command_line_value
-        } else if !url.is_none() {
-            let url_str = url
-                .unpack_str()
-                .ok_or_else(|| format_error!("url must be a string, got {}", url.get_type()))?;
-            // Find the entry whose url matches, then look up the key
-            workspace
-                .settings
-                .checkout_store
-                .entries
-                .values()
-                .find(|entry| entry.url.as_ref() == url_str)
-                .and_then(|entry| entry.values.get(key))
-        } else if !path.is_none() {
-            let path_str = path
-                .unpack_str()
-                .ok_or_else(|| format_error!("path must be a string, got {}", path.get_type()))?;
-            // Find the member whose path best matches, then look up by that member's path
-            let member_path: std::sync::Arc<str> = workspace
-                .settings
-                .json
-                .get_member_from_module_path(path_str.into())
-                .map(|member| member.path.clone())
-                .unwrap_or_else(|| path_str.into());
-            workspace
-                .settings
-                .checkout_store
-                .entries
-                .get(&member_path)
-                .and_then(|entry| entry.values.get(key))
-        } else {
-            // Search all member entries for the key, error if more than one match
-            let mut matches: Vec<_> = workspace
-                .settings
-                .checkout_store
-                .entries
-                .iter()
-                .filter_map(|(member_path, entry)| entry.values.get(key).map(|v| (member_path, v)))
-                .collect();
-            if matches.len() > 1 {
-                let paths: Vec<_> = matches.iter().map(|(p, _)| p.as_ref()).collect();
+        evaluation_profile::profile_builtin_call("workspace", "load_value", || {
+            if !url.is_none() && !path.is_none() {
                 return Err(format_error!(
-                    "Key '{key}' found in multiple members: {paths:?}. Use `url` or `path` to disambiguate."
+                    "Cannot specify both `url` and `path` in workspace.load_value()"
                 ));
             }
-            matches.pop().map(|(_, v)| v)
-        };
 
-        match json_value {
-            Some(json_value) => {
-                let heap = eval.heap();
-                let alloc_value = heap.alloc(json_value.clone());
-                Ok(alloc_value)
+            let ctx = get_eval_context(eval)?;
+            let workspace_arc = ctx
+                .workspace
+                .clone()
+                .ok_or_else(|| format_error!("No active workspace found"))?;
+            let workspace = workspace_arc.read();
+
+            // Command-line store values (path "//") always take priority
+            let command_line_value = workspace
+                .settings
+                .checkout_store
+                .entries
+                .get("//" as &str)
+                .and_then(|entry| entry.values.get(key));
+
+            let json_value = if command_line_value.is_some() {
+                command_line_value
+            } else if !url.is_none() {
+                let url_str = url
+                    .unpack_str()
+                    .ok_or_else(|| format_error!("url must be a string, got {}", url.get_type()))?;
+                // Find the entry whose url matches, then look up the key
+                workspace
+                    .settings
+                    .checkout_store
+                    .entries
+                    .values()
+                    .find(|entry| entry.url.as_ref() == url_str)
+                    .and_then(|entry| entry.values.get(key))
+            } else if !path.is_none() {
+                let path_str = path.unpack_str().ok_or_else(|| {
+                    format_error!("path must be a string, got {}", path.get_type())
+                })?;
+                // Find the member whose path best matches, then look up by that member's path
+                let member_path: std::sync::Arc<str> = workspace
+                    .settings
+                    .json
+                    .get_member_from_module_path(path_str.into())
+                    .map(|member| member.path.clone())
+                    .unwrap_or_else(|| path_str.into());
+                workspace
+                    .settings
+                    .checkout_store
+                    .entries
+                    .get(&member_path)
+                    .and_then(|entry| entry.values.get(key))
+            } else {
+                // Search all member entries for the key, error if more than one match
+                let mut matches: Vec<_> = workspace
+                    .settings
+                    .checkout_store
+                    .entries
+                    .iter()
+                    .filter_map(|(member_path, entry)| {
+                        entry.values.get(key).map(|v| (member_path, v))
+                    })
+                    .collect();
+                if matches.len() > 1 {
+                    let paths: Vec<_> = matches.iter().map(|(p, _)| p.as_ref()).collect();
+                    return Err(format_error!(
+                        "Key '{key}' found in multiple members: {paths:?}. Use `url` or `path` to disambiguate."
+                    ));
+                }
+                matches.pop().map(|(_, v)| v)
+            };
+
+            match json_value {
+                Some(json_value) => {
+                    let heap = eval.heap();
+                    let alloc_value = heap.alloc(json_value.clone());
+                    Ok(alloc_value)
+                }
+                None => Ok(Value::new_none()),
             }
-            None => Ok(Value::new_none()),
-        }
+        })
     }
 
     /// Loads all values matching a key from the checkout store.
@@ -641,43 +689,45 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// * `list[dict]`: A list of dictionaries with `url` (`str`), `path` (`str`),
     ///   and `value` (JSON-compatible value).
     fn load_values<'v>(key: &str, eval: &mut Evaluator<'v, '_, '_>) -> anyhow::Result<Value<'v>> {
-        let ctx = get_eval_context(eval)?;
-        let workspace_arc = ctx
-            .workspace
-            .clone()
-            .ok_or_else(|| format_error!("No active workspace found"))?;
-        let workspace = workspace_arc.read();
+        evaluation_profile::profile_builtin_call("workspace", "load_values", || {
+            let ctx = get_eval_context(eval)?;
+            let workspace_arc = ctx
+                .workspace
+                .clone()
+                .ok_or_else(|| format_error!("No active workspace found"))?;
+            let workspace = workspace_arc.read();
 
-        let mut items: Vec<(String, String, serde_json::Value)> = workspace
-            .settings
-            .checkout_store
-            .entries
-            .iter()
-            .filter_map(|(path, entry)| {
-                entry
-                    .values
-                    .get(key)
-                    .map(|value| (path.to_string(), entry.url.to_string(), value.clone()))
-            })
-            .collect();
-
-        // Return a deterministic order for callers.
-        items.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
-
-        let output: Vec<_> = items
-            .into_iter()
-            .map(|(path, url, value)| {
-                serde_json::json!({
-                    "url": url,
-                    "path": path,
-                    "value": value,
+            let mut items: Vec<(String, String, serde_json::Value)> = workspace
+                .settings
+                .checkout_store
+                .entries
+                .iter()
+                .filter_map(|(path, entry)| {
+                    entry
+                        .values
+                        .get(key)
+                        .map(|value| (path.to_string(), entry.url.to_string(), value.clone()))
                 })
-            })
-            .collect();
+                .collect();
 
-        let heap = eval.heap();
-        let alloc_value = heap.alloc(serde_json::Value::Array(output));
-        Ok(alloc_value)
+            // Return a deterministic order for callers.
+            items.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+
+            let output: Vec<_> = items
+                .into_iter()
+                .map(|(path, url, value)| {
+                    serde_json::json!({
+                        "url": url,
+                        "path": path,
+                        "value": value,
+                    })
+                })
+                .collect();
+
+            let heap = eval.heap();
+            let alloc_value = heap.alloc(serde_json::Value::Array(output));
+            Ok(alloc_value)
+        })
     }
 
     /// Returns the relative workspace path to the workspce HOME directory.
@@ -685,6 +735,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// Returns an error if no active workspace is found in the evaluator context.
     fn get_path_to_home() -> anyhow::Result<String> {
-        Ok(ws::SPACES_HOME_NAME.into())
+        evaluation_profile::profile_builtin_call("workspace", "get_path_to_home", || {
+            Ok(ws::SPACES_HOME_NAME.into())
+        })
     }
 }

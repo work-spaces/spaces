@@ -1,6 +1,6 @@
 use crate::builtins::eval_context::EvalContext;
 use crate::workspace::WorkspaceArc;
-use crate::{builtins, executor, prelude, rules, singleton, task, workspace};
+use crate::{builtins, evaluation_profile, executor, prelude, rules, singleton, task, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use starlark::environment::{FrozenModule, GlobalsBuilder, Module};
@@ -8,6 +8,7 @@ use starlark::eval::{Evaluator, ReturnFileLoader};
 use starlark::syntax::{AstModule, Dialect};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use utils::{
     environment, features, inspect, labels, logger, mtarget, query, rcache, rule, targets, ws,
 };
@@ -228,6 +229,8 @@ pub fn evaluate_loads(
     workspace_env: Arc<HashMap<Arc<str>, Arc<str>>>,
     console: Option<console::Console>,
 ) -> starlark::Result<Vec<LoadResult>> {
+    let _load_timer = evaluation_profile::start_load_timer();
+
     let is_allow_internal_load = if let Some(workspace) = workspace.as_ref() {
         let workspace_read = workspace.read();
         workspace_read
@@ -333,6 +336,11 @@ pub fn evaluate_loads(
                 .unwrap_or_else(|| module_load_path.clone())
         };
 
+        evaluation_profile::set_next_module_metadata(
+            evaluation_profile::ModuleCacheStatus::Bypass,
+            Some("load-module".to_string()),
+            None,
+        );
         let result = evaluate_module(
             workspace.clone(),
             workspace_path.clone(),
@@ -424,6 +432,7 @@ pub fn evaluate_ast(
                 eval.extra_mut = Some(ctx);
             }
             eval.set_loader(&loader);
+            let _eval_timer = evaluation_profile::start_eval_timer();
             eval.eval_module(ast, &globals)?;
         }
 
@@ -497,6 +506,9 @@ pub fn evaluate_module(
     workspace_env: Arc<HashMap<Arc<str>, Arc<str>>>,
     console: Option<console::Console>,
 ) -> starlark::Result<EvaluateModuleResult> {
+    let _module_profile_guard =
+        evaluation_profile::enter_module(params.name.as_ref(), singleton::get_execution_phase());
+
     // Register the module name so that the global task-graph machinery can
     // track which modules exist, without writing to `latest_starlark_module`
     // (which would race with parallel evaluations).
@@ -516,7 +528,10 @@ pub fn evaluate_module(
     });
 
     let dialect = get_dialect();
-    let ast = AstModule::parse(params.name.as_ref(), params.content.to_string(), &dialect)?;
+    let ast = {
+        let _parse_timer = evaluation_profile::start_parse_timer();
+        AstModule::parse(params.name.as_ref(), params.content.to_string(), &dialect)?
+    };
     let evaluate_ast_result = evaluate_ast(
         ast,
         params.clone(),
@@ -527,7 +542,8 @@ pub fn evaluate_module(
         console,
     );
 
-    if evaluate_ast_result.is_err() {
+    if let Err(error) = &evaluate_ast_result {
+        evaluation_profile::record_current_module_error(format!("{error:#}"));
         singleton::set_evaluation_failure();
     }
 
@@ -575,9 +591,12 @@ fn try_evaluate_with_cache(
     phase: task::Phase,
     params: ModuleEvalParams,
     workspace_env: Arc<HashMap<Arc<str>, Arc<str>>>,
+    queue_wait: Option<Duration>,
 ) -> anyhow::Result<()> {
     let workspace_path = workspace.read().get_absolute_path();
     let eval_logger = star_logger(console.clone());
+
+    let module_start = Instant::now();
 
     // Try to load existing module result from build folder
     let module_deps_option = mtarget::ModuleDeps::new_from_json(params.name.as_ref())
@@ -594,13 +613,26 @@ fn try_evaluate_with_cache(
         )
     };
 
-    let caching_not_allowed = module_deps_option.is_none()
-        || is_always_evaluate
-        || singleton::get_is_rescan()
-        || phase == task::Phase::Checkout
-        || !is_module_caching_feature_enabled;
+    let bypass_reason = if module_deps_option.is_none() {
+        Some("no-module-deps")
+    } else if is_always_evaluate {
+        Some("always-evaluate")
+    } else if singleton::get_is_rescan() {
+        Some("rescan")
+    } else if phase == task::Phase::Checkout {
+        Some("checkout-phase")
+    } else if !is_module_caching_feature_enabled {
+        Some("module-cache-feature-disabled")
+    } else {
+        None
+    };
 
-    if caching_not_allowed {
+    if let Some(reason) = bypass_reason {
+        evaluation_profile::set_next_module_metadata(
+            evaluation_profile::ModuleCacheStatus::Bypass,
+            Some(reason.to_string()),
+            queue_wait,
+        );
         let _ = evaluate_module(
             Some(workspace),
             workspace_path,
@@ -646,6 +678,11 @@ fn try_evaluate_with_cache(
         module_digest,
         &cache_targets,
         || {
+            evaluation_profile::set_next_module_metadata(
+                evaluation_profile::ModuleCacheStatus::Miss,
+                None,
+                queue_wait,
+            );
             let result = evaluate_module(
                 Some(workspace.clone()),
                 workspace_path.clone(),
@@ -667,6 +704,12 @@ fn try_evaluate_with_cache(
         Some(Err(e)) => Err(e),
         None => {
             eval_logger.debug(format!("Cache hit for module {:?}", params.name).as_str());
+            evaluation_profile::record_cache_hit_module(
+                params.name.as_ref(),
+                phase,
+                queue_wait,
+                module_start.elapsed(),
+            );
             let Some(mtarget) = mtarget::ModuleTarget::new_from_json(params.name.as_ref())
                 .with_context(|| format_context!("Failed to load mtarget for cache hit"))?
             else {
@@ -829,6 +872,8 @@ pub fn evaluate_starlark_modules(
     let logger = star_logger(console.clone());
     logger.message("--Run Starlark Modules--");
     let workspace_path = workspace.read().absolute_path.to_owned();
+    let _evaluation_profile_session =
+        evaluation_profile::begin_session(phase, workspace_path.clone());
     let rules_only_starlark = workspace
         .read()
         .features
@@ -856,7 +901,13 @@ pub fn evaluate_starlark_modules(
     }
 
     let mut module_queue = std::collections::VecDeque::new();
-    module_queue.extend(modules.iter().cloned());
+    let queue_start = Instant::now();
+    module_queue.extend(
+        modules
+            .iter()
+            .cloned()
+            .map(|(name, content)| (name, content, queue_start)),
+    );
     let mut total_modules = module_queue.len();
 
     logger.trace(format!("Input module queue:{module_queue:?}").as_str());
@@ -899,8 +950,14 @@ pub fn evaluate_starlark_modules(
     // After env.spaces.star is evaluated, the workspace env is fully populated
     // and available for subsequent modules in Run/Inspect modes.
     let checkout_state_digest = if phase != task::Phase::Checkout
-        && let Some((name, content)) = module_queue.pop_front()
+        && let Some((name, content, queued_at)) = module_queue.pop_front()
     {
+        let queue_wait = Some(queued_at.elapsed());
+        evaluation_profile::set_next_module_metadata(
+            evaluation_profile::ModuleCacheStatus::Bypass,
+            Some("env-module".to_string()),
+            queue_wait,
+        );
         eval_progress.set_message("env.spaces.star (first module)");
         let _ = evaluate_module(
             Some(workspace.clone()),
@@ -942,7 +999,8 @@ pub fn evaluate_starlark_modules(
     const MAX_CONCURRENT_EVALS: usize = 8;
     let mut eval_handles: Vec<(Arc<str>, std::thread::JoinHandle<anyhow::Result<()>>)> = Vec::new();
     while !module_queue.is_empty() {
-        if let Some((name, content)) = module_queue.pop_front() {
+        if let Some((name, content, queued_at)) = module_queue.pop_front() {
+            let queue_wait = Some(queued_at.elapsed());
             logger.debug(format!("evaluating {name} from front of queue").as_str());
             eval_progress.set_message(name.as_ref());
             let eval_name = name.clone();
@@ -965,6 +1023,7 @@ pub fn evaluate_starlark_modules(
                     phase,
                     params,
                     eval_workspace_env_inner,
+                    queue_wait,
                 )
                 .with_context(|| format_context!("Failed to evaluate module {eval_name}"))?;
                 Ok(())
@@ -1092,7 +1151,7 @@ pub fn evaluate_starlark_modules(
                     if !known_modules.contains(&hash) {
                         logger.debug(format!("Pushing: {module} on front of queue").as_str());
                         known_modules.insert(hash);
-                        module_queue.push_front((module, content.into()));
+                        module_queue.push_front((module, content.into(), Instant::now()));
                     }
                 }
             }
