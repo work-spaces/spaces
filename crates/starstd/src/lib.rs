@@ -5,6 +5,7 @@ pub mod args;
 pub mod env;
 pub mod fs;
 pub mod hash;
+pub mod io;
 pub mod json;
 pub mod log;
 pub mod path;
