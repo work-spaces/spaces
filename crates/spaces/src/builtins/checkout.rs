@@ -1,7 +1,7 @@
 use crate::builtins::eval_context::{get_eval_context, get_eval_context_mut};
 use crate::executor::asset;
 use crate::workspace::WorkspaceArc;
-use crate::{executor, rules, task};
+use crate::{evaluation_profile, executor, rules, task};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -64,52 +64,54 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] path: Option<String>,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let json_value = value.to_json_value().context(format_context!(
-            "Failed to convert value to JSON for key '{key}'"
-        ))?;
+        evaluation_profile::profile_builtin_call("checkout", "store_value", || {
+            let json_value = value.to_json_value().context(format_context!(
+                "Failed to convert value to JSON for key '{key}'"
+            ))?;
 
-        if path.as_deref() == Some("//") {
-            return Err(format_error!(
-                "path `//` is reserved for command-line --store values"
-            ));
-        }
+            if path.as_deref() == Some("//") {
+                return Err(format_error!(
+                    "path `//` is reserved for command-line --store values"
+                ));
+            }
 
-        let ctx = get_eval_context_mut(eval)?;
+            let ctx = get_eval_context_mut(eval)?;
 
-        if !ctx.is_checkout && !ctx.is_sync {
-            return Ok(NoneType);
-        }
+            if !ctx.is_checkout && !ctx.is_sync {
+                return Ok(NoneType);
+            }
 
-        let module_path = ctx.module_name.clone();
-        let workspace_arc = ctx
-            .workspace
-            .clone()
-            .ok_or_else(|| format_error!("No active workspace found"))?;
-        let mut workspace = workspace_arc.write();
+            let module_path = ctx.module_name.clone();
+            let workspace_arc = ctx
+                .workspace
+                .clone()
+                .ok_or_else(|| format_error!("No active workspace found"))?;
+            let mut workspace = workspace_arc.write();
 
-        let path: Arc<str> = path.map(Into::into).unwrap_or_else(|| {
-            workspace
-                .settings
-                .json
-                .get_member_from_module_path(module_path.clone())
-                .map(|member| member.path.clone())
-                .unwrap_or(module_path.clone())
-        });
-        let url: Arc<str> = "".into();
-
-        let entry = workspace
-            .settings
-            .checkout_store
-            .entries
-            .entry(path)
-            .or_insert_with(|| utils::ws::CheckoutStoreEntry {
-                url: url.clone(),
-                values: std::collections::HashMap::new(),
+            let path: Arc<str> = path.map(Into::into).unwrap_or_else(|| {
+                workspace
+                    .settings
+                    .json
+                    .get_member_from_module_path(module_path.clone())
+                    .map(|member| member.path.clone())
+                    .unwrap_or(module_path.clone())
             });
-        entry.url = url;
-        entry.values.insert(key.into(), json_value);
+            let url: Arc<str> = "".into();
 
-        Ok(NoneType)
+            let entry = workspace
+                .settings
+                .checkout_store
+                .entries
+                .entry(path)
+                .or_insert_with(|| utils::ws::CheckoutStoreEntry {
+                    url: url.clone(),
+                    values: std::collections::HashMap::new(),
+                });
+            entry.url = url;
+            entry.values.insert(key.into(), json_value);
+
+            Ok(NoneType)
+        })
     }
 
     /// Modifies a stored value by applying a lambda to the current value.
@@ -137,73 +139,75 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] path: Option<String>,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context_mut(eval)?;
+        evaluation_profile::profile_builtin_call("checkout", "modify_value", || {
+            let ctx = get_eval_context_mut(eval)?;
 
-        if path.as_deref() == Some("//") {
-            return Err(format_error!(
-                "path `//` is reserved for command-line --store values"
-            ));
-        }
+            if path.as_deref() == Some("//") {
+                return Err(format_error!(
+                    "path `//` is reserved for command-line --store values"
+                ));
+            }
 
-        if !ctx.is_checkout && !ctx.is_sync {
-            return Ok(NoneType);
-        }
+            if !ctx.is_checkout && !ctx.is_sync {
+                return Ok(NoneType);
+            }
 
-        let module_path = ctx.module_name.clone();
-        let workspace_arc = ctx
-            .workspace
-            .clone()
-            .ok_or_else(|| format_error!("No active workspace found"))?;
+            let module_path = ctx.module_name.clone();
+            let workspace_arc = ctx
+                .workspace
+                .clone()
+                .ok_or_else(|| format_error!("No active workspace found"))?;
 
-        let (path, current_value_json): (Arc<str>, Option<serde_json::Value>) = {
-            let workspace = workspace_arc.read();
-            let resolved_path: Arc<str> = path.map(Into::into).unwrap_or_else(|| {
-                workspace
+            let (path, current_value_json): (Arc<str>, Option<serde_json::Value>) = {
+                let workspace = workspace_arc.read();
+                let resolved_path: Arc<str> = path.map(Into::into).unwrap_or_else(|| {
+                    workspace
+                        .settings
+                        .json
+                        .get_member_from_module_path(module_path.clone())
+                        .map(|member| member.path.clone())
+                        .unwrap_or(module_path.clone())
+                });
+
+                let current_value = workspace
                     .settings
-                    .json
-                    .get_member_from_module_path(module_path.clone())
-                    .map(|member| member.path.clone())
-                    .unwrap_or(module_path.clone())
-            });
+                    .checkout_store
+                    .entries
+                    .get(resolved_path.as_ref())
+                    .and_then(|entry| entry.values.get(key))
+                    .cloned();
 
-            let current_value = workspace
+                (resolved_path, current_value)
+            };
+
+            let current_value = match current_value_json {
+                Some(value) => eval.heap().alloc(value),
+                None => starlark::values::Value::new_none(),
+            };
+
+            let modified_value = eval
+                .eval_function(modifier, &[current_value], &[])
+                .map_err(|e| format_error!("Failed to call modifier for key '{key}': {e}"))?;
+
+            let json_value = modified_value.to_json_value().context(format_context!(
+                "Failed to convert modified value to JSON for key '{key}'"
+            ))?;
+
+            let url: Arc<str> = "".into();
+            let mut workspace = workspace_arc.write();
+            let entry = workspace
                 .settings
                 .checkout_store
                 .entries
-                .get(resolved_path.as_ref())
-                .and_then(|entry| entry.values.get(key))
-                .cloned();
+                .entry(path)
+                .or_insert_with(|| utils::ws::CheckoutStoreEntry {
+                    url: url.clone(),
+                    values: std::collections::HashMap::new(),
+                });
+            entry.values.insert(key.into(), json_value);
 
-            (resolved_path, current_value)
-        };
-
-        let current_value = match current_value_json {
-            Some(value) => eval.heap().alloc(value),
-            None => starlark::values::Value::new_none(),
-        };
-
-        let modified_value = eval
-            .eval_function(modifier, &[current_value], &[])
-            .map_err(|e| format_error!("Failed to call modifier for key '{key}': {e}"))?;
-
-        let json_value = modified_value.to_json_value().context(format_context!(
-            "Failed to convert modified value to JSON for key '{key}'"
-        ))?;
-
-        let url: Arc<str> = "".into();
-        let mut workspace = workspace_arc.write();
-        let entry = workspace
-            .settings
-            .checkout_store
-            .entries
-            .entry(path)
-            .or_insert_with(|| utils::ws::CheckoutStoreEntry {
-                url: url.clone(),
-                values: std::collections::HashMap::new(),
-            });
-        entry.values.insert(key.into(), json_value);
-
-        Ok(NoneType)
+            Ok(NoneType)
+        })
     }
 
     /// Abort script evaluation with a message.
@@ -216,12 +220,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// * `message`: Abort message to show the user.
     ///
     fn abort(message: &str, eval: &mut Evaluator) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context_mut(eval)?;
-        if ctx.is_lsp {
-            Ok(NoneType)
-        } else {
-            Err(format_error!("Checkout Aborting: {}", message))
-        }
+        evaluation_profile::profile_builtin_call("checkout", "abort", || {
+            let ctx = get_eval_context_mut(eval)?;
+            if ctx.is_lsp {
+                Ok(NoneType)
+            } else {
+                Err(format_error!("Checkout Aborting: {}", message))
+            }
+        })
     }
 
     /// Adds a target to organize dependencies.
@@ -240,19 +246,21 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context_mut(eval)?;
-        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for add target rule"))?;
+        evaluation_profile::profile_builtin_call("checkout", "add_target", || {
+            let ctx = get_eval_context_mut(eval)?;
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+                .context(format_context!("bad options for add target rule"))?;
 
-        let rule_name = rule.name.clone();
-        rules::insert_task_for_module(
-            task::Task::new(rule, task::Phase::Checkout, executor::Task::Target),
-            &ctx.module_name,
-            ctx.default_module_visibility.clone(),
-            Some(ctx),
-        )
-        .context(format_context!("Failed to register rule {rule_name}"))?;
-        Ok(NoneType)
+            let rule_name = rule.name.clone();
+            rules::insert_task_for_module(
+                task::Task::new(rule, task::Phase::Checkout, executor::Task::Target),
+                &ctx.module_name,
+                ctx.default_module_visibility.clone(),
+                Some(ctx),
+            )
+            .context(format_context!("Failed to register rule {rule_name}"))?;
+            Ok(NoneType)
+        })
     }
 
     /// Adds a rule to organize dependencies.
@@ -269,19 +277,21 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context_mut(eval)?;
-        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for add target rule"))?;
+        evaluation_profile::profile_builtin_call("checkout", "add", || {
+            let ctx = get_eval_context_mut(eval)?;
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+                .context(format_context!("bad options for add target rule"))?;
 
-        let rule_name = rule.name.clone();
-        rules::insert_task_for_module(
-            task::Task::new(rule, task::Phase::Checkout, executor::Task::Target),
-            &ctx.module_name,
-            ctx.default_module_visibility.clone(),
-            Some(ctx),
-        )
-        .context(format_context!("Failed to register rule {rule_name}"))?;
-        Ok(NoneType)
+            let rule_name = rule.name.clone();
+            rules::insert_task_for_module(
+                task::Task::new(rule, task::Phase::Checkout, executor::Task::Target),
+                &ctx.module_name,
+                ctx.default_module_visibility.clone(),
+                Some(ctx),
+            )
+            .context(format_context!("Failed to register rule {rule_name}"))?;
+            Ok(NoneType)
+        })
     }
 
     /// Adds a process to execute during checkout.
@@ -301,39 +311,41 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] exec: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context_mut(eval)?;
-        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for exec rule"))?;
+        evaluation_profile::profile_builtin_call("checkout", "add_exec", || {
+            let ctx = get_eval_context_mut(eval)?;
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+                .context(format_context!("bad options for exec rule"))?;
 
-        if rule.inputs.is_some() {
-            return Err(format_error!(
-                "Cannot specify inputs for checkout.add_exec()"
-            ));
-        }
+            if rule.inputs.is_some() {
+                return Err(format_error!(
+                    "Cannot specify inputs for checkout.add_exec()"
+                ));
+            }
 
-        let mut exec: executor::exec::Exec = serde_json::from_value(exec.to_json_value()?)
-            .context(format_context!("bad options for exec"))?;
+            let mut exec: executor::exec::Exec = serde_json::from_value(exec.to_json_value()?)
+                .context(format_context!("bad options for exec"))?;
 
-        if let Some(working_directory) = exec.working_directory.as_mut() {
-            *working_directory = rules::get_sanitized_working_directory_for_module(
-                working_directory.clone(),
+            if let Some(working_directory) = exec.working_directory.as_mut() {
+                *working_directory = rules::get_sanitized_working_directory_for_module(
+                    working_directory.clone(),
+                    &ctx.module_name,
+                );
+            }
+
+            if let Some(redirect_stdout) = exec.redirect_stdout.as_mut() {
+                *redirect_stdout = format!("build/{redirect_stdout}").into();
+            }
+
+            let rule_name = rule.name.clone();
+            rules::insert_task_for_module(
+                task::Task::new(rule, task::Phase::Checkout, executor::Task::Exec(exec)),
                 &ctx.module_name,
-            );
-        }
-
-        if let Some(redirect_stdout) = exec.redirect_stdout.as_mut() {
-            *redirect_stdout = format!("build/{redirect_stdout}").into();
-        }
-
-        let rule_name = rule.name.clone();
-        rules::insert_task_for_module(
-            task::Task::new(rule, task::Phase::Checkout, executor::Task::Exec(exec)),
-            &ctx.module_name,
-            ctx.default_module_visibility.clone(),
-            Some(ctx),
-        )
-        .context(format_context!("Failed to register rule {rule_name}"))?;
-        Ok(NoneType)
+                ctx.default_module_visibility.clone(),
+                Some(ctx),
+            )
+            .context(format_context!("Failed to register rule {rule_name}"))?;
+            Ok(NoneType)
+        })
     }
 
     /// Adds a git repository to the workspace.
@@ -361,73 +373,79 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] repo: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context_mut(eval)?;
-        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for repo rule"))?;
+        evaluation_profile::profile_builtin_call("checkout", "add_repo", || {
+            let ctx = get_eval_context_mut(eval)?;
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+                .context(format_context!("bad options for repo rule"))?;
 
-        let repo: git::Repo = serde_json::from_value(repo.to_json_value()?)
-            .context(format_context!("bad options for repo"))?;
+            let repo: git::Repo = serde_json::from_value(repo.to_json_value()?)
+                .context(format_context!("bad options for repo"))?;
 
-        let workspace_arc = ctx
-            .workspace
-            .clone()
-            .ok_or_else(|| format_error!("No active workspace found"))?;
+            let workspace_arc = ctx
+                .workspace
+                .clone()
+                .ok_or_else(|| format_error!("No active workspace found"))?;
 
-        let worktree_path = if let Some(directory) = repo.working_directory.as_ref() {
-            directory.clone()
-        } else {
-            // Use cached value from EvalContext to avoid lock contention
-            ctx.workspace_absolute_path.clone()
-        };
+            let worktree_path = if let Some(directory) = repo.working_directory.as_ref() {
+                directory.clone()
+            } else {
+                // Use cached value from EvalContext to avoid lock contention
+                ctx.workspace_absolute_path.clone()
+            };
 
-        if let Some(clone_type) = repo.clone.as_ref()
-            && *clone_type == git::Clone::Worktree
-            && repo.sparse_checkout.is_some()
-        {
-            return Err(format_error!(
-                "Sparse checkout is not supported with Worktree clone"
-            ));
-        }
+            if let Some(clone_type) = repo.clone.as_ref()
+                && *clone_type == git::Clone::Worktree
+                && repo.sparse_checkout.is_some()
+            {
+                return Err(format_error!(
+                    "Sparse checkout is not supported with Worktree clone"
+                ));
+            }
 
-        let checkout = repo.get_checkout();
-        let spaces_key = rule.name.clone();
-        let rule_name = rule.name.clone();
-        let url = repo.url.trim_end_matches('/');
-        let url: Arc<str> = url.strip_suffix(".git").unwrap_or(url).into();
+            let checkout = repo.get_checkout();
+            let spaces_key = rule.name.clone();
+            let rule_name = rule.name.clone();
+            let url = repo.url.trim_end_matches('/');
+            let url: Arc<str> = url.strip_suffix(".git").unwrap_or(url).into();
 
-        let bare_prefix = format!("{}/", store::SPACES_STORE_BARE);
-        let store_prefix = if repo.uses_bare_repository() {
-            bare_prefix.as_str()
-        } else {
-            ""
-        };
+            let bare_prefix = format!("{}/", store::SPACES_STORE_BARE);
+            let store_prefix = if repo.uses_bare_repository() {
+                bare_prefix.as_str()
+            } else {
+                ""
+            };
 
-        if ctx.is_checkout || ctx.is_sync {
-            add_git_url_to_workspace_store_queue(workspace_arc.clone(), url.as_ref(), store_prefix)
+            if ctx.is_checkout || ctx.is_sync {
+                add_git_url_to_workspace_store_queue(
+                    workspace_arc.clone(),
+                    url.as_ref(),
+                    store_prefix,
+                )
                 .context(format_context!("during checkout add repo"))?;
-        }
+            }
 
-        rules::insert_task_for_module(
-            task::Task::new(
-                rule,
-                task::Phase::Checkout,
-                executor::Task::Git(executor::git::Git {
-                    url,
-                    spaces_key,
-                    worktree_path,
-                    checkout,
-                    clone: repo.clone.unwrap_or(git::Clone::Default),
-                    is_evaluate_spaces_modules: repo.is_evaluate_spaces_modules.unwrap_or(true),
-                    sparse_checkout: repo.sparse_checkout,
-                    working_directory: repo.working_directory,
-                }),
-            ),
-            &ctx.module_name,
-            ctx.default_module_visibility.clone(),
-            Some(ctx),
-        )
-        .context(format_context!("Failed to register rule {rule_name}"))?;
-        Ok(NoneType)
+            rules::insert_task_for_module(
+                task::Task::new(
+                    rule,
+                    task::Phase::Checkout,
+                    executor::Task::Git(executor::git::Git {
+                        url,
+                        spaces_key,
+                        worktree_path,
+                        checkout,
+                        clone: repo.clone.unwrap_or(git::Clone::Default),
+                        is_evaluate_spaces_modules: repo.is_evaluate_spaces_modules.unwrap_or(true),
+                        sparse_checkout: repo.sparse_checkout,
+                        working_directory: repo.working_directory,
+                    }),
+                ),
+                &ctx.module_name,
+                ctx.default_module_visibility.clone(),
+                Some(ctx),
+            )
+            .context(format_context!("Failed to register rule {rule_name}"))?;
+            Ok(NoneType)
+        })
     }
 
     /// Adds a binary crate using cargo-binstall.
@@ -451,107 +469,110 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] cargo_bin: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context_mut(eval)?;
-        let cargo_bin: CargoBin = serde_json::from_value(cargo_bin.to_json_value()?)
-            .context(format_context!("bad options for cargo_bin"))?;
+        evaluation_profile::profile_builtin_call("checkout", "add_cargo_bin", || {
+            let ctx = get_eval_context_mut(eval)?;
+            let cargo_bin: CargoBin = serde_json::from_value(cargo_bin.to_json_value()?)
+                .context(format_context!("bad options for cargo_bin"))?;
 
-        let mut rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for cargo_bin rule"))?;
+            let mut rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+                .context(format_context!("bad options for cargo_bin rule"))?;
 
-        // Validate workspace exists
-        if ctx.workspace.is_none() {
-            return Err(format_error!("No active workspace found"));
-        }
+            // Validate workspace exists
+            if ctx.workspace.is_none() {
+                return Err(format_error!("No active workspace found"));
+            }
 
-        // Use cached value from EvalContext to avoid lock contention
-        let cargo_binstall_dir = ctx.workspace_cargo_binstall_root.clone();
+            // Use cached value from EvalContext to avoid lock contention
+            let cargo_binstall_dir = ctx.workspace_cargo_binstall_root.clone();
 
-        let output_directory = format!("{}/{}", cargo_binstall_dir, cargo_bin.version);
+            let output_directory = format!("{}/{}", cargo_binstall_dir, cargo_bin.version);
 
-        std::fs::create_dir_all(output_directory.as_str()).context(format_context!(
-            "Failed to create directory {output_directory}"
-        ))?;
+            std::fs::create_dir_all(output_directory.as_str()).context(format_context!(
+                "Failed to create directory {output_directory}"
+            ))?;
 
-        let hard_link_rule = rule.clone();
+            let hard_link_rule = rule.clone();
 
-        let cargo_binstall_path = format!(
-            "{}/sysroot/bin/cargo-binstall",
-            ctx.workspace_spaces_tools_path
-        );
+            let cargo_binstall_path = format!(
+                "{}/sysroot/bin/cargo-binstall",
+                ctx.workspace_spaces_tools_path
+            );
 
-        let exec = executor::exec::Exec {
-            command: cargo_binstall_path.into(),
-            args: Some(vec![
-                format!("--version={}", cargo_bin.version).into(),
-                format!("--root={output_directory}").into(),
-                "--no-confirm".into(),
-                cargo_bin.crate_.into(),
-            ]),
-            env: None,
-            working_directory: None,
-            redirect_stdout: None,
-            expect: None,
-            log_level: None,
-            timeout: None,
-        };
+            let exec = executor::exec::Exec {
+                command: cargo_binstall_path.into(),
+                args: Some(vec![
+                    format!("--version={}", cargo_bin.version).into(),
+                    format!("--root={output_directory}").into(),
+                    "--no-confirm".into(),
+                    cargo_bin.crate_.into(),
+                ]),
+                env: None,
+                working_directory: None,
+                redirect_stdout: None,
+                expect: None,
+                log_level: None,
+                timeout: None,
+            };
 
-        let original_rule_name = rule.name.clone();
-        let cargo_bin_rule_name: Arc<str> = format!("{original_rule_name}_cargo_bin").into();
-        let mut cargo_bin_rule = rule.clone();
-        cargo_bin_rule.name = cargo_bin_rule_name.clone();
-        rules::insert_task_for_module(
-            task::Task::new(
-                cargo_bin_rule,
-                task::Phase::Checkout,
-                executor::Task::Exec(exec),
-            ),
-            &ctx.module_name,
-            ctx.default_module_visibility.clone(),
-            Some(ctx),
-        )
-        .context(format_context!(
-            "Failed to register rule {cargo_bin_rule_name}"
-        ))?;
-
-        let mut deps = vec![cargo_bin_rule_name.clone()];
-        for bin in cargo_bin.bins {
-            let mut bin_rule = hard_link_rule.clone();
-            let bin_rule_name: Arc<str> = format!("{original_rule_name}_hard_link_{bin}").into();
-            bin_rule.name = bin_rule_name.clone();
-            bin_rule.deps = Some(rule::Deps::Rules(vec![cargo_bin_rule_name.clone()]));
-            deps.push(bin_rule.name.clone());
-
-            // cargo install uses the root/bin install directory
-            let output_file = format!("{output_directory}/bin/{bin}");
-
+            let original_rule_name = rule.name.clone();
+            let cargo_bin_rule_name: Arc<str> = format!("{original_rule_name}_cargo_bin").into();
+            let mut cargo_bin_rule = rule.clone();
+            cargo_bin_rule.name = cargo_bin_rule_name.clone();
             rules::insert_task_for_module(
                 task::Task::new(
-                    bin_rule,
+                    cargo_bin_rule,
                     task::Phase::Checkout,
-                    executor::Task::AddHardLink(asset::AddHardLink {
-                        source: output_file,
-                        destination: format!("sysroot/bin/{bin}"),
-                    }),
+                    executor::Task::Exec(exec),
                 ),
                 &ctx.module_name,
                 ctx.default_module_visibility.clone(),
                 Some(ctx),
             )
-            .context(format_context!("Failed to register rule {bin_rule_name}"))?;
-        }
+            .context(format_context!(
+                "Failed to register rule {cargo_bin_rule_name}"
+            ))?;
 
-        // add original rule name as a target with hardlink deps
-        let rule_name = rule.name.clone();
-        rule.deps = Some(rule::Deps::Rules(deps));
-        rules::insert_task_for_module(
-            task::Task::new(rule, task::Phase::Checkout, executor::Task::Target),
-            &ctx.module_name,
-            ctx.default_module_visibility.clone(),
-            Some(ctx),
-        )
-        .context(format_context!("Failed to insert final target {rule_name}",))?;
+            let mut deps = vec![cargo_bin_rule_name.clone()];
+            for bin in cargo_bin.bins {
+                let mut bin_rule = hard_link_rule.clone();
+                let bin_rule_name: Arc<str> =
+                    format!("{original_rule_name}_hard_link_{bin}").into();
+                bin_rule.name = bin_rule_name.clone();
+                bin_rule.deps = Some(rule::Deps::Rules(vec![cargo_bin_rule_name.clone()]));
+                deps.push(bin_rule.name.clone());
 
-        Ok(NoneType)
+                // cargo install uses the root/bin install directory
+                let output_file = format!("{output_directory}/bin/{bin}");
+
+                rules::insert_task_for_module(
+                    task::Task::new(
+                        bin_rule,
+                        task::Phase::Checkout,
+                        executor::Task::AddHardLink(asset::AddHardLink {
+                            source: output_file,
+                            destination: format!("sysroot/bin/{bin}"),
+                        }),
+                    ),
+                    &ctx.module_name,
+                    ctx.default_module_visibility.clone(),
+                    Some(ctx),
+                )
+                .context(format_context!("Failed to register rule {bin_rule_name}"))?;
+            }
+
+            // add original rule name as a target with hardlink deps
+            let rule_name = rule.name.clone();
+            rule.deps = Some(rule::Deps::Rules(deps));
+            rules::insert_task_for_module(
+                task::Task::new(rule, task::Phase::Checkout, executor::Task::Target),
+                &ctx.module_name,
+                ctx.default_module_visibility.clone(),
+                Some(ctx),
+            )
+            .context(format_context!("Failed to insert final target {rule_name}",))?;
+
+            Ok(NoneType)
+        })
     }
 
     /// Adds an archive to the workspace based on the platform.
@@ -614,46 +635,48 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] platforms: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context_mut(eval)?;
-        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for add platform archive rule"))?;
-        //convert platforms to starlark value
+        evaluation_profile::profile_builtin_call("checkout", "add_platform_archive", || {
+            let ctx = get_eval_context_mut(eval)?;
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+                .context(format_context!("bad options for add platform archive rule"))?;
+            //convert platforms to starlark value
 
-        let platforms: PlatformArchive = serde_json::from_value(platforms.to_json_value()?)?;
+            let platforms: PlatformArchive = serde_json::from_value(platforms.to_json_value()?)?;
 
-        let platform_archive = match platform::Platform::get_platform() {
-            Some(platform::Platform::MacosX86_64) => platforms.macos_x86_64,
-            Some(platform::Platform::MacosAarch64) => platforms.macos_aarch64,
-            Some(platform::Platform::WindowsX86_64) => platforms.windows_x86_64,
-            Some(platform::Platform::WindowsAarch64) => platforms.windows_aarch64,
-            Some(platform::Platform::LinuxX86_64) => platforms.linux_x86_64,
-            Some(platform::Platform::LinuxAarch64) => platforms.linux_aarch64,
-            _ => None,
-        };
+            let platform_archive = match platform::Platform::get_platform() {
+                Some(platform::Platform::MacosX86_64) => platforms.macos_x86_64,
+                Some(platform::Platform::MacosAarch64) => platforms.macos_aarch64,
+                Some(platform::Platform::WindowsX86_64) => platforms.windows_x86_64,
+                Some(platform::Platform::WindowsAarch64) => platforms.windows_aarch64,
+                Some(platform::Platform::LinuxX86_64) => platforms.linux_x86_64,
+                Some(platform::Platform::LinuxAarch64) => platforms.linux_aarch64,
+                _ => None,
+            };
 
-        if platform_archive.is_none() {
-            return Err(format_error!(
-                "Platform {} not supported by {}",
-                platform::Platform::get_platform().unwrap(),
-                rule.name
-            ));
-        }
+            if platform_archive.is_none() {
+                return Err(format_error!(
+                    "Platform {} not supported by {}",
+                    platform::Platform::get_platform().unwrap(),
+                    rule.name
+                ));
+            }
 
-        let workspace_arc = ctx
-            .workspace
-            .clone()
-            .ok_or_else(|| format_error!("No active workspace found"))?;
-        add_http_archive(
-            rule,
-            platform_archive,
-            workspace_arc,
-            &ctx.module_name,
-            ctx.default_module_visibility.clone(),
-            ctx,
-        )
-        .context(format_context!("Failed to add archive"))?;
+            let workspace_arc = ctx
+                .workspace
+                .clone()
+                .ok_or_else(|| format_error!("No active workspace found"))?;
+            add_http_archive(
+                rule,
+                platform_archive,
+                workspace_arc,
+                &ctx.module_name,
+                ctx.default_module_visibility.clone(),
+                ctx,
+            )
+            .context(format_context!("Failed to add archive"))?;
 
-        Ok(NoneType)
+            Ok(NoneType)
+        })
     }
 
     /// Adds a hardlink to an executable file available on the `PATH`.
@@ -676,31 +699,33 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] asset: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context_mut(eval)?;
-        logger::push_deprecation_warning(
-            Some(ctx.module_name.clone()),
-            "Support for checkout.add_which_asset() will be removed in v0.16. Use checkout.add_any_asset().",
-        );
-        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for which asset rule"))?;
+        evaluation_profile::profile_builtin_call("checkout", "add_which_asset", || {
+            let ctx = get_eval_context_mut(eval)?;
+            logger::push_deprecation_warning(
+                Some(ctx.module_name.clone()),
+                "Support for checkout.add_which_asset() will be removed in v0.16. Use checkout.add_any_asset().",
+            );
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+                .context(format_context!("bad options for which asset rule"))?;
 
-        let asset: asset::AddWhichAsset = serde_json::from_value(asset.to_json_value()?)
-            .context(format_context!("Failed to parse add_which_asset arguments"))?;
+            let asset: asset::AddWhichAsset = serde_json::from_value(asset.to_json_value()?)
+                .context(format_context!("Failed to parse add_which_asset arguments"))?;
 
-        let rule_name = rule.name.clone();
-        rules::insert_task_for_module(
-            task::Task::new(
-                rule,
-                task::Phase::Checkout,
-                executor::Task::AddWhichAsset(asset),
-            ),
-            &ctx.module_name,
-            ctx.default_module_visibility.clone(),
-            Some(ctx),
-        )
-        .context(format_context!("Failed to register rule {rule_name}"))?;
+            let rule_name = rule.name.clone();
+            rules::insert_task_for_module(
+                task::Task::new(
+                    rule,
+                    task::Phase::Checkout,
+                    executor::Task::AddWhichAsset(asset),
+                ),
+                &ctx.module_name,
+                ctx.default_module_visibility.clone(),
+                Some(ctx),
+            )
+            .context(format_context!("Failed to register rule {rule_name}"))?;
 
-        Ok(NoneType)
+            Ok(NoneType)
+        })
     }
 
     /// Creates a hardlink from a source to a destination path.
@@ -725,32 +750,35 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] asset: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context_mut(eval)?;
-        logger::push_deprecation_warning(
-            Some(ctx.module_name.clone()),
-            "Support for checkout.add_hard_link_asset() will be removed in v0.16. Use checkout.add_any_asset()",
-        );
-        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for which asset rule"))?;
+        evaluation_profile::profile_builtin_call("checkout", "add_hard_link_asset", || {
+            let ctx = get_eval_context_mut(eval)?;
+            logger::push_deprecation_warning(
+                Some(ctx.module_name.clone()),
+                "Support for checkout.add_hard_link_asset() will be removed in v0.16. Use checkout.add_any_asset()",
+            );
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+                .context(format_context!("bad options for which asset rule"))?;
 
-        let asset: asset::AddHardLink = serde_json::from_value(asset.to_json_value()?).context(
-            format_context!("Failed to parse add_hard_link_asset arguments"),
-        )?;
+            let asset: asset::AddHardLink = serde_json::from_value(asset.to_json_value()?)
+                .context(format_context!(
+                    "Failed to parse add_hard_link_asset arguments"
+                ))?;
 
-        let rule_name = rule.name.clone();
-        rules::insert_task_for_module(
-            task::Task::new(
-                rule,
-                task::Phase::Checkout,
-                executor::Task::AddHardLink(asset),
-            ),
-            &ctx.module_name,
-            ctx.default_module_visibility.clone(),
-            Some(ctx),
-        )
-        .context(format_context!("Failed to register rule {rule_name}"))?;
+            let rule_name = rule.name.clone();
+            rules::insert_task_for_module(
+                task::Task::new(
+                    rule,
+                    task::Phase::Checkout,
+                    executor::Task::AddHardLink(asset),
+                ),
+                &ctx.module_name,
+                ctx.default_module_visibility.clone(),
+                Some(ctx),
+            )
+            .context(format_context!("Failed to register rule {rule_name}"))?;
 
-        Ok(NoneType)
+            Ok(NoneType)
+        })
     }
 
     /// Creates a symbolic link from a source to a destination path.
@@ -776,32 +804,35 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] asset: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context_mut(eval)?;
-        logger::push_deprecation_warning(
-            Some(ctx.module_name.clone()),
-            "Support for checkout.add_soft_link_asset() will be removed in v0.16. Use checkout.add_any_asset()",
-        );
-        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for which asset rule"))?;
+        evaluation_profile::profile_builtin_call("checkout", "add_soft_link_asset", || {
+            let ctx = get_eval_context_mut(eval)?;
+            logger::push_deprecation_warning(
+                Some(ctx.module_name.clone()),
+                "Support for checkout.add_soft_link_asset() will be removed in v0.16. Use checkout.add_any_asset()",
+            );
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+                .context(format_context!("bad options for which asset rule"))?;
 
-        let asset: asset::AddSoftLink = serde_json::from_value(asset.to_json_value()?).context(
-            format_context!("Failed to parse add_soft_link_asset arguments"),
-        )?;
+            let asset: asset::AddSoftLink = serde_json::from_value(asset.to_json_value()?)
+                .context(format_context!(
+                    "Failed to parse add_soft_link_asset arguments"
+                ))?;
 
-        let rule_name = rule.name.clone();
-        rules::insert_task_for_module(
-            task::Task::new(
-                rule,
-                task::Phase::Checkout,
-                executor::Task::AddSoftLink(asset),
-            ),
-            &ctx.module_name,
-            ctx.default_module_visibility.clone(),
-            Some(ctx),
-        )
-        .context(format_context!("Failed to register rule {rule_name}"))?;
+            let rule_name = rule.name.clone();
+            rules::insert_task_for_module(
+                task::Task::new(
+                    rule,
+                    task::Phase::Checkout,
+                    executor::Task::AddSoftLink(asset),
+                ),
+                &ctx.module_name,
+                ctx.default_module_visibility.clone(),
+                Some(ctx),
+            )
+            .context(format_context!("Failed to register rule {rule_name}"))?;
 
-        Ok(NoneType)
+            Ok(NoneType)
+        })
     }
 
     /// Adds any number of assets, with support for different asset types.
@@ -826,35 +857,38 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] assets: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context_mut(eval)?;
-        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for which asset rule"))?;
+        evaluation_profile::profile_builtin_call("checkout", "add_any_assets", || {
+            let ctx = get_eval_context_mut(eval)?;
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+                .context(format_context!("bad options for which asset rule"))?;
 
-        let mut any_assets: asset::AddAnyAssets =
-            serde_json::from_value(assets.to_json_value()?)
-                .context(format_context!("Failed to parse add_any_assets arguments"))?;
+            let mut any_assets: asset::AddAnyAssets =
+                serde_json::from_value(assets.to_json_value()?)
+                    .context(format_context!("Failed to parse add_any_assets arguments"))?;
 
-        let workspace_absolute_path = ctx.workspace.as_ref().map(|w| w.read().get_absolute_path());
-        sanitize_any_assets_paths(
-            &mut any_assets,
-            &ctx.module_name,
-            workspace_absolute_path.as_deref(),
-        );
+            let workspace_absolute_path =
+                ctx.workspace.as_ref().map(|w| w.read().get_absolute_path());
+            sanitize_any_assets_paths(
+                &mut any_assets,
+                &ctx.module_name,
+                workspace_absolute_path.as_deref(),
+            );
 
-        let rule_name = rule.name.clone();
-        rules::insert_task_for_module(
-            task::Task::new(
-                rule,
-                task::Phase::Checkout,
-                executor::Task::AddAnyAssets(any_assets),
-            ),
-            &ctx.module_name,
-            ctx.default_module_visibility.clone(),
-            Some(ctx),
-        )
-        .context(format_context!("Failed to register rule {rule_name}"))?;
+            let rule_name = rule.name.clone();
+            rules::insert_task_for_module(
+                task::Task::new(
+                    rule,
+                    task::Phase::Checkout,
+                    executor::Task::AddAnyAssets(any_assets),
+                ),
+                &ctx.module_name,
+                ctx.default_module_visibility.clone(),
+                Some(ctx),
+            )
+            .context(format_context!("Failed to register rule {rule_name}"))?;
 
-        Ok(NoneType)
+            Ok(NoneType)
+        })
     }
 
     /// Adds an archive to the workspace.
@@ -882,27 +916,30 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         // includes, excludes, strip_prefix
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context_mut(eval)?;
-        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for add archive rule"))?;
+        evaluation_profile::profile_builtin_call("checkout", "add_archive", || {
+            let ctx = get_eval_context_mut(eval)?;
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+                .context(format_context!("bad options for add archive rule"))?;
 
-        let archive: http_archive::Archive = serde_json::from_value(archive.to_json_value()?)
-            .context(format_context!("Failed to parse add_archive arguments"))?;
+            let archive: http_archive::Archive =
+                serde_json::from_value(archive.to_json_value()?)
+                    .context(format_context!("Failed to parse add_archive arguments"))?;
 
-        let workspace_arc = ctx
-            .workspace
-            .clone()
-            .ok_or_else(|| format_error!("No active workspace found"))?;
-        add_http_archive(
-            rule,
-            Some(archive),
-            workspace_arc,
-            &ctx.module_name,
-            ctx.default_module_visibility.clone(),
-            ctx,
-        )
-        .context(format_context!("Failed to add archive"))?;
-        Ok(NoneType)
+            let workspace_arc = ctx
+                .workspace
+                .clone()
+                .ok_or_else(|| format_error!("No active workspace found"))?;
+            add_http_archive(
+                rule,
+                Some(archive),
+                workspace_arc,
+                &ctx.module_name,
+                ctx.default_module_visibility.clone(),
+                ctx,
+            )
+            .context(format_context!("Failed to add archive"))?;
+            Ok(NoneType)
+        })
     }
 
     fn add_oras_archive(
@@ -911,28 +948,30 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         // includes, excludes, strip_prefix
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context_mut(eval)?;
-        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for oras rule"))?;
+        evaluation_profile::profile_builtin_call("checkout", "add_oras_archive", || {
+            let ctx = get_eval_context_mut(eval)?;
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+                .context(format_context!("bad options for oras rule"))?;
 
-        let oras_archive: executor::oras::OrasArchive =
-            serde_json::from_value(oras_archive.to_json_value()?)
-                .context(format_context!("Failed to parse oras archive arguments"))?;
+            let oras_archive: executor::oras::OrasArchive =
+                serde_json::from_value(oras_archive.to_json_value()?)
+                    .context(format_context!("Failed to parse oras archive arguments"))?;
 
-        let rule_name = rule.name.clone();
-        rules::insert_task_for_module(
-            task::Task::new(
-                rule,
-                task::Phase::Checkout,
-                executor::Task::OrasArchive(oras_archive),
-            ),
-            &ctx.module_name,
-            ctx.default_module_visibility.clone(),
-            Some(ctx),
-        )
-        .context(format_context!("Failed to register rule {rule_name}"))?;
+            let rule_name = rule.name.clone();
+            rules::insert_task_for_module(
+                task::Task::new(
+                    rule,
+                    task::Phase::Checkout,
+                    executor::Task::OrasArchive(oras_archive),
+                ),
+                &ctx.module_name,
+                ctx.default_module_visibility.clone(),
+                Some(ctx),
+            )
+            .context(format_context!("Failed to register rule {rule_name}"))?;
 
-        Ok(NoneType)
+            Ok(NoneType)
+        })
     }
 
     /// Adds a file to the workspace.
@@ -957,31 +996,33 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] asset: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context_mut(eval)?;
-        logger::push_deprecation_warning(
-            Some(ctx.module_name.clone()),
-            "Support for checkout.add_asset() will be removed in v0.16. Use checkout.add_any_asset()",
-        );
-        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for add asset rule"))?;
+        evaluation_profile::profile_builtin_call("checkout", "add_asset", || {
+            let ctx = get_eval_context_mut(eval)?;
+            logger::push_deprecation_warning(
+                Some(ctx.module_name.clone()),
+                "Support for checkout.add_asset() will be removed in v0.16. Use checkout.add_any_asset()",
+            );
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+                .context(format_context!("bad options for add asset rule"))?;
 
-        let add_asset: executor::asset::AddAsset =
-            serde_json::from_value(asset.to_json_value()?)
-                .context(format_context!("Failed to parse add_asset arguments"))?;
+            let add_asset: executor::asset::AddAsset =
+                serde_json::from_value(asset.to_json_value()?)
+                    .context(format_context!("Failed to parse add_asset arguments"))?;
 
-        let rule_name = rule.name.clone();
-        rules::insert_task_for_module(
-            task::Task::new(
-                rule,
-                task::Phase::Checkout,
-                executor::Task::AddAsset(add_asset),
-            ),
-            &ctx.module_name,
-            ctx.default_module_visibility.clone(),
-            Some(ctx),
-        )
-        .context(format_context!("Failed to register rule {rule_name}"))?;
-        Ok(NoneType)
+            let rule_name = rule.name.clone();
+            rules::insert_task_for_module(
+                task::Task::new(
+                    rule,
+                    task::Phase::Checkout,
+                    executor::Task::AddAsset(add_asset),
+                ),
+                &ctx.module_name,
+                ctx.default_module_visibility.clone(),
+                Some(ctx),
+            )
+            .context(format_context!("Failed to register rule {rule_name}"))?;
+            Ok(NoneType)
+        })
     }
 
     /// Creates or updates an existing file containing structured data in the workspace.
@@ -1025,36 +1066,39 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] asset: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context_mut(eval)?;
-        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for update asset rule"))?;
-        // support JSON, yaml, and toml
-        let mut update_asset: executor::asset::UpdateAsset =
-            serde_json::from_value(asset.to_json_value()?)
-                .context(format_context!("Failed to parse update_asset arguments"))?;
+        evaluation_profile::profile_builtin_call("checkout", "update_asset", || {
+            let ctx = get_eval_context_mut(eval)?;
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+                .context(format_context!("bad options for update asset rule"))?;
+            // support JSON, yaml, and toml
+            let mut update_asset: executor::asset::UpdateAsset =
+                serde_json::from_value(asset.to_json_value()?)
+                    .context(format_context!("Failed to parse update_asset arguments"))?;
 
-        let workspace_absolute_path = ctx.workspace.as_ref().map(|w| w.read().get_absolute_path());
-        update_asset.destination = sanitize_workspace_relative_path(
-            &update_asset.destination,
-            &ctx.module_name,
-            workspace_absolute_path.as_deref(),
-        )
-        .into();
+            let workspace_absolute_path =
+                ctx.workspace.as_ref().map(|w| w.read().get_absolute_path());
+            update_asset.destination = sanitize_workspace_relative_path(
+                &update_asset.destination,
+                &ctx.module_name,
+                workspace_absolute_path.as_deref(),
+            )
+            .into();
 
-        let rule_name = rule.name.clone();
-        rules::insert_task_for_module(
-            task::Task::new(
-                rule,
-                task::Phase::Checkout,
-                executor::Task::UpdateAsset(update_asset),
-            ),
-            &ctx.module_name,
-            ctx.default_module_visibility.clone(),
-            Some(ctx),
-        )
-        .context(format_context!("Failed to register rule {rule_name}"))?;
+            let rule_name = rule.name.clone();
+            rules::insert_task_for_module(
+                task::Task::new(
+                    rule,
+                    task::Phase::Checkout,
+                    executor::Task::UpdateAsset(update_asset),
+                ),
+                &ctx.module_name,
+                ctx.default_module_visibility.clone(),
+                Some(ctx),
+            )
+            .context(format_context!("Failed to register rule {rule_name}"))?;
 
-        Ok(NoneType)
+            Ok(NoneType)
+        })
     }
 
     /// Creates or updates the environment in the workspace during checkout.
@@ -1088,37 +1132,39 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] env: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context_mut(eval)?;
-        logger::push_deprecation_warning(
-            Some(ctx.module_name.clone()),
-            "Support for checkout.update_env() will be removed in v0.16. Use checkout.add_env_vars()",
-        );
-        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for update env rule"))?;
+        evaluation_profile::profile_builtin_call("checkout", "update_env", || {
+            let ctx = get_eval_context_mut(eval)?;
+            logger::push_deprecation_warning(
+                Some(ctx.module_name.clone()),
+                "Support for checkout.update_env() will be removed in v0.16. Use checkout.add_env_vars()",
+            );
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+                .context(format_context!("bad options for update env rule"))?;
 
-        let mut any_env = environment::AnyEnvironment::try_from(env.to_json_value()?)
-            .context(format_context!("Failed to parse update_env arguments"))?;
+            let mut any_env = environment::AnyEnvironment::try_from(env.to_json_value()?)
+                .context(format_context!("Failed to parse update_env arguments"))?;
 
-        any_env.populate_source_for_all(Some(ctx.module_name.clone()));
+            any_env.populate_source_for_all(Some(ctx.module_name.clone()));
 
-        let update_env = executor::env::UpdateEnv {
-            environment: any_env,
-        };
+            let update_env = executor::env::UpdateEnv {
+                environment: any_env,
+            };
 
-        let rule_name = rule.name.clone();
-        rules::insert_task_for_module(
-            task::Task::new(
-                rule,
-                task::Phase::Checkout,
-                executor::Task::UpdateEnv(update_env),
-            ),
-            &ctx.module_name,
-            ctx.default_module_visibility.clone(),
-            Some(ctx),
-        )
-        .context(format_context!("Failed to register rule {rule_name}"))?;
+            let rule_name = rule.name.clone();
+            rules::insert_task_for_module(
+                task::Task::new(
+                    rule,
+                    task::Phase::Checkout,
+                    executor::Task::UpdateEnv(update_env),
+                ),
+                &ctx.module_name,
+                ctx.default_module_visibility.clone(),
+                Some(ctx),
+            )
+            .context(format_context!("Failed to register rule {rule_name}"))?;
 
-        Ok(NoneType)
+            Ok(NoneType)
+        })
     }
 
     /// Creates or updates the environment in the workspace during checkout.
@@ -1152,43 +1198,45 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] any_env: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context_mut(eval)?;
-        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for update env rule"))?;
+        evaluation_profile::profile_builtin_call("checkout", "add_env_vars", || {
+            let ctx = get_eval_context_mut(eval)?;
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+                .context(format_context!("bad options for update env rule"))?;
 
-        let mut any_env: environment::AnyEnvironment =
-            serde_json::from_value(any_env.to_json_value()?)
-                .context(format_context!("Failed to parse add_env_vars arguments"))?;
+            let mut any_env: environment::AnyEnvironment =
+                serde_json::from_value(any_env.to_json_value()?)
+                    .context(format_context!("Failed to parse add_env_vars arguments"))?;
 
-        any_env.populate_source_for_all(Some(ctx.module_name.clone()));
+            any_env.populate_source_for_all(Some(ctx.module_name.clone()));
 
-        {
-            let workspace_arc = ctx
-                .workspace
-                .clone()
-                .ok_or_else(|| format_error!("No active workspace found"))?;
-            let workspace = workspace_arc.read();
-            workspace.insert_automatic_var_placeholders(&mut any_env);
-        }
+            {
+                let workspace_arc = ctx
+                    .workspace
+                    .clone()
+                    .ok_or_else(|| format_error!("No active workspace found"))?;
+                let workspace = workspace_arc.read();
+                workspace.insert_automatic_var_placeholders(&mut any_env);
+            }
 
-        let update_env = executor::env::UpdateEnv {
-            environment: any_env,
-        };
+            let update_env = executor::env::UpdateEnv {
+                environment: any_env,
+            };
 
-        let rule_name = rule.name.clone();
-        rules::insert_task_for_module(
-            task::Task::new(
-                rule,
-                task::Phase::Checkout,
-                executor::Task::UpdateEnv(update_env),
-            ),
-            &ctx.module_name,
-            ctx.default_module_visibility.clone(),
-            Some(ctx),
-        )
-        .context(format_context!("Failed to register rule {rule_name}"))?;
+            let rule_name = rule.name.clone();
+            rules::insert_task_for_module(
+                task::Task::new(
+                    rule,
+                    task::Phase::Checkout,
+                    executor::Task::UpdateEnv(update_env),
+                ),
+                &ctx.module_name,
+                ctx.default_module_visibility.clone(),
+                Some(ctx),
+            )
+            .context(format_context!("Failed to register rule {rule_name}"))?;
 
-        Ok(NoneType)
+            Ok(NoneType)
+        })
     }
 
     /// Sets the maximum number of concurrent tasks during the run phase.
@@ -1202,20 +1250,22 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Arguments
     /// * `count`: Maximum number of concurrent run tasks.
     fn set_max_run_queue(count: i64, eval: &mut Evaluator) -> anyhow::Result<NoneType> {
-        if count < 1 {
-            return Err(anyhow::anyhow!("max_run_queue must be greater than 0"));
-        }
-        if count > 64 {
-            return Err(anyhow::anyhow!("max_run_queue must be less than 65"));
-        }
-        let ctx = get_eval_context(eval)?;
-        let workspace_arc = ctx
-            .workspace
-            .clone()
-            .ok_or_else(|| format_error!("Internal Error: No active workspace found"))?;
-        let mut workspace = workspace_arc.write();
-        workspace.settings.json.max_run_queue = count;
-        Ok(NoneType)
+        evaluation_profile::profile_builtin_call("checkout", "set_max_run_queue", || {
+            if count < 1 {
+                return Err(anyhow::anyhow!("max_run_queue must be greater than 0"));
+            }
+            if count > 64 {
+                return Err(anyhow::anyhow!("max_run_queue must be less than 65"));
+            }
+            let ctx = get_eval_context(eval)?;
+            let workspace_arc = ctx
+                .workspace
+                .clone()
+                .ok_or_else(|| format_error!("Internal Error: No active workspace found"))?;
+            let mut workspace = workspace_arc.write();
+            workspace.settings.json.max_run_queue = count;
+            Ok(NoneType)
+        })
     }
 
     /// Sets the maximum number of concurrent tasks during the checkout phase.
@@ -1229,20 +1279,22 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Arguments
     /// * `count`: Maximum number of concurrent checkout tasks.
     fn set_max_checkout_queue(count: i64, eval: &mut Evaluator) -> anyhow::Result<NoneType> {
-        if count < 1 {
-            return Err(anyhow::anyhow!("max_checkout_queue must be greater than 0"));
-        }
-        if count > 64 {
-            return Err(anyhow::anyhow!("max_checkout_queue must be less than 65"));
-        }
-        let ctx = get_eval_context(eval)?;
-        let workspace_arc = ctx
-            .workspace
-            .clone()
-            .ok_or_else(|| format_error!("Internal Error: No active workspace found"))?;
-        let mut workspace = workspace_arc.write();
-        workspace.settings.json.max_checkout_queue = count;
-        Ok(NoneType)
+        evaluation_profile::profile_builtin_call("checkout", "set_max_checkout_queue", || {
+            if count < 1 {
+                return Err(anyhow::anyhow!("max_checkout_queue must be greater than 0"));
+            }
+            if count > 64 {
+                return Err(anyhow::anyhow!("max_checkout_queue must be less than 65"));
+            }
+            let ctx = get_eval_context(eval)?;
+            let workspace_arc = ctx
+                .workspace
+                .clone()
+                .ok_or_else(|| format_error!("Internal Error: No active workspace found"))?;
+            let mut workspace = workspace_arc.write();
+            workspace.settings.json.max_checkout_queue = count;
+            Ok(NoneType)
+        })
     }
 }
 

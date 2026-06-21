@@ -7,7 +7,7 @@ use std::sync::Arc;
 use utils::{logger, marker, rule, targets};
 
 use crate::builtins::eval_context::get_eval_context_mut;
-use crate::{executor, rules, task};
+use crate::{evaluation_profile, executor, rules, task};
 
 fn add_file_tokens_to_deps(
     exec: &executor::exec::Exec,
@@ -159,12 +159,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Arguments
     /// * `message`: Abort message to show the user.
     fn abort(message: &str, eval: &mut Evaluator) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context_mut(eval)?;
-        if ctx.is_lsp {
-            Ok(NoneType)
-        } else {
-            Err(format_error!("Run Aborting: {}", message))
-        }
+        evaluation_profile::profile_builtin_call("run", "abort", || {
+            let ctx = get_eval_context_mut(eval)?;
+            if ctx.is_lsp {
+                Ok(NoneType)
+            } else {
+                Err(format_error!("Run Aborting: {}", message))
+            }
+        })
     }
 
     /// Adds a rule that depends on other rules but doesn't execute any command.
@@ -186,24 +188,26 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context_mut(eval)?;
-        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for add target rule"))?;
+        evaluation_profile::profile_builtin_call("run", "add", || {
+            let ctx = get_eval_context_mut(eval)?;
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+                .context(format_context!("bad options for add target rule"))?;
 
-        if let Some(workspace_arc) = ctx.workspace.clone() {
-            add_rule_to_all(&rule, &workspace_arc, &ctx.module_name)
-                .context(format_context!("Internal Error: Failed to add rule to all"))?;
-        }
+            if let Some(workspace_arc) = ctx.workspace.clone() {
+                add_rule_to_all(&rule, &workspace_arc, &ctx.module_name)
+                    .context(format_context!("Internal Error: Failed to add rule to all"))?;
+            }
 
-        let rule_name = rule.name.clone();
-        rules::insert_task_for_module(
-            task::Task::new(rule, task::Phase::Run, executor::Task::Target),
-            &ctx.module_name,
-            ctx.default_module_visibility.clone(),
-            Some(ctx),
-        )
-        .context(format_context!("Failed to register rule {rule_name}"))?;
-        Ok(NoneType)
+            let rule_name = rule.name.clone();
+            rules::insert_task_for_module(
+                task::Task::new(rule, task::Phase::Run, executor::Task::Target),
+                &ctx.module_name,
+                ctx.default_module_visibility.clone(),
+                Some(ctx),
+            )
+            .context(format_context!("Failed to register rule {rule_name}"))?;
+            Ok(NoneType)
+        })
     }
 
     /// Adds a rule that depends on other rules.
@@ -216,29 +220,31 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] rule: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context_mut(eval)?;
-        logger::push_deprecation_warning(
-            Some(ctx.module_name.clone()),
-            "Support for checkout.add_which_asset() will be removed in v0.16. Use checkout.add_any_asset().",
-        );
+        evaluation_profile::profile_builtin_call("run", "add_target", || {
+            let ctx = get_eval_context_mut(eval)?;
+            logger::push_deprecation_warning(
+                Some(ctx.module_name.clone()),
+                "Support for checkout.add_which_asset() will be removed in v0.16. Use checkout.add_any_asset().",
+            );
 
-        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for add target rule"))?;
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+                .context(format_context!("bad options for add target rule"))?;
 
-        if let Some(workspace_arc) = ctx.workspace.clone() {
-            add_rule_to_all(&rule, &workspace_arc, &ctx.module_name)
-                .context(format_context!("Internal Error: Failed to add rule to all"))?;
-        }
+            if let Some(workspace_arc) = ctx.workspace.clone() {
+                add_rule_to_all(&rule, &workspace_arc, &ctx.module_name)
+                    .context(format_context!("Internal Error: Failed to add rule to all"))?;
+            }
 
-        let rule_name = rule.name.clone();
-        rules::insert_task_for_module(
-            task::Task::new(rule, task::Phase::Run, executor::Task::Target),
-            &ctx.module_name,
-            ctx.default_module_visibility.clone(),
-            Some(ctx),
-        )
-        .context(format_context!("Failed to register rule {rule_name}"))?;
-        Ok(NoneType)
+            let rule_name = rule.name.clone();
+            rules::insert_task_for_module(
+                task::Task::new(rule, task::Phase::Run, executor::Task::Target),
+                &ctx.module_name,
+                ctx.default_module_visibility.clone(),
+                Some(ctx),
+            )
+            .context(format_context!("Failed to register rule {rule_name}"))?;
+            Ok(NoneType)
+        })
     }
 
     /// Adds a rule that will execute a process.
@@ -265,62 +271,66 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] exec: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context_mut(eval)?;
-        let mut rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for exec rule"))?;
+        evaluation_profile::profile_builtin_call("run", "add_exec", || {
+            let ctx = get_eval_context_mut(eval)?;
+            let mut rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+                .context(format_context!("bad options for exec rule"))?;
 
-        if let Some(inputs) = rule.inputs.as_ref() {
-            for glob in inputs {
-                if !glob.starts_with('+') && !glob.starts_with('-') {
-                    return Err(format_error!(
-                        "Invalid glob: {glob:?}. Must begin with '+' (includes) or '-' (excludes) in {}",
-                        rule.name
-                    ));
+            if let Some(inputs) = rule.inputs.as_ref() {
+                for glob in inputs {
+                    if !glob.starts_with('+') && !glob.starts_with('-') {
+                        return Err(format_error!(
+                            "Invalid glob: {glob:?}. Must begin with '+' (includes) or '-' (excludes) in {}",
+                            rule.name
+                        ));
+                    }
                 }
             }
-        }
 
-        if let Some(workspace_arc) = ctx.workspace.clone() {
-            add_rule_to_all(&rule, &workspace_arc, &ctx.module_name)
-                .context(format_context!("Internal Error: Failed to add rule to all"))?;
-        }
+            if let Some(workspace_arc) = ctx.workspace.clone() {
+                add_rule_to_all(&rule, &workspace_arc, &ctx.module_name)
+                    .context(format_context!("Internal Error: Failed to add rule to all"))?;
+            }
 
-        let mut exec: executor::exec::Exec = serde_json::from_value(exec.to_json_value()?)
-            .context(format_context!("bad options for exec"))?;
+            let mut exec: executor::exec::Exec = serde_json::from_value(exec.to_json_value()?)
+                .context(format_context!("bad options for exec"))?;
 
-        if let Some(working_directory) = exec.working_directory.as_mut() {
-            *working_directory = rules::get_sanitized_working_directory_for_module(
-                working_directory.clone(),
+            if let Some(working_directory) = exec.working_directory.as_mut() {
+                *working_directory = rules::get_sanitized_working_directory_for_module(
+                    working_directory.clone(),
+                    &ctx.module_name,
+                );
+            }
+
+            if let Some(redirect_stdout) = exec.redirect_stdout.as_mut() {
+                *redirect_stdout = format!("build/{redirect_stdout}").into();
+            }
+
+            sanitize_exit_value_tokens(&mut exec, &ctx.module_name).context(format_context!(
+                "Failed to sanitize $RUN_LOAD_EXIT_VALUE tokens for rule {}",
+                rule.name
+            ))?;
+            add_file_tokens_to_deps(&exec, &mut rule).context(format_context!(
+                "Failed to add $FILE tokens to deps for rule {}",
+                rule.name
+            ))?;
+            add_exit_value_rule_deps(&exec, &mut rule, &ctx.module_name).context(
+                format_context!(
+                    "Failed to add $RUN_LOAD_EXIT_VALUE rule deps for rule {}",
+                    rule.name
+                ),
+            )?;
+
+            let rule_name = rule.name.clone();
+            rules::insert_task_for_module(
+                task::Task::new(rule, task::Phase::Run, executor::Task::Exec(exec)),
                 &ctx.module_name,
-            );
-        }
-
-        if let Some(redirect_stdout) = exec.redirect_stdout.as_mut() {
-            *redirect_stdout = format!("build/{redirect_stdout}").into();
-        }
-
-        sanitize_exit_value_tokens(&mut exec, &ctx.module_name).context(format_context!(
-            "Failed to sanitize $RUN_LOAD_EXIT_VALUE tokens for rule {}",
-            rule.name
-        ))?;
-        add_file_tokens_to_deps(&exec, &mut rule).context(format_context!(
-            "Failed to add $FILE tokens to deps for rule {}",
-            rule.name
-        ))?;
-        add_exit_value_rule_deps(&exec, &mut rule, &ctx.module_name).context(format_context!(
-            "Failed to add $RUN_LOAD_EXIT_VALUE rule deps for rule {}",
-            rule.name
-        ))?;
-
-        let rule_name = rule.name.clone();
-        rules::insert_task_for_module(
-            task::Task::new(rule, task::Phase::Run, executor::Task::Exec(exec)),
-            &ctx.module_name,
-            ctx.default_module_visibility.clone(),
-            Some(ctx),
-        )
-        .context(format_context!("Failed to register rule {rule_name}"))?;
-        Ok(NoneType)
+                ctx.default_module_visibility.clone(),
+                Some(ctx),
+            )
+            .context(format_context!("Failed to register rule {rule_name}"))?;
+            Ok(NoneType)
+        })
     }
 
     /// Adds a rule that will kill the execution of another rule.
@@ -344,40 +354,44 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] kill: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context_mut(eval)?;
-        let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for kill rule"))?;
+        evaluation_profile::profile_builtin_call("run", "add_kill_exec", || {
+            let ctx = get_eval_context_mut(eval)?;
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+                .context(format_context!("bad options for kill rule"))?;
 
-        if let Some(inputs) = rule.inputs.as_ref() {
-            for glob in inputs {
-                if !glob.starts_with('+') && !glob.starts_with('-') {
-                    return Err(format_error!(
-                        "Invalid glob: {glob:?}. Must begin with '+' (includes) or '-' (excludes) in {}",
-                        rule.name
-                    ));
+            if let Some(inputs) = rule.inputs.as_ref() {
+                for glob in inputs {
+                    if !glob.starts_with('+') && !glob.starts_with('-') {
+                        return Err(format_error!(
+                            "Invalid glob: {glob:?}. Must begin with '+' (includes) or '-' (excludes) in {}",
+                            rule.name
+                        ));
+                    }
                 }
             }
-        }
 
-        if let Some(workspace_arc) = ctx.workspace.clone() {
-            add_rule_to_all(&rule, &workspace_arc, &ctx.module_name)
-                .context(format_context!("Internal Error: Failed to add rule to all"))?;
-        }
+            if let Some(workspace_arc) = ctx.workspace.clone() {
+                add_rule_to_all(&rule, &workspace_arc, &ctx.module_name)
+                    .context(format_context!("Internal Error: Failed to add rule to all"))?;
+            }
 
-        let mut kill_exec: executor::exec::Kill = serde_json::from_value(kill.to_json_value()?)
-            .context(format_context!("bad options for kill"))?;
-        kill_exec.target =
-            rules::get_sanitized_rule_name_for_module(kill_exec.target.clone(), &ctx.module_name);
+            let mut kill_exec: executor::exec::Kill = serde_json::from_value(kill.to_json_value()?)
+                .context(format_context!("bad options for kill"))?;
+            kill_exec.target = rules::get_sanitized_rule_name_for_module(
+                kill_exec.target.clone(),
+                &ctx.module_name,
+            );
 
-        let rule_name = rule.name.clone();
-        rules::insert_task_for_module(
-            task::Task::new(rule, task::Phase::Run, executor::Task::Kill(kill_exec)),
-            &ctx.module_name,
-            ctx.default_module_visibility.clone(),
-            Some(ctx),
-        )
-        .context(format_context!("Failed to register rule {rule_name}"))?;
-        Ok(NoneType)
+            let rule_name = rule.name.clone();
+            rules::insert_task_for_module(
+                task::Task::new(rule, task::Phase::Run, executor::Task::Kill(kill_exec)),
+                &ctx.module_name,
+                ctx.default_module_visibility.clone(),
+                Some(ctx),
+            )
+            .context(format_context!("Failed to register rule {rule_name}"))?;
+            Ok(NoneType)
+        })
     }
 
     /// Adds a rule that will archive a directory.
@@ -402,64 +416,66 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] archive: starlark::values::Value,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context_mut(eval)?;
-        let mut rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for add_archive rule"))?;
+        evaluation_profile::profile_builtin_call("run", "add_archive", || {
+            let ctx = get_eval_context_mut(eval)?;
+            let mut rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+                .context(format_context!("bad options for add_archive rule"))?;
 
-        if rule.inputs.is_some() {
-            return Err(anyhow::anyhow!(
-                "inputs are populated automatically by add_archive"
-            ));
-        }
+            if rule.inputs.is_some() {
+                return Err(anyhow::anyhow!(
+                    "inputs are populated automatically by add_archive"
+                ));
+            }
 
-        if rule.targets.is_some() {
-            return Err(anyhow::anyhow!(
-                "outputs are populated automatically by add_archive"
-            ));
-        }
+            if rule.targets.is_some() {
+                return Err(anyhow::anyhow!(
+                    "outputs are populated automatically by add_archive"
+                ));
+            }
 
-        let mut create_archive: archiver::CreateArchive =
-            serde_json::from_value(archive.to_json_value()?)
-                .context(format_context!("bad options for archive"))?;
+            let mut create_archive: archiver::CreateArchive =
+                serde_json::from_value(archive.to_json_value()?)
+                    .context(format_context!("bad options for archive"))?;
 
-        let rule_name = rule.name.clone();
+            let rule_name = rule.name.clone();
 
-        let input = create_archive
-            .input
-            .strip_prefix("//")
-            .unwrap_or(&create_archive.input)
-            .to_owned();
-        create_archive.input = input;
+            let input = create_archive
+                .input
+                .strip_prefix("//")
+                .unwrap_or(&create_archive.input)
+                .to_owned();
+            create_archive.input = input;
 
-        // Add archive input globs to deps without clobbering existing deps
-        let includes = vec![format!("//{}/**", create_archive.input).into()];
-        rule::Deps::push_any_dep(
-            &mut rule.deps,
-            rule::AnyDep::Glob(rule::Globs::Includes(includes)),
-        );
+            // Add archive input globs to deps without clobbering existing deps
+            let includes = vec![format!("//{}/**", create_archive.input).into()];
+            rule::Deps::push_any_dep(
+                &mut rule.deps,
+                rule::AnyDep::Glob(rule::Globs::Includes(includes)),
+            );
 
-        let target_path = format!(
-            "//build/{}/{}",
-            rules::get_sanitized_rule_name_for_module(rule_name.clone(), &ctx.module_name),
-            create_archive.get_output_file()
-        )
-        .into();
-        rule.push_target(targets::Target::File(target_path));
+            let target_path = format!(
+                "//build/{}/{}",
+                rules::get_sanitized_rule_name_for_module(rule_name.clone(), &ctx.module_name),
+                create_archive.get_output_file()
+            )
+            .into();
+            rule.push_target(targets::Target::File(target_path));
 
-        let archive = executor::archive::Archive { create_archive };
+            let archive = executor::archive::Archive { create_archive };
 
-        rules::insert_task_for_module(
-            task::Task::new(
-                rule,
-                task::Phase::Run,
-                executor::Task::CreateArchive(archive),
-            ),
-            &ctx.module_name,
-            ctx.default_module_visibility.clone(),
-            Some(ctx),
-        )
-        .context(format_context!("Failed to register rule {rule_name}"))?;
-        Ok(NoneType)
+            rules::insert_task_for_module(
+                task::Task::new(
+                    rule,
+                    task::Phase::Run,
+                    executor::Task::CreateArchive(archive),
+                ),
+                &ctx.module_name,
+                ctx.default_module_visibility.clone(),
+                Some(ctx),
+            )
+            .context(format_context!("Failed to register rule {rule_name}"))?;
+            Ok(NoneType)
+        })
     }
 
     /// Adds a rule that will execute based on the cloned from rule.
@@ -485,81 +501,83 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] clone_from: &str,
         eval: &mut Evaluator,
     ) -> anyhow::Result<NoneType> {
-        let ctx = get_eval_context_mut(eval)?;
-        let mut rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-            .context(format_context!("bad options for add_from_clone rule"))?;
+        evaluation_profile::profile_builtin_call("run", "add_from_clone", || {
+            let ctx = get_eval_context_mut(eval)?;
+            let mut rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
+                .context(format_context!("bad options for add_from_clone rule"))?;
 
-        if ctx.is_lsp {
-            return Ok(NoneType);
-        }
+            if ctx.is_lsp {
+                return Ok(NoneType);
+            }
 
-        let cloned_task = rules::get_cloned_task_for_module(clone_from, &ctx.module_name)
-            .context(format_context!("Failed to clone rule {}", clone_from))?;
+            let cloned_task = rules::get_cloned_task_for_module(clone_from, &ctx.module_name)
+                .context(format_context!("Failed to clone rule {}", clone_from))?;
 
-        match &cloned_task.executor {
-            executor::Task::Exec(_) => (),
-            executor::Task::Target => (),
-            _ => {
+            match &cloned_task.executor {
+                executor::Task::Exec(_) => (),
+                executor::Task::Target => (),
+                _ => {
+                    return Err(format_error!(
+                        "clone_from rule {} does not have an Exec/Target task",
+                        clone_from
+                    ));
+                }
+            };
+
+            // Merge: cloned rule fields are used as defaults, new rule fields take precedence
+            let cloned_rule = cloned_task.rule;
+            if let Some(cloned_deps) = cloned_rule.deps {
+                let cloned_any_deps: Vec<rule::AnyDep> = match cloned_deps {
+                    rule::Deps::Rules(rules) => rules.into_iter().map(rule::AnyDep::Rule).collect(),
+                    rule::Deps::Any(any) => any,
+                };
+                rule::Deps::push_any_deps(&mut rule.deps, cloned_any_deps);
+            }
+            if rule.help.is_none() {
+                rule.help = cloned_rule.help;
+            }
+            if rule.inputs.is_none() {
+                rule.inputs = cloned_rule.inputs;
+            } else {
+                return Err(format_error!("Cloned rules cannot specify inputs"));
+            }
+            if rule.outputs.is_none() {
+                rule.outputs = cloned_rule.outputs;
+            } else {
+                return Err(format_error!("Cloned rules cannot specify outputs"));
+            }
+            if rule.targets.is_none() {
+                rule.targets = cloned_rule.targets;
+            } else {
                 return Err(format_error!(
-                    "clone_from rule {} does not have an Exec/Target task",
-                    clone_from
+                    "Cloned rules cannot specify targets (always cloned from the original)"
                 ));
             }
-        };
+            if rule.platforms.is_none() {
+                rule.platforms = cloned_rule.platforms;
+            } else {
+                return Err(format_error!(
+                    "Cloned rules cannot specify platforms (always cloned from the original)"
+                ));
+            }
+            if rule.type_.is_none() {
+                rule.type_ = cloned_rule.type_;
+            }
 
-        // Merge: cloned rule fields are used as defaults, new rule fields take precedence
-        let cloned_rule = cloned_task.rule;
-        if let Some(cloned_deps) = cloned_rule.deps {
-            let cloned_any_deps: Vec<rule::AnyDep> = match cloned_deps {
-                rule::Deps::Rules(rules) => rules.into_iter().map(rule::AnyDep::Rule).collect(),
-                rule::Deps::Any(any) => any,
-            };
-            rule::Deps::push_any_deps(&mut rule.deps, cloned_any_deps);
-        }
-        if rule.help.is_none() {
-            rule.help = cloned_rule.help;
-        }
-        if rule.inputs.is_none() {
-            rule.inputs = cloned_rule.inputs;
-        } else {
-            return Err(format_error!("Cloned rules cannot specify inputs"));
-        }
-        if rule.outputs.is_none() {
-            rule.outputs = cloned_rule.outputs;
-        } else {
-            return Err(format_error!("Cloned rules cannot specify outputs"));
-        }
-        if rule.targets.is_none() {
-            rule.targets = cloned_rule.targets;
-        } else {
-            return Err(format_error!(
-                "Cloned rules cannot specify targets (always cloned from the original)"
-            ));
-        }
-        if rule.platforms.is_none() {
-            rule.platforms = cloned_rule.platforms;
-        } else {
-            return Err(format_error!(
-                "Cloned rules cannot specify platforms (always cloned from the original)"
-            ));
-        }
-        if rule.type_.is_none() {
-            rule.type_ = cloned_rule.type_;
-        }
+            if let Some(workspace_arc) = ctx.workspace.clone() {
+                add_rule_to_all(&rule, &workspace_arc, &ctx.module_name)
+                    .context(format_context!("Internal Error: Failed to add rule to all"))?;
+            }
 
-        if let Some(workspace_arc) = ctx.workspace.clone() {
-            add_rule_to_all(&rule, &workspace_arc, &ctx.module_name)
-                .context(format_context!("Internal Error: Failed to add rule to all"))?;
-        }
-
-        let rule_name = rule.name.clone();
-        rules::insert_task_for_module(
-            task::Task::new(rule, task::Phase::Run, cloned_task.executor),
-            &ctx.module_name,
-            ctx.default_module_visibility.clone(),
-            Some(ctx),
-        )
-        .context(format_context!("Failed to register rule {rule_name}"))?;
-        Ok(NoneType)
+            let rule_name = rule.name.clone();
+            rules::insert_task_for_module(
+                task::Task::new(rule, task::Phase::Run, cloned_task.executor),
+                &ctx.module_name,
+                ctx.default_module_visibility.clone(),
+                Some(ctx),
+            )
+            .context(format_context!("Failed to register rule {rule_name}"))?;
+            Ok(NoneType)
+        })
     }
 }

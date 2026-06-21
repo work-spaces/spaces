@@ -5,6 +5,7 @@
 //! were not constructed with a console), the calls are no-ops so that rules
 //! modules can be loaded without side effects.
 use crate::builtins::eval_context::get_eval_context;
+use crate::evaluation_profile;
 use starlark::environment::GlobalsBuilder;
 use starlark::eval::Evaluator;
 use starlark::values::none::NoneType;
@@ -17,13 +18,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// rlog.trace("starting checkout")
     /// ```
     fn trace(message: &str, eval: &mut Evaluator) -> anyhow::Result<NoneType> {
-        if let Some(logger) = get_eval_context(eval)
-            .ok()
-            .and_then(|ctx| ctx.logger.as_ref())
-        {
-            logger.trace(message);
-        }
-        Ok(NoneType)
+        evaluation_profile::profile_builtin_call("rlog", "trace", || {
+            if let Some(logger) = get_eval_context(eval)
+                .ok()
+                .and_then(|ctx| ctx.logger.as_ref())
+            {
+                logger.trace(message);
+            }
+            Ok(NoneType)
+        })
     }
 
     /// Log a debug-level message on the active console.
@@ -32,13 +35,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// rlog.debug("resolved version 1.2.3")
     /// ```
     fn debug(message: &str, eval: &mut Evaluator) -> anyhow::Result<NoneType> {
-        if let Some(logger) = get_eval_context(eval)
-            .ok()
-            .and_then(|ctx| ctx.logger.as_ref())
-        {
-            logger.debug(message);
-        }
-        Ok(NoneType)
+        evaluation_profile::profile_builtin_call("rlog", "debug", || {
+            if let Some(logger) = get_eval_context(eval)
+                .ok()
+                .and_then(|ctx| ctx.logger.as_ref())
+            {
+                logger.debug(message);
+            }
+            Ok(NoneType)
+        })
     }
 
     /// Log an informational message on the active console.
@@ -47,13 +52,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// rlog.info("workspace ready")
     /// ```
     fn info(message: &str, eval: &mut Evaluator) -> anyhow::Result<NoneType> {
-        if let Some(logger) = get_eval_context(eval)
-            .ok()
-            .and_then(|ctx| ctx.logger.as_ref())
-        {
-            logger.info(message);
-        }
-        Ok(NoneType)
+        evaluation_profile::profile_builtin_call("rlog", "info", || {
+            if let Some(logger) = get_eval_context(eval)
+                .ok()
+                .and_then(|ctx| ctx.logger.as_ref())
+            {
+                logger.info(message);
+            }
+            Ok(NoneType)
+        })
     }
 
     /// Log a high-level user-facing message on the active console.
@@ -62,13 +69,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// rlog.message("--Building--")
     /// ```
     fn message(message: &str, eval: &mut Evaluator) -> anyhow::Result<NoneType> {
-        if let Some(logger) = get_eval_context(eval)
-            .ok()
-            .and_then(|ctx| ctx.logger.as_ref())
-        {
-            logger.message(message);
-        }
-        Ok(NoneType)
+        evaluation_profile::profile_builtin_call("rlog", "message", || {
+            if let Some(logger) = get_eval_context(eval)
+                .ok()
+                .and_then(|ctx| ctx.logger.as_ref())
+            {
+                logger.message(message);
+            }
+            Ok(NoneType)
+        })
     }
 
     /// Queue a deferred warning to be displayed at the end of the run.
@@ -77,13 +86,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// rlog.warn("deprecated rule used")
     /// ```
     fn warn(message: &str, eval: &mut Evaluator) -> anyhow::Result<NoneType> {
-        if let Some(logger) = get_eval_context(eval)
-            .ok()
-            .and_then(|ctx| ctx.logger.as_ref())
-        {
-            logger.warning(message);
-        }
-        Ok(NoneType)
+        evaluation_profile::profile_builtin_call("rlog", "warn", || {
+            if let Some(logger) = get_eval_context(eval)
+                .ok()
+                .and_then(|ctx| ctx.logger.as_ref())
+            {
+                logger.warning(message);
+            }
+            Ok(NoneType)
+        })
     }
 
     /// Log an error-level message on the active console.
@@ -92,12 +103,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// rlog.error("something went wrong")
     /// ```
     fn error(message: &str, eval: &mut Evaluator) -> anyhow::Result<NoneType> {
-        if let Some(logger) = get_eval_context(eval)
-            .ok()
-            .and_then(|ctx| ctx.logger.as_ref())
-        {
-            logger.error(message);
-        }
-        Ok(NoneType)
+        evaluation_profile::profile_builtin_call("rlog", "error", || {
+            if let Some(logger) = get_eval_context(eval)
+                .ok()
+                .and_then(|ctx| ctx.logger.as_ref())
+            {
+                logger.error(message);
+            }
+            Ok(NoneType)
+        })
     }
 }
