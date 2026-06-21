@@ -889,25 +889,27 @@ fn emit_pretty_rule_details(
                 rule_details = rule_details.item(key, rendered_value);
             }
 
-            let mut deps_list =
-                console::components::List::unordered().variant(console::components::Variant::Info);
-            let dep_items = if let Some(deps) = deps_value {
-                deps_to_unordered_items(deps).context(format_context!(
-                    "Failed to render deps list for {}",
-                    qr.rule.name.as_ref()
-                ))?
-            } else {
-                vec!["<None>".to_string()]
-            };
+            if include_deps {
+                let mut deps_list = console::components::List::unordered()
+                    .variant(console::components::Variant::Info);
+                let dep_items = if let Some(deps) = deps_value {
+                    deps_to_unordered_items(deps).context(format_context!(
+                        "Failed to render deps list for {}",
+                        qr.rule.name.as_ref()
+                    ))?
+                } else {
+                    vec!["<None>".to_string()]
+                };
 
-            for dep in dep_items {
-                deps_list = deps_list.item(dep);
+                for dep in dep_items {
+                    deps_list = deps_list.item(dep);
+                }
+
+                let deps_header = console::components::Header::h3("Deps")
+                    .variant(console::components::Variant::Info);
+                console.emit_lines(deps_header.render());
+                console.emit_lines(deps_list.render());
             }
-
-            let deps_header =
-                console::components::Header::h3("Deps").variant(console::components::Variant::Info);
-            console.emit_lines(deps_header.render());
-            console.emit_lines(deps_list.render());
         } else {
             let rendered_value =
                 yaml_value_to_pretty_string(rule_value).context(format_context!(
