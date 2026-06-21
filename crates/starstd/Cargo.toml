@@ -28,6 +28,7 @@ log = "0.4"
 env_logger = "0.11"
 clap = { version = "4", features = ["string", "wrap_help"] }
 tempfile = "3"
+fd-lock = "4"
 
 glob-match.workspace = true
 starlark.workspace = true

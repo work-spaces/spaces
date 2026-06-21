@@ -3963,6 +3963,7 @@ dependencies = [
  "crc32fast",
  "dirs",
  "env_logger",
+ "fd-lock",
  "glob-match",
  "hex",
  "hostname",

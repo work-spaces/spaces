@@ -135,6 +135,47 @@ def fs_write_string_atomic(path: str, content: str, mode: int = 0o644) -> None:
     """
     return fs.write_string_atomic(path = path, content = content, mode = mode)
 
+def fs_with_file_lock(
+        lock_path: str,
+        callback,
+        exclusive: bool = True,
+        blocking: bool = True,
+        create: bool = True):
+    """
+    Acquire an advisory file lock for the duration of a callback.
+
+    The callback is executed while the lock is held, and the callback's return
+    value is returned by this function.
+
+    Args:
+        lock_path: Path to the lock file to use
+        callback: Zero-argument function/lambda to run while locked
+        exclusive: If True, acquire an exclusive (writer) lock; otherwise shared
+        blocking: If True, wait until lock can be acquired; otherwise error if busy
+        create: If True, create the lock file (and parent directories) when needed
+
+    Returns:
+        Any: The return value from callback
+
+    Raises:
+        Error: If lock acquisition fails or callback raises
+
+    Examples:
+        # Protect an update with an exclusive lock
+        def critical_section():
+            fs_append_text("state.txt", "updated\\n")
+            return "ok"
+
+        result = fs_with_file_lock(".spaces/state.lock", critical_section)
+    """
+    return fs.with_file_lock(
+        path = lock_path,
+        callback = callback,
+        exclusive = exclusive,
+        blocking = blocking,
+        create = create,
+    )
+
 # ============================================================================
 # FILE I/O - Binary and Lines
 # ============================================================================
