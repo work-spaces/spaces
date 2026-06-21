@@ -603,114 +603,535 @@ fn query_highlight_mask(value: &str, query: &[Arc<str>]) -> Vec<bool> {
     highlights
 }
 
-fn push_highlighted_value(
-    line: &mut console::Line,
-    value: &str,
-    highlight_terms: Option<&[Arc<str>]>,
-) {
+fn highlight_chunks(value: &str, highlight_terms: Option<&[Arc<str>]>) -> Vec<(String, bool)> {
     let Some(highlight_terms) = highlight_terms.filter(|terms| !terms.is_empty()) else {
-        line.push(console::Span::new_unstyled_lossy(value));
-        return;
+        return vec![(value.to_owned(), false)];
     };
 
     let chars: Vec<char> = value.chars().collect();
-    let highlights = query_highlight_mask(value, highlight_terms);
-    if !highlights.iter().any(|highlighted| *highlighted) {
-        line.push(console::Span::new_unstyled_lossy(value));
-        return;
+    if chars.is_empty() {
+        return vec![(String::new(), false)];
     }
 
+    let highlights = query_highlight_mask(value, highlight_terms);
+    if !highlights.iter().any(|highlighted| *highlighted) {
+        return vec![(value.to_owned(), false)];
+    }
+
+    let mut chunks = Vec::new();
     let mut current_highlighted = highlights[0];
     let mut chunk = String::new();
+
     for (ch, highlighted) in chars.into_iter().zip(highlights) {
         if highlighted != current_highlighted {
-            if current_highlighted {
-                line.push(console::Span::new_styled_lossy(StyledContent::new(
-                    console::danger_style(),
-                    std::mem::take(&mut chunk),
-                )));
-            } else {
-                line.push(console::Span::new_unstyled_lossy(std::mem::take(
-                    &mut chunk,
-                )));
-            }
+            chunks.push((std::mem::take(&mut chunk), current_highlighted));
             current_highlighted = highlighted;
         }
         chunk.push(ch);
     }
 
-    if current_highlighted {
-        line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::danger_style(),
-            chunk,
-        )));
-    } else {
-        line.push(console::Span::new_unstyled_lossy(chunk));
-    }
+    chunks.push((chunk, current_highlighted));
+    chunks
 }
 
 fn make_name_line(name: &str, highlight_terms: Option<&[Arc<str>]>) -> console::Line {
     let mut line = console::Line::default();
-    let Some(highlight_terms) = highlight_terms.filter(|terms| !terms.is_empty()) else {
+    for (chunk, highlighted) in highlight_chunks(name, highlight_terms) {
+        let style = if highlighted {
+            console::warning_style()
+        } else {
+            console::primary_style()
+        };
         line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::primary_style(),
-            name.to_owned(),
-        )));
-        return line;
-    };
-
-    let chars: Vec<char> = name.chars().collect();
-    let highlights = query_highlight_mask(name, highlight_terms);
-    if !highlights.iter().any(|highlighted| *highlighted) {
-        line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::primary_style(),
-            name.to_owned(),
-        )));
-        return line;
-    }
-
-    let mut current_highlighted = highlights[0];
-    let mut chunk = String::new();
-    for (ch, highlighted) in chars.into_iter().zip(highlights) {
-        if highlighted != current_highlighted {
-            if current_highlighted {
-                line.push(console::Span::new_styled_lossy(StyledContent::new(
-                    console::danger_style(),
-                    std::mem::take(&mut chunk),
-                )));
-            } else {
-                line.push(console::Span::new_styled_lossy(StyledContent::new(
-                    console::primary_style(),
-                    std::mem::take(&mut chunk),
-                )));
-            }
-            current_highlighted = highlighted;
-        }
-        chunk.push(ch);
-    }
-
-    if current_highlighted {
-        line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::danger_style(),
-            chunk,
-        )));
-    } else {
-        line.push(console::Span::new_styled_lossy(StyledContent::new(
-            console::primary_style(),
-            chunk,
+            style, chunk,
         )));
     }
     line
 }
 
-fn make_kv_line(key: &str, value: &str, highlight_terms: Option<&[Arc<str>]>) -> console::Line {
-    let mut line = console::Line::default();
-    line.push(console::Span::new_styled_lossy(StyledContent::new(
-        console::default_style(),
-        format!("  {key:<8}"),
-    )));
-    push_highlighted_value(&mut line, value, highlight_terms);
-    line
+fn normalize_help_text(help: &str) -> String {
+    let mut help_lines = help.lines();
+    if let Some(first) = help_lines.next() {
+        std::iter::once(first)
+            .chain(help_lines.map(str::trim_start))
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        String::new()
+    }
+}
+
+fn make_help_lines(help: &str, highlight_terms: Option<&[Arc<str>]>) -> Vec<console::Line> {
+    help.lines()
+        .map(|line| {
+            let mut styled_line = console::Line::default();
+            for (segment_idx, segment) in line.split('`').enumerate() {
+                if segment.is_empty() {
+                    continue;
+                }
+
+                let is_code = segment_idx % 2 == 1;
+                for (chunk, highlighted) in highlight_chunks(segment, highlight_terms) {
+                    if chunk.is_empty() {
+                        continue;
+                    }
+
+                    if highlighted {
+                        styled_line.push(console::Span::new_styled_lossy(StyledContent::new(
+                            console::warning_style(),
+                            chunk,
+                        )));
+                    } else if is_code {
+                        styled_line.push(console::components::code(chunk));
+                    } else {
+                        styled_line.push(console::Span::new_unstyled_lossy(chunk));
+                    }
+                }
+            }
+            styled_line
+        })
+        .collect()
+}
+
+fn yaml_key_to_string(key: &serde_yaml::Value) -> anyhow::Result<String> {
+    let key = match key {
+        serde_yaml::Value::Null => "null".to_string(),
+        serde_yaml::Value::Bool(v) => v.to_string(),
+        serde_yaml::Value::Number(v) => v.to_string(),
+        serde_yaml::Value::String(v) => v.clone(),
+        _ => {
+            let rendered = serde_yaml::to_string(key)
+                .context(format_context!("Failed to serialize YAML key"))?;
+            rendered
+                .strip_prefix("---\n")
+                .unwrap_or(&rendered)
+                .trim_end()
+                .to_string()
+        }
+    };
+    Ok(key)
+}
+
+fn yaml_value_to_pretty_string(value: &serde_yaml::Value) -> anyhow::Result<String> {
+    match value {
+        serde_yaml::Value::Null => Ok("null".to_string()),
+        serde_yaml::Value::Bool(v) => Ok(v.to_string()),
+        serde_yaml::Value::Number(v) => Ok(v.to_string()),
+        serde_yaml::Value::String(v) => Ok(v.clone()),
+        _ => {
+            let rendered = serde_yaml::to_string(value)
+                .context(format_context!("Failed to serialize YAML value"))?;
+            Ok(rendered
+                .strip_prefix("---\n")
+                .unwrap_or(&rendered)
+                .trim_end()
+                .to_string())
+        }
+    }
+}
+
+fn deps_to_unordered_items(value: &serde_yaml::Value) -> anyhow::Result<Vec<String>> {
+    match value {
+        serde_yaml::Value::Null => Ok(vec!["<None>".to_string()]),
+        serde_yaml::Value::Sequence(seq) => {
+            let mut items = Vec::new();
+            for entry in seq {
+                let rendered = yaml_value_to_pretty_string(entry)
+                    .context(format_context!("Failed to render deps sequence item"))?;
+                let collapsed = rendered
+                    .lines()
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                items.push(if collapsed.is_empty() {
+                    "<None>".to_string()
+                } else {
+                    collapsed
+                });
+            }
+            if items.is_empty() {
+                Ok(vec!["<None>".to_string()])
+            } else {
+                Ok(items)
+            }
+        }
+        serde_yaml::Value::Mapping(map) => {
+            if map.len() == 1
+                && let Some((tag_key, tagged_value)) = map.iter().next()
+                && let serde_yaml::Value::String(tag) = tag_key
+                && (tag == "Rules" || tag == "Any")
+            {
+                return deps_to_unordered_items(tagged_value);
+            }
+
+            let rendered = yaml_value_to_pretty_string(value)
+                .context(format_context!("Failed to render deps mapping"))?;
+            let collapsed = rendered
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ");
+            Ok(vec![if collapsed.is_empty() {
+                "<None>".to_string()
+            } else {
+                collapsed
+            }])
+        }
+        _ => {
+            let rendered = yaml_value_to_pretty_string(value)
+                .context(format_context!("Failed to render deps value"))?;
+            Ok(vec![rendered])
+        }
+    }
+}
+
+fn emit_pretty_rule_details(
+    console: &console::Console,
+    qr: &QueryRule,
+    include_deps: bool,
+) -> anyhow::Result<()> {
+    let serialized_yaml = qr.serialized_yaml.as_ref().ok_or_else(|| {
+        format_error!(
+            "Internal error: serialized_yaml not computed for rule {}",
+            qr.rule.name.as_ref()
+        )
+    })?;
+
+    let value: serde_yaml::Value = serde_yaml::from_str(serialized_yaml)
+        .context(format_context!("Failed to parse rule YAML"))?;
+
+    let header = console::components::Header::h1(qr.rule.name.as_ref())
+        .variant(console::components::Variant::Primary);
+    console.emit_lines(header.render());
+
+    let mut digest: Option<String> = None;
+    let mut phase: Option<String> = None;
+    let mut rule_value: Option<&serde_yaml::Value> = None;
+    let mut executor_value: Option<&serde_yaml::Value> = None;
+
+    if let Some(map) = value.as_mapping() {
+        for (key, field_value) in map {
+            let key = yaml_key_to_string(key).context(format_context!(
+                "Failed to render rule field key for {}",
+                qr.rule.name.as_ref()
+            ))?;
+
+            match key.as_str() {
+                "digest" => {
+                    digest = Some(yaml_value_to_pretty_string(field_value).context(
+                        format_context!("Failed to render digest for {}", qr.rule.name.as_ref()),
+                    )?);
+                }
+                "phase" => {
+                    phase = Some(yaml_value_to_pretty_string(field_value).context(
+                        format_context!("Failed to render phase for {}", qr.rule.name.as_ref()),
+                    )?);
+                }
+                "rule" => rule_value = Some(field_value),
+                "executor" => executor_value = Some(field_value),
+                _ => {}
+            }
+        }
+    }
+
+    let top_level = console::components::DescriptionList::new()
+        .variant(console::components::Variant::Info)
+        .compact(true)
+        .item("source", qr.source.as_str())
+        .item(
+            "digest",
+            digest.unwrap_or_else(|| "<Not Provided>".to_string()),
+        )
+        .item(
+            "phase",
+            phase.unwrap_or_else(|| "<Not Provided>".to_string()),
+        );
+    console.emit_lines(top_level.render());
+
+    let rule_header =
+        console::components::Header::h2("Rule").variant(console::components::Variant::Primary);
+    console.emit_lines(rule_header.render());
+
+    let mut rule_details = console::components::DescriptionList::new()
+        .variant(console::components::Variant::Info)
+        .compact(true);
+
+    if let Some(rule_value) = rule_value {
+        if let Some(rule_map) = rule_value.as_mapping() {
+            let mut deps_value: Option<&serde_yaml::Value> = None;
+
+            for (key, field_value) in rule_map {
+                let key = yaml_key_to_string(key).context(format_context!(
+                    "Failed to render rule member key for {}",
+                    qr.rule.name.as_ref()
+                ))?;
+
+                if key == "deps" {
+                    deps_value = Some(field_value);
+                    continue;
+                }
+
+                if key == "help" {
+                    let help_text = field_value.as_str().unwrap_or("<Not Provided>");
+                    let normalized_help = normalize_help_text(help_text);
+                    rule_details =
+                        rule_details.item("help", make_help_lines(&normalized_help, None));
+                    continue;
+                }
+
+                let rendered_value =
+                    yaml_value_to_pretty_string(field_value).context(format_context!(
+                        "Failed to render rule field '{key}' for {}",
+                        qr.rule.name.as_ref()
+                    ))?;
+                rule_details = rule_details.item(key, rendered_value);
+            }
+
+            if include_deps {
+                let mut deps_list = console::components::List::unordered()
+                    .variant(console::components::Variant::Info);
+                let dep_items = if let Some(deps) = deps_value {
+                    deps_to_unordered_items(deps).context(format_context!(
+                        "Failed to render deps list for {}",
+                        qr.rule.name.as_ref()
+                    ))?
+                } else {
+                    vec!["<None>".to_string()]
+                };
+
+                for dep in dep_items {
+                    deps_list = deps_list.item(dep);
+                }
+
+                let deps_header = console::components::Header::h3("Deps")
+                    .variant(console::components::Variant::Info);
+                console.emit_lines(deps_header.render());
+                console.emit_lines(deps_list.render());
+            }
+        } else {
+            let rendered_value =
+                yaml_value_to_pretty_string(rule_value).context(format_context!(
+                    "Failed to render rule details for {}",
+                    qr.rule.name.as_ref()
+                ))?;
+            rule_details = rule_details.item("rule", rendered_value);
+        }
+    } else {
+        rule_details = rule_details.item("rule", "<Not Provided>");
+    }
+
+    console.emit_lines(console::components::h3("Details"));
+    console.emit_lines(rule_details.render());
+
+    if include_deps {
+        let expanded_deps = qr.expanded_deps.as_ref().ok_or_else(|| {
+            format_error!(
+                "Internal error: expanded_deps not computed for rule {}",
+                qr.rule.name.as_ref()
+            )
+        })?;
+        let expanded_deps_value = serde_yaml::to_value(expanded_deps)
+            .context(format_context!("Failed to serialize expanded_deps"))?;
+        let expanded_deps_items = deps_to_unordered_items(&expanded_deps_value)
+            .context(format_context!("Failed to render expanded_deps"))?;
+
+        let mut expanded_deps_list =
+            console::components::List::unordered().variant(console::components::Variant::Info);
+        for dep in expanded_deps_items {
+            expanded_deps_list = expanded_deps_list.item(dep);
+        }
+
+        console.emit_lines(console::components::h3("Expanded Deps"));
+        console.emit_lines(expanded_deps_list.render());
+    }
+
+    let executor_header =
+        console::components::Header::h2("Executor").variant(console::components::Variant::Primary);
+    console.emit_lines(executor_header.render());
+
+    let mut executor_details = console::components::DescriptionList::new()
+        .variant(console::components::Variant::Info)
+        .compact(true);
+
+    if let Some(executor_value) = executor_value {
+        if let Some(executor_map) = executor_value.as_mapping() {
+            if executor_map.len() == 1 {
+                let (type_key, data_value) = executor_map.iter().next().ok_or_else(|| {
+                    format_error!(
+                        "Internal error: failed to read executor mapping for {}",
+                        qr.rule.name.as_ref()
+                    )
+                })?;
+
+                let executor_type = yaml_key_to_string(type_key).context(format_context!(
+                    "Failed to render executor type for {}",
+                    qr.rule.name.as_ref()
+                ))?;
+
+                executor_details = executor_details.item("type", executor_type.clone());
+
+                if executor_type == "Exec" {
+                    if let Some(exec_map) = data_value.as_mapping() {
+                        let command = exec_map
+                            .iter()
+                            .find_map(|(key, val)| {
+                                if matches!(key, serde_yaml::Value::String(s) if s == "command") {
+                                    Some(val)
+                                } else {
+                                    None
+                                }
+                            })
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("<Not Provided>");
+
+                        let mut tokens = vec![command.to_string()];
+                        if let Some(args_value) = exec_map.iter().find_map(|(key, val)| {
+                            if matches!(key, serde_yaml::Value::String(s) if s == "args") {
+                                Some(val)
+                            } else {
+                                None
+                            }
+                        }) && let Some(args) = args_value.as_sequence()
+                        {
+                            for arg in args {
+                                let rendered_arg =
+                                    yaml_value_to_pretty_string(arg).context(format_context!(
+                                        "Failed to render executor args for {}",
+                                        qr.rule.name.as_ref()
+                                    ))?;
+                                tokens.push(rendered_arg);
+                            }
+                        }
+
+                        let pretty_command = tokens
+                            .into_iter()
+                            .map(|token| {
+                                if token
+                                    .chars()
+                                    .all(|c| c.is_ascii_alphanumeric() || "-_./:=+".contains(c))
+                                {
+                                    token
+                                } else {
+                                    format!("{token:?}")
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" ");
+
+                        let mut pretty_line = console::Line::default();
+                        pretty_line.push(console::components::code(pretty_command));
+                        console.emit_line(pretty_line);
+
+                        let env_header = console::components::Header::h3("Env")
+                            .variant(console::components::Variant::Info);
+                        console.emit_lines(env_header.render());
+
+                        let mut env_list = console::components::List::unordered()
+                            .variant(console::components::Variant::Info);
+                        let mut has_env = false;
+                        if let Some(env_value) = exec_map.iter().find_map(|(key, val)| {
+                            if matches!(key, serde_yaml::Value::String(s) if s == "env") {
+                                Some(val)
+                            } else {
+                                None
+                            }
+                        }) && let Some(env_map) = env_value.as_mapping()
+                        {
+                            for (env_key, env_val) in env_map {
+                                let env_key =
+                                    yaml_key_to_string(env_key).context(format_context!(
+                                        "Failed to render executor env key for {}",
+                                        qr.rule.name.as_ref()
+                                    ))?;
+                                let env_val = yaml_value_to_pretty_string(env_val).context(
+                                    format_context!(
+                                        "Failed to render executor env value for {}",
+                                        qr.rule.name.as_ref()
+                                    ),
+                                )?;
+                                env_list = env_list.item(format!("{env_key}={env_val}"));
+                                has_env = true;
+                            }
+                        }
+
+                        if !has_env {
+                            env_list = env_list.item("<None>");
+                        }
+                        console.emit_lines(env_list.render());
+
+                        for (key, field_value) in exec_map {
+                            let key = yaml_key_to_string(key).context(format_context!(
+                                "Failed to render executor field key for {}",
+                                qr.rule.name.as_ref()
+                            ))?;
+                            if key == "command" || key == "args" || key == "env" {
+                                continue;
+                            }
+
+                            let rendered_value = yaml_value_to_pretty_string(field_value).context(
+                                format_context!(
+                                    "Failed to render executor field '{key}' for {}",
+                                    qr.rule.name.as_ref()
+                                ),
+                            )?;
+                            executor_details = executor_details.item(key, rendered_value);
+                        }
+                    } else {
+                        let rendered_value =
+                            yaml_value_to_pretty_string(data_value).context(format_context!(
+                                "Failed to render executor details for {}",
+                                qr.rule.name.as_ref()
+                            ))?;
+                        executor_details = executor_details.item("value", rendered_value);
+                    }
+                } else if let Some(other_map) = data_value.as_mapping() {
+                    for (key, field_value) in other_map {
+                        let key = yaml_key_to_string(key).context(format_context!(
+                            "Failed to render executor field key for {}",
+                            qr.rule.name.as_ref()
+                        ))?;
+                        let rendered_value =
+                            yaml_value_to_pretty_string(field_value).context(format_context!(
+                                "Failed to render executor field '{key}' for {}",
+                                qr.rule.name.as_ref()
+                            ))?;
+                        executor_details = executor_details.item(key, rendered_value);
+                    }
+                } else {
+                    let rendered_value =
+                        yaml_value_to_pretty_string(data_value).context(format_context!(
+                            "Failed to render executor details for {}",
+                            qr.rule.name.as_ref()
+                        ))?;
+                    executor_details = executor_details.item("value", rendered_value);
+                }
+            } else {
+                let rendered_value =
+                    yaml_value_to_pretty_string(executor_value).context(format_context!(
+                        "Failed to render executor details for {}",
+                        qr.rule.name.as_ref()
+                    ))?;
+                executor_details = executor_details.item("executor", rendered_value);
+            }
+        } else {
+            let rendered_value =
+                yaml_value_to_pretty_string(executor_value).context(format_context!(
+                    "Failed to render executor details for {}",
+                    qr.rule.name.as_ref()
+                ))?;
+            executor_details = executor_details.item("executor", rendered_value);
+        }
+    } else {
+        executor_details = executor_details.item("executor", "<Not Provided>");
+    }
+
+    let details_header =
+        console::components::Header::h3("Details").variant(console::components::Variant::Default);
+    console.emit_lines(details_header.render());
+    console.emit_lines(executor_details.render());
+    Ok(())
 }
 
 fn emit_styled_rule(
@@ -723,30 +1144,29 @@ fn emit_styled_rule(
     highlight_terms: Option<&[Arc<str>]>,
 ) {
     console.emit_line(make_name_line(name, highlight_terms));
-    console.emit_line(make_kv_line("source", source, None));
-    let help_lines: Vec<&str> = help.lines().collect();
-    if let Some((first, rest)) = help_lines.split_first() {
-        console.emit_line(make_kv_line("help", first, highlight_terms));
-        for continuation in rest {
-            let mut line = console::Line::default();
-            let continuation = continuation.trim_start();
-            line.push(console::Span::new_unstyled_lossy("          "));
-            push_highlighted_value(&mut line, continuation, highlight_terms);
-            console.emit_line(line);
-        }
-    } else {
-        console.emit_line(make_kv_line("help", "", highlight_terms));
-    }
+
+    let normalized_help = normalize_help_text(help);
+    let highlighted_help = make_help_lines(&normalized_help, highlight_terms);
+
+    let mut description_list = console::components::DescriptionList::new()
+        .variant(console::components::Variant::Info)
+        .compact(true)
+        .item("source", source)
+        .item("help", highlighted_help);
+
     if let Some(deps) = deps {
         for dep in deps {
-            console.emit_line(make_kv_line("dep", dep.as_ref(), None));
+            description_list = description_list.item("dep", dep.as_ref());
         }
     }
+
     if let Some(targets) = targets {
         for target in targets {
-            console.emit_line(make_kv_line("target", target.as_ref(), None));
+            description_list = description_list.item("target", target.as_ref());
         }
     }
+
+    console.emit_lines(description_list.render());
     console.emit_line(console::Line::default());
 }
 
@@ -877,22 +1297,7 @@ impl QueryCommand {
                 .ok_or_else(|| format_error!("Rule not found: {name}"))?;
 
                 if matches!(format, console::Format::Pretty) {
-                    let rule_deps = if *deps {
-                        qr.expanded_deps.as_ref()
-                    } else {
-                        None
-                    };
-                    let targets = extract_targets(&qr.rule);
-                    let rule_targets = if *deps { Some(&targets) } else { None };
-                    emit_styled_rule(
-                        &console,
-                        qr.rule.name.as_ref(),
-                        &qr.source,
-                        qr.rule.help.as_deref().unwrap_or("<Not Provided>"),
-                        rule_deps,
-                        rule_targets,
-                        None,
-                    );
+                    emit_pretty_rule_details(&console, qr, *deps)?;
                     return Ok(());
                 }
 
@@ -1151,7 +1556,16 @@ impl QueryCommand {
                             Some(query.as_slice()),
                         );
                     }
+
+                    if let Some((best_name, _)) = top.iter().next_back() {
+                        console.emit_lines(console::components::h3("Run Best Match:"));
+                        let mut command = console::Line::default();
+                        command.push(console::components::code(format!("spaces run {best_name}")));
+                        console.emit_line(command);
+                        console.emit_line(console::Line::default());
+                    }
                 }
+
                 Ok(())
             }
 
@@ -1287,8 +1701,11 @@ impl QueryCommand {
                         // Count total dependencies
 
                         // Write header
-                        console.write("Dependency Graph\n")?;
-                        console.write("─────\n")?;
+                        console.emit_lines(
+                            console::components::Header::h2("Dependency Graph")
+                                .variant(console::components::Variant::Primary)
+                                .render(),
+                        );
 
                         // Write tree
                         let term_tree = dependency_node_to_tree(&tree);
