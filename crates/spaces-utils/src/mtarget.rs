@@ -9,8 +9,9 @@ use crate::{bin_detail, platform, rule};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
+use starlark::environment::FrozenModule;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 /// Directory where module evaluation results are saved (relative to workspace root).
 pub const MODULE_TARGETS_DIR: &str = "build/spaces-module-targets";
@@ -43,6 +44,55 @@ fn get_existing_json_path(dir: &str, module_name: &str) -> Option<Arc<std::path:
 pub struct LoadStatement {
     /// The module path as a relative workspace path (e.g., "lib/common.star")
     pub module_id: Arc<str>,
+}
+
+/// Result of evaluating a single load statement.
+/// Contains the original module_id (for the loader), normalized path (for caching),
+/// the frozen module, and the module's evaluation result (for transitive loads).
+#[derive(Clone)]
+pub struct LoadResult {
+    pub module_id: String,
+    pub normalized_path: Arc<str>,
+    pub frozen_module: FrozenModule,
+    pub module_deps: Option<ModuleDeps>,
+}
+
+/// In-memory cache of evaluated `load()` results for the duration of a single
+/// Starlark evaluation pass.
+///
+/// Entries are keyed by the BLAKE3 hash of the loaded module contents.
+pub struct LoadResultCache {
+    load_results: RwLock<HashMap<Arc<str>, LoadResult>>,
+}
+
+impl LoadResultCache {
+    pub fn new() -> Self {
+        Self {
+            load_results: RwLock::new(HashMap::new()),
+        }
+    }
+
+    pub fn get(&self, content_hash: &str) -> Option<LoadResult> {
+        self.load_results
+            .read()
+            .unwrap_or_else(|_| panic!("Internal Error: failed to read lock for LoadResultCache"))
+            .get(content_hash)
+            .cloned()
+    }
+
+    pub fn insert(&self, content_hash: Arc<str>, load_result: LoadResult) {
+        self.load_results
+            .write()
+            .unwrap_or_else(|_| panic!("Internal Error: failed to write lock for LoadResultCache"))
+            .entry(content_hash)
+            .or_insert(load_result);
+    }
+}
+
+impl Default for LoadResultCache {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Summary of a task created during module evaluation.

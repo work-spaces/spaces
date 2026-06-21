@@ -22,6 +22,7 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use starlark::syntax::DialectTypes;
 use std::sync::Arc;
+use utils::mtarget;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -151,6 +152,7 @@ impl SpacesContext {
             },
             workspace_env,
             None,
+            Arc::new(mtarget::LoadResultCache::new()),
         )?;
 
         Ok(result.frozen_module)
@@ -288,11 +290,14 @@ impl SpacesContext {
                 content: Arc::from(""),
                 checkout_state_digest: Arc::from(""),
             },
-            Some(self.workspace.clone()),
             workspace_path.clone(),
             eval_context,
-            workspace_env.clone(),
-            None,
+            evaluator::EvalConfig {
+                workspace: Some(self.workspace.clone()),
+                workspace_env: workspace_env.clone(),
+                console: None,
+                load_result_cache: Arc::new(mtarget::LoadResultCache::new()),
+            },
         );
 
         eprintln!("run: {name} - got result");
