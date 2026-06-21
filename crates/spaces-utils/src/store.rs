@@ -694,8 +694,10 @@ impl Store {
         //          added via set_total once repos_needing_repair is known.
         let bare_passes = if is_dry_run {
             if run_git_fsck { 1u64 } else { 0u64 }
+        } else if run_git_fsck {
+            2u64
         } else {
-            if run_git_fsck { 2u64 } else { 1u64 }
+            1u64
         };
         let mut total = (unmanaged_candidates.len() + self.entries.len()) as u64
             + bare_repo_paths.len() as u64 * bare_passes;

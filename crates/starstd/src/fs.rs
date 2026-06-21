@@ -1434,19 +1434,41 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             ))?;
         }
 
-        let mut open_options = std::fs::OpenOptions::new();
-        if create {
-            // `OpenOptions::create` requires write or append mode.
-            open_options.read(true).write(true).create(true);
-        } else if exclusive {
-            open_options.read(true).write(true);
+        let file = if create && !exclusive {
+            // For shared locks, prefer opening read-only when the file already exists.
+            // This avoids requiring write permission unless creation is actually needed.
+            match std::fs::OpenOptions::new().read(true).open(lock_path) {
+                Ok(file) => file,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => std::fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .create(true)
+                    .truncate(false)
+                    .open(lock_path)
+                    .context(format_context!("Failed to open lock file {}", path))?,
+                Err(e) => {
+                    return Err(e).context(format_context!("Failed to open lock file {}", path));
+                }
+            }
         } else {
-            open_options.read(true);
-        }
+            let mut open_options = std::fs::OpenOptions::new();
+            if create {
+                // `OpenOptions::create` requires write or append mode.
+                open_options
+                    .read(true)
+                    .write(true)
+                    .create(true)
+                    .truncate(false);
+            } else if exclusive {
+                open_options.read(true).write(true);
+            } else {
+                open_options.read(true);
+            }
 
-        let file = open_options
-            .open(lock_path)
-            .context(format_context!("Failed to open lock file {}", path))?;
+            open_options
+                .open(lock_path)
+                .context(format_context!("Failed to open lock file {}", path))?
+        };
         let mut lock = fd_lock::RwLock::new(file);
 
         if exclusive {

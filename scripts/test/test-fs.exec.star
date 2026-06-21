@@ -483,6 +483,24 @@ results["locks"]["callback_returned"] = lock_result == "lock-ok"
 results["locks"]["lock_file_exists"] = fs_exists(p("resource.lock"))
 results["locks"]["critical_section_ran"] = fs_read_text(p("lock_target.txt")) == "locked write\n"
 
+# shared lock + create=True should not require write permission when lock file exists
+readonly_lock_path = p("readonly_resource.lock")
+fs_write_text(readonly_lock_path, "existing lock file")
+fs_set_permissions(readonly_lock_path, 0o444)
+
+def _shared_lock_callback():
+    fs_append_text(p("shared_lock_target.txt"), "shared lock callback\n")
+    return "shared-lock-ok"
+
+shared_lock_result = fs_with_file_lock(
+    readonly_lock_path,
+    _shared_lock_callback,
+    exclusive = False,
+    create = True,
+)
+results["locks"]["shared_create_true_readonly_existing"] = shared_lock_result == "shared-lock-ok"
+results["locks"]["shared_create_true_readonly_ran"] = fs_read_text(p("shared_lock_target.txt")) == "shared lock callback\n"
+
 # ============================================================================
 # Touch
 # ============================================================================
