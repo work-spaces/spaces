@@ -48,6 +48,14 @@ pub struct ModuleEvalParams {
     pub checkout_state_digest: Arc<str>,
 }
 
+#[derive(Clone)]
+pub struct EvalConfig {
+    pub workspace: Option<WorkspaceArc>,
+    pub workspace_env: Arc<HashMap<Arc<str>, Arc<str>>>,
+    pub console: Option<console::Console>,
+    pub load_result_cache: Arc<mtarget::LoadResultCache>,
+}
+
 fn star_logger(console: console::Console) -> logger::Logger {
     logger::Logger::new(console, "starlark".into())
 }
@@ -202,16 +210,6 @@ fn build_module_deps(
     Ok(result)
 }
 
-/// Result of evaluating a single load statement.
-/// Contains the original module_id (for the loader), normalized path (for caching),
-/// the frozen module, and the module's evaluation result (for transitive loads).
-pub struct LoadResult {
-    pub module_id: String,
-    pub normalized_path: Arc<str>,
-    pub frozen_module: FrozenModule,
-    pub module_deps: Option<mtarget::ModuleDeps>,
-}
-
 const EMBEDDED_PRELUDE_PREFIX: &str = "//@star/prelude/";
 
 fn embedded_prelude_relative_path(module_id: &str) -> Option<&str> {
@@ -223,15 +221,13 @@ fn embedded_prelude_relative_path(module_id: &str) -> Option<&str> {
 pub fn evaluate_loads(
     ast: &AstModule,
     name: Arc<str>,
-    workspace: Option<WorkspaceArc>,
     workspace_path: Arc<str>,
     globals_config: GlobalsConfig,
-    workspace_env: Arc<HashMap<Arc<str>, Arc<str>>>,
-    console: Option<console::Console>,
-) -> starlark::Result<Vec<LoadResult>> {
+    eval_config: &EvalConfig,
+) -> starlark::Result<Vec<mtarget::LoadResult>> {
     let _load_timer = evaluation_profile::start_load_timer();
 
-    let is_allow_internal_load = if let Some(workspace) = workspace.as_ref() {
+    let is_allow_internal_load = if let Some(workspace) = eval_config.workspace.as_ref() {
         let workspace_read = workspace.read();
         workspace_read
             .features
@@ -325,6 +321,8 @@ pub fn evaluate_loads(
             }
         };
 
+        let content_hash: Arc<str> = blake3::hash(contents.as_bytes()).to_string().into();
+
         // Normalize the load path to workspace-relative format (no leading slashes)
         let normalized_path: Arc<str> = if let Some(relative_path) = embedded_rel {
             format!("@star/prelude/{relative_path}").into()
@@ -336,13 +334,22 @@ pub fn evaluate_loads(
                 .unwrap_or_else(|| module_load_path.clone())
         };
 
+        if let Some(mut cached_load_result) =
+            eval_config.load_result_cache.get(content_hash.as_ref())
+        {
+            cached_load_result.module_id = load.module_id.to_owned();
+            cached_load_result.normalized_path = normalized_path;
+            loads.push(cached_load_result);
+            continue;
+        }
+
         evaluation_profile::set_next_module_metadata(
             evaluation_profile::ModuleCacheStatus::Bypass,
             Some("load-module".to_string()),
             None,
         );
         let result = evaluate_module(
-            workspace.clone(),
+            eval_config.workspace.clone(),
             workspace_path.clone(),
             ModuleEvalParams {
                 globals_config,
@@ -350,18 +357,21 @@ pub fn evaluate_loads(
                 content: contents,
                 checkout_state_digest: Arc::from(""),
             },
-            workspace_env.clone(),
-            console.clone(),
+            eval_config.workspace_env.clone(),
+            eval_config.console.clone(),
+            eval_config.load_result_cache.clone(),
         )?;
-        let frozen_module = result.frozen_module;
-        let module_deps = result.module_deps;
-
-        loads.push(LoadResult {
+        let load_result = mtarget::LoadResult {
             module_id: load.module_id.to_owned(),
             normalized_path,
-            frozen_module,
-            module_deps,
-        });
+            frozen_module: result.frozen_module,
+            module_deps: result.module_deps,
+        };
+
+        eval_config
+            .load_result_cache
+            .insert(content_hash, load_result.clone());
+        loads.push(load_result);
     }
     Ok(loads)
 }
@@ -369,11 +379,9 @@ pub fn evaluate_loads(
 pub fn evaluate_ast(
     ast: AstModule,
     params: ModuleEvalParams,
-    workspace: Option<WorkspaceArc>,
     workspace_path: Arc<str>,
     mut eval_context: Option<EvalContext>,
-    workspace_env_vars: Arc<HashMap<Arc<str>, Arc<str>>>,
-    console: Option<console::Console>,
+    eval_config: EvalConfig,
 ) -> starlark::Result<(
     FrozenModule,
     Option<mtarget::ModuleDeps>,
@@ -382,11 +390,9 @@ pub fn evaluate_ast(
     let loads = evaluate_loads(
         &ast,
         params.name.clone(),
-        workspace.clone(),
         workspace_path.clone(),
         params.globals_config,
-        workspace_env_vars,
-        console,
+        &eval_config,
     )?;
 
     // Collect all load statements: direct loads (normalized) + transitive loads from children
@@ -462,7 +468,7 @@ pub fn evaluate_ast(
                 (module_deps, module_target)
             };
 
-        if let Some(workspace) = workspace
+        if let Some(workspace) = eval_config.workspace
             && singleton::get_inspect_options().stardoc.is_some()
         {
             let mut workspace = workspace.write();
@@ -505,6 +511,7 @@ pub fn evaluate_module(
     params: ModuleEvalParams,
     workspace_env: Arc<HashMap<Arc<str>, Arc<str>>>,
     console: Option<console::Console>,
+    load_result_cache: Arc<mtarget::LoadResultCache>,
 ) -> starlark::Result<EvaluateModuleResult> {
     let _module_profile_guard =
         evaluation_profile::enter_module(params.name.as_ref(), singleton::get_execution_phase());
@@ -535,11 +542,14 @@ pub fn evaluate_module(
     let evaluate_ast_result = evaluate_ast(
         ast,
         params.clone(),
-        workspace,
         workspace_path.clone(),
         eval_context,
-        workspace_env,
-        console,
+        EvalConfig {
+            workspace,
+            workspace_env,
+            console,
+            load_result_cache,
+        },
     );
 
     if let Err(error) = &evaluate_ast_result {
@@ -592,6 +602,7 @@ fn try_evaluate_with_cache(
     params: ModuleEvalParams,
     workspace_env: Arc<HashMap<Arc<str>, Arc<str>>>,
     queue_wait: Option<Duration>,
+    load_result_cache: Arc<mtarget::LoadResultCache>,
 ) -> anyhow::Result<()> {
     let workspace_path = workspace.read().get_absolute_path();
     let eval_logger = star_logger(console.clone());
@@ -639,6 +650,7 @@ fn try_evaluate_with_cache(
             params,
             workspace_env,
             Some(console.clone()),
+            load_result_cache,
         )
         .map_err(|e| format_error!("Failed to evaluate module during checkout {:?} -> {e}", e))?;
         return Ok(());
@@ -689,6 +701,7 @@ fn try_evaluate_with_cache(
                 params.clone(),
                 workspace_env.clone(),
                 Some(console.clone()),
+                load_result_cache.clone(),
             )
             .map(|_| ());
             result.map_err(|e| format_error!("Failed to evaluate module {:?}", e))
@@ -869,6 +882,7 @@ pub fn evaluate_starlark_modules(
     modules: &[(Arc<str>, Arc<str>)],
     phase: task::Phase,
 ) -> anyhow::Result<()> {
+    let load_result_cache = Arc::new(mtarget::LoadResultCache::new());
     let logger = star_logger(console.clone());
     logger.message("--Run Starlark Modules--");
     let workspace_path = workspace.read().absolute_path.to_owned();
@@ -970,6 +984,7 @@ pub fn evaluate_starlark_modules(
             },
             eval_workspace_env.clone(),
             Some(console.clone()),
+            load_result_cache.clone(),
         )
         .map_err(|e| format_error!("Failed to evaluate module {:?}", e))?;
 
@@ -1008,6 +1023,7 @@ pub fn evaluate_starlark_modules(
             let eval_workspace = workspace.clone();
             let eval_digest = checkout_state_digest.clone();
             let eval_workspace_env_inner = eval_workspace_env.clone();
+            let load_result_cache_inner = load_result_cache.clone();
 
             let params = ModuleEvalParams {
                 globals_config,
@@ -1024,6 +1040,7 @@ pub fn evaluate_starlark_modules(
                     params,
                     eval_workspace_env_inner,
                     queue_wait,
+                    load_result_cache_inner,
                 )
                 .with_context(|| format_context!("Failed to evaluate module {eval_name}"))?;
                 Ok(())
@@ -1770,6 +1787,7 @@ pub fn run_starlark_script(name: Arc<str>, script: Arc<str>) -> anyhow::Result<(
         },
         Arc::new(HashMap::new()),
         None,
+        Arc::new(mtarget::LoadResultCache::new()),
     )
     .map_err(|e| format_error!("Failed to evaluate module {name}: {e}"))?;
 

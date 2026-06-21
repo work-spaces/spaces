@@ -44,6 +44,7 @@ strum.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
 state.workspace = true
+starlark.workspace = true
 url.workspace = true
 termtree = "0.5"
 

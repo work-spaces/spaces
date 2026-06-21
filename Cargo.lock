@@ -3815,6 +3815,7 @@ dependencies = [
  "sha2 0.10.9",
  "spaces-archiver",
  "spaces-console",
+ "starlark",
  "state",
  "strum",
  "sublime_fuzzy",
