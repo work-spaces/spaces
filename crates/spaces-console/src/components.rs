@@ -1125,18 +1125,118 @@ impl Component for Blockquote {
 // Description List component
 // ---------------------------------------------------------------------------
 
+/// Converts a description value into one or more renderable lines.
+pub trait IntoLines {
+    fn into_description_lines(self) -> Vec<Line>;
+}
+
+fn plain_description_lines(text: &str) -> Vec<Line> {
+    text.lines()
+        .map(|text_line| {
+            let mut line = Line::default();
+            line.push(unstyled_span(text_line.to_string()));
+            line
+        })
+        .collect()
+}
+
+impl IntoLines for String {
+    fn into_description_lines(self) -> Vec<Line> {
+        plain_description_lines(&self)
+    }
+}
+
+impl IntoLines for &str {
+    fn into_description_lines(self) -> Vec<Line> {
+        plain_description_lines(self)
+    }
+}
+
+impl IntoLines for &String {
+    fn into_description_lines(self) -> Vec<Line> {
+        plain_description_lines(self)
+    }
+}
+
+impl IntoLines for std::borrow::Cow<'_, str> {
+    fn into_description_lines(self) -> Vec<Line> {
+        plain_description_lines(&self)
+    }
+}
+
+impl IntoLines for Line {
+    fn into_description_lines(self) -> Vec<Line> {
+        vec![self]
+    }
+}
+
+impl IntoLines for &Line {
+    fn into_description_lines(self) -> Vec<Line> {
+        vec![self.clone()]
+    }
+}
+
+impl IntoLines for Vec<Line> {
+    fn into_description_lines(self) -> Vec<Line> {
+        self
+    }
+}
+
+impl IntoLines for &[Line] {
+    fn into_description_lines(self) -> Vec<Line> {
+        self.to_vec()
+    }
+}
+
+impl IntoLines for Span {
+    fn into_description_lines(self) -> Vec<Line> {
+        let mut line = Line::default();
+        line.push(self);
+        vec![line]
+    }
+}
+
+impl IntoLines for Vec<Span> {
+    fn into_description_lines(self) -> Vec<Line> {
+        let mut line = Line::default();
+        line.extend(self);
+        vec![line]
+    }
+}
+
+impl<T> IntoLines for StyledContent<T>
+where
+    T: std::fmt::Display,
+{
+    fn into_description_lines(self) -> Vec<Line> {
+        let style = *self.style();
+        self.content()
+            .to_string()
+            .lines()
+            .map(|text_line| {
+                let mut line = Line::default();
+                line.push(Span::new_styled_lossy(style::StyledContent::new(
+                    style,
+                    text_line.to_string(),
+                )));
+                line
+            })
+            .collect()
+    }
+}
+
 /// A term-description pair for use in description lists.
 #[derive(Debug, Clone)]
 pub struct DescriptionItem {
     term: String,
-    description: String,
+    description: Vec<Line>,
 }
 
 impl DescriptionItem {
-    pub fn new(term: impl Into<String>, description: impl Into<String>) -> Self {
+    pub fn new(term: impl Into<String>, description: impl IntoLines) -> Self {
         Self {
             term: term.into(),
-            description: description.into(),
+            description: description.into_description_lines(),
         }
     }
 }
@@ -1171,7 +1271,7 @@ impl DescriptionList {
     }
 
     /// Add a term-description pair to the list.
-    pub fn item(mut self, term: impl Into<String>, description: impl Into<String>) -> Self {
+    pub fn item(mut self, term: impl Into<String>, description: impl IntoLines) -> Self {
         self.items.push(DescriptionItem::new(term, description));
         self
     }
@@ -1180,7 +1280,7 @@ impl DescriptionList {
     pub fn items<T, D>(mut self, items: impl IntoIterator<Item = (T, D)>) -> Self
     where
         T: Into<String>,
-        D: Into<String>,
+        D: IntoLines,
     {
         for (term, desc) in items {
             self.items.push(DescriptionItem::new(term, desc));
@@ -1213,7 +1313,6 @@ impl DescriptionList {
             .unwrap_or(0);
 
         for (idx, item) in self.items.iter().enumerate() {
-            let desc_lines: Vec<&str> = item.description.lines().collect();
             let term_width = item.term.len();
 
             // First line: 2 spaces, term (left-justified), padding, then description
@@ -1224,19 +1323,19 @@ impl DescriptionList {
             // Padding to align descriptions: from end of term to description start
             let padding = max_term_width - term_width + 2;
 
-            if let Some(first_desc) = desc_lines.first() {
+            if let Some(first_desc_line) = item.description.first() {
                 first_line.push(unstyled_span(" ".repeat(padding)));
-                first_line.push(unstyled_span(first_desc.to_string()));
+                first_line.extend(first_desc_line.iter().cloned());
             }
             lines.push(first_line);
 
             // Subsequent description lines (aligned with first description line)
-            for desc_line in desc_lines.iter().skip(1) {
+            for desc_line in item.description.iter().skip(1) {
                 let mut line = Line::default();
                 // Indent to align with description: 2 spaces + max_term_width + padding
                 let indent = 2 + max_term_width + 2;
                 line.push(unstyled_span(" ".repeat(indent)));
-                line.push(unstyled_span(desc_line.to_string()));
+                line.extend(desc_line.iter().cloned());
                 lines.push(line);
             }
 
@@ -2840,6 +2939,57 @@ mod tests {
 
         // 1 term + 3 description lines = 4 lines
         assert_eq!(lines.len(), 4);
+    }
+
+    #[test]
+    fn test_description_list_accepts_styled_content() {
+        let dl = DescriptionList::new().item("Status", "Ready".green());
+        let lines = dl.render();
+
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].to_unstyled().contains("Ready"));
+    }
+
+    #[test]
+    fn test_description_list_accepts_multiline_styled_content() {
+        let dl = DescriptionList::new().item("Status", "Ready\nSet".green());
+        let lines = dl.render();
+
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].to_unstyled().contains("Ready"));
+        assert!(lines[1].to_unstyled().contains("Set"));
+        assert!(lines[0].fmt_for_test().to_string().contains("fg=green"));
+        assert!(lines[1].fmt_for_test().to_string().contains("fg=green"));
+    }
+
+    #[test]
+    fn test_description_list_accepts_styled_line() {
+        let mut description_line = Line::default();
+        description_line.push(code("npm install"));
+        description_line.push(unstyled_span(" --offline".to_string()));
+
+        let dl = DescriptionList::new().item("Command", description_line);
+        let lines = dl.render();
+
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].to_unstyled().contains("npm install --offline"));
+        assert!(lines[0].fmt_for_test().to_string().contains("fg=magenta"));
+    }
+
+    #[test]
+    fn test_description_list_accepts_multiline_styled_description() {
+        let mut first_line = Line::default();
+        first_line.push(mark("First"));
+
+        let mut second_line = Line::default();
+        second_line.push(code("Second"));
+
+        let dl = DescriptionList::new().item("Steps", vec![first_line, second_line]);
+        let lines = dl.render();
+
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].to_unstyled().contains("First"));
+        assert!(lines[1].to_unstyled().contains("Second"));
     }
 
     #[test]
