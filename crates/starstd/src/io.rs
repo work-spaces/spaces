@@ -115,11 +115,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// The underlying stdin stream is drained at most once per process. Repeated
     /// calls return data decoded from the same cached bytes.
     ///
+    /// Note: stdin is fully read and cached before `max_bytes` is enforced, so
+    /// `max_bytes` validates size but does not bound memory usage while reading.
+    ///
     /// # Arguments
     ///
     /// * `encoding` - `"utf-8"` (strict, default) or `"lossy"`.
     /// * `strip_trailing_newline` - If true, remove one trailing `\n` or `\r\n`.
-    /// * `max_bytes` - Optional positive byte limit. Errors when exceeded.
+    /// * `max_bytes` - Optional positive byte limit (checked after stdin is fully
+    ///   read and cached). Errors when exceeded.
     ///
     /// # Returns
     ///
@@ -150,12 +154,16 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// The underlying stdin stream is drained at most once per process. Repeated
     /// calls return lines derived from the same cached bytes.
     ///
+    /// Note: stdin is fully read and cached before `max_bytes` is enforced, so
+    /// `max_bytes` validates size but does not bound memory usage while reading.
+    ///
     /// # Arguments
     ///
     /// * `encoding` - `"utf-8"` (strict, default) or `"lossy"`.
     /// * `strip_newline` - If true (default), strip line terminators.
     /// * `max_lines` - Optional positive line limit. Errors when exceeded.
-    /// * `max_bytes` - Optional positive byte limit. Errors when exceeded.
+    /// * `max_bytes` - Optional positive byte limit (checked after stdin is fully
+    ///   read and cached). Errors when exceeded.
     ///
     /// # Returns
     ///
