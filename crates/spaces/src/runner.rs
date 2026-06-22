@@ -6,7 +6,7 @@ use utils::{
     ci, features, git, labels, lock, logger, logs, mtarget, rcache, shell, store, version, ws,
 };
 
-use crate::{lsp_context, singleton};
+use crate::{lsp_context, singleton, sync};
 use itertools::Itertools;
 
 pub use evaluator::IsExecuteTasks;
@@ -95,541 +95,6 @@ fn evaluate_environment(
         task::Phase::Inspect,
     )
     .context(format_context!("while evaluating starlark env module"))?;
-
-    Ok(())
-}
-
-/// Check all repositories for cleanliness and perform pre-sync validations.
-/// If stash is enabled, stashes dirty repos and returns their paths.
-/// Returns a vector of repo paths that were stashed (empty if stash is disabled).
-/// Returns an error if repos are dirty without --stash or if rebase operations would fail.
-pub fn check_repos_before_sync(
-    console: console::Console,
-    top_progress: &mut console::Progress,
-    workspace_arc: workspace::WorkspaceArc,
-) -> anyhow::Result<Vec<Arc<str>>> {
-    let workspace_members = workspace_arc.read().settings.json.members.clone();
-    let dev_branch_rules = workspace_arc.read().settings.json.dev_branches.clone();
-    let use_stash = singleton::get_sync_stash();
-
-    let mut dev_branch_dirty = Vec::new();
-    let mut branch_dirty = Vec::new();
-    let mut detached_dirty = Vec::new();
-    let mut stashed_repos = Vec::new();
-    let mut rebase_conflicts = Vec::new();
-
-    // First pass: check all repos for cleanliness
-    for (url, member_list) in workspace_members.iter() {
-        for member in member_list.iter() {
-            top_progress.set_message(format!("checking {}", member.path).as_str());
-            // Check if the member directory has a .git directory
-            let member_git_path = std::path::Path::new(member.path.as_ref()).join(".git");
-            if !member_git_path.exists() {
-                continue;
-            }
-
-            let mut repo_progress = console::Progress::new(
-                console.clone(),
-                format!("//{}", member.path),
-                None,
-                Some(format!("//{} checking repository status", member.path)),
-            );
-
-            let repo = git::Repository::new(url.clone(), member.path.clone());
-
-            // Check if repo is dirty
-            if repo.is_dirty(&mut repo_progress, git::IgnoreSubmodules::Yes) {
-                if use_stash {
-                    // Stash the changes
-                    if let Err(e) = repo.stash(&mut repo_progress) {
-                        let lines = console::make_finalize_line(
-                            console::FinalType::Failed,
-                            None,
-                            &format!("//{} failed to stash changes", member.path),
-                        );
-                        repo_progress.set_finalize_lines(lines);
-
-                        // Pop any stashes that were successfully created before this failure
-                        if !stashed_repos.is_empty() {
-                            let pop_result = pop_stashed_repos(
-                                console.clone(),
-                                workspace_arc.clone(),
-                                stashed_repos.clone(),
-                            );
-                            if let Err(pop_err) = pop_result {
-                                console.warning(
-                                    "Failed to pop stashes",
-                                    format!("Some stashes could not be popped: {pop_err}. You may need to manually run 'git stash pop'."),
-                                )?;
-                            }
-                        }
-
-                        return Err(format_error!(
-                            "//{} failed to stash changes: {e}",
-                            member.path,
-                        ));
-                    }
-                    stashed_repos.push(member.path.clone());
-                    let lines = console::make_finalize_line(
-                        console::FinalType::Completed,
-                        None,
-                        &format!("//{} stashed uncommitted changes", member.path),
-                    );
-                    repo_progress.set_finalize_lines(lines);
-                } else {
-                    // Categorize dirty repos by their state
-                    let is_dev_branch = dev_branch_rules.contains(&member.path);
-                    let current_branch = repo.get_current_branch(&mut repo_progress).ok().flatten();
-
-                    if is_dev_branch {
-                        dev_branch_dirty.push(member.path.clone());
-                    } else if current_branch.is_some() {
-                        branch_dirty.push(member.path.clone());
-                    } else {
-                        detached_dirty.push(member.path.clone());
-                    }
-
-                    let lines = console::make_finalize_line(
-                        console::FinalType::Failed,
-                        None,
-                        &format!("//{} has uncommitted changes", member.path),
-                    );
-                    repo_progress.set_finalize_lines(lines);
-                    continue;
-                }
-            }
-
-            // If this is a dev branch repo, check if rebase would have conflicts
-            if dev_branch_rules.contains(&member.path) {
-                if let Ok(Some(_current_branch)) = repo.get_current_branch(&mut repo_progress) {
-                    // Use the original rev from the member as the upstream branch
-                    let upstream_branch = format!("origin/{}", member.rev);
-
-                    // First fetch to ensure we have latest remote changes
-                    if let Err(e) =
-                        repo.fetch_with_prune(&mut repo_progress, git::IgnoreSubmodules::Yes)
-                    {
-                        let lines = console::make_finalize_line(
-                            console::FinalType::Failed,
-                            None,
-                            &format!("//{} failed to fetch", member.path),
-                        );
-                        repo_progress.set_finalize_lines(lines);
-
-                        // Pop any stashes before returning error
-                        if !stashed_repos.is_empty() {
-                            let pop_result = pop_stashed_repos(
-                                console.clone(),
-                                workspace_arc.clone(),
-                                stashed_repos.clone(),
-                            );
-                            if let Err(pop_err) = pop_result {
-                                console.warning(
-                                    "Failed to pop stashes",
-                                    format!("Some stashes could not be popped: {pop_err}. You may need to manually run 'git stash pop'."),
-                                )?;
-                            }
-                        }
-
-                        return Err(format_error!(
-                            "//{} failed to fetch updates: {e}",
-                            member.path,
-                        ));
-                    }
-
-                    // Check if rebase would have conflicts
-                    match repo.can_rebase_without_conflicts(&mut repo_progress, &upstream_branch) {
-                        Ok(true) => {
-                            let lines = console::make_finalize_line(
-                                console::FinalType::Completed,
-                                repo_progress.elapsed(),
-                                &format!("//{} ready for rebase", member.path),
-                            );
-                            repo_progress.set_finalize_lines(lines);
-                        }
-                        Ok(false) => {
-                            rebase_conflicts.push((member.path.clone(), member.rev.clone()));
-                            let lines = console::make_finalize_line(
-                                console::FinalType::Failed,
-                                None,
-                                &format!("//{} rebase would have conflicts", member.path),
-                            );
-                            repo_progress.set_finalize_lines(lines);
-                        }
-                        Err(e) => {
-                            let lines = console::make_finalize_line(
-                                console::FinalType::Failed,
-                                None,
-                                &format!("//{} failed to check conflicts: {}", member.path, e),
-                            );
-                            repo_progress.set_finalize_lines(lines);
-
-                            // Pop any stashes before returning error
-                            if !stashed_repos.is_empty() {
-                                let pop_result = pop_stashed_repos(
-                                    console.clone(),
-                                    workspace_arc.clone(),
-                                    stashed_repos.clone(),
-                                );
-                                if let Err(pop_err) = pop_result {
-                                    console.warning(
-                                        "Failed to pop stashes",
-                                        format!("Some stashes could not be popped: {pop_err}. You may need to manually run 'git stash pop'."),
-                                    )?;
-                                }
-                            }
-
-                            return Err(format_error!(
-                                "//{} failed to check rebase conflicts: {e}",
-                                member.path,
-                            ));
-                        }
-                    }
-                } else {
-                    let lines = console::make_finalize_line(
-                        console::FinalType::NotRequired,
-                        repo_progress.elapsed(),
-                        format!("//{} not on a branch", member.path).as_str(),
-                    );
-                    repo_progress.set_finalize_lines(lines);
-                }
-            } else {
-                let status_msg = if stashed_repos.contains(&member.path) {
-                    format!("//{} stashed changes", member.path)
-                } else {
-                    format!("//{} clean git repo", member.path)
-                };
-                let lines = console::make_finalize_line(
-                    console::FinalType::Completed,
-                    repo_progress.elapsed(),
-                    status_msg.as_str(),
-                );
-                repo_progress.set_finalize_lines(lines);
-            }
-        }
-    }
-
-    // If there are any dirty repos and stash is not enabled, report them all and fail
-    let dirty_repo_count = dev_branch_dirty.len() + branch_dirty.len() + detached_dirty.len();
-    if dirty_repo_count > 0 {
-        singleton::set_evaluation_failure();
-
-        // Emit styled error message to console
-        console.emit_line(console::Line::default());
-
-        let mut error_line = console::Line::default();
-        error_line.push(console::Span::new_styled_lossy(
-            console::style::StyledContent::new(console::danger_style(), "Cannot sync:".to_string()),
-        ));
-        error_line.push(console::Span::new_unstyled_lossy(
-            " the following repositories have uncommitted changes:".to_string(),
-        ));
-        console.emit_line(error_line);
-
-        // Report dev branches
-        if !dev_branch_dirty.is_empty() {
-            for repo in &dev_branch_dirty {
-                let mut repo_line = console::Line::default();
-                repo_line.push(console::Span::new_unstyled_lossy("- ".to_string()));
-                repo_line.push(console::Span::new_styled_lossy(
-                    console::style::StyledContent::new(
-                        console::primary_style(),
-                        format!("//{repo}"),
-                    ),
-                ));
-                repo_line.push(console::Span::new_unstyled_lossy(
-                    ": [dev-branch] is dirty and not ready for rebase",
-                ));
-                console.emit_line(repo_line);
-            }
-        }
-
-        // Report regular branches
-        if !branch_dirty.is_empty() {
-            for repo in &branch_dirty {
-                let mut repo_line = console::Line::default();
-                repo_line.push(console::Span::new_unstyled_lossy("- ".to_string()));
-                repo_line.push(console::Span::new_styled_lossy(
-                    console::style::StyledContent::new(
-                        console::primary_style(),
-                        format!("//{repo}"),
-                    ),
-                ));
-                repo_line.push(console::Span::new_unstyled_lossy(
-                    ": [branch] is dirty and not ready for pull",
-                ));
-                console.emit_line(repo_line);
-            }
-        }
-
-        // Report detached HEAD
-        if !detached_dirty.is_empty() {
-            for repo in &detached_dirty {
-                let mut repo_line = console::Line::default();
-                repo_line.push(console::Span::new_unstyled_lossy("- ".to_string()));
-                repo_line.push(console::Span::new_styled_lossy(
-                    console::style::StyledContent::new(
-                        console::primary_style(),
-                        format!("//{repo}"),
-                    ),
-                ));
-                repo_line.push(console::Span::new_unstyled_lossy(
-                    ": [detached HEAD] is dirty and not ready for sync",
-                ));
-                console.emit_line(repo_line);
-            }
-        }
-
-        console.emit_line(console::Line::default());
-    }
-
-    // If there are any repos with rebase conflicts, report them all and fail
-    if !rebase_conflicts.is_empty() {
-        singleton::set_evaluation_failure();
-
-        // Pop stashes before returning error
-        if !stashed_repos.is_empty() {
-            let pop_result = pop_stashed_repos(
-                console.clone(),
-                workspace_arc.clone(),
-                stashed_repos.clone(),
-            );
-            if let Err(e) = pop_result {
-                console.warning(
-                    "Failed to pop stashes",
-                    format!("Some stashes could not be popped: {e}. You may need to manually run 'git stash pop'."),
-                )?;
-            }
-        }
-
-        // Emit styled error message to console
-        console.emit_line(console::Line::default());
-
-        let mut error_line = console::Line::default();
-        error_line.push(console::Span::new_styled_lossy(
-            console::style::StyledContent::new(console::danger_style(), "Cannot sync:".to_string()),
-        ));
-        error_line.push(console::Span::new_unstyled_lossy(
-            " the following dev-branch repositories would have rebase conflicts:".to_string(),
-        ));
-        console.emit_line(error_line);
-
-        // Report each repository with rebase conflicts
-        for (path, upstream_branch) in &rebase_conflicts {
-            let mut repo_line = console::Line::default();
-            repo_line.push(console::Span::new_unstyled_lossy("- ".to_string()));
-            repo_line.push(console::Span::new_styled_lossy(
-                console::style::StyledContent::new(console::primary_style(), format!("//{}", path)),
-            ));
-            repo_line.push(console::Span::new_unstyled_lossy(format!(
-                " (rebasing onto origin/{})",
-                upstream_branch
-            )));
-            console.emit_line(repo_line);
-        }
-
-        console.emit_line(console::Line::default());
-        let mut help_line = console::Line::default();
-        help_line.push(console::Span::new_unstyled_lossy(
-            "Please manually resolve conflicts by rebasing these repositories.".to_string(),
-        ));
-        console.emit_line(help_line);
-        console.emit_line(console::Line::default());
-    }
-
-    if !rebase_conflicts.is_empty() || dirty_repo_count > 0 {
-        if rebase_conflicts.is_empty() {
-            let mut help_line = console::Line::default();
-            help_line.push(console::Span::new_unstyled_lossy("Use ".to_string()));
-            help_line.push(console::Span::new_styled_lossy(
-                console::style::StyledContent::new(
-                    console::primary_style(),
-                    "spaces sync --stash".to_string(),
-                ),
-            ));
-            help_line.push(console::Span::new_unstyled_lossy(
-                " to automatically stash/pop changes.".to_string(),
-            ));
-            console.emit_line(help_line);
-            console.emit_line(console::Line::default());
-        }
-
-        return Err(format_error!(
-            "Cannot sync: {} repositories need to be resolved manually",
-            rebase_conflicts.len() + dirty_repo_count
-        ));
-    }
-
-    Ok(stashed_repos)
-}
-
-/// Perform rebase operations on dev-branch repositories.
-pub fn rebase_dev_branches(
-    console: console::Console,
-    workspace_arc: workspace::WorkspaceArc,
-) -> anyhow::Result<()> {
-    let workspace_members = workspace_arc.read().settings.json.members.clone();
-    let dev_branch_rules = workspace_arc.read().settings.json.dev_branches.clone();
-
-    for (url, member_list) in workspace_members.iter() {
-        for member in member_list.iter() {
-            // Only process dev branch repos
-            if !dev_branch_rules.contains(&member.path) {
-                continue;
-            }
-
-            // Check if the member directory has a .git directory
-            let member_git_path = std::path::Path::new(member.path.as_ref()).join(".git");
-            if !member_git_path.exists() {
-                continue;
-            }
-
-            let mut repo_progress = console::Progress::new(
-                console.clone(),
-                format!("//{}", member.path),
-                None,
-                Some("Rebasing dev branch".to_string()),
-            );
-
-            let repo = git::Repository::new(url.clone(), member.path.clone());
-
-            // Get current branch to verify we're on a branch
-            if let Ok(Some(_current_branch)) = repo.get_current_branch(&mut repo_progress) {
-                // Use the original rev from the member as the upstream branch
-                let upstream_branch = format!("origin/{}", member.rev);
-
-                // Fetch with prune
-                repo.fetch_with_prune(&mut repo_progress, git::IgnoreSubmodules::Yes)
-                    .context(format_context!(
-                        "Failed to fetch updates for {}",
-                        member.path
-                    ))?;
-
-                // Check if upstream branch exists after fetch
-                let check_branch = git::execute_git_command(
-                    &mut repo_progress,
-                    url,
-                    console::ExecuteOptions {
-                        working_directory: Some(member.path.clone()),
-                        arguments: vec![
-                            "rev-parse".into(),
-                            "--verify".into(),
-                            upstream_branch.clone().into(),
-                        ],
-                        ..Default::default()
-                    },
-                );
-
-                if check_branch.is_err() {
-                    // Upstream branch doesn't exist - skip rebase
-                    let lines = console::make_finalize_line(
-                        console::FinalType::NotRequired,
-                        repo_progress.elapsed(),
-                        &format!(
-                            "//{} remote branch {upstream_branch} not found, skipping rebase",
-                            member.path
-                        ),
-                    );
-                    repo_progress.set_finalize_lines(lines);
-                    continue;
-                }
-
-                // Perform rebase
-                match repo.rebase_onto(&mut repo_progress, &upstream_branch) {
-                    Ok(_) => {
-                        let lines = console::make_finalize_line(
-                            console::FinalType::Completed,
-                            repo_progress.elapsed(),
-                            &format!(
-                                "//{} rebased successfully on {upstream_branch}",
-                                member.path
-                            ),
-                        );
-                        repo_progress.set_finalize_lines(lines);
-                    }
-                    Err(e) => {
-                        let lines = console::make_finalize_line(
-                            console::FinalType::Failed,
-                            repo_progress.elapsed(),
-                            &format!("//{} rebase failed", member.path),
-                        );
-                        repo_progress.set_finalize_lines(lines);
-                        return Err(format_error!(
-                            "//{} failed to rebase onto {upstream_branch}: {e}",
-                            member.path,
-                        ));
-                    }
-                }
-            } else {
-                let lines = console::make_finalize_line(
-                    console::FinalType::NotRequired,
-                    repo_progress.elapsed(),
-                    &format!("//{} not on a branch, skipping rebase", member.path),
-                );
-                repo_progress.set_finalize_lines(lines);
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Pop stashes on repositories that were stashed during pre-sync checks.
-pub fn pop_stashed_repos(
-    console: console::Console,
-    workspace_arc: workspace::WorkspaceArc,
-    stashed_repos: Vec<Arc<str>>,
-) -> anyhow::Result<()> {
-    if stashed_repos.is_empty() {
-        return Ok(());
-    }
-
-    let workspace_members = workspace_arc.read().settings.json.members.clone();
-
-    for (url, member_list) in workspace_members.iter() {
-        for member in member_list.iter() {
-            // Only process repos that were stashed
-            if !stashed_repos.contains(&member.path) {
-                continue;
-            }
-
-            let mut repo_progress = console::Progress::new(
-                console.clone(),
-                format!("//{}", member.path),
-                None,
-                Some(format!("//{} popping stash", member.path)),
-            );
-
-            let repo = git::Repository::new(url.clone(), member.path.clone());
-
-            match repo.stash_pop(&mut repo_progress) {
-                Ok(_) => {
-                    let lines = console::make_finalize_line(
-                        console::FinalType::Completed,
-                        repo_progress.elapsed(),
-                        &format!("//{} popped stash successfully", member.path),
-                    );
-                    repo_progress.set_finalize_lines(lines);
-                }
-                Err(e) => {
-                    let lines = console::make_finalize_line(
-                        console::FinalType::Failed,
-                        None,
-                        &format!("//{} failed to pop stash", member.path),
-                    );
-                    repo_progress.set_finalize_lines(lines);
-                    // Don't fail the entire operation, just warn
-                    console.warning(
-                        "Failed to pop stash",
-                        format!(
-                            "//{} {e}. Manually check this repo with 'git status'",
-                            member.path
-                        ),
-                    )?;
-                }
-            }
-        }
-    }
 
     Ok(())
 }
@@ -1250,37 +715,51 @@ pub fn run_starlark_modules_in_workspace(
 
     let workspace_arc = workspace::WorkspaceArc::new(lock::StateLock::new(workspace));
 
-    // If this is a sync operation, check all repos before proceeding
-    // We check repos based on the existing workspace settings (from previous checkout/sync)
-    let stashed_repos = if phase == task::Phase::Checkout
-        && singleton::get_is_sync()
-        && !singleton::get_sync_force()
-    {
-        let mut pre_sync_progress = console::Progress::new(console.clone(), "pre-sync", None, None);
-        // Check all repos for cleanliness and potential rebase conflicts
-        // This uses the existing members from the workspace settings
-        let stashed = check_repos_before_sync(
-            console.clone(),
-            &mut pre_sync_progress,
-            workspace_arc.clone(),
-        )
-        .context(format_context!("while checking repositories before sync"))?;
+    // If this is a sync operation, create and apply a pre-sync plan before task execution.
+    let sync_options = singleton::get_sync_options();
+    let stashed_repos =
+        if phase == task::Phase::Checkout && singleton::get_is_sync() && !sync_options.force {
+            let mut pre_sync_progress =
+                console::Progress::new(console.clone(), "pre-sync", None, None);
 
-        pre_sync_progress.set_message("rebasing branches");
-        // Perform rebase operations on dev-branch repos
-        rebase_dev_branches(console.clone(), workspace_arc.clone())
-            .context(format_context!("while rebasing dev branches"))?;
+            let repo_sync_plan = sync::build_repo_sync_plan(
+                console.clone(),
+                &mut pre_sync_progress,
+                workspace_arc.clone(),
+            )
+            .context(format_context!("while building repositories sync plan"))?;
 
-        pre_sync_progress.set_finalize_lines(console::make_finalize_line(
-            console::FinalType::Completed,
-            pre_sync_progress.elapsed(),
-            "pre-sync repo check",
-        ));
+            if sync_options.dry_run {
+                pre_sync_progress.set_finalize_lines(console::make_finalize_line(
+                    console::FinalType::Completed,
+                    pre_sync_progress.elapsed(),
+                    "pre-sync dry-run completed",
+                ));
 
-        stashed
-    } else {
-        Vec::new()
-    };
+                drop(pre_sync_progress);
+                sync::emit_dry_run_repo_plan(console.clone(), repo_sync_plan.as_slice())
+                    .context(format_context!("while emitting dry-run sync plan"))?;
+
+                return Ok(());
+            }
+
+            let stashed = sync::execute_repo_sync_plan(
+                console.clone(),
+                workspace_arc.clone(),
+                repo_sync_plan.as_slice(),
+            )
+            .context(format_context!("while applying repositories sync plan"))?;
+
+            pre_sync_progress.set_finalize_lines(console::make_finalize_line(
+                console::FinalType::Completed,
+                pre_sync_progress.elapsed(),
+                "pre-sync plan applied",
+            ));
+
+            stashed
+        } else {
+            Vec::new()
+        };
 
     // Capture the sync result so we can always pop stashes, even if sync fails
     let sync_result = run_starlark_modules_with_workspace(
@@ -1297,7 +776,7 @@ pub fn run_starlark_modules_in_workspace(
     if phase == task::Phase::Checkout && singleton::get_is_sync() && !stashed_repos.is_empty() {
         let mut stash_pop_progress =
             console::Progress::new(console.clone(), "pop stashes after sync", None, None);
-        pop_stashed_repos(console, workspace_arc, stashed_repos)
+        sync::pop_stashed_repos(console, workspace_arc, stashed_repos)
             .context(format_context!("while popping stashes after sync"))?;
         stash_pop_progress.set_finalize_lines(console::make_finalize_line(
             console::FinalType::Finished,

@@ -593,6 +593,50 @@ pub fn can_rebase_without_conflicts(
     }
 }
 
+/// Check if a merge would have conflicts without actually performing it.
+/// Returns Ok(true) if merge would succeed, Ok(false) if there would be conflicts.
+pub fn can_merge_without_conflicts(
+    progress_bar: &mut console::Progress,
+    url: &str,
+    directory: &str,
+    upstream_branch: &str,
+) -> anyhow::Result<bool> {
+    // First check if the upstream branch exists
+    let check_branch_options = console::ExecuteOptions {
+        working_directory: Some(directory.into()),
+        arguments: vec![
+            "rev-parse".into(),
+            "--verify".into(),
+            upstream_branch.into(),
+        ],
+        ..Default::default()
+    };
+
+    if execute_git_command(progress_bar, url, check_branch_options).is_err() {
+        // Upstream branch doesn't exist.
+        return Ok(true);
+    }
+
+    // Use merge-tree dry-run to check for conflicts without modifying working tree.
+    let options = console::ExecuteOptions {
+        working_directory: Some(directory.into()),
+        arguments: vec![
+            "merge-tree".into(),
+            "--write-tree".into(),
+            "HEAD".into(),
+            upstream_branch.into(),
+        ],
+        is_return_stdout: true,
+        ..Default::default()
+    };
+
+    match execute_git_command(progress_bar, url, options) {
+        Ok(Some(output)) => Ok(!output.trim().is_empty()),
+        Ok(None) => Ok(false),
+        Err(_) => Ok(false),
+    }
+}
+
 /// Perform a fetch with prune on a repository
 pub fn fetch_with_prune(
     progress_bar: &mut console::Progress,
@@ -627,6 +671,23 @@ pub fn rebase_onto(
     };
     execute_git_command(progress_bar, url, options)
         .context(format_context!("Failed to rebase onto {}", upstream_branch))?;
+    Ok(())
+}
+
+/// Merge the specified upstream branch into the current branch.
+pub fn merge_from(
+    progress_bar: &mut console::Progress,
+    url: &str,
+    directory: &str,
+    upstream_branch: &str,
+) -> anyhow::Result<()> {
+    let options = console::ExecuteOptions {
+        working_directory: Some(directory.into()),
+        arguments: vec!["merge".into(), "--no-edit".into(), upstream_branch.into()],
+        ..Default::default()
+    };
+    execute_git_command(progress_bar, url, options)
+        .context(format_context!("Failed to merge from {}", upstream_branch))?;
     Ok(())
 }
 
@@ -1296,12 +1357,28 @@ impl Repository {
         can_rebase_without_conflicts(progress_bar, &self.url, &self.full_path, upstream_branch)
     }
 
+    pub fn can_merge_without_conflicts(
+        &self,
+        progress_bar: &mut console::Progress,
+        upstream_branch: &str,
+    ) -> anyhow::Result<bool> {
+        can_merge_without_conflicts(progress_bar, &self.url, &self.full_path, upstream_branch)
+    }
+
     pub fn rebase_onto(
         &self,
         progress_bar: &mut console::Progress,
         upstream_branch: &str,
     ) -> anyhow::Result<()> {
         rebase_onto(progress_bar, &self.url, &self.full_path, upstream_branch)
+    }
+
+    pub fn merge_from(
+        &self,
+        progress_bar: &mut console::Progress,
+        upstream_branch: &str,
+    ) -> anyhow::Result<()> {
+        merge_from(progress_bar, &self.url, &self.full_path, upstream_branch)
     }
 
     pub fn stash(&self, progress_bar: &mut console::Progress) -> anyhow::Result<()> {

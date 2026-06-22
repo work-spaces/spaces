@@ -16,6 +16,7 @@ mod rules;
 mod runner;
 mod singleton;
 mod stardoc;
+mod sync;
 mod task;
 mod tools;
 mod workspace;
