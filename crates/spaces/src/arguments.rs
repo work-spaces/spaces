@@ -189,14 +189,7 @@ pub fn execute() -> anyhow::Result<()> {
             singleton::process_anyhow_error(error);
             singleton::show_latest_error(effective_console.clone());
             if !logs.is_empty() {
-                let mut line = console::Line::default();
-                line.push(console::Span::new_styled_lossy(
-                    console::style::StyledContent::new(
-                        console::danger_style(),
-                        "see also:".to_string(),
-                    ),
-                ));
-                effective_console.emit_line(line);
+                effective_console.emit_lines(console::components::h3("see also:"));
                 for log in logs {
                     let _ = effective_console.write(format!("  {}", log).as_str());
                 }

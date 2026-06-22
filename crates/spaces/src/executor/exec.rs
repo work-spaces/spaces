@@ -123,6 +123,37 @@ pub struct Exec {
 }
 
 impl Exec {
+    pub fn log_failed_execution(&self, console: console::Console) {
+        let title_line = console::components::Banner::new(format!(
+            "{} Failed ",
+            console::components::icon_danger()
+        ))
+        .width(console::components::Width::Large)
+        .variant(console::components::Variant::Danger)
+        .render();
+
+        let args = self.args.as_deref().unwrap_or_default();
+        let metadata_lines = console::components::DescriptionList::new()
+            .variant(console::components::Variant::Primary)
+            .item("command:", format!("{} {}", self.command, args.join(" ")))
+            .item(
+                "working directory:",
+                self.working_directory.as_deref().unwrap_or("//"),
+            )
+            .compact(true)
+            .render();
+
+        // Divider that visually separates the metadata above from the log body below.
+        let divider_line = console::components::Divider::new()
+            .style(console::components::DividerStyle::Double)
+            .width(console::components::Width::Large)
+            .render();
+
+        console.emit_line(title_line);
+        console.emit_lines(metadata_lines);
+        console.emit_line(divider_line);
+    }
+
     pub fn execute(
         &self,
         progress: &mut console::Progress,
@@ -266,7 +297,11 @@ impl Exec {
 
         let result = progress
             .execute_process(&self.command, options)
-            .context(format_context!("Failed to execute {}", self.command))?;
+            .with_context(|| {
+                self.log_failed_execution(progress.console.clone());
+
+                format_context!("Failed to execute {}", self.command)
+            })?;
 
         handle_process_ended(name);
         workspace

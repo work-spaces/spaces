@@ -108,45 +108,33 @@ pub fn format_log_file_summary(log_contents: &str, log_file_path: &str) -> (Vec<
     match process::parse_log_file(log_contents) {
         Ok((header, body)) => {
             let args = header.arguments.join(" ");
-            let working_dir = header.working_directory.as_deref().unwrap_or("(default)");
+            let working_dir = header.working_directory.as_deref().unwrap_or("//");
 
             // ═══ Failed ═══ banner – the first thing the user sees.
-            let mut title_line = Line::default();
-            title_line.push(Span::new_unstyled_lossy(format!("{}  ", "═".repeat(25))));
-            title_line.push(Span::new_styled_lossy(style::StyledContent::new(
-                danger_style(),
-                "Failed".to_owned(),
-            )));
-            title_line.push(Span::new_unstyled_lossy(format!("  {}", "═".repeat(25))));
+            let title_line =
+                components::Banner::new(format!("{} Failed ", components::icon_danger()))
+                    .width(components::Width::Large)
+                    .variant(components::Variant::Danger)
+                    .render();
 
-            // Build a two-span `key: value` line without repeating the StyledContent boilerplate.
-            let labeled_line = |label: &str, value_style: style::ContentStyle, value: String| {
-                let styled = |s, t: String| Span::new_styled_lossy(style::StyledContent::new(s, t));
-                let mut line = Line::default();
-                line.push(styled(default_style(), label.to_owned()));
-                line.push(styled(value_style, value));
-                line
-            };
-
-            let cmd_line = labeled_line(
-                "command: ",
-                primary_style(),
-                format!("{} {}", header.command, args),
-            );
-            let dir_line = labeled_line(
-                "working directory: ",
-                warning_style(),
-                working_dir.to_owned(),
-            );
+            let metadata_lines = components::DescriptionList::new()
+                .variant(components::Variant::Primary)
+                .item("command:", format!("{} {}", header.command, args))
+                .item("working directory:", working_dir.to_owned())
+                .compact(true)
+                .render();
 
             // Divider that visually separates the metadata above from the log body below.
-            let mut divider_line = Line::default();
-            divider_line.push(Span::new_unstyled_lossy("═".repeat(60)));
+            let divider_line = components::Divider::new()
+                .style(components::DividerStyle::Double)
+                .width(components::Width::Large)
+                .render();
 
-            (
-                vec![title_line, cmd_line, dir_line, divider_line],
-                body.to_owned(),
-            )
+            let mut lines = vec![title_line];
+            lines.extend(metadata_lines);
+            lines.push(divider_line);
+
+            (lines, body.to_owned())
         }
         Err(_) => {
             let mut line = Line::default();
