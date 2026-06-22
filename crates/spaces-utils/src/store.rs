@@ -1374,7 +1374,7 @@ fn emit_pretty_summary(
     }
 
     if let Some(workspace_info) = workspace_info {
-        let icon = console::components::icon_info();
+        let icon = console::bootstrap::typography::icon_info();
         let workspace_line = if icon.is_empty() {
             format!("Workspaces: {workspace_info}")
         } else {
@@ -1479,7 +1479,7 @@ fn emit_pretty_issues(console: &console::Console, entries: &[StoreInfoEntry]) {
     let alert = components::Alert::new(issue_details.trim_end())
         .title(format!(
             "{} Issues - {} entries need attention",
-            console::components::icon_warning(),
+            console::bootstrap::typography::icon_warning(),
             issues.len()
         ))
         .variant(Variant::Warning)
@@ -1646,11 +1646,11 @@ fn emit_pretty_bare_info(
 
     // Add health status
     let health_status = if repos_with_problems == 0 {
-        format!("{} ok", console::components::icon_success())
+        format!("{} ok", console::bootstrap::typography::icon_success())
     } else {
         format!(
             "{} {} repos have problems. re-clone affected repos",
-            console::components::icon_warning(),
+            console::bootstrap::typography::icon_warning(),
             repos_with_problems
         )
     };

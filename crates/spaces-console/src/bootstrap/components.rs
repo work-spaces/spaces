@@ -1,7 +1,7 @@
+use super::span;
+use super::typography::*;
 use crossterm::style::{self, Attribute, Attributes, Color, ContentStyle, StyledContent, Stylize};
-use std::sync::OnceLock;
 use superconsole::{Line, Span};
-use termwiz::cell::Hyperlink;
 
 // ---------------------------------------------------------------------------
 // Component Trait
@@ -11,257 +11,6 @@ use termwiz::cell::Hyperlink;
 pub trait Component {
     /// Renders the component as a vector of lines.
     fn render(&self) -> Vec<Line>;
-}
-
-// ---------------------------------------------------------------------------
-// Typography Mode Configuration
-// ---------------------------------------------------------------------------
-
-/// The character set mode for typography rendering.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum TypographyMode {
-    /// ASCII-only characters (maximum compatibility)
-    Ascii,
-    /// Full Unicode box-drawing and special characters
-    #[default]
-    Unicode,
-    /// Unicode with Nerd Fonts icons (future extension)
-    #[allow(dead_code)]
-    NerdFonts,
-}
-
-static TYPOGRAPHY_MODE: OnceLock<TypographyMode> = OnceLock::new();
-
-/// Sets the global typography mode. This can only be called once.
-/// Returns `Ok(())` if the mode was set successfully, or `Err(())` if it was already set.
-pub fn set_typography_mode(mode: TypographyMode) -> anyhow::Result<()> {
-    TYPOGRAPHY_MODE
-        .set(mode)
-        .map_err(|_| anyhow::anyhow!("Typography mode already set"))
-}
-
-/// Gets the current typography mode. Defaults to Unicode if not explicitly set.
-pub fn typography_mode() -> TypographyMode {
-    *TYPOGRAPHY_MODE.get_or_init(TypographyMode::default)
-}
-
-// ---------------------------------------------------------------------------
-// Character Set Definitions
-// ---------------------------------------------------------------------------
-
-/// Characters used for a bounded progress bar: filled, tip, empty.
-struct BarCharsBounded {
-    filled: char,
-    tip: char,
-    empty: char,
-}
-
-const BAR_CHARS_BOUNDED_ASCII: BarCharsBounded = BarCharsBounded {
-    filled: '#',
-    tip: '>',
-    empty: '-',
-};
-
-const BAR_CHARS_BOUNDED_UNICODE: BarCharsBounded = BarCharsBounded {
-    filled: '█',
-    tip: '▒',
-    empty: '░',
-};
-
-fn get_bar_chars_bounded() -> &'static BarCharsBounded {
-    match typography_mode() {
-        TypographyMode::Ascii => &BAR_CHARS_BOUNDED_ASCII,
-        TypographyMode::Unicode | TypographyMode::NerdFonts => &BAR_CHARS_BOUNDED_UNICODE,
-    }
-}
-
-/// Spinner frames for indeterminate progress.
-const SPINNER_FRAMES_ASCII: &[char] = &['|', '/', '-', '\\'];
-const SPINNER_FRAMES_UNICODE: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-
-fn get_spinner_frames() -> &'static [char] {
-    match typography_mode() {
-        TypographyMode::Ascii => SPINNER_FRAMES_ASCII,
-        TypographyMode::Unicode | TypographyMode::NerdFonts => SPINNER_FRAMES_UNICODE,
-    }
-}
-
-/// Box-drawing characters for tables and cards.
-struct BoxChars {
-    // Corners
-    top_left: &'static str,
-    top_right: &'static str,
-    bottom_left: &'static str,
-    bottom_right: &'static str,
-    // Lines
-    horizontal: &'static str,
-    vertical: &'static str,
-    // T-junctions
-    left_t: &'static str,
-    right_t: &'static str,
-    top_t: &'static str,
-    bottom_t: &'static str,
-    cross: &'static str,
-}
-
-const BOX_CHARS_ASCII: BoxChars = BoxChars {
-    top_left: "+",
-    top_right: "+",
-    bottom_left: "+",
-    bottom_right: "+",
-    horizontal: "-",
-    vertical: "|",
-    left_t: "+",
-    right_t: "+",
-    top_t: "+",
-    bottom_t: "+",
-    cross: "+",
-};
-
-const BOX_CHARS_UNICODE: BoxChars = BoxChars {
-    top_left: "╭",
-    top_right: "╮",
-    bottom_left: "╰",
-    bottom_right: "╯",
-    horizontal: "─",
-    vertical: "│",
-    left_t: "├",
-    right_t: "┤",
-    top_t: "┬",
-    bottom_t: "┴",
-    cross: "┼",
-};
-
-fn get_box_chars() -> &'static BoxChars {
-    match typography_mode() {
-        TypographyMode::Ascii => &BOX_CHARS_ASCII,
-        TypographyMode::Unicode | TypographyMode::NerdFonts => &BOX_CHARS_UNICODE,
-    }
-}
-
-/// Characters for divider styles.
-struct DividerChars {
-    solid: &'static str,
-    dashed: &'static str,
-    dotted: &'static str,
-    double: &'static str,
-}
-
-const DIVIDER_CHARS_ASCII: DividerChars = DividerChars {
-    solid: "-",
-    dashed: "-",
-    dotted: ".",
-    double: "=",
-};
-
-const DIVIDER_CHARS_UNICODE: DividerChars = DividerChars {
-    solid: "─",
-    dashed: "╌",
-    dotted: "·",
-    double: "═",
-};
-
-fn get_divider_chars() -> &'static DividerChars {
-    match typography_mode() {
-        TypographyMode::Ascii => &DIVIDER_CHARS_ASCII,
-        TypographyMode::Unicode | TypographyMode::NerdFonts => &DIVIDER_CHARS_UNICODE,
-    }
-}
-
-/// Characters for histogram bars.
-const HISTOGRAM_BAR_ASCII: char = '#';
-const HISTOGRAM_BAR_UNICODE: char = '█';
-
-fn get_histogram_bar_char() -> char {
-    match typography_mode() {
-        TypographyMode::Ascii => HISTOGRAM_BAR_ASCII,
-        TypographyMode::Unicode | TypographyMode::NerdFonts => HISTOGRAM_BAR_UNICODE,
-    }
-}
-
-/// Characters for header underlines.
-struct HeaderUnderlineChars {
-    h1: &'static str,
-    h2: &'static str,
-}
-
-const HEADER_UNDERLINE_ASCII: HeaderUnderlineChars = HeaderUnderlineChars { h1: "=", h2: "-" };
-
-const HEADER_UNDERLINE_UNICODE: HeaderUnderlineChars = HeaderUnderlineChars {
-    h1: "═", h2: "─"
-};
-
-fn get_header_underline_chars() -> &'static HeaderUnderlineChars {
-    match typography_mode() {
-        TypographyMode::Ascii => &HEADER_UNDERLINE_ASCII,
-        TypographyMode::Unicode | TypographyMode::NerdFonts => &HEADER_UNDERLINE_UNICODE,
-    }
-}
-
-/// Characters for blockquote prefix.
-const BLOCKQUOTE_PREFIX_ASCII: &str = "| ";
-const BLOCKQUOTE_PREFIX_UNICODE: &str = "▐ ";
-
-fn get_blockquote_prefix() -> &'static str {
-    match typography_mode() {
-        TypographyMode::Ascii => BLOCKQUOTE_PREFIX_ASCII,
-        TypographyMode::Unicode | TypographyMode::NerdFonts => BLOCKQUOTE_PREFIX_UNICODE,
-    }
-}
-
-/// Icon characters for status indicators.
-const ICON_SUCCESS_UNICODE: &str = "✓";
-const ICON_DANGER_UNICODE: &str = "x";
-const ICON_WARNING_UNICODE: &str = "▲";
-const ICON_INFO_UNICODE: &str = "ℹ";
-
-/// Returns a success icon (checkmark) in Unicode mode, empty string in ASCII mode.
-pub fn icon_success() -> &'static str {
-    match typography_mode() {
-        TypographyMode::Ascii => "",
-        TypographyMode::Unicode | TypographyMode::NerdFonts => ICON_SUCCESS_UNICODE,
-    }
-}
-
-/// Returns a danger icon (X mark) in Unicode mode, empty string in ASCII mode.
-pub fn icon_danger() -> &'static str {
-    match typography_mode() {
-        TypographyMode::Ascii => "",
-        TypographyMode::Unicode | TypographyMode::NerdFonts => ICON_DANGER_UNICODE,
-    }
-}
-
-/// Returns a warning icon (warning sign) in Unicode mode, empty string in ASCII mode.
-pub fn icon_warning() -> &'static str {
-    match typography_mode() {
-        TypographyMode::Ascii => "",
-        TypographyMode::Unicode | TypographyMode::NerdFonts => ICON_WARNING_UNICODE,
-    }
-}
-
-/// Returns an info icon (information symbol) in Unicode mode, empty string in ASCII mode.
-pub fn icon_info() -> &'static str {
-    match typography_mode() {
-        TypographyMode::Ascii => "",
-        TypographyMode::Unicode | TypographyMode::NerdFonts => ICON_INFO_UNICODE,
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Duration formatting
-// ---------------------------------------------------------------------------
-
-/// Formats a duration in minutes and seconds, e.g. `1m30s` or `2.5s`.
-pub fn format_duration(secs: f64) -> String {
-    if secs > 100.0 {
-        let mins = secs as u64 / 60;
-        let remaining_secs = secs as u64 % 60;
-        format!("{mins}m{remaining_secs:02}s")
-    } else if secs > 10.0 {
-        format!("{secs:.1}s")
-    } else {
-        format!("{secs:.2}s")
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -503,6 +252,34 @@ pub fn bold_style() -> ContentStyle {
     }
 }
 
+/// Standard width presets inspired by Bootstrap-style sizing, plus custom width.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Width {
+    Small,
+    Medium,
+    Large,
+    ExtraLarge,
+    Custom(usize),
+}
+
+impl Width {
+    pub fn as_usize(self) -> usize {
+        match self {
+            Width::Small => 40,
+            Width::Medium => 64,
+            Width::Large => 80,
+            Width::ExtraLarge => 160,
+            Width::Custom(width) => width,
+        }
+    }
+}
+
+impl From<usize> for Width {
+    fn from(value: usize) -> Self {
+        Width::Custom(value)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Typography API - Bootstrap-inspired elements
 // ---------------------------------------------------------------------------
@@ -536,23 +313,6 @@ impl Variant {
             Variant::Default => default_style(),
         }
     }
-}
-
-// ---------------------------------------------------------------------------
-// Helper functions for creating styled spans
-// ---------------------------------------------------------------------------
-
-fn styled_span(style: ContentStyle, text: String) -> Span {
-    Span::new_styled_lossy(style::StyledContent::new(style, text))
-}
-
-fn unstyled_span(text: String) -> Span {
-    Span::new_unstyled_lossy(text)
-}
-
-fn hyperlinked_span(style: ContentStyle, text: String, url: String) -> Span {
-    let span = Span::new_styled_lossy(style::StyledContent::new(style, text));
-    span.with_hyperlink(Some(Hyperlink::new(url)))
 }
 
 // ---------------------------------------------------------------------------
@@ -610,7 +370,7 @@ impl Header {
 
         // Main header line
         let mut header_line = Line::default();
-        header_line.push(styled_span(style, self.text.clone()));
+        header_line.push(span::styled_span(style, self.text.clone()));
         lines.push(header_line);
 
         // Underline for H1 and H2
@@ -618,7 +378,7 @@ impl Header {
         match self.level {
             HeaderLevel::H1 => {
                 let mut underline = Line::default();
-                underline.push(styled_span(
+                underline.push(span::styled_span(
                     style,
                     underline_chars.h1.repeat(self.text.len()),
                 ));
@@ -626,7 +386,7 @@ impl Header {
             }
             HeaderLevel::H2 => {
                 let mut underline = Line::default();
-                underline.push(styled_span(
+                underline.push(span::styled_span(
                     style,
                     underline_chars.h2.repeat(self.text.len()),
                 ));
@@ -665,7 +425,7 @@ pub enum DividerStyle {
 /// Divider component for visual separation
 pub struct Divider {
     style: DividerStyle,
-    width: Option<usize>,
+    width: Option<Width>,
     variant: Variant,
 }
 
@@ -683,8 +443,8 @@ impl Divider {
         self
     }
 
-    pub fn width(mut self, width: usize) -> Self {
-        self.width = Some(width);
+    pub fn width(mut self, width: impl Into<Width>) -> Self {
+        self.width = Some(width.into());
         self
     }
 
@@ -704,12 +464,12 @@ impl Divider {
     }
 
     fn render_line(&self) -> Line {
-        let width = self.width.unwrap_or(80);
+        let width = self.width.unwrap_or(Width::Large).as_usize();
         let line_str = self.get_char().repeat(width);
         let style = self.variant.style();
 
         let mut line = Line::default();
-        line.push(styled_span(style, line_str));
+        line.push(span::styled_span(style, line_str));
         line
     }
 
@@ -731,19 +491,141 @@ impl Default for Divider {
 }
 
 // ---------------------------------------------------------------------------
+// Banner component
+// ---------------------------------------------------------------------------
+
+/// Banner component for emphasized status labels surrounded by divider glyphs.
+///
+/// `width` represents the total rendered width (including flanks, spaces, and text).
+pub struct Banner {
+    text: String,
+    width: Width,
+    variant: Variant,
+}
+
+impl Banner {
+    pub fn new(text: impl Into<String>) -> Self {
+        let text = text.into();
+        // Preserve previous default visual width: 25 flank chars per side + 2 spaces per side.
+        let width = text.chars().count() + (25 * 2) + 4;
+        Self {
+            text,
+            width: Width::Custom(width),
+            variant: Variant::Default,
+        }
+    }
+
+    pub fn width(mut self, width: impl Into<Width>) -> Self {
+        self.width = width.into();
+        self
+    }
+
+    pub fn variant(mut self, variant: Variant) -> Self {
+        self.variant = variant;
+        self
+    }
+
+    fn render_line(&self) -> Line {
+        let mut line = Line::default();
+        let text_width = self.text.chars().count();
+        let style = self.variant.style();
+        let width = self.width.as_usize();
+
+        // Not enough room to include flanks and spacing; render text only.
+        if width <= text_width {
+            line.push(span::styled_span(style, self.text.clone()));
+            return line;
+        }
+
+        let min_with_padding = text_width + 4;
+        if width < min_with_padding {
+            let remaining = width - text_width;
+            let left_pad = remaining / 2;
+            let right_pad = remaining - left_pad;
+            line.push(span::unstyled_span(" ".repeat(left_pad)));
+            line.push(span::styled_span(style, self.text.clone()));
+            line.push(span::unstyled_span(" ".repeat(right_pad)));
+            return line;
+        }
+
+        let flank_total = width - min_with_padding;
+        let left_flank = flank_total / 2;
+        let right_flank = flank_total - left_flank;
+        let divider = get_divider_chars().double;
+
+        line.push(span::unstyled_span(format!(
+            "{}  ",
+            divider.repeat(left_flank)
+        )));
+        line.push(span::styled_span(style, self.text.clone()));
+        line.push(span::unstyled_span(format!(
+            "  {}",
+            divider.repeat(right_flank)
+        )));
+
+        line
+    }
+
+    pub fn render(&self) -> Line {
+        self.render_line()
+    }
+}
+
+impl Component for Banner {
+    fn render(&self) -> Vec<Line> {
+        vec![self.render_line()]
+    }
+}
+
+pub struct VerticalSpacer {
+    height: u16,
+}
+
+impl VerticalSpacer {
+    pub fn new(height: u16) -> Self {
+        Self { height }
+    }
+}
+
+impl Component for VerticalSpacer {
+    fn render(&self) -> Vec<Line> {
+        let mut result = Vec::new();
+        result.resize(self.height as usize, Line::default());
+        result
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Paragraph component
 // ---------------------------------------------------------------------------
 
+/// Paragraph input content.
+enum ParagraphText {
+    Plain(String),
+    Rich(Line),
+}
+
 /// Paragraph component for body text
 pub struct Paragraph {
-    text: String,
+    text: ParagraphText,
     variant: Variant,
 }
 
 impl Paragraph {
+    /// Create a paragraph from plain text. This text is styled using the
+    /// paragraph variant when rendered.
     pub fn new(text: impl Into<String>) -> Self {
         Self {
-            text: text.into(),
+            text: ParagraphText::Plain(text.into()),
+            variant: Variant::Default,
+        }
+    }
+
+    /// Create a paragraph from rich line content. Existing span-level styling
+    /// is preserved when rendered.
+    pub fn from_line(text: impl IntoLine) -> Self {
+        Self {
+            text: ParagraphText::Rich(text.into_line()),
             variant: Variant::Default,
         }
     }
@@ -754,10 +636,15 @@ impl Paragraph {
     }
 
     fn render_line(&self) -> Line {
-        let style = self.variant.style();
-        let mut line = Line::default();
-        line.push(styled_span(style, self.text.clone()));
-        line
+        match &self.text {
+            ParagraphText::Plain(text) => {
+                let style = self.variant.style();
+                let mut line = Line::default();
+                line.push(span::styled_span(style, text.clone()));
+                line
+            }
+            ParagraphText::Rich(line) => line.clone(),
+        }
     }
 
     pub fn render(&self) -> Line {
@@ -778,17 +665,17 @@ impl Component for Paragraph {
 /// Aligns text within a specified width
 pub struct AlignedText {
     text: String,
-    width: usize,
+    width: Width,
     align: Align,
     variant: Variant,
 }
 
 impl AlignedText {
     /// Create a new aligned text with specified width and alignment
-    pub fn new(text: impl Into<String>, width: usize, align: Align) -> Self {
+    pub fn new(text: impl Into<String>, width: impl Into<Width>, align: Align) -> Self {
         Self {
             text: text.into(),
-            width,
+            width: width.into(),
             align,
             variant: Variant::Default,
         }
@@ -804,12 +691,13 @@ impl AlignedText {
     fn render_line(&self) -> Line {
         let style = self.variant.style();
         let text_len = self.text.chars().count();
+        let width = self.width.as_usize();
 
-        let aligned = if text_len >= self.width {
+        let aligned = if text_len >= width {
             // Text is too long, just return it as is
             self.text.clone()
         } else {
-            let padding = self.width - text_len;
+            let padding = width - text_len;
             match self.align {
                 Align::Left => format!("{}{}", self.text, " ".repeat(padding)),
                 Align::Right => format!("{}{}", " ".repeat(padding), self.text),
@@ -827,7 +715,7 @@ impl AlignedText {
         };
 
         let mut line = Line::default();
-        line.push(styled_span(style, aligned));
+        line.push(span::styled_span(style, aligned));
         line
     }
 
@@ -843,17 +731,17 @@ impl Component for AlignedText {
 }
 
 /// Left-align text within the specified width
-pub fn align_left(text: impl Into<String>, width: usize) -> AlignedText {
+pub fn align_left(text: impl Into<String>, width: impl Into<Width>) -> AlignedText {
     AlignedText::new(text, width, Align::Left)
 }
 
 /// Center-align text within the specified width
-pub fn align_center(text: impl Into<String>, width: usize) -> AlignedText {
+pub fn align_center(text: impl Into<String>, width: impl Into<Width>) -> AlignedText {
     AlignedText::new(text, width, Align::Center)
 }
 
 /// Right-align text within the specified width
-pub fn align_right(text: impl Into<String>, width: usize) -> AlignedText {
+pub fn align_right(text: impl Into<String>, width: impl Into<Width>) -> AlignedText {
     AlignedText::new(text, width, Align::Right)
 }
 
@@ -870,8 +758,10 @@ pub enum ListStyle {
 
 /// Represents a list item that can be either text or a nested list
 pub enum ListItem {
-    /// Simple text item
+    /// Plain text item (styled by the list variant).
     Text(String),
+    /// Rich line item (keeps per-span styling as provided).
+    Rich(Line),
     /// Nested list (for creating hierarchical lists)
     Nested(List),
 }
@@ -885,6 +775,39 @@ impl From<String> for ListItem {
 impl From<&str> for ListItem {
     fn from(s: &str) -> Self {
         ListItem::Text(s.to_string())
+    }
+}
+
+impl From<Line> for ListItem {
+    fn from(line: Line) -> Self {
+        ListItem::Rich(line)
+    }
+}
+
+impl From<&Line> for ListItem {
+    fn from(line: &Line) -> Self {
+        ListItem::Rich(line.clone())
+    }
+}
+
+impl From<Span> for ListItem {
+    fn from(span: Span) -> Self {
+        ListItem::Rich(span.into_line())
+    }
+}
+
+impl From<Vec<Span>> for ListItem {
+    fn from(spans: Vec<Span>) -> Self {
+        ListItem::Rich(spans.into_line())
+    }
+}
+
+impl<T> From<StyledContent<T>> for ListItem
+where
+    T: std::fmt::Display,
+{
+    fn from(content: StyledContent<T>) -> Self {
+        ListItem::Rich(content.into_line())
     }
 }
 
@@ -969,8 +892,27 @@ impl List {
                         ListStyle::Ordered => format!("{}  {}. ", base_indent, text_item_index),
                     };
 
-                    line.push(unstyled_span(prefix));
-                    line.push(styled_span(style, text.clone()));
+                    line.push(span::unstyled_span(prefix));
+                    line.push(span::styled_span(style, text.clone()));
+                    lines.push(line);
+                }
+                ListItem::Rich(text_line) => {
+                    text_item_index += 1;
+                    let mut line = Line::default();
+
+                    let prefix = match self.style {
+                        ListStyle::Unordered => {
+                            let bullet = match typography_mode() {
+                                TypographyMode::Ascii => "-",
+                                TypographyMode::Unicode | TypographyMode::NerdFonts => "•",
+                            };
+                            format!("{}{} ", base_indent, bullet)
+                        }
+                        ListStyle::Ordered => format!("{}  {}. ", base_indent, text_item_index),
+                    };
+
+                    line.push(span::unstyled_span(prefix));
+                    line.extend(text_line.iter().cloned());
                     lines.push(line);
                 }
                 ListItem::Nested(nested_list) => {
@@ -1008,7 +950,7 @@ impl Component for List {
 /// # Examples
 ///
 /// ```rust
-/// use spaces_console::typography::Link;
+/// use spaces_console::components::Link;
 ///
 /// // Create a clickable link
 /// let link = Link::new("Visit our docs")
@@ -1052,10 +994,14 @@ impl Link {
 
         // If a URL is provided, use OSC 8 hyperlink support for clickable links
         if let Some(url) = &self.url {
-            line.push(hyperlinked_span(style, self.text.clone(), url.clone()));
+            line.push(span::hyperlinked_span(
+                style,
+                self.text.clone(),
+                url.clone(),
+            ));
         } else {
             // No URL provided, just render styled text
-            line.push(styled_span(style, self.text.clone()));
+            line.push(span::styled_span(style, self.text.clone()));
         }
 
         line
@@ -1078,16 +1024,27 @@ impl Component for Link {
 
 /// Blockquote component for quotations
 pub struct Blockquote {
-    text: String,
+    text: Vec<Line>,
     variant: Variant,
 }
 
+impl Default for Blockquote {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Blockquote {
-    pub fn new(text: impl Into<String>) -> Self {
+    pub fn new() -> Self {
         Self {
-            text: text.into(),
+            text: Vec::new(),
             variant: Variant::Secondary,
         }
+    }
+
+    pub fn push(mut self, text: impl IntoLine) -> Self {
+        self.text.push(text.into_line());
+        self
     }
 
     pub fn variant(mut self, variant: Variant) -> Self {
@@ -1096,14 +1053,14 @@ impl Blockquote {
     }
 
     fn render_impl(&self) -> Vec<Line> {
-        let style = self.variant.style();
         let mut lines = Vec::new();
         let prefix = get_blockquote_prefix();
+        let prefix_style = self.variant.style();
 
-        for text_line in self.text.lines() {
+        for text_line in &self.text {
             let mut line = Line::default();
-            line.push(unstyled_span(prefix.to_string()));
-            line.push(styled_span(style, text_line.to_string()));
+            line.push(span::styled_span(prefix_style, prefix.to_string()));
+            line.extend(text_line.iter().cloned());
             lines.push(line);
         }
 
@@ -1125,86 +1082,154 @@ impl Component for Blockquote {
 // Description List component
 // ---------------------------------------------------------------------------
 
+/// Converts an input value into a single renderable line.
+pub trait IntoLine {
+    fn into_line(self) -> Line;
+}
+
 /// Converts a description value into one or more renderable lines.
-pub trait IntoLines {
+pub trait IntoDescriptionLines {
     fn into_description_lines(self) -> Vec<Line>;
 }
 
+fn line_from_span(span_value: Span) -> Line {
+    let mut line = Line::default();
+    line.push(span_value);
+    line
+}
+
+fn plain_line(text: &str) -> Line {
+    line_from_span(span::unstyled_span(text.to_string()))
+}
+
 fn plain_description_lines(text: &str) -> Vec<Line> {
-    text.lines()
-        .map(|text_line| {
-            let mut line = Line::default();
-            line.push(unstyled_span(text_line.to_string()));
-            line
-        })
-        .collect()
+    text.lines().map(plain_line).collect()
 }
 
-impl IntoLines for String {
+impl IntoLine for String {
+    fn into_line(self) -> Line {
+        plain_line(&self)
+    }
+}
+
+impl IntoLine for &str {
+    fn into_line(self) -> Line {
+        plain_line(self)
+    }
+}
+
+impl IntoLine for &String {
+    fn into_line(self) -> Line {
+        plain_line(self)
+    }
+}
+
+impl IntoLine for std::borrow::Cow<'_, str> {
+    fn into_line(self) -> Line {
+        plain_line(&self)
+    }
+}
+
+impl IntoLine for Line {
+    fn into_line(self) -> Line {
+        self
+    }
+}
+
+impl IntoLine for &Line {
+    fn into_line(self) -> Line {
+        self.clone()
+    }
+}
+
+impl IntoLine for Span {
+    fn into_line(self) -> Line {
+        line_from_span(self)
+    }
+}
+
+impl IntoLine for Vec<Span> {
+    fn into_line(self) -> Line {
+        let mut line = Line::default();
+        line.extend(self);
+        line
+    }
+}
+
+impl<T> IntoLine for StyledContent<T>
+where
+    T: std::fmt::Display,
+{
+    fn into_line(self) -> Line {
+        let style = *self.style();
+        line_from_span(Span::new_styled_lossy(style::StyledContent::new(
+            style,
+            self.content().to_string(),
+        )))
+    }
+}
+
+impl IntoDescriptionLines for String {
     fn into_description_lines(self) -> Vec<Line> {
         plain_description_lines(&self)
     }
 }
 
-impl IntoLines for &str {
+impl IntoDescriptionLines for &str {
     fn into_description_lines(self) -> Vec<Line> {
         plain_description_lines(self)
     }
 }
 
-impl IntoLines for &String {
+impl IntoDescriptionLines for &String {
     fn into_description_lines(self) -> Vec<Line> {
         plain_description_lines(self)
     }
 }
 
-impl IntoLines for std::borrow::Cow<'_, str> {
+impl IntoDescriptionLines for std::borrow::Cow<'_, str> {
     fn into_description_lines(self) -> Vec<Line> {
         plain_description_lines(&self)
     }
 }
 
-impl IntoLines for Line {
+impl IntoDescriptionLines for Line {
     fn into_description_lines(self) -> Vec<Line> {
         vec![self]
     }
 }
 
-impl IntoLines for &Line {
+impl IntoDescriptionLines for &Line {
     fn into_description_lines(self) -> Vec<Line> {
         vec![self.clone()]
     }
 }
 
-impl IntoLines for Vec<Line> {
+impl IntoDescriptionLines for Vec<Line> {
     fn into_description_lines(self) -> Vec<Line> {
         self
     }
 }
 
-impl IntoLines for &[Line] {
+impl IntoDescriptionLines for &[Line] {
     fn into_description_lines(self) -> Vec<Line> {
         self.to_vec()
     }
 }
 
-impl IntoLines for Span {
+impl IntoDescriptionLines for Span {
     fn into_description_lines(self) -> Vec<Line> {
-        let mut line = Line::default();
-        line.push(self);
-        vec![line]
+        vec![self.into_line()]
     }
 }
 
-impl IntoLines for Vec<Span> {
+impl IntoDescriptionLines for Vec<Span> {
     fn into_description_lines(self) -> Vec<Line> {
-        let mut line = Line::default();
-        line.extend(self);
-        vec![line]
+        vec![self.into_line()]
     }
 }
 
-impl<T> IntoLines for StyledContent<T>
+impl<T> IntoDescriptionLines for StyledContent<T>
 where
     T: std::fmt::Display,
 {
@@ -1214,12 +1239,10 @@ where
             .to_string()
             .lines()
             .map(|text_line| {
-                let mut line = Line::default();
-                line.push(Span::new_styled_lossy(style::StyledContent::new(
+                line_from_span(Span::new_styled_lossy(style::StyledContent::new(
                     style,
                     text_line.to_string(),
-                )));
-                line
+                )))
             })
             .collect()
     }
@@ -1233,7 +1256,7 @@ pub struct DescriptionItem {
 }
 
 impl DescriptionItem {
-    pub fn new(term: impl Into<String>, description: impl IntoLines) -> Self {
+    pub fn new(term: impl Into<String>, description: impl IntoDescriptionLines) -> Self {
         Self {
             term: term.into(),
             description: description.into_description_lines(),
@@ -1247,7 +1270,7 @@ impl DescriptionItem {
 /// # Examples
 ///
 /// ```rust
-/// use spaces_console::typography::DescriptionList;
+/// use spaces_console::components::DescriptionList;
 ///
 /// let dl = DescriptionList::new()
 ///     .item("Name", "Zed")
@@ -1271,16 +1294,20 @@ impl DescriptionList {
     }
 
     /// Add a term-description pair to the list.
-    pub fn item(mut self, term: impl Into<String>, description: impl IntoLines) -> Self {
+    pub fn item(mut self, term: impl Into<String>, description: impl IntoDescriptionLines) -> Self {
         self.items.push(DescriptionItem::new(term, description));
         self
+    }
+
+    pub fn add_item(&mut self, term: impl Into<String>, description: impl IntoDescriptionLines) {
+        self.items.push(DescriptionItem::new(term, description));
     }
 
     /// Add multiple term-description pairs at once.
     pub fn items<T, D>(mut self, items: impl IntoIterator<Item = (T, D)>) -> Self
     where
         T: Into<String>,
-        D: IntoLines,
+        D: IntoDescriptionLines,
     {
         for (term, desc) in items {
             self.items.push(DescriptionItem::new(term, desc));
@@ -1317,14 +1344,14 @@ impl DescriptionList {
 
             // First line: 2 spaces, term (left-justified), padding, then description
             let mut first_line = Line::default();
-            first_line.push(unstyled_span("  ".to_string()));
-            first_line.push(styled_span(style.bold(), item.term.clone()));
+            first_line.push(span::unstyled_span("  ".to_string()));
+            first_line.push(span::styled_span(style.bold(), item.term.clone()));
 
             // Padding to align descriptions: from end of term to description start
             let padding = max_term_width - term_width + 2;
 
             if let Some(first_desc_line) = item.description.first() {
-                first_line.push(unstyled_span(" ".repeat(padding)));
+                first_line.push(span::unstyled_span(" ".repeat(padding)));
                 first_line.extend(first_desc_line.iter().cloned());
             }
             lines.push(first_line);
@@ -1334,7 +1361,7 @@ impl DescriptionList {
                 let mut line = Line::default();
                 // Indent to align with description: 2 spaces + max_term_width + padding
                 let indent = 2 + max_term_width + 2;
-                line.push(unstyled_span(" ".repeat(indent)));
+                line.push(span::unstyled_span(" ".repeat(indent)));
                 line.extend(desc_line.iter().cloned());
                 lines.push(line);
             }
@@ -1366,265 +1393,6 @@ impl Default for DescriptionList {
 }
 
 // ---------------------------------------------------------------------------
-// Inline Text Styling
-// ---------------------------------------------------------------------------
-
-/// Inline code text (monospace).
-///
-/// # Examples
-///
-/// ```rust
-/// use spaces_console::typography::code;
-///
-/// let span = code("npm install");
-/// ```
-pub fn code(text: impl Into<String>) -> Span {
-    let style = ContentStyle {
-        foreground_color: Some(Color::Magenta),
-        background_color: Some(Color::Black),
-        attributes: Attributes::default(),
-        underline_color: None,
-    };
-    styled_span(style, text.into())
-}
-
-/// Highlighted/marked text.
-///
-/// # Examples
-///
-/// ```rust
-/// use spaces_console::typography::mark;
-///
-/// let span = mark("important");
-/// ```
-pub fn mark(text: impl Into<String>) -> Span {
-    let style = ContentStyle {
-        foreground_color: Some(Color::Black),
-        background_color: Some(Color::Yellow),
-        attributes: Attributes::default(),
-        underline_color: None,
-    };
-    styled_span(style, text.into())
-}
-
-/// Small/fine print text.
-///
-/// # Examples
-///
-/// ```rust
-/// use spaces_console::typography::small;
-///
-/// let span = small("© 2024");
-/// ```
-pub fn small(text: impl Into<String>) -> Span {
-    let style = ContentStyle {
-        foreground_color: Some(Color::DarkGrey),
-        background_color: None,
-        attributes: Attributes::default(),
-        underline_color: None,
-    };
-    styled_span(style, text.into())
-}
-
-/// Deleted/strikethrough text.
-///
-/// # Examples
-///
-/// ```rust
-/// use spaces_console::typography::del;
-///
-/// let span = del("obsolete");
-/// ```
-pub fn del(text: impl Into<String>) -> Span {
-    let style = ContentStyle {
-        foreground_color: Some(Color::DarkGrey),
-        background_color: None,
-        attributes: Attributes::from(Attribute::CrossedOut),
-        underline_color: None,
-    };
-    styled_span(style, text.into())
-}
-
-/// Inserted/underlined text.
-///
-/// # Examples
-///
-/// ```rust
-/// use spaces_console::typography::ins;
-///
-/// let span = ins("new feature");
-/// ```
-pub fn ins(text: impl Into<String>) -> Span {
-    let style = ContentStyle {
-        foreground_color: Some(Color::Green),
-        background_color: None,
-        attributes: Attributes::from(Attribute::Underlined),
-        underline_color: None,
-    };
-    styled_span(style, text.into())
-}
-
-/// Subscript text (using Unicode subscript characters where possible).
-///
-/// # Examples
-///
-/// ```rust
-/// use spaces_console::typography::sub_text;
-///
-/// let span = sub_text("2"); // For H₂O
-/// ```
-pub fn sub_text(text: impl Into<String>) -> Span {
-    let text_str = text.into();
-    let subscript = convert_to_subscript(&text_str);
-    let style = ContentStyle {
-        foreground_color: None,
-        background_color: None,
-        attributes: Attributes::default(),
-        underline_color: None,
-    };
-    styled_span(style, subscript)
-}
-
-/// Superscript text (using Unicode superscript characters where possible).
-///
-/// # Examples
-///
-/// ```rust
-/// use spaces_console::typography::sup_text;
-///
-/// let span = sup_text("2"); // For E=mc²
-/// ```
-pub fn sup_text(text: impl Into<String>) -> Span {
-    let text_str = text.into();
-    let superscript = convert_to_superscript(&text_str);
-    let style = ContentStyle {
-        foreground_color: None,
-        background_color: None,
-        attributes: Attributes::default(),
-        underline_color: None,
-    };
-    styled_span(style, superscript)
-}
-
-/// Keyboard input text.
-///
-/// # Examples
-///
-/// ```rust
-/// use spaces_console::typography::kbd;
-///
-/// let span = kbd("Ctrl+C");
-/// ```
-pub fn kbd(text: impl Into<String>) -> Span {
-    let style = ContentStyle {
-        foreground_color: Some(Color::White),
-        background_color: Some(Color::DarkGrey),
-        attributes: Attributes::from(Attribute::Bold),
-        underline_color: None,
-    };
-    styled_span(style, text.into())
-}
-
-/// Variable name text.
-///
-/// # Examples
-///
-/// ```rust
-/// use spaces_console::typography::var;
-///
-/// let span = var("user_name");
-/// ```
-pub fn var(text: impl Into<String>) -> Span {
-    let style = ContentStyle {
-        foreground_color: Some(Color::Cyan),
-        background_color: None,
-        attributes: Attributes::from(Attribute::Italic),
-        underline_color: None,
-    };
-    styled_span(style, text.into())
-}
-
-/// Sample output text.
-///
-/// # Examples
-///
-/// ```rust
-/// use spaces_console::typography::samp;
-///
-/// let span = samp("Command output");
-/// ```
-pub fn samp(text: impl Into<String>) -> Span {
-    let style = ContentStyle {
-        foreground_color: Some(Color::Green),
-        background_color: Some(Color::Black),
-        attributes: Attributes::default(),
-        underline_color: None,
-    };
-    styled_span(style, text.into())
-}
-
-// Helper functions for subscript/superscript conversion
-fn convert_to_subscript(text: &str) -> String {
-    text.chars()
-        .map(|c| match c {
-            '0' => '₀',
-            '1' => '₁',
-            '2' => '₂',
-            '3' => '₃',
-            '4' => '₄',
-            '5' => '₅',
-            '6' => '₆',
-            '7' => '₇',
-            '8' => '₈',
-            '9' => '₉',
-            '+' => '₊',
-            '-' => '₋',
-            '=' => '₌',
-            '(' => '₍',
-            ')' => '₎',
-            'a' => 'ₐ',
-            'e' => 'ₑ',
-            'o' => 'ₒ',
-            'x' => 'ₓ',
-            'h' => 'ₕ',
-            'k' => 'ₖ',
-            'l' => 'ₗ',
-            'm' => 'ₘ',
-            'n' => 'ₙ',
-            'p' => 'ₚ',
-            's' => 'ₛ',
-            't' => 'ₜ',
-            _ => c,
-        })
-        .collect()
-}
-
-fn convert_to_superscript(text: &str) -> String {
-    text.chars()
-        .map(|c| match c {
-            '0' => '⁰',
-            '1' => '¹',
-            '2' => '²',
-            '3' => '³',
-            '4' => '⁴',
-            '5' => '⁵',
-            '6' => '⁶',
-            '7' => '⁷',
-            '8' => '⁸',
-            '9' => '⁹',
-            '+' => '⁺',
-            '-' => '⁻',
-            '=' => '⁼',
-            '(' => '⁽',
-            ')' => '⁾',
-            'i' => 'ⁱ',
-            'n' => 'ⁿ',
-            _ => c,
-        })
-        .collect()
-}
-
-// ---------------------------------------------------------------------------
 // Table component
 // ---------------------------------------------------------------------------
 
@@ -1643,7 +1411,7 @@ pub struct Table {
     footers: Vec<String>,
     alignments: Vec<Align>,
     variant: Variant,
-    width: Option<usize>,
+    width: Option<Width>,
 }
 
 impl Table {
@@ -1689,8 +1457,8 @@ impl Table {
         self
     }
 
-    pub fn width(mut self, width: usize) -> Self {
-        self.width = Some(width);
+    pub fn width(mut self, width: impl Into<Width>) -> Self {
+        self.width = Some(width.into());
         self
     }
 
@@ -1714,7 +1482,7 @@ impl Table {
         }
 
         // Apply width constraint if specified
-        if let Some(target_width) = self.width {
+        if let Some(target_width) = self.width.map(Width::as_usize) {
             let num_cols = widths.len();
             if num_cols > 0 {
                 // Calculate current total width including borders and padding
@@ -1836,18 +1604,18 @@ impl Table {
             }
         }
         top_str.push_str(box_chars.top_right);
-        top_line.push(unstyled_span(top_str));
+        top_line.push(span::unstyled_span(top_str));
         lines.push(top_line);
 
         // Headers
         let mut header_line = Line::default();
-        header_line.push(unstyled_span(box_chars.vertical.to_string()));
+        header_line.push(span::unstyled_span(box_chars.vertical.to_string()));
         for (i, (header, width)) in self.headers.iter().zip(widths.iter()).enumerate() {
             let align = self.alignments.get(i).copied().unwrap_or(Align::Left);
             let formatted = self.format_cell(header, *width, align);
-            header_line.push(unstyled_span(" ".to_string()));
-            header_line.push(styled_span(header_style, formatted));
-            header_line.push(unstyled_span(format!(" {}", box_chars.vertical)));
+            header_line.push(span::unstyled_span(" ".to_string()));
+            header_line.push(span::styled_span(header_style, formatted));
+            header_line.push(span::unstyled_span(format!(" {}", box_chars.vertical)));
         }
         lines.push(header_line);
 
@@ -1861,20 +1629,20 @@ impl Table {
             }
         }
         sep_str.push_str(box_chars.right_t);
-        sep_line.push(unstyled_span(sep_str));
+        sep_line.push(span::unstyled_span(sep_str));
         lines.push(sep_line);
 
         // Rows
         for row in &self.rows {
             let mut row_line = Line::default();
-            row_line.push(unstyled_span(box_chars.vertical.to_string()));
+            row_line.push(span::unstyled_span(box_chars.vertical.to_string()));
             for (i, width) in widths.iter().enumerate() {
                 let cell = row.get(i).map(|s| s.as_str()).unwrap_or("");
                 let align = self.alignments.get(i).copied().unwrap_or(Align::Left);
                 let formatted = self.format_cell(cell, *width, align);
-                row_line.push(unstyled_span(" ".to_string()));
-                row_line.push(styled_span(style, formatted));
-                row_line.push(unstyled_span(format!(" {}", box_chars.vertical)));
+                row_line.push(span::unstyled_span(" ".to_string()));
+                row_line.push(span::styled_span(style, formatted));
+                row_line.push(span::unstyled_span(format!(" {}", box_chars.vertical)));
             }
             lines.push(row_line);
         }
@@ -1891,19 +1659,19 @@ impl Table {
                 }
             }
             footer_sep_str.push_str(box_chars.right_t);
-            footer_sep_line.push(unstyled_span(footer_sep_str));
+            footer_sep_line.push(span::unstyled_span(footer_sep_str));
             lines.push(footer_sep_line);
 
             // Footer row
             let mut footer_line = Line::default();
-            footer_line.push(unstyled_span(box_chars.vertical.to_string()));
+            footer_line.push(span::unstyled_span(box_chars.vertical.to_string()));
             for (i, width) in widths.iter().enumerate() {
                 let cell = self.footers.get(i).map(|s| s.as_str()).unwrap_or("");
                 let align = self.alignments.get(i).copied().unwrap_or(Align::Left);
                 let formatted = self.format_cell(cell, *width, align);
-                footer_line.push(unstyled_span(" ".to_string()));
-                footer_line.push(styled_span(header_style, formatted));
-                footer_line.push(unstyled_span(format!(" {}", box_chars.vertical)));
+                footer_line.push(span::unstyled_span(" ".to_string()));
+                footer_line.push(span::styled_span(header_style, formatted));
+                footer_line.push(span::unstyled_span(format!(" {}", box_chars.vertical)));
             }
             lines.push(footer_line);
         }
@@ -1918,7 +1686,7 @@ impl Table {
             }
         }
         bottom_str.push_str(box_chars.bottom_right);
-        bottom_line.push(unstyled_span(bottom_str));
+        bottom_line.push(span::unstyled_span(bottom_str));
         lines.push(bottom_line);
 
         lines
@@ -1950,7 +1718,7 @@ pub struct Card {
     title: Option<String>,
     body: String,
     variant: Variant,
-    width: Option<usize>,
+    width: Option<Width>,
 }
 
 impl Card {
@@ -1973,14 +1741,14 @@ impl Card {
         self
     }
 
-    pub fn width(mut self, width: usize) -> Self {
-        self.width = Some(width);
+    pub fn width(mut self, width: impl Into<Width>) -> Self {
+        self.width = Some(width.into());
         self
     }
 
     fn render_impl(&self) -> Vec<Line> {
         // Clamp width to minimum of 4 to prevent underflow in border/padding calculations
-        let width = self.width.unwrap_or(60).max(4);
+        let width = self.width.unwrap_or(Width::Custom(60)).as_usize().max(4);
         let style = self.variant.style();
         let title_style = ContentStyle {
             foreground_color: style.foreground_color,
@@ -1994,7 +1762,7 @@ impl Card {
 
         // Top border
         let mut top_line = Line::default();
-        top_line.push(unstyled_span(format!(
+        top_line.push(span::unstyled_span(format!(
             "{}{}{}",
             box_chars.top_left,
             box_chars.horizontal.repeat(width - 2),
@@ -2005,16 +1773,16 @@ impl Card {
         // Title
         if let Some(title) = &self.title {
             let mut title_line = Line::default();
-            title_line.push(unstyled_span(format!("{} ", box_chars.vertical)));
-            title_line.push(styled_span(
+            title_line.push(span::unstyled_span(format!("{} ", box_chars.vertical)));
+            title_line.push(span::styled_span(
                 title_style,
                 format!("{:<width$}", title, width = width - 4),
             ));
-            title_line.push(unstyled_span(format!(" {}", box_chars.vertical)));
+            title_line.push(span::unstyled_span(format!(" {}", box_chars.vertical)));
             lines.push(title_line);
 
             let mut sep_line = Line::default();
-            sep_line.push(unstyled_span(format!(
+            sep_line.push(span::unstyled_span(format!(
                 "{}{}{}",
                 box_chars.left_t,
                 box_chars.horizontal.repeat(width - 2),
@@ -2026,18 +1794,18 @@ impl Card {
         // Body
         for body_line in self.body.lines() {
             let mut line = Line::default();
-            line.push(unstyled_span(format!("{} ", box_chars.vertical)));
-            line.push(styled_span(
+            line.push(span::unstyled_span(format!("{} ", box_chars.vertical)));
+            line.push(span::styled_span(
                 style,
                 format!("{:<width$}", body_line, width = width - 4),
             ));
-            line.push(unstyled_span(format!(" {}", box_chars.vertical)));
+            line.push(span::unstyled_span(format!(" {}", box_chars.vertical)));
             lines.push(line);
         }
 
         // Bottom border
         let mut bottom_line = Line::default();
-        bottom_line.push(unstyled_span(format!(
+        bottom_line.push(span::unstyled_span(format!(
             "{}{}{}",
             box_chars.bottom_left,
             box_chars.horizontal.repeat(width - 2),
@@ -2091,7 +1859,7 @@ impl HistogramBar {
 pub struct Histogram {
     title: String,
     bars: Vec<HistogramBar>,
-    bar_width: usize,
+    bar_width: Width,
     variant: Variant,
 }
 
@@ -2100,13 +1868,13 @@ impl Histogram {
         Self {
             title: title.into(),
             bars: Vec::new(),
-            bar_width: 20,
+            bar_width: Width::Custom(20),
             variant: Variant::Default,
         }
     }
 
-    pub fn bar_width(mut self, width: usize) -> Self {
-        self.bar_width = width;
+    pub fn bar_width(mut self, width: impl Into<Width>) -> Self {
+        self.bar_width = width.into();
         self
     }
 
@@ -2131,7 +1899,7 @@ impl Histogram {
         // Print title with variant style
         let title_style = self.variant.style().bold();
         let mut title_line = Line::default();
-        title_line.push(styled_span(title_style, self.title.clone()));
+        title_line.push(span::styled_span(title_style, self.title.clone()));
         lines.push(title_line);
 
         if self.bars.is_empty() {
@@ -2145,30 +1913,29 @@ impl Histogram {
         let max_label_len = self.bars.iter().map(|b| b.label.len()).max().unwrap_or(0);
 
         let bar_char = get_histogram_bar_char();
+        let bar_width = self.bar_width.as_usize();
 
         // Render each bar
         for bar in &self.bars {
-            let bar_len = (bar.value * self.bar_width)
-                .checked_div(max_value)
-                .unwrap_or(0);
+            let bar_len = (bar.value * bar_width).checked_div(max_value).unwrap_or(0);
             let bar_str = bar_char.to_string().repeat(bar_len);
 
             let mut bar_line = Line::default();
 
             // Label
-            bar_line.push(styled_span(
+            bar_line.push(span::styled_span(
                 default_style(),
                 format!("  {:width$}  ", bar.label, width = max_label_len),
             ));
 
             // Bar
-            bar_line.push(styled_span(
+            bar_line.push(span::styled_span(
                 bar.variant.style(),
-                format!("{:width$}", bar_str, width = self.bar_width),
+                format!("{:width$}", bar_str, width = bar_width),
             ));
 
             // Count
-            bar_line.push(unstyled_span(format!("  {}", bar.value)));
+            bar_line.push(span::unstyled_span(format!("  {}", bar.value)));
 
             lines.push(bar_line);
         }
@@ -2190,12 +1957,12 @@ impl Component for Histogram {
 /// An alert/callout component for displaying notices, warnings, and important messages.
 ///
 /// Alerts provide prominent visual feedback with colored borders and titles based on their variant.
-/// The border and title use the variant color, while the body text remains in the default style.
+/// The border and title use the variant color, while the body can contain rich text spans.
 ///
 /// # Examples
 ///
 /// ```rust
-/// use spaces_console::typography::{Alert, Variant};
+/// use spaces_console::components::{Alert, Variant};
 ///
 /// // Create an info alert
 /// let alert = Alert::new("Server restarted successfully")
@@ -2207,26 +1974,30 @@ impl Component for Histogram {
 ///     .title("Warning")
 ///     .variant(Variant::Warning);
 ///
-/// // Create a danger alert with multi-line content
-/// let alert = Alert::new("Connection failed\nPlease check your network settings")
+/// // Create a danger alert with rich body text
+/// let alert = Alert::new(vec![
+///     spaces_console::components::code("spaces sync --stash"),
+///     spaces_console::components::plain_text(" failed"),
+/// ])
 ///     .title("Error")
 ///     .variant(Variant::Danger);
 /// ```
 pub struct Alert {
     title: Option<String>,
-    body: String,
+    body: Line,
     variant: Variant,
-    width: Option<usize>,
+    width: Option<Width>,
 }
 
 impl Alert {
-    /// Creates a new Alert with the given body text.
+    /// Creates a new Alert with the given body content.
     ///
+    /// Accepts plain text or rich `Line` content.
     /// Defaults to the Info variant.
-    pub fn new(body: impl Into<String>) -> Self {
+    pub fn new(body: impl IntoLine) -> Self {
         Self {
             title: None,
-            body: body.into(),
+            body: body.into_line(),
             variant: Variant::Info,
             width: None,
         }
@@ -2245,15 +2016,31 @@ impl Alert {
     }
 
     /// Sets the width of the alert box.
-    pub fn width(mut self, width: usize) -> Self {
-        self.width = Some(width);
+    pub fn width(mut self, width: impl Into<Width>) -> Self {
+        self.width = Some(width.into());
         self
+    }
+
+    fn body_lines(&self) -> Vec<Line> {
+        let body_text = self.body.to_unstyled();
+
+        if body_text.is_empty() {
+            return Vec::new();
+        }
+
+        // Split into multiple rendered lines only if newline content survives in spans.
+        if self.body.iter().any(|span| span.content().contains('\n')) {
+            body_text.lines().map(plain_line).collect()
+        } else {
+            vec![self.body.clone()]
+        }
     }
 
     /// Renders the alert as a vector of Lines.
     fn render_impl(&self) -> Vec<Line> {
         // Clamp width to minimum of 4 to prevent underflow in border/padding calculations
-        let width = self.width.unwrap_or(60).max(4);
+        let width = self.width.unwrap_or(Width::Custom(60)).as_usize().max(4);
+        let inner_width = width - 4;
         let border_style = self.variant.style();
         let title_style = ContentStyle {
             foreground_color: border_style.foreground_color,
@@ -2268,7 +2055,7 @@ impl Alert {
 
         // Top border (colored)
         let mut top_line = Line::default();
-        top_line.push(styled_span(
+        top_line.push(span::styled_span(
             border_style,
             format!(
                 "{}{}{}",
@@ -2282,15 +2069,15 @@ impl Alert {
         // Title (colored border + colored title text)
         if let Some(title) = &self.title {
             let mut title_line = Line::default();
-            title_line.push(styled_span(
+            title_line.push(span::styled_span(
                 border_style,
                 format!("{} ", box_chars.vertical),
             ));
-            title_line.push(styled_span(
+            title_line.push(span::styled_span(
                 title_style,
                 format!("{:<width$}", title, width = width - 4),
             ));
-            title_line.push(styled_span(
+            title_line.push(span::styled_span(
                 border_style,
                 format!(" {}", box_chars.vertical),
             ));
@@ -2298,7 +2085,7 @@ impl Alert {
 
             // Separator (colored)
             let mut sep_line = Line::default();
-            sep_line.push(styled_span(
+            sep_line.push(span::styled_span(
                 border_style,
                 format!(
                     "{}{}{}",
@@ -2310,18 +2097,25 @@ impl Alert {
             lines.push(sep_line);
         }
 
-        // Body (colored border + default text)
-        for body_line in self.body.lines() {
+        // Body (colored border + rich body content)
+        for body_line in self.body_lines() {
             let mut line = Line::default();
-            line.push(styled_span(
+            line.push(span::styled_span(
                 border_style,
                 format!("{} ", box_chars.vertical),
             ));
-            line.push(styled_span(
-                body_style,
-                format!("{:<width$}", body_line, width = width - 4),
-            ));
-            line.push(styled_span(
+
+            line.extend(body_line.iter().cloned());
+
+            let body_len = body_line.to_unstyled().chars().count();
+            if body_len < inner_width {
+                line.push(span::styled_span(
+                    body_style,
+                    " ".repeat(inner_width - body_len),
+                ));
+            }
+
+            line.push(span::styled_span(
                 border_style,
                 format!(" {}", box_chars.vertical),
             ));
@@ -2330,7 +2124,7 @@ impl Alert {
 
         // Bottom border (colored)
         let mut bottom_line = Line::default();
-        bottom_line.push(styled_span(
+        bottom_line.push(span::styled_span(
             border_style,
             format!(
                 "{}{}{}",
@@ -2379,8 +2173,13 @@ pub fn paragraph(text: impl Into<String>) -> Line {
     Paragraph::new(text).render()
 }
 
-pub fn blockquote(text: impl Into<String>) -> Vec<Line> {
-    Blockquote::new(text).render()
+/// Render a paragraph from rich line content while preserving span styling.
+pub fn paragraph_line(text: impl IntoLine) -> Line {
+    Paragraph::from_line(text).render()
+}
+
+pub fn blockquote(text: impl IntoLine) -> Vec<Line> {
+    Blockquote::new().push(text).render()
 }
 
 pub fn link(text: impl Into<String>) -> Line {
@@ -2391,13 +2190,14 @@ pub fn link_with_url(text: impl Into<String>, url: impl Into<String>) -> Line {
     Link::new(text).url(url).render()
 }
 
-pub fn alert(body: impl Into<String>) -> Vec<Line> {
+pub fn alert(body: impl IntoLine) -> Vec<Line> {
     Alert::new(body).render()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bootstrap::span::{code, mark};
 
     #[test]
     fn test_header_render() {
@@ -2446,6 +2246,65 @@ mod tests {
         let lines = list.render();
         // Root + Level 1A + Level 2A + Level 2B + End = 5
         assert_eq!(lines.len(), 5);
+    }
+
+    #[test]
+    fn test_paragraph_plain_text_uses_variant_style() {
+        let line = Paragraph::new("Hello").variant(Variant::Info).render();
+        assert!(line.to_unstyled().contains("Hello"));
+        assert!(line.fmt_for_test().to_string().contains("fg=cyan"));
+    }
+
+    #[test]
+    fn test_paragraph_accepts_rich_line() {
+        let mut rich_line = Line::default();
+        rich_line.push(code("npm install"));
+        rich_line.push(span::unstyled_span(" --offline".to_string()));
+
+        let line = Paragraph::from_line(rich_line)
+            .variant(Variant::Danger)
+            .render();
+
+        assert!(line.to_unstyled().contains("npm install --offline"));
+        // Rich line should preserve explicit code styling.
+        assert!(line.fmt_for_test().to_string().contains("fg=magenta"));
+    }
+
+    #[test]
+    fn test_paragraph_helper_accepts_rich_line() {
+        let mut rich_line = Line::default();
+        rich_line.push(code("spaces sync --stash"));
+
+        let line = paragraph_line(rich_line);
+
+        assert!(line.to_unstyled().contains("spaces sync --stash"));
+        assert!(line.fmt_for_test().to_string().contains("fg=magenta"));
+    }
+
+    #[test]
+    fn test_list_accepts_rich_item() {
+        let mut rich_line = Line::default();
+        rich_line.push(code("cargo test"));
+
+        let list = List::unordered().item(rich_line);
+        let lines = list.render();
+
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].to_unstyled().contains("cargo test"));
+        assert!(lines[0].fmt_for_test().to_string().contains("fg=magenta"));
+    }
+
+    #[test]
+    fn test_blockquote_accepts_rich_line() {
+        let mut rich_line = Line::default();
+        rich_line.push(mark("Important"));
+
+        let lines = Blockquote::new().push(rich_line).render();
+
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].to_unstyled().contains("Important"));
+        let fmt = lines[0].fmt_for_test().to_string();
+        assert!(fmt.contains("bg=yellow") || fmt.contains("fg=black"));
     }
 
     #[test]
@@ -2652,13 +2511,27 @@ mod tests {
     }
 
     #[test]
-    fn test_alert_multiline() {
+    fn test_alert_newline_body_renders_single_line() {
         let alert = Alert::new("Line 1\nLine 2\nLine 3")
             .title("Multi-line Alert")
             .variant(Variant::Danger);
         let lines = alert.render();
-        // Should have: top border, title, separator, 3 body lines, bottom border
-        assert_eq!(lines.len(), 7);
+        // Newline characters in a Line body are rendered as a single body line.
+        assert_eq!(lines.len(), 5);
+    }
+
+    #[test]
+    fn test_alert_accepts_rich_line() {
+        let mut rich_line = Line::default();
+        rich_line.push(code("spaces sync"));
+        rich_line.push(span::unstyled_span(" --stash".to_string()));
+
+        let lines = Alert::new(rich_line).title("Command").render();
+
+        assert!(!lines.is_empty());
+        // Body line should preserve rich span styling.
+        assert!(lines[3].to_unstyled().contains("spaces sync --stash"));
+        assert!(lines[3].fmt_for_test().to_string().contains("fg=magenta"));
     }
 
     #[test]
@@ -2711,7 +2584,7 @@ mod tests {
         assert!(info_style().foreground_color.is_some());
         assert!(light_style().foreground_color.is_some());
         assert!(dark_style().foreground_color.is_some());
-        assert!(default_style().foreground_color.is_some());
+        assert!(default_style().foreground_color.is_none());
     }
 
     #[test]
@@ -2859,46 +2732,6 @@ mod tests {
     }
 
     #[test]
-    fn test_typography_mode_default() {
-        // The default mode should be Unicode
-        assert_eq!(typography_mode(), TypographyMode::Unicode);
-    }
-
-    #[test]
-    fn test_ascii_mode_characters() {
-        // This test demonstrates what the ASCII mode characters would be
-        // Note: We can't actually set the mode in tests due to OnceLock,
-        // but we can verify the character sets exist and are different
-        assert_ne!(
-            BAR_CHARS_BOUNDED_ASCII.filled,
-            BAR_CHARS_BOUNDED_UNICODE.filled
-        );
-        assert_ne!(SPINNER_FRAMES_ASCII, SPINNER_FRAMES_UNICODE);
-        assert_ne!(BOX_CHARS_ASCII.top_left, BOX_CHARS_UNICODE.top_left);
-        assert_ne!(DIVIDER_CHARS_ASCII.solid, DIVIDER_CHARS_UNICODE.solid);
-        assert_ne!(HISTOGRAM_BAR_ASCII, HISTOGRAM_BAR_UNICODE);
-    }
-
-    #[test]
-    fn test_ascii_mode_uses_only_ascii() {
-        // Verify that ASCII mode characters are all within ASCII range
-        assert!(BAR_CHARS_BOUNDED_ASCII.filled.is_ascii());
-        assert!(BAR_CHARS_BOUNDED_ASCII.tip.is_ascii());
-        assert!(BAR_CHARS_BOUNDED_ASCII.empty.is_ascii());
-
-        for &frame in SPINNER_FRAMES_ASCII {
-            assert!(frame.is_ascii());
-        }
-
-        assert!(BOX_CHARS_ASCII.top_left.chars().all(|c| c.is_ascii()));
-        assert!(BOX_CHARS_ASCII.horizontal.chars().all(|c| c.is_ascii()));
-        assert!(BOX_CHARS_ASCII.vertical.chars().all(|c| c.is_ascii()));
-
-        assert!(DIVIDER_CHARS_ASCII.solid.chars().all(|c| c.is_ascii()));
-        assert!(HISTOGRAM_BAR_ASCII.is_ascii());
-    }
-
-    #[test]
     fn test_description_list() {
         let dl = DescriptionList::new()
             .item("Name", "Zed")
@@ -2906,8 +2739,8 @@ mod tests {
             .item("License", "MIT");
         let lines = dl.render();
 
-        // Should have 3 terms + 3 descriptions + 2 blank lines = 8 lines
-        assert_eq!(lines.len(), 8);
+        // One rendered line per item + 2 blank lines between items = 5 lines
+        assert_eq!(lines.len(), 5);
     }
 
     #[test]
@@ -2918,8 +2751,8 @@ mod tests {
             .compact(true);
         let lines = dl.render();
 
-        // Compact mode: 2 terms + 2 descriptions = 4 lines (no blank lines)
-        assert_eq!(lines.len(), 4);
+        // Compact mode: one rendered line per item, no blank lines
+        assert_eq!(lines.len(), 2);
     }
 
     #[test]
@@ -2937,8 +2770,9 @@ mod tests {
         let dl = DescriptionList::new().item("Description", "Line 1\nLine 2\nLine 3");
         let lines = dl.render();
 
-        // 1 term + 3 description lines = 4 lines
-        assert_eq!(lines.len(), 4);
+        // Multi-line description: first line includes term + first description line,
+        // plus two continuation description lines
+        assert_eq!(lines.len(), 3);
     }
 
     #[test]
@@ -2966,7 +2800,7 @@ mod tests {
     fn test_description_list_accepts_styled_line() {
         let mut description_line = Line::default();
         description_line.push(code("npm install"));
-        description_line.push(unstyled_span(" --offline".to_string()));
+        description_line.push(span::unstyled_span(" --offline".to_string()));
 
         let dl = DescriptionList::new().item("Command", description_line);
         let lines = dl.render();
@@ -2998,124 +2832,7 @@ mod tests {
         let dl = DescriptionList::new().items(items);
         let lines = dl.render();
 
-        // 2 terms + 2 descriptions + 1 blank line = 5 lines
-        assert_eq!(lines.len(), 5);
-    }
-
-    #[test]
-    fn test_code_inline() {
-        let span = code("npm install");
-        // Verify it returns a Span (compilation test mainly)
-        assert!(span.content().len() > 0);
-    }
-
-    #[test]
-    fn test_mark_inline() {
-        let span = mark("important");
-        assert!(span.content().len() > 0);
-    }
-
-    #[test]
-    fn test_small_inline() {
-        let span = small("© 2024");
-        assert!(span.content().len() > 0);
-    }
-
-    #[test]
-    fn test_del_inline() {
-        let span = del("obsolete");
-        assert!(span.content().len() > 0);
-    }
-
-    #[test]
-    fn test_ins_inline() {
-        let span = ins("new feature");
-        assert!(span.content().len() > 0);
-    }
-
-    #[test]
-    fn test_kbd_inline() {
-        let span = kbd("Ctrl+C");
-        assert!(span.content().len() > 0);
-    }
-
-    #[test]
-    fn test_var_inline() {
-        let span = var("user_name");
-        assert!(span.content().len() > 0);
-    }
-
-    #[test]
-    fn test_samp_inline() {
-        let span = samp("Command output");
-        assert!(span.content().len() > 0);
-    }
-
-    #[test]
-    fn test_subscript_conversion() {
-        let result = convert_to_subscript("0123456789");
-        assert_eq!(result, "₀₁₂₃₄₅₆₇₈₉");
-
-        let result = convert_to_subscript("H2O");
-        assert_eq!(result, "H₂O");
-
-        // Note: 'x' and 'n' both have subscript equivalents
-        let result = convert_to_subscript("x(n+1)");
-        assert_eq!(result, "ₓ₍ₙ₊₁₎");
-    }
-
-    #[test]
-    fn test_superscript_conversion() {
-        let result = convert_to_superscript("0123456789");
-        assert_eq!(result, "⁰¹²³⁴⁵⁶⁷⁸⁹");
-
-        let result = convert_to_superscript("E=mc2");
-        assert_eq!(result, "E⁼mc²");
-
-        // Note: 'n' has superscript equivalent, but not other letters
-        let result = convert_to_superscript("x(n+1)");
-        assert_eq!(result, "x⁽ⁿ⁺¹⁾");
-    }
-
-    #[test]
-    fn test_sub_text_inline() {
-        let span = sub_text("2");
-        assert_eq!(span.content(), "₂");
-    }
-
-    #[test]
-    fn test_sup_text_inline() {
-        let span = sup_text("2");
-        assert_eq!(span.content(), "²");
-    }
-
-    #[test]
-    fn test_subscript_preserves_unknown_chars() {
-        let result = convert_to_subscript("ABC");
-        assert_eq!(result, "ABC"); // A, B, C don't have subscript equivalents
-    }
-
-    #[test]
-    fn test_superscript_preserves_unknown_chars() {
-        let result = convert_to_superscript("ABC");
-        assert_eq!(result, "ABC"); // A, B, C don't have superscript equivalents (except i and n)
-    }
-
-    #[test]
-    fn test_icon_functions_unicode_mode() {
-        // In default Unicode mode, icons should return non-empty strings
-        assert_eq!(icon_success(), "✓");
-        assert_eq!(icon_danger(), "✗");
-        assert_eq!(icon_warning(), "⚠");
-        assert_eq!(icon_info(), "ℹ");
-    }
-
-    #[test]
-    fn test_icon_functions_not_empty_in_unicode() {
-        // Verify icons are not empty in default (Unicode) mode
-        assert!(!icon_success().is_empty());
-        assert!(!icon_danger().is_empty());
-        assert!(!icon_warning().is_empty());
-        assert!(!icon_info().is_empty());
+        // One rendered line per item + 1 blank separator line = 3 lines
+        assert_eq!(lines.len(), 3);
     }
 }

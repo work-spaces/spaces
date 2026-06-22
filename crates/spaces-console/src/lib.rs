@@ -2,7 +2,18 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use std::sync::{Arc, Mutex, RwLock};
 
-pub mod components;
+pub mod bootstrap;
+
+// Backward-compatible public modules expected by downstream crates.
+pub mod components {
+    pub use crate::bootstrap::components::*;
+    pub use crate::bootstrap::span::*;
+}
+
+pub mod container {
+    pub use crate::bootstrap::container::*;
+}
+
 mod file;
 mod null;
 mod process;
@@ -12,10 +23,11 @@ pub mod ui;
 mod verbosity;
 mod writer;
 
-pub use components::{
-    bold_style, danger_style, dark_style, default_style, format_duration, info_style, light_style,
-    primary_style, secondary_style, success_style, warning_style,
+pub use bootstrap::components::{
+    bold_style, danger_style, dark_style, default_style, info_style, light_style, primary_style,
+    secondary_style, success_style, warning_style,
 };
+pub use bootstrap::typography::format_duration;
 pub use crossterm::style;
 pub use process::{ExecuteOptions, ExecuteResult, LogHeader, get_log_divider};
 pub use secrets::Secrets;
@@ -274,6 +286,10 @@ impl Console {
         for line in lines {
             writer.emit_line(line);
         }
+    }
+
+    pub fn emit_container(&self, container: &bootstrap::container::Container) {
+        self.emit_lines(container.render());
     }
 
     pub(crate) fn emit_progress_line(&self, line: superconsole::Line) {

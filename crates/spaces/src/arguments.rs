@@ -340,7 +340,13 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             dev_branch,
             no_dev_branch,
             stash,
-            force,
+            allow_dirty,
+            merge,
+            no_rebase_repo,
+            no_rebase,
+            dev_branch_base,
+            dry_run,
+            locked,
         } => {
             singleton::set_execution_phase(task::Phase::Checkout);
 
@@ -356,6 +362,17 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                 .context(format_context!("while setting store values for sync"))?;
 
             singleton::set_args_store_removals(no_store);
+
+            if allow_dirty
+                && (!merge.is_empty()
+                    || !no_rebase_repo.is_empty()
+                    || no_rebase
+                    || !dev_branch_base.is_empty())
+            {
+                return Err(format_error!(
+                    "`--allow_dirty` cannot be combined with `--merge`, `--no-rebase`, `--no-rebase-repo`, or `--dev-branch-base`"
+                ));
+            }
 
             // Add any dev branches specified by the command line
             if !dev_branch.is_empty() {
@@ -374,8 +391,19 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             // Always need to evaluate when doing a sync
             singleton::set_rescan(true);
             singleton::set_is_sync();
-            singleton::set_sync_stash(stash);
-            singleton::set_sync_force(force);
+            singleton::set_sync_options(singleton::SyncOptions {
+                stash,
+                force: allow_dirty,
+                merge_repos: merge,
+                no_rebase_repos: no_rebase_repo,
+                no_rebase,
+                dev_branch_bases: dev_branch_base,
+                dry_run,
+            });
+
+            if locked {
+                singleton::set_use_locks();
+            }
 
             runner::run_starlark_modules_in_workspace(
                 effective_console,
@@ -989,7 +1017,39 @@ create-lock-file = false # optionally create a lock file
             help = r#"Skip repository status checks and rebase operations.
   Use with caution: this bypasses safety checks for dirty repos and rebase conflicts."#
         )]
-        force: bool,
+        allow_dirty: bool,
+        #[arg(
+            long,
+            help = r#"For matching dev-branch repos, merge instead of rebase.
+  Use `--merge=<repo-path>`. This flag can be used multiple times."#
+        )]
+        merge: Vec<Arc<str>>,
+        #[arg(
+            long,
+            help = r#"For matching dev-branch repos, skip both rebase and merge.
+  Use `--no-rebase-repo=<repo-path>`. This flag can be used multiple times."#
+        )]
+        no_rebase_repo: Vec<Arc<str>>,
+        #[arg(
+            long,
+            help = r#"Skip rebase for all dev-branch repos unless explicitly listed in `--merge`."#
+        )]
+        no_rebase: bool,
+        #[arg(
+            long,
+            help = r#"Override dev-branch base ref for a repo.
+  Use `--dev-branch-base=<repo-path>=<ref>`. This flag can be used multiple times."#
+        )]
+        dev_branch_base: Vec<Arc<str>>,
+        #[arg(
+            long,
+            help = r#"Run pre-sync planning only and print what would happen.
+  Does not modify repositories and does not execute sync tasks."#
+        )]
+        dry_run: bool,
+        /// The workspace lock rev's will override the rule rev for repos during sync.
+        #[arg(long)]
+        locked: bool,
     },
     #[command(about = r"Runs a spaces run rule.
   - `spaces run`: Run all non-optional rules with dependencies

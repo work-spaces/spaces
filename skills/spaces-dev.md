@@ -1,6 +1,6 @@
 ---
 name: create-spaces-pr
-description: Use this skill when making general code changes in this workspace's Spaces codebase. It enforces using sysroot/bin in PATH and validates changes with spaces rules as broadly as practical.
+description: Use this skill when making general code changes in this workspace's Spaces codebase and validates changes with spaces rules as broadly as practical.
 ---
 
 # Spaces Dev
@@ -9,13 +9,7 @@ Use this skill for day-to-day implementation, refactoring, and debugging work in
 
 ## Required command environment
 
-When running commands, always ensure `sysroot/bin` is first in `PATH`.
-
-Use this pattern from the workspace root:
-
-```sh
-PATH=<workspace_root>/sysroot/bin:/usr/bin:/bin:/usr/sbin:/sbin <command>
-```
+When running `spaces`, there is no need to set `PATH`.
 
 To test spaces code changes, first check the changes using:
 
@@ -32,7 +26,7 @@ spaces run //spaces:build
 Then use:
 
 ```sh
-spaces/target/debug/spaces ...
+build/target/debug/spaces ...
 ```
 
 ## Rule-first validation workflow
@@ -52,7 +46,7 @@ spaces query rules
 
 ```sh
 spaces run //spaces:clippy
-spaces run //spaces:fmt
+spaces run //spaces:format
 ```
 
 ## Change execution guidance
@@ -61,3 +55,13 @@ spaces run //spaces:fmt
 - Prefer existing Spaces patterns in `spaces/spaces.star` and nearby crates/scripts.
 - If a rule fails, report the failing rule label and the key error lines.
 - In final summaries, list exactly which Spaces rules were executed.
+
+## Running Tools Directly
+
+When running tools directly, ensure `sysroot/bin` is first in `PATH`. Use this pattern from the workspace root:
+
+```sh
+PATH=<workspace_root>/sysroot/bin:/usr/bin:/bin:/usr/sbin:/sbin <command>
+```
+
+sysroot/bin contains sccache, rg, and other helpful tools.
