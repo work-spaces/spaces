@@ -787,3 +787,152 @@ pub fn pop_stashed_repos(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn arcs(items: &[&str]) -> Vec<Arc<str>> {
+        items.iter().map(|item| Arc::<str>::from(*item)).collect()
+    }
+
+    fn set(items: &[&str]) -> HashSet<Arc<str>> {
+        items.iter().map(|item| Arc::<str>::from(*item)).collect()
+    }
+
+    fn parsed_entry(repo_path: &str, base_ref: &str) -> ParsedDevBranchBase {
+        ParsedDevBranchBase {
+            repo_path: repo_path.into(),
+            base_ref: base_ref.into(),
+        }
+    }
+
+    #[test]
+    fn parse_dev_branch_base_entries_parses_and_normalizes_repo_paths() {
+        let parsed = parse_dev_branch_base_entries(&arcs(&[
+            "//repo-a=origin/main",
+            "repo-b=refs/heads/trunk",
+        ]))
+        .unwrap();
+
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].repo_path.as_ref(), "repo-a");
+        assert_eq!(parsed[0].base_ref.as_ref(), "origin/main");
+        assert_eq!(parsed[1].repo_path.as_ref(), "repo-b");
+        assert_eq!(parsed[1].base_ref.as_ref(), "refs/heads/trunk");
+    }
+
+    #[test]
+    fn parse_dev_branch_base_entries_rejects_malformed_arguments() {
+        let err = parse_dev_branch_base_entries(&arcs(&["repo-a"])).unwrap_err();
+
+        assert!(format!("{err:#}").contains("expected <repo-path>=<ref>"));
+    }
+
+    #[test]
+    fn parse_dev_branch_base_entries_rejects_duplicate_repo_after_normalization() {
+        let err = parse_dev_branch_base_entries(&arcs(&[
+            "//repo-a=origin/main",
+            "repo-a=origin/release",
+        ]))
+        .unwrap_err();
+
+        assert!(format!("{err:#}").contains("Duplicate --dev-branch-base for repo `//repo-a`"));
+    }
+
+    #[test]
+    fn resolve_selector_set_normalizes_and_deduplicates() {
+        let member_paths = set(&["repo-a", "repo-b"]);
+
+        let resolved = resolve_selector_set(
+            "--merge",
+            &arcs(&["//repo-a", "repo-a", "repo-b"]),
+            &member_paths,
+        )
+        .unwrap();
+
+        assert_eq!(resolved, set(&["repo-a", "repo-b"]));
+    }
+
+    #[test]
+    fn resolve_selector_set_returns_sorted_unknown_selectors() {
+        let err = resolve_selector_set(
+            "--merge",
+            &arcs(&["//repo-z", "//repo-b"]),
+            &set(&["repo-a"]),
+        )
+        .unwrap_err();
+
+        assert!(
+            format!("{err:#}").contains("Unknown repo selectors for --merge: //repo-b, //repo-z")
+        );
+    }
+
+    #[test]
+    fn resolve_dev_branch_base_map_returns_map_for_known_dev_branch_repos() {
+        let map = resolve_dev_branch_base_map(
+            &[parsed_entry("repo-a", "origin/main")],
+            &set(&["repo-a", "repo-b"]),
+            &set(&["repo-a"]),
+        )
+        .unwrap();
+
+        assert_eq!(map.len(), 1);
+        assert_eq!(map.get("repo-a").map(|v| v.as_ref()), Some("origin/main"));
+    }
+
+    #[test]
+    fn resolve_dev_branch_base_map_errors_on_unknown_repo_selectors() {
+        let err = resolve_dev_branch_base_map(
+            &[
+                parsed_entry("repo-z", "origin/main"),
+                parsed_entry("repo-b", "origin/dev"),
+            ],
+            &set(&["repo-a"]),
+            &set(&["repo-a"]),
+        )
+        .unwrap_err();
+
+        assert!(
+            format!("{err:#}")
+                .contains("Unknown repo selectors for --dev-branch-base: //repo-b, //repo-z")
+        );
+    }
+
+    #[test]
+    fn resolve_dev_branch_base_map_errors_on_non_dev_branch_repos() {
+        let err = resolve_dev_branch_base_map(
+            &[parsed_entry("repo-b", "origin/main")],
+            &set(&["repo-a", "repo-b"]),
+            &set(&["repo-a"]),
+        )
+        .unwrap_err();
+
+        assert!(format!("{err:#}").contains(
+            "`--dev-branch-base` is only valid for dev-branch repos. Not dev-branch: //repo-b"
+        ));
+    }
+
+    #[test]
+    fn resolve_dev_branch_base_map_prioritizes_unknown_over_non_dev_branch_errors() {
+        let err = resolve_dev_branch_base_map(
+            &[
+                parsed_entry("repo-unknown", "origin/main"),
+                parsed_entry("repo-b", "origin/dev"),
+            ],
+            &set(&["repo-a", "repo-b"]),
+            &set(&["repo-a"]),
+        )
+        .unwrap_err();
+
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("Unknown repo selectors for --dev-branch-base: //repo-unknown"),
+            "unexpected error message: {msg}"
+        );
+        assert!(
+            !msg.contains("Not dev-branch"),
+            "unexpected error message: {msg}"
+        );
+    }
+}

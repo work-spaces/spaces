@@ -585,13 +585,21 @@ impl VerticalSpacer {
     pub fn new(height: u16) -> Self {
         Self { height }
     }
+
+    fn render_impl(&self) -> Vec<Line> {
+        let mut result = Vec::new();
+        result.resize(self.height as usize, Line::default());
+        result
+    }
+
+    pub fn render(&self) -> Vec<Line> {
+        self.render_impl()
+    }
 }
 
 impl Component for VerticalSpacer {
     fn render(&self) -> Vec<Line> {
-        let mut result = Vec::new();
-        result.resize(self.height as usize, Line::default());
-        result
+        self.render_impl()
     }
 }
 
@@ -1984,7 +1992,7 @@ impl Component for Histogram {
 /// ```
 pub struct Alert {
     title: Option<String>,
-    body: Line,
+    body: Vec<Line>,
     variant: Variant,
     width: Option<Width>,
 }
@@ -1992,12 +2000,12 @@ pub struct Alert {
 impl Alert {
     /// Creates a new Alert with the given body content.
     ///
-    /// Accepts plain text or rich `Line` content.
+    /// Accepts plain text, rich `Line` content, or pre-split `Vec<Line>` content.
     /// Defaults to the Info variant.
-    pub fn new(body: impl IntoLine) -> Self {
+    pub fn new(body: impl IntoDescriptionLines) -> Self {
         Self {
             title: None,
-            body: body.into_line(),
+            body: body.into_description_lines(),
             variant: Variant::Info,
             width: None,
         }
@@ -2022,17 +2030,10 @@ impl Alert {
     }
 
     fn body_lines(&self) -> Vec<Line> {
-        let body_text = self.body.to_unstyled();
-
-        if body_text.is_empty() {
-            return Vec::new();
-        }
-
-        // Split into multiple rendered lines only if newline content survives in spans.
-        if self.body.iter().any(|span| span.content().contains('\n')) {
-            body_text.lines().map(plain_line).collect()
+        if self.body.iter().all(|line| line.to_unstyled().is_empty()) {
+            Vec::new()
         } else {
-            vec![self.body.clone()]
+            self.body.clone()
         }
     }
 
@@ -2190,7 +2191,7 @@ pub fn link_with_url(text: impl Into<String>, url: impl Into<String>) -> Line {
     Link::new(text).url(url).render()
 }
 
-pub fn alert(body: impl IntoLine) -> Vec<Line> {
+pub fn alert(body: impl IntoDescriptionLines) -> Vec<Line> {
     Alert::new(body).render()
 }
 
@@ -2511,13 +2512,13 @@ mod tests {
     }
 
     #[test]
-    fn test_alert_newline_body_renders_single_line() {
+    fn test_alert_newline_body_renders_multiple_lines() {
         let alert = Alert::new("Line 1\nLine 2\nLine 3")
             .title("Multi-line Alert")
             .variant(Variant::Danger);
         let lines = alert.render();
-        // Newline characters in a Line body are rendered as a single body line.
-        assert_eq!(lines.len(), 5);
+        // Newline characters in body text are rendered as separate body lines.
+        assert_eq!(lines.len(), 7);
     }
 
     #[test]

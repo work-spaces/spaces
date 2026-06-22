@@ -850,8 +850,8 @@ fn emit_pretty_rule_details(
         );
     console.emit_lines(top_level.render());
 
-    let rule_header =
-        console::components::Header::h2("Rule").variant(console::components::Variant::Primary);
+    let rule_header = console::components::Header::h2("Rule Details")
+        .variant(console::components::Variant::Primary);
     console.emit_lines(rule_header.render());
 
     let mut rule_details = console::components::DescriptionList::new()
@@ -922,7 +922,6 @@ fn emit_pretty_rule_details(
         rule_details = rule_details.item("rule", "<Not Provided>");
     }
 
-    console.emit_lines(console::components::h3("Details"));
     console.emit_lines(rule_details.render());
 
     if include_deps {
@@ -947,8 +946,8 @@ fn emit_pretty_rule_details(
         console.emit_lines(expanded_deps_list.render());
     }
 
-    let executor_header =
-        console::components::Header::h2("Executor").variant(console::components::Variant::Primary);
+    let executor_header = console::components::Header::h2("Rule Executor")
+        .variant(console::components::Variant::Primary);
     console.emit_lines(executor_header.render());
 
     let mut executor_details = console::components::DescriptionList::new()
@@ -1021,7 +1020,7 @@ fn emit_pretty_rule_details(
                             .join(" ");
 
                         let mut pretty_line = console::Line::default();
-                        pretty_line.push(console::components::code(pretty_command));
+                        pretty_line.push(console::bootstrap::code(pretty_command));
                         console.emit_line(pretty_line);
 
                         let env_header = console::components::Header::h3("Env")
@@ -1131,6 +1130,7 @@ fn emit_pretty_rule_details(
         console::components::Header::h3("Details").variant(console::components::Variant::Default);
     console.emit_lines(details_header.render());
     console.emit_lines(executor_details.render());
+    console.emit_lines(console::bootstrap::VerticalSpacer::new(1).render());
     Ok(())
 }
 

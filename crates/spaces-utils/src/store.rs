@@ -2,6 +2,7 @@ use crate::{age, ci, git, http_archive, logger};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use bytesize::ByteSize;
+use console::bootstrap::IntoLine;
 use console::components::{self, Variant};
 use serde::{Deserialize, Serialize};
 use serde_with::{TimestampSeconds, serde_as};
@@ -1325,7 +1326,7 @@ fn emit_pretty_summary(
             components::Align::Right,
             components::Align::Right,
         ])
-        .width(56);
+        .width(console::bootstrap::Width::Large);
 
     table = table
         .row(vec![
@@ -1465,29 +1466,29 @@ fn emit_pretty_issues(console: &console::Console, entries: &[StoreInfoEntry]) {
     console.emit_line(console::Line::default());
 
     // Build issue summary as a formatted list
-    let mut issue_details = String::new();
+    let mut issue_details = Vec::new();
     for entry in &issues {
         let reason = if entry.path_missing {
             "path does not exist"
         } else {
             "size is zero"
         };
-        issue_details.push_str(&format!("{:<22} {}\n", reason, entry.path));
+        issue_details.push(
+            console::bootstrap::plain_text(format!("{:<22} {}", reason, entry.path)).into_line(),
+        );
     }
 
     // Use Alert for the issues section
-    let alert = components::Alert::new(issue_details.trim_end())
+    let alert = components::Alert::new(issue_details)
         .title(format!(
             "{} Issues - {} entries need attention",
             console::bootstrap::typography::icon_warning(),
             issues.len()
         ))
         .variant(Variant::Warning)
-        .width(56);
+        .width(console::bootstrap::Width::Large);
 
-    for line in alert.render() {
-        console.emit_line(line);
-    }
+    console.emit_lines(alert.render());
 }
 
 fn emit_pretty_info(

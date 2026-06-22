@@ -370,7 +370,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                     || !dev_branch_base.is_empty())
             {
                 return Err(format_error!(
-                    "`--allow_dirty` cannot be combined with `--merge`, `--no-rebase`, `--no-rebase-repo`, or `--dev-branch-base`"
+                    "`--allow-dirty` cannot be combined with `--merge`, `--no-rebase`, `--no-rebase-repo`, or `--dev-branch-base`"
                 ));
             }
 

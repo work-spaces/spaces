@@ -87,7 +87,7 @@ run_add_exec(
 run_add_exec(
     "run",
     command = "cargo",
-    args = ["run"],
+    args = ["run", "--target-dir=build/target"],
     help = "Run spaces from the build/debug target",
     deps = deps(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
     visibility = visibility_private(),
