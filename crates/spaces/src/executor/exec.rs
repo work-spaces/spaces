@@ -123,7 +123,7 @@ pub struct Exec {
 }
 
 impl Exec {
-    pub fn log_failed_execution(&self, console: console::Console) {
+    fn log_failed_execution(&self, console: console::Console) {
         let title_line = console::components::Banner::new(format!(
             "{} Failed ",
             console::bootstrap::icon_danger()
