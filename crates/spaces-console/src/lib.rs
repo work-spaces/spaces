@@ -112,7 +112,7 @@ pub fn format_log_file_summary(log_contents: &str, log_file_path: &str) -> (Vec<
 
             // ═══ Failed ═══ banner – the first thing the user sees.
             let title_line =
-                components::Banner::new(format!("{} Failed ", components::icon_danger()))
+                components::Banner::new(format!("{} Failed ", bootstrap::icon_danger()))
                     .width(components::Width::Large)
                     .variant(components::Variant::Danger)
                     .render();

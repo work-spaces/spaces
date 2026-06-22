@@ -298,34 +298,6 @@ pub enum Variant {
     Default,
 }
 
-/// Standard width presets inspired by Bootstrap-style sizing, plus custom width.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Width {
-    Small,
-    Medium,
-    Large,
-    ExtraLarge,
-    Custom(usize),
-}
-
-impl Width {
-    pub fn as_usize(self) -> usize {
-        match self {
-            Width::Small => 40,
-            Width::Medium => 64,
-            Width::Large => 80,
-            Width::ExtraLarge => 160,
-            Width::Custom(width) => width,
-        }
-    }
-}
-
-impl From<usize> for Width {
-    fn from(value: usize) -> Self {
-        Width::Custom(value)
-    }
-}
-
 impl Variant {
     /// Returns the ContentStyle for this variant
     pub fn style(&self) -> ContentStyle {

@@ -126,7 +126,7 @@ impl Exec {
     pub fn log_failed_execution(&self, console: console::Console) {
         let title_line = console::components::Banner::new(format!(
             "{} Failed ",
-            console::components::icon_danger()
+            console::bootstrap::icon_danger()
         ))
         .width(console::components::Width::Large)
         .variant(console::components::Variant::Danger)
