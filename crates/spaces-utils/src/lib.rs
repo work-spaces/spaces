@@ -4,6 +4,7 @@ pub mod changes;
 pub mod ci;
 pub mod copy;
 pub mod deps;
+pub mod ecode;
 pub mod environment;
 pub mod features;
 pub mod fs_mutex;

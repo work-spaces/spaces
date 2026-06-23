@@ -1,4 +1,4 @@
-use crate::suggest;
+use crate::{ecode, suggest};
 use anyhow_source_location::format_error;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
@@ -69,14 +69,14 @@ impl Graph {
             .collect::<Vec<String>>();
 
         format!(
-            "Rule not found [{target}]. Did you mean?\n{}",
-            suggestions.join("\n")
+            "Rule not found [{target}]. Did you mean?\n  {}",
+            suggestions.join("\n  ")
         )
         .into()
     }
 
     fn get_target_not_found_error(&self, target: Arc<str>) -> anyhow::Error {
-        format_error!("{}", self.get_target_not_found(target).as_ref())
+        anyhow::anyhow!("{}", self.get_target_not_found(target).as_ref())
     }
 
     pub fn get_sorted_tasks(
@@ -86,7 +86,7 @@ impl Graph {
         let mut topo_tasks =
             petgraph::algo::toposort(&self.directed_graph, None).map_err(|err| {
                 let description = self.describe_cycle(err.node_id());
-                format_error!("Found a circular dependency:\n{description}")
+                ecode::anyhow(1, description.as_str())
             })?;
 
         let sorted_tasks = if let Some(target) = target {
@@ -150,7 +150,7 @@ impl Graph {
         // Handle the self-loop case explicitly.
         if scc.len() == 1 {
             let name = name_of(seed);
-            return format!("  cycle: {name} -> {name}");
+            return format!("cycle: {name} -> {name}");
         }
 
         // Walk the SCC depth-first starting from `seed` until we revisit a
@@ -220,11 +220,11 @@ impl Graph {
             .collect();
 
         if extras.is_empty() {
-            format!("  cycle: {cycle_str}")
+            format!("cycle: {cycle_str}")
         } else {
             extras.sort();
             format!(
-                "  cycle: {cycle_str}\n  also in the same component: {}",
+                "cycle: {cycle_str}\nalso in the same component: {}",
                 extras.join(", ")
             )
         }

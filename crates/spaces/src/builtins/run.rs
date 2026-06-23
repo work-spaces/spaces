@@ -190,8 +190,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ) -> anyhow::Result<NoneType> {
         evaluation_profile::profile_builtin_call("run", "add", || {
             let ctx = get_eval_context_mut(eval)?;
-            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-                .context(format_context!("bad options for add target rule"))?;
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)?;
 
             if let Some(workspace_arc) = ctx.workspace.clone() {
                 add_rule_to_all(&rule, &workspace_arc, &ctx.module_name)
@@ -227,8 +226,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 "Support for checkout.add_which_asset() will be removed in v0.16. Use checkout.add_any_asset().",
             );
 
-            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-                .context(format_context!("bad options for add target rule"))?;
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)?;
 
             if let Some(workspace_arc) = ctx.workspace.clone() {
                 add_rule_to_all(&rule, &workspace_arc, &ctx.module_name)
@@ -273,8 +271,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ) -> anyhow::Result<NoneType> {
         evaluation_profile::profile_builtin_call("run", "add_exec", || {
             let ctx = get_eval_context_mut(eval)?;
-            let mut rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-                .context(format_context!("bad options for exec rule"))?;
+            let mut rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)?;
 
             if let Some(inputs) = rule.inputs.as_ref() {
                 for glob in inputs {
@@ -356,8 +353,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ) -> anyhow::Result<NoneType> {
         evaluation_profile::profile_builtin_call("run", "add_kill_exec", || {
             let ctx = get_eval_context_mut(eval)?;
-            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-                .context(format_context!("bad options for kill rule"))?;
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)?;
 
             if let Some(inputs) = rule.inputs.as_ref() {
                 for glob in inputs {
@@ -418,8 +414,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ) -> anyhow::Result<NoneType> {
         evaluation_profile::profile_builtin_call("run", "add_archive", || {
             let ctx = get_eval_context_mut(eval)?;
-            let mut rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-                .context(format_context!("bad options for add_archive rule"))?;
+            let mut rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)?;
 
             if rule.inputs.is_some() {
                 return Err(anyhow::anyhow!(
@@ -503,8 +498,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ) -> anyhow::Result<NoneType> {
         evaluation_profile::profile_builtin_call("run", "add_from_clone", || {
             let ctx = get_eval_context_mut(eval)?;
-            let mut rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-                .context(format_context!("bad options for add_from_clone rule"))?;
+            let mut rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)?;
 
             if ctx.is_lsp {
                 return Ok(NoneType);

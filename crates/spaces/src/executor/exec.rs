@@ -123,35 +123,53 @@ pub struct Exec {
 }
 
 impl Exec {
-    fn log_failed_execution(&self, console: console::Console) {
-        let title_line = console::components::Banner::new(format!(
-            "{} Failed ",
-            console::bootstrap::icon_danger()
-        ))
-        .width(console::components::Width::Large)
-        .variant(console::components::Variant::Danger)
-        .render();
+    fn log_failed_execution(&self, console: console::Console, name: &str, err: &anyhow::Error) {
+        singleton::set_is_error_already_reported();
+        let mut container = console::bootstrap::Container::new();
+        container.add(console::bootstrap::VerticalSpacer::new(1));
+        container.add(
+            console::bootstrap::Banner::new(format!(
+                "{} Failed ",
+                console::bootstrap::icon_danger()
+            ))
+            .width(console::components::Width::Large)
+            .variant(console::components::Variant::Danger),
+        );
 
         let args = self.args.as_deref().unwrap_or_default();
-        let metadata_lines = console::components::DescriptionList::new()
-            .variant(console::components::Variant::Primary)
-            .item("command:", format!("{} {}", self.command, args.join(" ")))
-            .item(
-                "working directory:",
-                self.working_directory.as_deref().unwrap_or("//"),
-            )
-            .compact(true)
-            .render();
+        container.add(
+            console::components::DescriptionList::new()
+                .variant(console::components::Variant::Primary)
+                .item("rule:", name)
+                .item("command:", format!("{} {}", self.command, args.join(" ")))
+                .item(
+                    "directory:",
+                    self.working_directory.as_deref().unwrap_or("//"),
+                )
+                .compact(true),
+        );
+
+        container.add(
+            console::bootstrap::Header::new(console::bootstrap::HeaderLevel::H3, "stderr")
+                .variant(console::components::Variant::Default),
+        );
+
+        let mut error_quote =
+            console::bootstrap::Blockquote::new().variant(console::bootstrap::Variant::Danger);
+        for line in err.chain() {
+            error_quote.push_line(line.to_string());
+        }
+
+        container.add(error_quote);
 
         // Divider that visually separates the metadata above from the log body below.
-        let divider_line = console::components::Divider::new()
-            .style(console::components::DividerStyle::Double)
-            .width(console::components::Width::Large)
-            .render();
+        container.add(
+            console::components::Divider::new()
+                .style(console::components::DividerStyle::Double)
+                .width(console::components::Width::Large),
+        );
 
-        console.emit_line(title_line);
-        console.emit_lines(metadata_lines);
-        console.emit_line(divider_line);
+        console.emit_container(&container);
     }
 
     pub fn execute(
@@ -295,13 +313,14 @@ impl Exec {
             .as_str(),
         );
 
-        let result = progress
-            .execute_process(&self.command, options)
-            .with_context(|| {
-                self.log_failed_execution(progress.console.clone());
+        let result = progress.execute_process(&self.command, options);
 
-                format_context!("Failed to execute {}", self.command)
-            })?;
+        let result = if let Err(err) = result {
+            self.log_failed_execution(progress.console.clone(), name, &err);
+            return Err(format_error!("Error executing {name}: {err:#}"));
+        } else {
+            result?
+        };
 
         handle_process_ended(name);
         workspace
@@ -325,24 +344,23 @@ impl Exec {
             if let Some(Expect::Failure) | Some(Expect::Any) = self.expect.as_ref() {
                 None
             } else {
+                singleton::set_is_error_already_reported();
                 if let Some(log_file_path) = log_file_path {
                     if std::path::Path::new(log_file_path.as_ref()).exists() {
+                        let mut log_container = console::bootstrap::Container::new();
                         let log_contents =
                             std::fs::read_to_string(log_file_path.as_ref()).context(
                                 format_context!("Failed to read log file {}", log_file_path),
                             )?;
-                        let (summary_lines, body) =
-                            console::format_log_file_summary(&log_contents, log_file_path.as_ref());
-                        for line in summary_lines {
-                            progress.console.emit_line(line);
-                        }
-                        if body.len() > 10 * 1024 * 1024 {
-                            logger(progress.console.clone(), name).error(
-                                format!("See log file {log_file_path} for details").as_str(),
-                            );
-                        } else {
-                            logger(progress.console.clone(), name).error(body.as_str());
-                        }
+                        let summary_container = console::format_log_file_summary(
+                            name,
+                            &log_contents,
+                            log_file_path.as_ref(),
+                            result.exit_code,
+                        );
+                        log_container.add(console::bootstrap::VerticalSpacer::new(1));
+                        log_container.extend(summary_container);
+                        progress.console.emit_container(&log_container);
                     }
                 } else {
                     logger(progress.console.clone(), name).error(

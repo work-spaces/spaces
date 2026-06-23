@@ -142,9 +142,10 @@ impl Git {
                     ..Default::default()
                 },
             )
-            .context(format_context!(
-                "{name} - Failed to create bare repository at {bare_repo_path}"
-            ))?;
+            .with_context(|| {
+                singleton::set_is_show_latest_error();
+                format_context!("{name} - Failed to create bare repository at {bare_repo_path}")
+            })?;
         } else {
             logger(progress.console.clone(), self.url.clone())
                 .debug(format!("Bare repository exists at {bare_repo_path}").as_str());

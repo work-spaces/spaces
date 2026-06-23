@@ -445,7 +445,7 @@ pub fn build_repo_sync_plan(
         .variant(console::components::Variant::Warning);
 
     if dirty_repo_count > 0 {
-        singleton::set_evaluation_failure();
+        singleton::set_is_error_already_reported();
 
         if !dev_branch_dirty.is_empty() {
             for repo in &dev_branch_dirty {
@@ -476,7 +476,7 @@ pub fn build_repo_sync_plan(
     }
 
     if !rebase_conflicts.is_empty() || !merge_conflicts.is_empty() {
-        singleton::set_evaluation_failure();
+        singleton::set_is_error_already_reported();
 
         if !rebase_conflicts.is_empty() {
             for (path, base_ref) in &rebase_conflicts {

@@ -3,7 +3,7 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
 use std::{io::IsTerminal, sync::Arc};
-use utils::{ci, features, git, logs, shell, store, version};
+use utils::{ci, ecode, features, git, logger, logs, shell, store, version};
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
 pub enum Level {
@@ -182,22 +182,24 @@ pub fn execute() -> anyhow::Result<()> {
     let result = if let Err(error) = result {
         let verbosity_level = effective_console.get_level();
         let args = std::env::args().collect::<Vec<String>>();
-        let _ = effective_console.error("While executing", args.join(" "));
-        if let Some(logs) = singleton::get_logs_for_failed_rules()
-            && verbosity_level > console::Level::Message
+        singleton::process_anyhow_error(error);
+        let error_chain = singleton::get_error_chain();
+        let error_report = singleton::get_report_error_mode();
+        let show_backtrace = if error_report == singleton::ErrorReport::Full
+            || verbosity_level <= console::Level::Message
         {
-            singleton::process_anyhow_error(error);
-            singleton::show_latest_error(effective_console.clone());
-            if !logs.is_empty() {
-                effective_console.emit_lines(console::components::h3("see also:"));
-                for log in logs {
-                    let _ = effective_console.write(format!("  {}", log).as_str());
-                }
-            }
+            logger::ShowBacktrace::Yes
         } else {
-            singleton::process_anyhow_error(error);
-            singleton::show_error_chain(effective_console.clone());
-        }
+            logger::ShowBacktrace::No
+        };
+        match error_report {
+            singleton::ErrorReport::None => (),
+            singleton::ErrorReport::One | singleton::ErrorReport::Full => {
+                logger::show_error(effective_console.clone(), error_chain, show_backtrace)
+            }
+        };
+
+        let _ = effective_console.error("While executing", args.join(" "));
         Err(anyhow::anyhow!("execution failed"))
     } else {
         Ok(())
@@ -407,7 +409,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                 runner::IsCreateLockFile::No,
                 runner::IsExecuteTasks::Yes,
             )
-            .context(format_context!("during runner sync"))?;
+            .context(ecode::anyhow_trace(11))?;
         }
 
         Commands::Foreach { mode } => {

@@ -1,4 +1,4 @@
-use crate::logger;
+use crate::{ecode, logger};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -217,7 +217,8 @@ pub fn execute_git_command(
     options: console::ExecuteOptions,
 ) -> anyhow::Result<Option<String>> {
     use std::ops::DerefMut;
-
+    let full_command = format!("git {}", options.arguments.join(" "));
+    let mut last_error = None;
     for attempt in 0..=GIT_MAX_RETRIES {
         if attempt > 0 {
             let wait = git_backoff_duration(attempt - 1);
@@ -273,13 +274,9 @@ pub fn execute_git_command(
         if let Some(directory) = attempt_options.working_directory.as_ref() {
             url_logger(progress.console.clone(), url).debug(format!("cwd: {directory}").as_str());
         }
-        url_logger(progress.console.clone(), url)
-            .debug(format!("git {}", attempt_options.arguments.join(" ")).as_str());
 
-        let full_command = attempt_options.get_full_command_in_working_directory("git");
-        let result = progress
-            .execute_process("git", attempt_options)
-            .context(format_context!("{full_command}"));
+        url_logger(progress.console.clone(), url).debug(full_command.as_str());
+        let result = progress.execute_process("git", attempt_options);
 
         {
             let mut state_lock = get_state().write().unwrap();
@@ -298,6 +295,7 @@ pub fn execute_git_command(
             }
             Err(err) => {
                 if attempt < GIT_MAX_RETRIES && is_retryable_git_error(&err) {
+                    last_error = Some(format!("{err:#}"));
                     url_logger(progress.console.clone(), url).debug(
                         format!(
                             "Transient network error (attempt {}/{}): {err:#}",
@@ -308,15 +306,24 @@ pub fn execute_git_command(
                     );
                     continue;
                 }
-                return Err(format_error!(
-                    "Git command failed for repository: {url}: {err:#}"
+                return Err(ecode::anyhow(
+                    8,
+                    &format!("url: {url}\ncmd: {full_command}\n{err:#}"),
                 ));
             }
         }
     }
 
-    Err(format_error!(
-        "git command for {url} failed after {GIT_MAX_RETRIES} retries"
+    if let Some(last_error) = last_error {
+        return Err(ecode::anyhow(
+            9,
+            &format!("url: {url}\ncmd: {full_command}\nretries: {GIT_MAX_RETRIES}\n{last_error}"),
+        ));
+    }
+
+    Err(ecode::anyhow(
+        10,
+        &format!("url: {url}\ncmd: {full_command}\nretries: {GIT_MAX_RETRIES}"),
     ))
 }
 

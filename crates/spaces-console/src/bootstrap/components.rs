@@ -1055,6 +1055,10 @@ impl Blockquote {
         self
     }
 
+    pub fn push_line(&mut self, text: impl IntoLine) {
+        self.text.push(text.into_line());
+    }
+
     pub fn variant(mut self, variant: Variant) -> Self {
         self.variant = variant;
         self

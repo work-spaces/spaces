@@ -104,44 +104,71 @@ pub fn make_finalize_line(
     vec![line]
 }
 
-pub fn format_log_file_summary(log_contents: &str, log_file_path: &str) -> (Vec<Line>, String) {
+pub fn format_log_file_summary<'a>(
+    rule: &str,
+    log_contents: &str,
+    log_file_path: &str,
+    exit_code: i32,
+) -> bootstrap::Container<'a> {
     match process::parse_log_file(log_contents) {
         Ok((header, body)) => {
+            let mut log_container = bootstrap::Container::new();
             let args = header.arguments.join(" ");
             let working_dir = header.working_directory.as_deref().unwrap_or("//");
 
-            // ═══ Failed ═══ banner – the first thing the user sees.
-            let title_line =
-                components::Banner::new(format!("{} Failed ", bootstrap::icon_danger()))
+            log_container.add(
+                bootstrap::Banner::new(format!("{} Failed ", bootstrap::icon_danger()))
                     .width(components::Width::Large)
-                    .variant(components::Variant::Danger)
-                    .render();
+                    .variant(components::Variant::Danger),
+            );
 
-            let metadata_lines = components::DescriptionList::new()
-                .variant(components::Variant::Primary)
-                .item("command:", format!("{} {}", header.command, args))
-                .item("working directory:", working_dir.to_owned())
-                .compact(true)
-                .render();
+            log_container.add(
+                bootstrap::DescriptionList::new()
+                    .variant(components::Variant::Primary)
+                    .item("rule:", rule)
+                    .item("command:", format!("{} {}", header.command, args))
+                    .item("directory:", working_dir.to_owned())
+                    .item("exit code:", format!("{exit_code}"))
+                    .item("log:", log_file_path)
+                    .compact(true),
+            );
+
+            if body.len() < 10 * 1024 * 1024 {
+                log_container.add(
+                    bootstrap::Header::new(bootstrap::HeaderLevel::H2, "Log Contents")
+                        .variant(bootstrap::Variant::Default),
+                );
+                for line in body.lines() {
+                    let lower_line = line.to_lowercase();
+                    let variant = if lower_line.contains("error")
+                        || lower_line.contains("failed")
+                        || lower_line.contains("fatal")
+                    {
+                        bootstrap::Variant::Danger
+                    } else if lower_line.contains("warning") {
+                        bootstrap::Variant::Warning
+                    } else {
+                        bootstrap::Variant::Default
+                    };
+                    log_container.add(bootstrap::Blockquote::new().variant(variant).push(line));
+                }
+            };
 
             // Divider that visually separates the metadata above from the log body below.
-            let divider_line = components::Divider::new()
-                .style(components::DividerStyle::Double)
-                .width(components::Width::Large)
-                .render();
+            log_container.add(
+                bootstrap::Divider::new()
+                    .style(bootstrap::DividerStyle::Double)
+                    .width(bootstrap::Width::Large),
+            );
 
-            let mut lines = vec![title_line];
-            lines.extend(metadata_lines);
-            lines.push(divider_line);
-
-            (lines, body.to_owned())
+            log_container
         }
         Err(_) => {
-            let mut line = Line::default();
-            line.push(Span::new_unstyled_lossy(format!(
+            let mut log_container = bootstrap::Container::new();
+            log_container.add(bootstrap::Paragraph::new(format!(
                 "See log file {log_file_path} for details"
             )));
-            (vec![line], String::new())
+            log_container
         }
     }
 }
@@ -451,7 +478,7 @@ impl Console {
 
         let child = options
             .spawn(command)
-            .context(format_context!("Failed to spawn command {command}"))?;
+            .with_context(|| format!("Failed to spawn command `{command}`"))?;
         let (tx, rx) = mpsc::channel::<String>();
 
         let label_clone = label.to_string();
