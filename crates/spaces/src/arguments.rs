@@ -3,7 +3,7 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
 use std::{io::IsTerminal, sync::Arc};
-use utils::{ci, features, git, logger, logs, shell, store, version};
+use utils::{ci, ecode, features, git, logger, logs, shell, store, version};
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
 pub enum Level {
@@ -409,7 +409,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                 runner::IsCreateLockFile::No,
                 runner::IsExecuteTasks::Yes,
             )
-            .context(format_context!("during runner sync"))?;
+            .context(ecode::anyhow_trace(11))?;
         }
 
         Commands::Foreach { mode } => {

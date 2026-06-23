@@ -10,7 +10,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use utils::{
-    environment, features, inspect, labels, logger, mtarget, query, rcache, rule, targets, ws,
+    ecode, environment, features, inspect, labels, logger, mtarget, query, rcache, rule, targets,
+    ws,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -249,7 +250,7 @@ pub fn evaluate_loads(
             use starlark::{Error, ErrorKind};
             return Err(Error::new_spanned(
                 ErrorKind::Fail(anyhow::anyhow!(
-                    "\nAttempting to load internal module using workspace path (//).\nInternal modules can only be loaded using relative paths."
+                    "attempted to load `internal` module using workspace path (//).\nInternal modules can only be loaded using relative paths."
                 )),
                 load.span.span,
                 &load.span.file,
@@ -652,7 +653,7 @@ fn try_evaluate_with_cache(
             Some(console.clone()),
             load_result_cache,
         )
-        .map_err(|e| anyhow::anyhow!("Failed to evaluate module during checkout {e}"))?;
+        .map_err(|e| ecode::anyhow(3, &format!("{e}")))?;
         return Ok(());
     }
 
@@ -704,7 +705,7 @@ fn try_evaluate_with_cache(
                 load_result_cache.clone(),
             )
             .map(|_| ());
-            result.map_err(|e| anyhow::anyhow!("Failed to evaluate module {:?}", e))
+            result.map_err(|e| ecode::anyhow(2, &format!("{e:?}")))
         },
         || vec![Arc::from(std::path::Path::new(json_target.as_ref()))],
     );
