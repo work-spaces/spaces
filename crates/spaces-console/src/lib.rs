@@ -510,7 +510,6 @@ impl Console {
                     }
                 }
             }
-            console.writer.lock().unwrap().remove_progress(&label_clone);
         });
 
         let secrets = self.state.read().unwrap().secrets.clone();
