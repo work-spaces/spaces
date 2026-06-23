@@ -65,7 +65,7 @@ run_add_exec(
 run_add_exec(
     "build",
     command = "cargo",
-    args = ["build", "--target-dir=build/target"],
+    args = ["build1", "--target-dir=build/target"],
     deps = deps(
         rules = [":check"],
         globs = [GLOB_DEPS],

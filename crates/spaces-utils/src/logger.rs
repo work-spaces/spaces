@@ -98,3 +98,52 @@ impl Logger {
         let _ = self.console.log(level, &output);
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ShowBacktrace {
+    No,
+    Yes,
+}
+
+pub fn show_error(
+    console: console::Console,
+    input_error_chain: Vec<String>,
+    show_backtrace: ShowBacktrace,
+) {
+    let mut container = console::bootstrap::Container::new();
+    container.add(console::bootstrap::VerticalSpacer::new(1));
+
+    container.add(
+        console::bootstrap::Banner::new(format!("{} Failed", console::bootstrap::icon_danger()))
+            .width(console::bootstrap::Width::Large)
+            .variant(console::bootstrap::Variant::Danger),
+    );
+
+    let mut error_quote =
+        console::bootstrap::Blockquote::new().variant(console::bootstrap::Variant::Danger);
+
+    let mut error_chain = Vec::new();
+    if show_backtrace == ShowBacktrace::Yes {
+        for cause in input_error_chain.into_iter().rev() {
+            error_chain.push(cause.to_string());
+        }
+    } else if let Some(last) = input_error_chain.first() {
+        error_chain.push(last.to_string());
+    }
+
+    for cause in error_chain {
+        for line in cause.lines() {
+            error_quote.push_line(line.to_string());
+        }
+    }
+
+    container.add(error_quote);
+
+    container.add(
+        console::bootstrap::Divider::new()
+            .style(console::bootstrap::DividerStyle::Double)
+            .width(console::bootstrap::Width::Large),
+    );
+
+    console.emit_container(&container);
+}

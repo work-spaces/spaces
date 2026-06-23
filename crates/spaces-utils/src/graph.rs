@@ -69,14 +69,14 @@ impl Graph {
             .collect::<Vec<String>>();
 
         format!(
-            "Rule not found [{target}]. Did you mean?\n{}",
-            suggestions.join("\n")
+            "Rule not found [{target}]. Did you mean?\n  {}",
+            suggestions.join("\n  ")
         )
         .into()
     }
 
     fn get_target_not_found_error(&self, target: Arc<str>) -> anyhow::Error {
-        format_error!("{}", self.get_target_not_found(target).as_ref())
+        anyhow::anyhow!("{}", self.get_target_not_found(target).as_ref())
     }
 
     pub fn get_sorted_tasks(
@@ -86,7 +86,7 @@ impl Graph {
         let mut topo_tasks =
             petgraph::algo::toposort(&self.directed_graph, None).map_err(|err| {
                 let description = self.describe_cycle(err.node_id());
-                format_error!("Found a circular dependency:\n{description}")
+                anyhow::anyhow!("Found a circular dependency:\n{description}")
             })?;
 
         let sorted_tasks = if let Some(target) = target {

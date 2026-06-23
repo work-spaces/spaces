@@ -245,7 +245,7 @@ pub fn evaluate_loads(
             && load.module_id.starts_with("//")
             && load.module_id.contains("/internal/")
         {
-            singleton::set_evaluation_failure();
+            singleton::set_is_show_latest_error();
             use starlark::{Error, ErrorKind};
             return Err(Error::new_spanned(
                 ErrorKind::Fail(anyhow::anyhow!(
@@ -259,7 +259,7 @@ pub fn evaluate_loads(
         let module_load_path =
             workspace::get_workspace_path(workspace_path.as_ref(), name.as_ref(), load.module_id);
         if module_load_path.ends_with(workspace::SPACES_MODULE_NAME) {
-            singleton::set_evaluation_failure();
+            singleton::set_is_show_latest_error();
             use starlark::{Error, ErrorKind};
             return Err(Error::new_spanned(
                 ErrorKind::Fail(anyhow::anyhow!(
@@ -554,7 +554,7 @@ pub fn evaluate_module(
 
     if let Err(error) = &evaluate_ast_result {
         evaluation_profile::record_current_module_error(format!("{error:#}"));
-        singleton::set_evaluation_failure();
+        singleton::set_is_show_latest_error();
     }
 
     let (module, module_deps, module_target) = evaluate_ast_result?;
@@ -652,7 +652,7 @@ fn try_evaluate_with_cache(
             Some(console.clone()),
             load_result_cache,
         )
-        .map_err(|e| format_error!("Failed to evaluate module during checkout {:?} -> {e}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to evaluate module during checkout {e}"))?;
         return Ok(());
     }
 
@@ -704,7 +704,7 @@ fn try_evaluate_with_cache(
                 load_result_cache.clone(),
             )
             .map(|_| ());
-            result.map_err(|e| format_error!("Failed to evaluate module {:?}", e))
+            result.map_err(|e| anyhow::anyhow!("Failed to evaluate module {:?}", e))
         },
         || vec![Arc::from(std::path::Path::new(json_target.as_ref()))],
     );

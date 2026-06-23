@@ -4,6 +4,12 @@ pub struct Container<'a> {
     pub(crate) components: Vec<Box<dyn components::Component + 'a>>,
 }
 
+impl<'a> std::fmt::Debug for Container<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Container").finish()
+    }
+}
+
 impl<'a> Default for Container<'a> {
     fn default() -> Self {
         Self::new()

@@ -8,6 +8,13 @@ use utils::inspect;
 use utils::lock;
 use utils::query;
 
+#[derive(Clone, Debug, PartialEq, Copy)]
+pub enum ErrorReport {
+    None,
+    One,
+    Full,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct SyncOptions {
     pub stash: bool,
@@ -30,7 +37,7 @@ struct State {
     is_lsp: bool,
     is_use_locks: bool,
     is_skip_deps: bool,
-    logs_for_failed_rules: Option<Vec<Arc<str>>>,
+    error_report: ErrorReport,
     error_chain: Vec<String>,
     args_env: HashMap<Arc<str>, Arc<str>>,
     args_store: HashMap<Arc<str>, serde_json::Value>,
@@ -69,7 +76,7 @@ fn get_state() -> &'static lock::StateLock<State> {
         is_lsp: false,
         is_skip_deps: false,
         is_use_locks: false,
-        logs_for_failed_rules: None,
+        error_report: ErrorReport::Full,
         error_chain: Vec::new(),
         new_branches: Vec::new(),
         removed_branches: Vec::new(),
@@ -93,42 +100,27 @@ pub fn process_anyhow_error(error: anyhow::Error) {
     }
 }
 
+pub fn get_error_chain() -> Vec<String> {
+    get_state().read().error_chain.clone()
+}
+
 pub fn process_error(error: String) {
     let mut state = get_state().write();
     state.error_chain.push(error);
 }
 
-pub fn show_error_chain(console: console::Console) {
-    let mut state = get_state().write();
-    state.error_chain.reverse();
-    for (offset, error) in state.error_chain.iter().enumerate() {
-        let show_error = error.to_string().replace('\n', "\n    ");
-        let _ = console.write(&format!("  [{offset}] {show_error}"));
-    }
+pub fn get_report_error_mode() -> ErrorReport {
+    get_state().read().error_report
 }
 
-pub fn show_latest_error(console: console::Console) {
+pub fn set_is_error_already_reported() {
     let mut state = get_state().write();
-    state.error_chain.reverse();
-    if let Some(last_error) = state.error_chain.last() {
-        let show_error = last_error.to_string().replace('\n', "\n    ");
-        let _ = console.write(&show_error.to_string());
-    }
+    state.error_report = ErrorReport::None;
 }
 
-pub fn set_evaluation_failure() {
+pub fn set_is_show_latest_error() {
     let mut state = get_state().write();
-    state.logs_for_failed_rules = Some(Vec::new());
-}
-
-pub fn set_rule_failure(log_files: Vec<Arc<str>>) {
-    let mut state = get_state().write();
-    state.logs_for_failed_rules = Some(log_files);
-}
-
-pub fn get_logs_for_failed_rules() -> Option<Vec<Arc<str>>> {
-    let state = get_state().read();
-    state.logs_for_failed_rules.clone()
+    state.error_report = ErrorReport::One;
 }
 
 pub fn enable_lsp_mode() {

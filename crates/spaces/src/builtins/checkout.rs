@@ -375,11 +375,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ) -> anyhow::Result<NoneType> {
         evaluation_profile::profile_builtin_call("checkout", "add_repo", || {
             let ctx = get_eval_context_mut(eval)?;
-            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-                .context(format_context!("bad options for repo rule"))?;
-
-            let repo: git::Repo = serde_json::from_value(repo.to_json_value()?)
-                .context(format_context!("bad options for repo"))?;
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)?;
+            let repo: git::Repo = serde_json::from_value(repo.to_json_value()?)?;
 
             let workspace_arc = ctx
                 .workspace
@@ -474,8 +471,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             let cargo_bin: CargoBin = serde_json::from_value(cargo_bin.to_json_value()?)
                 .context(format_context!("bad options for cargo_bin"))?;
 
-            let mut rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-                .context(format_context!("bad options for cargo_bin rule"))?;
+            let mut rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)?;
 
             // Validate workspace exists
             if ctx.workspace.is_none() {
@@ -637,8 +633,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ) -> anyhow::Result<NoneType> {
         evaluation_profile::profile_builtin_call("checkout", "add_platform_archive", || {
             let ctx = get_eval_context_mut(eval)?;
-            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-                .context(format_context!("bad options for add platform archive rule"))?;
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)?;
+
             //convert platforms to starlark value
 
             let platforms: PlatformArchive = serde_json::from_value(platforms.to_json_value()?)?;
@@ -705,8 +701,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 Some(ctx.module_name.clone()),
                 "Support for checkout.add_which_asset() will be removed in v0.16. Use checkout.add_any_asset().",
             );
-            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-                .context(format_context!("bad options for which asset rule"))?;
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)?;
 
             let asset: asset::AddWhichAsset = serde_json::from_value(asset.to_json_value()?)
                 .context(format_context!("Failed to parse add_which_asset arguments"))?;
@@ -756,8 +751,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 Some(ctx.module_name.clone()),
                 "Support for checkout.add_hard_link_asset() will be removed in v0.16. Use checkout.add_any_asset()",
             );
-            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-                .context(format_context!("bad options for which asset rule"))?;
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)?;
 
             let asset: asset::AddHardLink = serde_json::from_value(asset.to_json_value()?)
                 .context(format_context!(
@@ -810,8 +804,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 Some(ctx.module_name.clone()),
                 "Support for checkout.add_soft_link_asset() will be removed in v0.16. Use checkout.add_any_asset()",
             );
-            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-                .context(format_context!("bad options for which asset rule"))?;
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)?;
 
             let asset: asset::AddSoftLink = serde_json::from_value(asset.to_json_value()?)
                 .context(format_context!(
@@ -859,8 +852,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ) -> anyhow::Result<NoneType> {
         evaluation_profile::profile_builtin_call("checkout", "add_any_assets", || {
             let ctx = get_eval_context_mut(eval)?;
-            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-                .context(format_context!("bad options for which asset rule"))?;
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)?;
 
             let mut any_assets: asset::AddAnyAssets =
                 serde_json::from_value(assets.to_json_value()?)
@@ -918,8 +910,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ) -> anyhow::Result<NoneType> {
         evaluation_profile::profile_builtin_call("checkout", "add_archive", || {
             let ctx = get_eval_context_mut(eval)?;
-            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-                .context(format_context!("bad options for add archive rule"))?;
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)?;
 
             let archive: http_archive::Archive =
                 serde_json::from_value(archive.to_json_value()?)
@@ -950,8 +941,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ) -> anyhow::Result<NoneType> {
         evaluation_profile::profile_builtin_call("checkout", "add_oras_archive", || {
             let ctx = get_eval_context_mut(eval)?;
-            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-                .context(format_context!("bad options for oras rule"))?;
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)?;
 
             let oras_archive: executor::oras::OrasArchive =
                 serde_json::from_value(oras_archive.to_json_value()?)
@@ -1002,8 +992,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 Some(ctx.module_name.clone()),
                 "Support for checkout.add_asset() will be removed in v0.16. Use checkout.add_any_asset()",
             );
-            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-                .context(format_context!("bad options for add asset rule"))?;
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)?;
 
             let add_asset: executor::asset::AddAsset =
                 serde_json::from_value(asset.to_json_value()?)
@@ -1068,8 +1057,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ) -> anyhow::Result<NoneType> {
         evaluation_profile::profile_builtin_call("checkout", "update_asset", || {
             let ctx = get_eval_context_mut(eval)?;
-            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-                .context(format_context!("bad options for update asset rule"))?;
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)?;
+
             // support JSON, yaml, and toml
             let mut update_asset: executor::asset::UpdateAsset =
                 serde_json::from_value(asset.to_json_value()?)
@@ -1138,8 +1127,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 Some(ctx.module_name.clone()),
                 "Support for checkout.update_env() will be removed in v0.16. Use checkout.add_env_vars()",
             );
-            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-                .context(format_context!("bad options for update env rule"))?;
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)?;
 
             let mut any_env = environment::AnyEnvironment::try_from(env.to_json_value()?)
                 .context(format_context!("Failed to parse update_env arguments"))?;
@@ -1200,8 +1188,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ) -> anyhow::Result<NoneType> {
         evaluation_profile::profile_builtin_call("checkout", "add_env_vars", || {
             let ctx = get_eval_context_mut(eval)?;
-            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)
-                .context(format_context!("bad options for update env rule"))?;
+            let rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)?;
 
             let mut any_env: environment::AnyEnvironment =
                 serde_json::from_value(any_env.to_json_value()?)

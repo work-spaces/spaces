@@ -276,10 +276,7 @@ pub fn execute_git_command(
         url_logger(progress.console.clone(), url)
             .debug(format!("git {}", attempt_options.arguments.join(" ")).as_str());
 
-        let full_command = attempt_options.get_full_command_in_working_directory("git");
-        let result = progress
-            .execute_process("git", attempt_options)
-            .context(format_context!("{full_command}"));
+        let result = progress.execute_process("git", attempt_options);
 
         {
             let mut state_lock = get_state().write().unwrap();
@@ -308,7 +305,7 @@ pub fn execute_git_command(
                     );
                     continue;
                 }
-                return Err(format_error!(
+                return Err(anyhow::anyhow!(
                     "Git command failed for repository: {url}: {err:#}"
                 ));
             }
