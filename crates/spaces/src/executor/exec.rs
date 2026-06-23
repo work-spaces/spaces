@@ -123,7 +123,7 @@ pub struct Exec {
 }
 
 impl Exec {
-    fn log_failed_execution(&self, console: console::Console, err: &anyhow::Error) {
+    fn log_failed_execution(&self, console: console::Console, name: &str, err: &anyhow::Error) {
         singleton::set_is_error_already_reported();
         let mut container = console::bootstrap::Container::new();
         container.add(console::bootstrap::VerticalSpacer::new(1));
@@ -140,6 +140,7 @@ impl Exec {
         container.add(
             console::components::DescriptionList::new()
                 .variant(console::components::Variant::Primary)
+                .item("rule:", name)
                 .item("command:", format!("{} {}", self.command, args.join(" ")))
                 .item(
                     "directory:",
@@ -315,7 +316,7 @@ impl Exec {
         let result = progress.execute_process(&self.command, options);
 
         let result = if let Err(err) = result {
-            self.log_failed_execution(progress.console.clone(), &err);
+            self.log_failed_execution(progress.console.clone(), name, &err);
             return Err(format_error!("Error executing {name}: {err:#}"));
         } else {
             result?

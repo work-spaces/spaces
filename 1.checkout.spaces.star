@@ -12,6 +12,7 @@ load(
     "//@star/sdk/star/checkout.star",
     "checkout_add_any_assets",
     "checkout_add_env_vars",
+    "checkout_add_exec",
 )
 load("//@star/sdk/star/env.star", "env_assign")
 load(

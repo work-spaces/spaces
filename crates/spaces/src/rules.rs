@@ -1234,21 +1234,8 @@ impl State {
                         task_result.extend(handle_task_result);
                     }
                     Err(err) => {
-                        let log_status = self.log_status.read();
                         let err_message = err.to_string();
                         singleton::process_anyhow_error(err);
-                        let mut logs = Vec::new();
-                        for log in log_status.iter() {
-                            if log.status == logs::Expect::Failure
-                                && std::path::Path::new(log.file.as_ref()).exists()
-                            {
-                                logs.push(log.file.clone());
-                            }
-                        }
-
-                        // Always mark a rule failure (even with no logs) so the
-                        // top-level error handler knows to suppress the full
-                        // error chain backtrace.
                         first_error = Some(anyhow::anyhow!("Rule failed: {err_message}"));
                     }
                 },

@@ -45,3 +45,15 @@ pub static ECODES: &[&Ecode] = &[
     &Ecode::new(10, "git command failed with retries (unknown cause)"),
     &Ecode::new(11, "<trace> runner sync failed"),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::{ECODES, anyhow_trace};
+
+    #[test]
+    fn anyhow_trace_works_for_all_ecodes() {
+        for serial_number in 0..ECODES.len() {
+            let _ = anyhow_trace(serial_number as u32);
+        }
+    }
+}
