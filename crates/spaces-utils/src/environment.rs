@@ -1,4 +1,4 @@
-use crate::markdown;
+use crate::{markdown, placeholder};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -232,21 +232,20 @@ const AUTOMATIC_PLACEHOLDER_PREFIX: &str = "$AUTO";
 
 impl Value {
     pub fn get_automatic_placeholder(name: &str) -> String {
-        format!("{AUTOMATIC_PLACEHOLDER_PREFIX}{{{name}}}")
+        placeholder::format_placeholder(AUTOMATIC_PLACEHOLDER_PREFIX, name)
     }
 
     pub fn replace_with_automatic_placeholders(
         value: &str,
         auto_vars: &HashMap<&str, Arc<str>>,
     ) -> String {
-        let mut result = value.to_string();
-        for (auto_name, auto_value) in auto_vars.iter() {
-            if !auto_value.is_empty() {
-                let placeholder = Self::get_automatic_placeholder(auto_name);
-                result = result.replace(auto_value.as_ref(), &placeholder);
-            }
-        }
-        result
+        placeholder::replace_values_with_placeholders(
+            value,
+            AUTOMATIC_PLACEHOLDER_PREFIX,
+            auto_vars
+                .iter()
+                .map(|(auto_name, auto_value)| (*auto_name, auto_value.as_ref())),
+        )
     }
 }
 
