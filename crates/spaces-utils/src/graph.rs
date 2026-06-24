@@ -86,7 +86,10 @@ impl Graph {
         let mut topo_tasks =
             petgraph::algo::toposort(&self.directed_graph, None).map_err(|err| {
                 let description = self.describe_cycle(err.node_id());
-                ecode::anyhow(1, description.as_str())
+                ecode::anyhow(
+                    ecode::Ecode::DependencyGraphContainsCircularDependency,
+                    description.as_str(),
+                )
             })?;
 
         let sorted_tasks = if let Some(target) = target {

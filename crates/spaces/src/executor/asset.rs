@@ -2,7 +2,7 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use utils::{copy, labels, logger, ws};
+use utils::{copy, ecode, labels, logger, ws};
 
 use crate::workspace;
 
@@ -68,12 +68,16 @@ impl UpdateAsset {
             .insert(self.destination.clone());
         let workspace_path = workspace_write_lock.get_absolute_path();
 
-        let dest_path = get_destination_path(workspace_path.clone(), &self.destination).context(
-            format_context!(
-                "Failed to get destination path for asset file {}",
-                &self.destination
-            ),
-        )?;
+        let dest_path =
+            get_destination_path(workspace_path.clone(), &self.destination).map_err(|err| {
+                ecode::anyhow(
+                    ecode::Ecode::AssetExecutorOperationFailed,
+                    &format!(
+                        "Failed to get destination path for asset file {}\n{err:?}",
+                        &self.destination
+                    ),
+                )
+            })?;
 
         logger.debug(format!("update asset {}", self.destination).as_str());
 
@@ -83,17 +87,21 @@ impl UpdateAsset {
         {
             logger.debug(format!("load existing value {}", self.destination).as_str());
 
-            let old_value = std::fs::read_to_string(dest_path.clone()).context(format_context!(
-                "Failed to read asset file {}",
-                dest_path.display()
-            ))?;
+            let old_value = std::fs::read_to_string(dest_path.clone()).map_err(|err| {
+                ecode::anyhow(
+                    ecode::Ecode::AssetExecutorOperationFailed,
+                    &format!("Failed to read asset file {}\n{err:?}", dest_path.display()),
+                )
+            })?;
 
             logger
                 .trace(format!("Parsing asset file `{}` as {:?}", old_value, self.format).as_str());
-            let mut old_value = parse_value(self.format, &old_value).context(format_context!(
-                "Failed to parse asset file {}",
-                &self.destination
-            ))?;
+            let mut old_value = parse_value(self.format, &old_value).map_err(|err| {
+                ecode::anyhow(
+                    ecode::Ecode::AssetExecutorOperationFailed,
+                    &format!("Failed to parse asset file {}\n{err:?}", &self.destination),
+                )
+            })?;
 
             old_value.merge(&self.value);
 
@@ -106,13 +114,19 @@ impl UpdateAsset {
             self.value.clone()
         };
 
-        let content = format_value(self.format, &new_value).context(format_context!(
-            "Failed to format asset file {}",
-            &self.destination
-        ))?;
+        let content = format_value(self.format, &new_value).map_err(|err| {
+            ecode::anyhow(
+                ecode::Ecode::AssetExecutorOperationFailed,
+                &format!("Failed to format asset file {}\n{err:?}", &self.destination),
+            )
+        })?;
 
-        save_asset(workspace_path, &self.destination, &content)
-            .context(format_context!("failed to add asset {}", self.destination))?;
+        save_asset(workspace_path, &self.destination, &content).map_err(|err| {
+            ecode::anyhow(
+                ecode::Ecode::AssetExecutorOperationFailed,
+                &format!("Failed to save asset file {}\n{err:?}", &self.destination),
+            )
+        })?;
 
         logger.debug(
             format!(
@@ -146,10 +160,12 @@ impl AddWhichAsset {
         workspace: workspace::WorkspaceArc,
         _name: &str,
     ) -> anyhow::Result<()> {
-        let path = which::which(self.which.as_str()).with_context(|| {
-            format_context!(
-                "Failed to find {} on using `which`. This is required for this workspace",
-                self.which
+        let path = which::which(self.which.as_str()).map_err(|err| {
+            ecode::anyhow(ecode::Ecode::AssetExecutorOperationFailed,
+                &format!(
+                    "Failed to find {} on using `which`. This is required for this workspace\n{err:?}",
+                    self.which
+                ),
             )
         })?;
 
@@ -173,11 +189,14 @@ impl AddWhichAsset {
             None,
             copy::LinkType::Hard,
         )
-        .with_context(|| {
-            format_context!(
-                "Failed to create hard link from {} to {}",
-                path.display(),
-                destination
+        .map_err(|err| {
+            ecode::anyhow(
+                ecode::Ecode::AssetExecutorOperationFailed,
+                &format!(
+                    "Failed to create hard link from {}\nto {}\n{err:?}",
+                    path.display(),
+                    destination
+                ),
             )
         })?;
 
@@ -222,11 +241,13 @@ impl AddHardLink {
             None,
             copy::LinkType::Hard,
         )
-        .with_context(|| {
-            format_context!(
-                "Failed to create hard link from {} to {}",
-                source,
-                destination
+        .map_err(|err| {
+            ecode::anyhow(
+                ecode::Ecode::AssetExecutorOperationFailed,
+                &format!(
+                    "Failed to create hard link from {}\nto {}\n{err:?}",
+                    source, destination
+                ),
             )
         })?;
 
@@ -264,8 +285,12 @@ impl AddAsset {
         }
 
         let workspace_path = workspace_write_lock.get_absolute_path();
-        save_asset(workspace_path, &self.destination, &self.content)
-            .context(format_context!("failed to add asset"))?;
+        save_asset(workspace_path, &self.destination, &self.content).map_err(|err| {
+            ecode::anyhow(
+                ecode::Ecode::AssetExecutorOperationFailed,
+                &format!("failed to add asset {}\n{err:?}", self.destination),
+            )
+        })?;
 
         logger.debug(
             format!(
@@ -315,39 +340,52 @@ impl AddSoftLink {
 
         let destination_path = std::path::Path::new(&destination);
         if let Some(parent) = destination_path.parent() {
-            std::fs::create_dir_all(parent).with_context(|| {
-                format_context!(
-                    "Failed to create parent directories for soft link {}",
-                    destination
+            std::fs::create_dir_all(parent).map_err(|err| {
+                ecode::anyhow(
+                    ecode::Ecode::AssetExecutorOperationFailed,
+                    &format!(
+                        "Failed to create parent directories for soft link {}\n{err:?}",
+                        destination
+                    ),
                 )
             })?;
         }
 
         if destination_path.is_symlink() {
-            symlink::remove_symlink_auto(destination_path).with_context(|| {
-                format_context!("Failed to remove existing symlink {}", destination)
+            symlink::remove_symlink_auto(destination_path).map_err(|err| {
+                ecode::anyhow(
+                    ecode::Ecode::AssetExecutorOperationFailed,
+                    &format!("Failed to remove existing symlink {}\n{err:?}", destination),
+                )
             })?;
         } else if destination_path.exists() {
-            std::fs::remove_file(destination_path).with_context(|| {
-                format_context!("Failed to remove existing file {}", destination)
+            std::fs::remove_file(destination_path).map_err(|err| {
+                ecode::anyhow(
+                    ecode::Ecode::AssetExecutorOperationFailed,
+                    &format!("Failed to remove existing file {}\n{err:?}", destination),
+                )
             })?;
         }
 
         let source_path = std::path::Path::new(&source);
         if source_path.is_dir() {
-            symlink::symlink_dir(source_path, destination_path).with_context(|| {
-                format_context!(
-                    "Failed to create soft link dir from {} to {}",
-                    source,
-                    destination
+            symlink::symlink_dir(source_path, destination_path).map_err(|err| {
+                ecode::anyhow(
+                    ecode::Ecode::AssetExecutorOperationFailed,
+                    &format!(
+                        "Failed to create soft link dir from {} to {}\n{err:?}",
+                        source, destination
+                    ),
                 )
             })?;
         } else {
-            symlink::symlink_file(source_path, destination_path).with_context(|| {
-                format_context!(
-                    "Failed to create soft link file from {} to {}",
-                    source,
-                    destination
+            symlink::symlink_file(source_path, destination_path).map_err(|err| {
+                ecode::anyhow(
+                    ecode::Ecode::AssetExecutorOperationFailed,
+                    &format!(
+                        "Failed to create soft link file from {} to {}\n{err:?}",
+                        source, destination
+                    ),
                 )
             })?;
         }
@@ -371,8 +409,12 @@ impl AddHomeAsset {
     ) -> anyhow::Result<()> {
         let logger = logger::Logger::new(progress.console.clone(), name.into());
 
-        let home = std::env::var("HOME")
-            .with_context(|| format_context!("HOME environment variable is not set"))?;
+        let home = std::env::var("HOME").map_err(|err| {
+            ecode::anyhow(
+                ecode::Ecode::AssetExecutorOperationFailed,
+                &format!("HOME environment variable is not set\n{err:?}"),
+            )
+        })?;
 
         let source_path = std::path::Path::new(&home).join(&self.source);
 
@@ -397,52 +439,57 @@ impl AddHomeAsset {
             .join(&self.source);
 
         if let Some(parent) = workspace_home.parent() {
-            std::fs::create_dir_all(parent).with_context(|| {
-                format_context!(
-                    "Failed to create workspace home directories for {}",
-                    workspace_home.display()
+            std::fs::create_dir_all(parent).map_err(|err| {
+                ecode::anyhow(
+                    ecode::Ecode::AssetExecutorOperationFailed,
+                    &format!(
+                        "Failed to create workspace home directories for {}\n{err:?}",
+                        workspace_home.display()
+                    ),
                 )
             })?;
         }
 
-        normalize_home_asset_store_entry(&workspace_home, source_path.is_dir()).context(
-            format_context!(
-                "Failed to normalize home asset entry for {}",
-                workspace_home.display()
-            ),
-        )?;
+        normalize_home_asset_store_entry(&workspace_home, source_path.is_dir()).map_err(|err| {
+            ecode::anyhow(
+                ecode::Ecode::AssetExecutorOperationFailed,
+                &format!(
+                    "Failed to normalize home asset entry for {}\n{err:?}",
+                    workspace_home.display()
+                ),
+            )
+        })?;
 
         if source_path.is_dir() {
+            let source_path_string = source_path.to_string_lossy().to_string();
+            let workspace_home_string = workspace_home.to_string_lossy().to_string();
+
             copy::copy_with_cow_semantics(
                 progress,
-                source_path.to_str().with_context(|| {
-                    format_context!(
-                        "Failed to convert source path to string {}",
-                        source_path.display()
-                    )
-                })?,
-                workspace_home.to_str().with_context(|| {
-                    format_context!(
-                        "Failed to convert workspace home path to string {}",
-                        workspace_home.display()
-                    )
-                })?,
+                source_path_string.as_str(),
+                workspace_home_string.as_str(),
                 copy::UseCowSemantics::No,
                 None,
             )
-            .with_context(|| {
-                format_context!(
-                    "Failed to copy home asset {} to workspace home {}",
-                    source_path.display(),
-                    workspace_home.display()
+            .map_err(|err| {
+                ecode::anyhow(
+                    ecode::Ecode::AssetExecutorOperationFailed,
+                    &format!(
+                        "Failed to copy home asset {} to workspace home {}\n{err:?}",
+                        source_path.display(),
+                        workspace_home.display()
+                    ),
                 )
             })?;
         } else {
-            std::fs::copy(&source_path, &workspace_home).with_context(|| {
-                format_context!(
-                    "Failed to copy home asset {} to workspace home {}",
-                    source_path.display(),
-                    workspace_home.display()
+            std::fs::copy(&source_path, &workspace_home).map_err(|err| {
+                ecode::anyhow(
+                    ecode::Ecode::AssetExecutorOperationFailed,
+                    &format!(
+                        "Failed to copy home asset {} to workspace home {}\n{err:?}",
+                        source_path.display(),
+                        workspace_home.display()
+                    ),
                 )
             })?;
         }
@@ -465,14 +512,17 @@ fn normalize_home_asset_store_entry(
     }
 
     if store_is_dir {
-        std::fs::remove_dir_all(store_full).context(format_context!(
-            "Failed to remove stale store directory {}",
-            store_full.display()
+        std::fs::remove_dir_all(store_full).context(ecode::anyhow(
+            ecode::Ecode::AssetExecutorOperationFailed,
+            &format!(
+                "Failed to remove stale store directory {}",
+                store_full.display()
+            ),
         ))?;
     } else {
-        std::fs::remove_file(store_full).context(format_context!(
-            "Failed to remove stale store file {}",
-            store_full.display()
+        std::fs::remove_file(store_full).context(ecode::anyhow(
+            ecode::Ecode::AssetExecutorOperationFailed,
+            &format!("Failed to remove stale store file {}", store_full.display()),
         ))?;
     }
 
@@ -523,17 +573,25 @@ fn get_destination_path(
 }
 
 fn save_asset(workspace_path: Arc<str>, destination: &str, content: &str) -> anyhow::Result<()> {
-    let output_path = get_destination_path(workspace_path, destination)
-        .context(format_context!("Failed to get destaiont for {destination}"))?;
+    let output_path = get_destination_path(workspace_path, destination).context(ecode::anyhow(
+        ecode::Ecode::AssetExecutorOperationFailed,
+        &format!("Failed to get destination for {destination}"),
+    ))?;
     if let Some(parent) = output_path.parent() {
-        std::fs::create_dir_all(parent).context(format_context!(
-            "Failed to create parent directories for asset file {}",
-            output_path.to_string_lossy()
+        std::fs::create_dir_all(parent).context(ecode::anyhow(
+            ecode::Ecode::AssetExecutorOperationFailed,
+            &format!(
+                "Failed to create parent directories for asset file {}",
+                output_path.to_string_lossy()
+            ),
         ))?;
     }
-    std::fs::write(output_path.clone(), content).context(format_context!(
-        "Failed to write asset file {}",
-        output_path.to_string_lossy()
+    std::fs::write(output_path.clone(), content).context(ecode::anyhow(
+        ecode::Ecode::AssetExecutorOperationFailed,
+        &format!(
+            "Failed to write asset file {}",
+            output_path.to_string_lossy()
+        ),
     ))?;
 
     Ok(())

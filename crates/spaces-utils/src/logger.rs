@@ -105,10 +105,57 @@ pub enum ShowBacktrace {
     Yes,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum StripSourceLocation {
+    No,
+    Yes,
+}
+
+fn is_source_location_fragment(fragment: &str) -> bool {
+    let Some((path, line)) = fragment.rsplit_once(':') else {
+        return false;
+    };
+
+    !path.is_empty()
+        && path.contains('/')
+        && line.chars().all(|ch| ch.is_ascii_digit())
+        && !line.is_empty()
+}
+
+fn strip_source_locations(line: &str) -> String {
+    let mut output = String::with_capacity(line.len());
+    let mut remaining = line;
+
+    while let Some(open_idx) = remaining.find('[') {
+        output.push_str(&remaining[..open_idx]);
+
+        let bracket_slice = &remaining[open_idx + 1..];
+        let Some(close_rel_idx) = bracket_slice.find(']') else {
+            output.push_str(&remaining[open_idx..]);
+            remaining = "";
+            break;
+        };
+
+        let fragment = &bracket_slice[..close_rel_idx];
+
+        if is_source_location_fragment(fragment) {
+            remaining = &bracket_slice[close_rel_idx + 1..];
+            continue;
+        }
+
+        output.push_str(&remaining[open_idx..open_idx + close_rel_idx + 2]);
+        remaining = &bracket_slice[close_rel_idx + 1..];
+    }
+
+    output.push_str(remaining);
+    output.to_string()
+}
+
 pub fn show_error(
     console: console::Console,
     input_error_chain: Vec<String>,
     show_backtrace: ShowBacktrace,
+    strip_source_location: StripSourceLocation,
 ) {
     let mut container = console::bootstrap::Container::new();
     container.add(console::bootstrap::VerticalSpacer::new(1));
@@ -133,7 +180,17 @@ pub fn show_error(
 
     for cause in error_chain {
         for line in cause.lines() {
-            error_quote.push_line(line.to_string());
+            let line = if strip_source_location == StripSourceLocation::Yes {
+                strip_source_locations(line)
+            } else {
+                line.to_string()
+            };
+
+            if line.is_empty() {
+                continue;
+            }
+
+            error_quote.push_line(line);
         }
     }
 

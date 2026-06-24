@@ -249,7 +249,7 @@ pub fn evaluate_loads(
             singleton::set_is_show_latest_error();
             use starlark::{Error, ErrorKind};
             return Err(Error::new_spanned(
-                ErrorKind::Fail(anyhow::anyhow!(
+                ErrorKind::Fail(format_error!(
                     "attempted to load `internal` module using workspace path (//).\nInternal modules can only be loaded using relative paths."
                 )),
                 load.span.span,
@@ -263,7 +263,7 @@ pub fn evaluate_loads(
             singleton::set_is_show_latest_error();
             use starlark::{Error, ErrorKind};
             return Err(Error::new_spanned(
-                ErrorKind::Fail(anyhow::anyhow!(
+                ErrorKind::Fail(format_error!(
                     "\nAttempting to load module ending with `spaces.star` module. This is a reserved module name."
                 )),
                 load.span.span,
@@ -653,7 +653,12 @@ fn try_evaluate_with_cache(
             Some(console.clone()),
             load_result_cache,
         )
-        .map_err(|e| ecode::anyhow(3, &format!("{e}")))?;
+        .map_err(|e| {
+            ecode::anyhow(
+                ecode::Ecode::FailedToEvaluateModuleDuringCheckout,
+                &format!("{e}"),
+            )
+        })?;
         return Ok(());
     }
 
@@ -705,7 +710,8 @@ fn try_evaluate_with_cache(
                 load_result_cache.clone(),
             )
             .map(|_| ());
-            result.map_err(|e| ecode::anyhow(2, &format!("{e:?}")))
+            result
+                .map_err(|e| ecode::anyhow(ecode::Ecode::FailedToEvaluateModule, &format!("{e:?}")))
         },
         || vec![Arc::from(std::path::Path::new(json_target.as_ref()))],
     );

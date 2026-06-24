@@ -1,4 +1,4 @@
-use crate::{ecode, logger};
+use crate::logger;
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -295,10 +295,10 @@ pub fn execute_git_command(
             }
             Err(err) => {
                 if attempt < GIT_MAX_RETRIES && is_retryable_git_error(&err) {
-                    last_error = Some(format!("{err:#}"));
+                    last_error = Some(format!("{err:?}"));
                     url_logger(progress.console.clone(), url).debug(
                         format!(
-                            "Transient network error (attempt {}/{}): {err:#}",
+                            "Transient network error (attempt {}/{}): {err:?}",
                             attempt + 1,
                             GIT_MAX_RETRIES + 1
                         )
@@ -306,24 +306,19 @@ pub fn execute_git_command(
                     );
                     continue;
                 }
-                return Err(ecode::anyhow(
-                    8,
-                    &format!("url: {url}\ncmd: {full_command}\n{err:#}"),
-                ));
+                return Err(format_error!("url: {url}\ncmd: {full_command}\n{err:?}"));
             }
         }
     }
 
     if let Some(last_error) = last_error {
-        return Err(ecode::anyhow(
-            9,
-            &format!("url: {url}\ncmd: {full_command}\nretries: {GIT_MAX_RETRIES}\n{last_error}"),
+        return Err(format_error!(
+            "url: {url}\ncmd: {full_command}\nretries: {GIT_MAX_RETRIES}\n{last_error}"
         ));
     }
 
-    Err(ecode::anyhow(
-        10,
-        &format!("url: {url}\ncmd: {full_command}\nretries: {GIT_MAX_RETRIES}"),
+    Err(format_error!(
+        "url: {url}\ncmd: {full_command}\nretries: {GIT_MAX_RETRIES}"
     ))
 }
 

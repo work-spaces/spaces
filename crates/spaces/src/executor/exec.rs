@@ -1,10 +1,9 @@
 use crate::{singleton, workspace};
 use anyhow::Context;
-use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use utils::{lock, logger, rule};
+use utils::{ecode, lock, logger, rule};
 
 pub use rule::Expect;
 
@@ -60,7 +59,10 @@ fn expand_exit_value_tokens(
         result.push_str(&remaining[..start]);
         let after = &remaining[start + marker_open.len()..];
         let end = after.find('}').ok_or_else(|| {
-            format_error!("Unclosed $RUN_LOAD_EXIT_VALUE{{}} token in: {}", value)
+            ecode::anyhow(
+                ecode::Ecode::ExecExecutorOperationFailed,
+                &format!("Unclosed $RUN_LOAD_EXIT_VALUE{{}} token in: {}", value),
+            )
         })?;
         let dep_rule = &after[..end];
         let exit_code = workspace
@@ -70,7 +72,12 @@ fn expand_exit_value_tokens(
             .exit_codes
             .get(dep_rule)
             .copied()
-            .ok_or_else(|| format_error!("No exit value stored for rule '{}'", dep_rule))?;
+            .ok_or_else(|| {
+                ecode::anyhow(
+                    ecode::Ecode::ExecExecutorOperationFailed,
+                    &format!("No exit value stored for rule '{}'", dep_rule),
+                )
+            })?;
         result.push_str(&exit_code.to_string());
         remaining = &after[end + 1..];
     }
@@ -91,7 +98,10 @@ fn expand_file_tokens(
         result.push_str(&remaining[..start]);
         let after = &remaining[start + file_open.len()..];
         let end = after.find('}').ok_or_else(|| {
-            format_error!("Unclosed $RUN_LOAD_FILE_CONTENTS{{}} token in: {}", value)
+            ecode::anyhow(
+                ecode::Ecode::ExecExecutorOperationFailed,
+                &format!("Unclosed $RUN_LOAD_FILE_CONTENTS{{}} token in: {}", value),
+            )
         })?;
         let file_path = &after[..end];
         let abs_path = if let Some(ws_relative) = file_path.strip_prefix("//") {
@@ -100,7 +110,10 @@ fn expand_file_tokens(
             format!("{working_directory}/{file_path}")
         };
         let contents = std::fs::read_to_string(&abs_path).with_context(|| {
-            format_context!("Failed to read $RUN_LOAD_FILE_CONTENTS{{{}}}", file_path)
+            ecode::anyhow(
+                ecode::Ecode::ExecExecutorOperationFailed,
+                &format!("Failed to read $RUN_LOAD_FILE_CONTENTS{{{}}}", file_path),
+            )
         })?;
         result.push_str(&contents);
         remaining = &after[end + 1..];
@@ -214,23 +227,36 @@ impl Exec {
         let working_dir = pwd.as_ref();
 
         for arg in arguments.iter_mut() {
-            *arg = expand_file_tokens(arg, workspace_root, working_dir).with_context(|| {
-                format_context!("Failed to expand $RUN_LOAD_FILE_CONTENTS tokens in args")
+            *arg = expand_file_tokens(arg, workspace_root, working_dir).map_err(|err| {
+                ecode::anyhow(
+                    ecode::Ecode::ExecExecutorOperationFailed,
+                    &format!("Failed to expand $RUN_LOAD_FILE_CONTENTS tokens in args\n{err:?}"),
+                )
             })?;
-            *arg = expand_exit_value_tokens(arg, &workspace).with_context(|| {
-                format_context!("Failed to expand $RUN_LOAD_EXIT_VALUE tokens in args")
+            *arg = expand_exit_value_tokens(arg, &workspace).map_err(|err| {
+                ecode::anyhow(
+                    ecode::Ecode::ExecExecutorOperationFailed,
+                    &format!("Failed to expand $RUN_LOAD_EXIT_VALUE tokens in args\n{err:?}"),
+                )
             })?;
         }
 
         for (key, value) in self.env.clone().unwrap_or_default() {
-            let expanded =
-                expand_file_tokens(&value, workspace_root, working_dir).with_context(|| {
-                    format_context!(
-                        "Failed to expand $RUN_LOAD_FILE_CONTENTS tokens in env var {key}"
-                    )
-                })?;
-            let expanded = expand_exit_value_tokens(&expanded, &workspace).with_context(|| {
-                format_context!("Failed to expand $RUN_LOAD_EXIT_VALUE tokens in env var {key}")
+            let expanded = expand_file_tokens(&value, workspace_root, working_dir).map_err(|err| {
+                ecode::anyhow(
+                    ecode::Ecode::ExecExecutorOperationFailed,
+                    &format!(
+                        "Failed to expand $RUN_LOAD_FILE_CONTENTS tokens in env var {key}\n{err:?}"
+                    ),
+                )
+            })?;
+            let expanded = expand_exit_value_tokens(&expanded, &workspace).map_err(|err| {
+                ecode::anyhow(
+                    ecode::Ecode::ExecExecutorOperationFailed,
+                    &format!(
+                        "Failed to expand $RUN_LOAD_EXIT_VALUE tokens in env var {key}\n{err:?}"
+                    ),
+                )
             })?;
             exec_env_vars.insert(key, expanded);
         }
@@ -300,9 +326,12 @@ impl Exec {
             lock::LOCK_FILE_SUFFIX
         );
         let mut file_lock = lock::FileLock::new(std::path::Path::new(&lock_file_path).into());
-        file_lock
-            .lock(progress.console.clone())
-            .context(format_context!("Failed to acquire lock for rule {name}"))?;
+        file_lock.lock(progress.console.clone()).map_err(|err| {
+            ecode::anyhow(
+                ecode::Ecode::ExecExecutorOperationFailed,
+                &format!("Failed to acquire lock for rule {name}\n{err:?}"),
+            )
+        })?;
 
         logger(progress.console.clone(), name).info(
             format!(
@@ -313,14 +342,15 @@ impl Exec {
             .as_str(),
         );
 
-        let result = progress.execute_process(&self.command, options);
-
-        let result = if let Err(err) = result {
-            self.log_failed_execution(progress.console.clone(), name, &err);
-            return Err(format_error!("Error executing {name}: {err:#}"));
-        } else {
-            result?
-        };
+        let result = progress
+            .execute_process(&self.command, options)
+            .map_err(|err| {
+                self.log_failed_execution(progress.console.clone(), name, &err);
+                ecode::anyhow(
+                    ecode::Ecode::ExecExecutorOperationFailed,
+                    &format!("Error executing {name}\n{err:?}"),
+                )
+            })?;
 
         handle_process_ended(name);
         workspace
@@ -336,7 +366,10 @@ impl Exec {
         let stdout_content = if result.exit_code == 0 {
             logger(progress.console.clone(), name).info("succeeded");
             if let Some(Expect::Failure) = self.expect.as_ref() {
-                return Err(format_error!("Expected failure but task succeeded"));
+                return Err(ecode::anyhow(
+                    ecode::Ecode::ExecExecutorOperationFailed,
+                    "Expected failure but task succeeded",
+                ));
             }
             result.stdout
         } else {
@@ -348,10 +381,13 @@ impl Exec {
                 if let Some(log_file_path) = log_file_path {
                     if std::path::Path::new(log_file_path.as_ref()).exists() {
                         let mut log_container = console::bootstrap::Container::new();
-                        let log_contents =
-                            std::fs::read_to_string(log_file_path.as_ref()).context(
-                                format_context!("Failed to read log file {}", log_file_path),
-                            )?;
+                        let log_contents = std::fs::read_to_string(log_file_path.as_ref())
+                            .map_err(|err| {
+                                ecode::anyhow(
+                                    ecode::Ecode::ExecExecutorOperationFailed,
+                                    &format!("Failed to read log file {}\n{err:?}", log_file_path),
+                                )
+                            })?;
                         let summary_container = console::format_log_file_summary(
                             name,
                             &log_contents,
@@ -367,10 +403,12 @@ impl Exec {
                         "No log file is available (log files disabled with the --ci option)",
                     );
                 }
-                return Err(anyhow::anyhow!(
-                    "Command `{}` failed with exit code: {}",
-                    self.command,
-                    result.exit_code
+                return Err(ecode::anyhow(
+                    ecode::Ecode::ExecExecutorOperationFailed,
+                    &format!(
+                        "Command `{}` failed with exit code: {}",
+                        self.command, result.exit_code
+                    ),
                 ));
             }
         };
@@ -380,21 +418,29 @@ impl Exec {
         {
             let parent_path = std::path::Path::new(stdout_location.as_ref())
                 .parent()
-                .context(format_context!(
-                    "Failed to get parent directory of {}",
-                    stdout_location
-                ))?;
+                .ok_or_else(|| {
+                    ecode::anyhow(
+                        ecode::Ecode::ExecExecutorOperationFailed,
+                        &format!("Failed to get parent directory of {}", stdout_location),
+                    )
+                })?;
 
-            std::fs::create_dir_all(parent_path).context(format_context!(
-                "Failed to create parent directory {:?} for stdout file {}",
-                parent_path,
-                stdout_location
-            ))?;
+            std::fs::create_dir_all(parent_path).map_err(|err| {
+                ecode::anyhow(
+                    ecode::Ecode::ExecExecutorOperationFailed,
+                    &format!(
+                        "Failed to create parent directory {:?} for stdout file {}\n{err:?}",
+                        parent_path, stdout_location
+                    ),
+                )
+            })?;
 
-            std::fs::write(stdout_location.as_ref(), stdout_content).context(format_context!(
-                "Failed to write stdout to {}",
-                stdout_location
-            ))?;
+            std::fs::write(stdout_location.as_ref(), stdout_content).map_err(|err| {
+                ecode::anyhow(
+                    ecode::Ecode::ExecExecutorOperationFailed,
+                    &format!("Failed to write stdout to {}\n{err:?}", stdout_location),
+                )
+            })?;
         }
 
         Ok(())
@@ -506,22 +552,32 @@ impl Kill {
                 ..Default::default()
             };
 
-            let result = progress
-                .execute_process("kill", options)
-                .context(format_context!("Failed to execute kill"))?;
+            let result = progress.execute_process("kill", options).map_err(|err| {
+                ecode::anyhow(
+                    ecode::Ecode::ExecExecutorOperationFailed,
+                    &format!("Failed to execute kill\n{err:?}"),
+                )
+            })?;
             match self.expect.as_ref() {
                 Some(Expect::Success) if result.exit_code != 0 => {
-                    return Err(format_error!("Expected success but kill failed {self:?}"));
+                    return Err(ecode::anyhow(
+                        ecode::Ecode::ExecExecutorOperationFailed,
+                        &format!("Expected success but kill failed {self:?}"),
+                    ));
                 }
                 Some(Expect::Failure) if result.exit_code == 0 => {
-                    return Err(format_error!(
-                        "Expected failure but kill succeeded {self:?}"
+                    return Err(ecode::anyhow(
+                        ecode::Ecode::ExecExecutorOperationFailed,
+                        &format!("Expected failure but kill succeeded {self:?}"),
                     ));
                 }
                 _ => {}
             }
         } else if let Some(Expect::Success) = self.expect.as_ref() {
-            return Err(format_error!("No process found for {name}"));
+            return Err(ecode::anyhow(
+                ecode::Ecode::ExecExecutorOperationFailed,
+                &format!("No process found for {name}"),
+            ));
         }
 
         Ok(())

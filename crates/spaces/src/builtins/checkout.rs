@@ -928,7 +928,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 ctx.default_module_visibility.clone(),
                 ctx,
             )
-            .context(format_context!("Failed to add archive"))?;
+            .context(format_context!("while adding http archive rule"))?;
             Ok(NoneType)
         })
     }
@@ -1496,8 +1496,8 @@ fn add_http_archive(
             &archive,
             format!("{}/sysroot/bin", eval_context.workspace_spaces_tools_path).as_str(),
         )
-        .context(format_context!(
-            "Failed to create http_archive {}",
+        .context(anyhow::anyhow!(
+            "Failed to create http_archive for rule :{}",
             rule.name
         ))?;
 

@@ -785,7 +785,7 @@ impl State {
                         {
                             singleton::set_is_show_latest_error();
                             return Err(ecode::anyhow(
-                                5,
+                                ecode::Ecode::TargetFileIsClaimedByMultipleRules,
                                 &format!("{file} is claimed by:\n- {existing_rule}\n- {rule_name}",),
                             ));
                         };
@@ -795,7 +795,7 @@ impl State {
                         {
                             singleton::set_is_show_latest_error();
                             return Err(ecode::anyhow(
-                                6,
+                                ecode::Ecode::TargetDirIsClaimedByMultipleRules,
                                 &format!("{file} is claimed by:\n- {existing_rule}\n- {rule_name}",),
                             ));
                         };
@@ -814,7 +814,7 @@ impl State {
                 if file_path_label.starts_with(dir_prefix.as_str()) {
                     singleton::set_is_show_latest_error();
                     return Err(ecode::anyhow(
-                        7,
+                        ecode::Ecode::TargetArtifactIsContainedInTargetDir,
                         &format!(
                             "{file_path_label} from\n{file_rule} is contained in target dir\n{dir_path_label}\nfrom rule {dir_rule}",
                         ),
@@ -1236,7 +1236,7 @@ impl State {
                     Err(err) => {
                         let err_message = err.to_string();
                         singleton::process_anyhow_error(err);
-                        first_error = Some(anyhow::anyhow!("Rule failed: {err_message}"));
+                        first_error = Some(format_error!("Rule failed: {err_message}"));
                     }
                 },
                 Err(err) => {

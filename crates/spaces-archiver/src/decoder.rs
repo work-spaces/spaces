@@ -127,7 +127,7 @@ impl Decoder {
             let actual_digest = driver::digest_file(input_file.as_str(), &mut progress_bar)?;
             if actual_digest != *digest {
                 return Err(format_error!(
-                    "digest mismatch: expected: {} actual: {}",
+                    "digest mismatch: expected: `{}`\nactual: `{}`",
                     digest,
                     actual_digest
                 ));

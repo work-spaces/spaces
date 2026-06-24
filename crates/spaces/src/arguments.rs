@@ -3,7 +3,7 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
 use std::{io::IsTerminal, sync::Arc};
-use utils::{ci, ecode, features, git, logger, logs, shell, store, version};
+use utils::{ci, features, git, logger, logs, shell, store, version};
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
 pub enum Level {
@@ -192,11 +192,23 @@ pub fn execute() -> anyhow::Result<()> {
         } else {
             logger::ShowBacktrace::No
         };
+        let strip_source_location = if matches!(
+            verbosity_level,
+            console::Level::Debug | console::Level::Trace
+        ) {
+            logger::StripSourceLocation::No
+        } else {
+            logger::StripSourceLocation::Yes
+        };
+
         match error_report {
             singleton::ErrorReport::None => (),
-            singleton::ErrorReport::One | singleton::ErrorReport::Full => {
-                logger::show_error(effective_console.clone(), error_chain, show_backtrace)
-            }
+            singleton::ErrorReport::One | singleton::ErrorReport::Full => logger::show_error(
+                effective_console.clone(),
+                error_chain,
+                show_backtrace,
+                strip_source_location,
+            ),
         };
 
         let _ = effective_console.error("While executing", args.join(" "));
@@ -409,7 +421,9 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                 runner::IsCreateLockFile::No,
                 runner::IsExecuteTasks::Yes,
             )
-            .context(ecode::anyhow_trace(11))?;
+            .context(format_context!(
+                "while running starlark modules in workspace"
+            ))?;
         }
 
         Commands::Foreach { mode } => {
