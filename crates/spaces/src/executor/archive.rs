@@ -1,8 +1,7 @@
 use crate::workspace;
-use anyhow::Context;
-use anyhow_source_location::format_context;
+
 use serde::{Deserialize, Serialize};
-use utils::logger;
+use utils::{ecode, logger};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -21,9 +20,12 @@ impl Archive {
         let output_directory = format!("{workspace_directory}/build/{name}");
         let console = progress.console.clone();
 
-        std::fs::create_dir_all(output_directory.as_str()).context(format_context!(
-            "failed to create output directory {output_directory}"
-        ))?;
+        std::fs::create_dir_all(output_directory.as_str()).map_err(|err| {
+            ecode::anyhow(
+                ecode::Ecode::ArchiveExecutorOperationFailed,
+                &format!("failed to create output directory {output_directory}\n{err:?}"),
+            )
+        })?;
 
         logger::Logger::new(console.clone(), name.into())
             .debug(format!("Creating archive {output_directory}").as_str());
@@ -38,18 +40,24 @@ impl Archive {
         let (output_file_path, digest) = self
             .create_archive
             .create(output_directory.as_str(), archive_progress)
-            .context(format_context!(
-                "failed to create archive {output_directory}"
-            ))?;
+            .map_err(|err| {
+                ecode::anyhow(
+                    ecode::Ecode::ArchiveExecutorOperationFailed,
+                    &format!("failed to create archive {output_directory}\n{err:?}"),
+                )
+            })?;
 
         let output_file_as_path = std::path::Path::new(output_file_path.as_str());
         let output_sha_suffix_as_path = output_file_as_path
             .with_extension("")
             .with_extension("sha256.txt");
 
-        std::fs::write(output_sha_suffix_as_path.clone(), digest).context(format_context!(
-            "failed to write sha256 file {output_sha_suffix_as_path:?}"
-        ))?;
+        std::fs::write(output_sha_suffix_as_path.clone(), digest).map_err(|err| {
+            ecode::anyhow(
+                ecode::Ecode::ArchiveExecutorOperationFailed,
+                &format!("failed to write sha256 file {output_sha_suffix_as_path:?}\n{err:?}"),
+            )
+        })?;
 
         Ok(())
     }

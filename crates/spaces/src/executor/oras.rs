@@ -1,10 +1,9 @@
 use crate::workspace;
 use anyhow::Context;
-use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::Arc;
-use utils::{http_archive, logger};
+use utils::{ecode, http_archive, logger};
 
 fn get_oras_command(tools_path: &str) -> Arc<str> {
     format!("{tools_path}/sysroot/bin/oras").into()
@@ -62,8 +61,9 @@ impl OrasArchive {
                 &get_oras_command(&workspace.read().get_spaces_tools_path()),
                 options,
             )
-            .context(format_context!(
-                "failed to download {artifact_label} using oras",
+            .context(ecode::anyhow(
+                ecode::Ecode::FailedToCreateOrAcquireLockFile,
+                &format!("failed to download {artifact_label} using oras",),
             ))?;
 
         Ok(())
@@ -87,21 +87,27 @@ impl OrasArchive {
                 get_oras_command(&workspace.read().get_spaces_tools_path()).as_ref(),
                 options,
             )
-            .context(format_context!(
-                "failed to fetch manifest for {artifact_label} using oras",
+            .context(ecode::anyhow(
+                ecode::Ecode::FailedToCreateOrAcquireLockFile,
+                &format!("failed to fetch manifest for {artifact_label} using oras",),
             ))?;
 
         if manifest.exit_code != 0 {
-            return Err(format_error!(
-                "oras manifest fetch for {artifact_label} failed with exit code {}",
-                manifest.exit_code
+            return Err(ecode::anyhow(
+                ecode::Ecode::FailedToCreateOrAcquireLockFile,
+                &format!(
+                    "oras manifest fetch for {artifact_label} failed with exit code {}",
+                    manifest.exit_code
+                ),
             ));
         }
 
         if let Some(manifest) = manifest.stdout {
-            let value: serde_json::Value = serde_json::from_str(&manifest).context(
-                format_context!("failed to parse manifest from {artifact_label}"),
-            )?;
+            let value: serde_json::Value =
+                serde_json::from_str(&manifest).context(ecode::anyhow(
+                    ecode::Ecode::FailedToCreateOrAcquireLockFile,
+                    &format!("failed to parse manifest from {artifact_label}"),
+                ))?;
             let mut sha256_option: Option<Arc<str>> = None;
             let mut filename_option: Option<Arc<str>> = None;
 
@@ -122,12 +128,14 @@ impl OrasArchive {
                 return Ok(ManifestDetails { filename, sha256 });
             }
 
-            return Err(format_error!(
-                "Failed to find sha256 or filename in manifest {self:?}"
+            return Err(ecode::anyhow(
+                ecode::Ecode::FailedToCreateOrAcquireLockFile,
+                &format!("Failed to find sha256 or filename in manifest {self:?}"),
             ));
         }
-        Err(format_error!(
-            "Internal error: oras failed to return manifest"
+        Err(ecode::anyhow(
+            ecode::Ecode::FailedToCreateOrAcquireLockFile,
+            "Internal error: oras failed to return manifest",
         ))
     }
 
@@ -142,7 +150,12 @@ impl OrasArchive {
 
         let manifest_details = self
             .get_manifest_details(progress, workspace.clone())
-            .context(format_context!("Failed to fetch manifest"))?;
+            .map_err(|err| {
+                ecode::anyhow(
+                    ecode::Ecode::OrasExecutorOperationFailed,
+                    &format!("Failed to fetch manifest for {name}\n{err:?}"),
+                )
+            })?;
 
         let archive = http_archive::Archive {
             url: format!("oras://{}/{}", self.url, manifest_details.filename).into(),
@@ -156,38 +169,66 @@ impl OrasArchive {
         let tools_path = format!("{}/sysroot/bin", workspace.read().get_spaces_tools_path());
         let store_path = workspace.read().get_store_path();
         let http_archive = http_archive::HttpArchive::new(&store_path, name, &archive, &tools_path)
-            .context(format_context!("Failed to create http_archive {archive:?}"))?;
+            .map_err(|err| {
+                ecode::anyhow(
+                    ecode::Ecode::OrasExecutorOperationFailed,
+                    &format!("Failed to create http_archive {archive:?}\n{err:?}"),
+                )
+            })?;
 
         let full_path = std::path::Path::new(&http_archive.full_path_to_archive);
 
         let mut lock_file = http_archive.get_file_lock();
-        lock_file.lock(console.clone()).context(format_context!(
-            "{name} - Failed to lock the spaces store for {}",
-            http_archive.archive.url
-        ))?;
+        lock_file.lock(console.clone()).map_err(|err| {
+            ecode::anyhow(
+                ecode::Ecode::OrasExecutorOperationFailed,
+                &format!(
+                    "{name} - Failed to lock the spaces store for {}\n{err:?}",
+                    http_archive.archive.url
+                ),
+            )
+        })?;
 
         if !full_path.exists() {
             let parent = full_path
                 .parent()
-                .context(format_context!("Failed to get parent of {full_path:?}"))?
+                .ok_or_else(|| {
+                    ecode::anyhow(
+                        ecode::Ecode::OrasExecutorOperationFailed,
+                        &format!("Failed to get parent of {full_path:?}"),
+                    )
+                })?
                 .to_string_lossy()
                 .to_string();
             // need to ensure the archive is downloaded before using http_archive which doesn't know how to download
             self.download(progress, workspace.clone(), &parent)
-                .context(format_context!("Failed to download using oras"))?;
+                .map_err(|err| {
+                    ecode::anyhow(
+                        ecode::Ecode::OrasExecutorOperationFailed,
+                        &format!("Failed to download using oras for {name}\n{err:?}"),
+                    )
+                })?;
 
             let full_path_to_download =
                 std::path::Path::new(&parent).join(manifest_details.filename.as_ref());
             //rename the file name to the name http_archive expects
-            std::fs::rename(full_path_to_download.clone(), full_path).context(format_context!(
-                "Failed to rename {full_path_to_download:?} to {full_path:?}"
-            ))?;
+            std::fs::rename(full_path_to_download.clone(), full_path).map_err(|err| {
+                ecode::anyhow(
+                    ecode::Ecode::OrasExecutorOperationFailed,
+                    &format!(
+                        "Failed to rename {full_path_to_download:?} to {full_path:?}\n{err:?}"
+                    ),
+                )
+            })?;
         }
 
         // sync will skip the download because the file is already there
-        http_archive
-            .sync(console.clone())
-            .context(format_context!("Failed to sync http_archive {}", name))?;
+        http_archive.sync(console.clone()).map_err(|err| {
+            ecode::anyhow(
+                ecode::Ecode::OrasExecutorOperationFailed,
+                &format!("Failed to sync http_archive {}\n{err:?}", name),
+            )
+        })?;
 
         let mut workspace_write_lock = workspace.write();
         let workspace_directory = workspace_write_lock.absolute_path.clone();
@@ -199,10 +240,15 @@ impl OrasArchive {
                 name,
                 &mut workspace_write_lock.settings.checkout.links,
             )
-            .context(format_context!(
-                "Failed to create hard links for oras http_archive {}",
-                name
-            ))?;
+            .map_err(|err| {
+                ecode::anyhow(
+                    ecode::Ecode::OrasExecutorOperationFailed,
+                    &format!(
+                        "Failed to create hard links for oras http_archive {}\n{err:?}",
+                        name
+                    ),
+                )
+            })?;
 
         Ok(())
     }

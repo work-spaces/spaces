@@ -1,8 +1,7 @@
 use crate::workspace;
-use anyhow::Context;
-use anyhow_source_location::format_context;
+
 use serde::{Deserialize, Serialize};
-use utils::http_archive;
+use utils::{ecode, http_archive};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpArchive {
@@ -18,14 +17,25 @@ impl HttpArchive {
     ) -> anyhow::Result<()> {
         let mut lock_file = self.http_archive.get_file_lock();
         let console = progress.console.clone();
-        lock_file.lock(console.clone()).context(format_context!(
-            "{name} - Failed to lock the spaces store for {}",
-            self.http_archive.archive.url
-        ))?;
+        lock_file.lock(console.clone()).map_err(|err| {
+            ecode::anyhow(
+                ecode::Ecode::FailedToCreateOrAcquireLockFile,
+                &format!(
+                    "{name} - Failed to lock the spaces store for {}\n{err:?}",
+                    self.http_archive.archive.url
+                ),
+            )
+        })?;
 
-        self.http_archive
-            .sync(console.clone())
-            .context(format_context!("Failed to sync http_archive {}", name))?;
+        self.http_archive.sync(console.clone()).map_err(|err| {
+            ecode::anyhow(
+                ecode::Ecode::FailedToLoadJsonFilesManifest,
+                &format!(
+                    "{name} - Failed to sync http archive {}\n{err:?}",
+                    self.http_archive.archive.url
+                ),
+            )
+        })?;
 
         let mut workspace_write_lock = workspace.write();
 
@@ -37,10 +47,15 @@ impl HttpArchive {
                 name,
                 &mut workspace_write_lock.settings.checkout.links,
             )
-            .context(format_context!(
-                "Failed to create hard links for http_archive {}",
-                name
-            ))?;
+            .map_err(|err| {
+                ecode::anyhow(
+                    ecode::Ecode::HttpArchiveExecutorOperationFailed,
+                    &format!(
+                        "{name} - Failed to create links for\n{}\n{err:?}",
+                        self.http_archive.archive.url
+                    ),
+                )
+            })?;
 
         workspace_write_lock.add_member(self.http_archive.get_member());
 

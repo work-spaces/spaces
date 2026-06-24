@@ -378,7 +378,7 @@ pub fn download(
                 progress.set_total(Some(total_size));
 
                 let file = tokio::fs::File::create(&destination).await.context(
-                    format_context!("Failed to create {destination}"),
+                    anyhow::anyhow!("failed to create {destination}"),
                 )?;
                 (file, 0u64)
             };
@@ -434,7 +434,7 @@ pub fn download(
                     continue;
                 }
                 cleanup_partial_download(&destination);
-                return Err(err).context(format_context!(
+                return Err(err).context(anyhow::anyhow!(
                     "Failed to download {url}: stream interrupted after {bytes_written} bytes, all retries exhausted"
                 ));
             }
@@ -576,8 +576,10 @@ impl HttpArchive {
         archive: &Archive,
         tools_path: &str,
     ) -> anyhow::Result<Self> {
-        let relative_path = Self::url_to_relative_path(archive.url.as_ref(), &archive.filename)
-            .context(format_context!("no relative path for {}", archive.url))?;
+        let relative_path =
+            Self::url_to_relative_path(archive.url.as_ref(), &archive.filename).context(
+                anyhow::anyhow!("could not create relative path for `{}`", archive.url),
+            )?;
 
         let full_path_to_archive = format!("{bare_store_path}/{relative_path}");
 
@@ -689,7 +691,7 @@ impl HttpArchive {
         let mut files = Vec::new();
         let all_files = self
             .load_files_json()
-            .context(format_context!("failed to load json files manifest"))?;
+            .context(format_context!("while creating links for http_archive"))?;
 
         let mut collect_globs = glob::Globs::default();
         if let Some(globs) = self.archive.globs.as_ref() {
@@ -792,7 +794,7 @@ impl HttpArchive {
             .worker_threads(1)
             .enable_all()
             .build()
-            .context(format_context!("Failed to create runtime"))?;
+            .context(anyhow::anyhow!("Failed to create runtime"))?;
 
         if self.is_download_required() {
             if let Some(arguments) = gh::transform_url_to_arguments(
@@ -838,9 +840,9 @@ impl HttpArchive {
 
         label_logger(console.clone(), &self.archive.url).debug("Extracting archive");
 
-        self.extract(console.clone()).context(format_context!(
-            "extract failed {}",
-            self.full_path_to_archive
+        self.extract(console.clone()).context(anyhow::anyhow!(
+            "extract failed on file://{}",
+            self.full_path_to_archive,
         ))?;
         Ok(())
     }
@@ -876,7 +878,7 @@ impl HttpArchive {
     fn load_files_json(&self) -> anyhow::Result<HashSet<Arc<str>>> {
         let file_path = self.get_path_to_extracted_files_json();
         let contents = std::fs::read_to_string(file_path.as_str())
-            .context(format_context!("while reading {file_path}"))?;
+            .context(anyhow::anyhow!("while reading {file_path}"))?;
         let files: Files = serde_json::from_str(contents.as_str())
             .context(format_context!("while parsing {file_path}"))?;
         Ok(files.files)
@@ -911,8 +913,8 @@ impl HttpArchive {
                 self.get_path_to_extracted_files()
             ))?;
 
-            let extracted = decoder.extract().context(format_context!(
-                "{} -> {}",
+            let extracted = decoder.extract().context(anyhow::anyhow!(
+                "{} ->\n{}",
                 self.full_path_to_archive,
                 self.get_path_to_extracted_files()
             ))?;
@@ -985,8 +987,7 @@ impl HttpArchive {
     }
 
     pub fn url_to_relative_path(url: &str, filename: &Option<Arc<str>>) -> anyhow::Result<String> {
-        let archive_url = url::Url::parse(url)
-            .context(format_context!("Failed to parse bare store url {url}"))?;
+        let archive_url = url::Url::parse(url)?;
 
         let host = archive_url
             .host_str()

@@ -1,9 +1,9 @@
 use crate::{label, singleton, workspace};
 use anyhow::Context;
-use anyhow_source_location::{format_context, format_error};
+use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use utils::{features, git, lock, logger, ws};
+use utils::{ecode, features, git, lock, logger, ws};
 
 fn logger(console: console::Console, url: Arc<str>) -> logger::Logger {
     logger::Logger::new(console, url)
@@ -85,12 +85,12 @@ impl Git {
         &self,
         progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
-        name: &str,
         filter: Option<String>,
     ) -> anyhow::Result<(git::BareRepository, lock::FileLock)> {
         let (relative_bare_store_path, name_dot_git) =
-            git::BareRepository::url_to_relative_path_and_name(&self.url)
-                .context(format_context!("Failed to parse {name} url: {}", self.url))?;
+            git::BareRepository::url_to_relative_path_and_name(&self.url).context(
+                format_context!("Failed to parse repository URL: {}", self.url),
+            )?;
         let store_path = workspace.read().get_store_path();
         let store_repo_name: Arc<str> = name_dot_git.clone();
         let bare_repo_path: Arc<str> = format!(
@@ -105,7 +105,7 @@ impl Git {
         // Create parent directory for bare repo
         if let Some(parent) = std::path::Path::new(bare_repo_path.as_ref()).parent() {
             std::fs::create_dir_all(parent).context(format_context!(
-                "{name} - Failed to create bare repository parent directory {}",
+                "Failed to create bare repository parent directory {}",
                 parent.display()
             ))?;
         }
@@ -116,7 +116,7 @@ impl Git {
         lock_file
             .lock(progress.console.clone())
             .context(format_context!(
-                "{name} - Failed to lock the bare repository {}",
+                "Failed to lock bare repository {}",
                 self.spaces_key
             ))?;
 
@@ -144,7 +144,7 @@ impl Git {
             )
             .with_context(|| {
                 singleton::set_is_show_latest_error();
-                format_context!("{name} - Failed to create bare repository at {bare_repo_path}")
+                format_context!("Failed to create bare repository at {bare_repo_path}")
             })?;
         } else {
             logger(progress.console.clone(), self.url.clone())
@@ -171,7 +171,7 @@ impl Git {
                 },
             )
             .context(format_context!(
-                "{name} - Failed to fetch in bare repository {bare_repo_path}"
+                "Failed to fetch in bare repository {bare_repo_path}"
             ))?;
         }
 
@@ -189,28 +189,29 @@ impl Git {
         &self,
         progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
-        name: &str,
     ) -> anyhow::Result<()> {
         logger::push_deprecation_warning(None, "Support for worktrees will be removed in v0.16");
         logger(progress.console.clone(), self.url.clone()).message("execute worktree clone");
 
         let (bare_repo, _lock_file) =
-            self.ensure_bare_repository(progress, workspace.clone(), name, None)?;
+            self.ensure_bare_repository(progress, workspace.clone(), None)?;
 
         match &self.checkout {
             git::Checkout::NewBranch(branch_name) => {
                 let worktree = bare_repo
                     .add_worktree(progress, &self.worktree_path)
-                    .context(format_context!("{name} - Failed to add worktree"))?;
+                    .context(format_context!("Failed to add worktree"))?;
 
                 let repository = worktree.to_repository();
                 let revision = repository
                     .resolve_revision(progress, branch_name)
-                    .context(format_context!("failed to resolve revision"))?;
+                    .context(format_context!("while resolving revision {branch_name}"))?;
 
                 worktree
                     .switch_new_branch(progress, branch_name, &revision.commit)
-                    .context(format_context!("{name} - Failed to checkout new branch"))?;
+                    .context(format_context!(
+                        "while switching to new branch {branch_name}"
+                    ))?;
             }
             git::Checkout::Revision(revision) => {
                 // Check if revision is a branch using the bare repository
@@ -220,21 +221,25 @@ impl Git {
                     // Create worktree directly on the branch
                     let _worktree = bare_repo
                         .add_worktree_on_branch(progress, &self.worktree_path, revision)
-                        .context(format_context!("{name} - Failed to add worktree on branch"))?;
+                        .context(format_context!(
+                            "while adding worktree on branch {revision}"
+                        ))?;
                 } else {
                     // Create detached worktree and checkout the revision
                     let worktree = bare_repo
                         .add_worktree(progress, &self.worktree_path)
-                        .context(format_context!("{name} - Failed to add worktree"))?;
+                        .context(format_context!("while adding detached worktree"))?;
 
                     let repository = worktree.to_repository();
                     let revision_result = repository
                         .resolve_revision(progress, revision)
-                        .context(format_context!("failed to resolve revision"))?;
+                        .context(format_context!("while resolving revision {revision}"))?;
 
                     worktree
                         .checkout(progress, &revision_result.commit)
-                        .context(format_context!("{name} - Failed to checkout revision"))?;
+                        .context(format_context!(
+                            "while checking out revision {revision} in worktree"
+                        ))?;
                 }
             }
         };
@@ -242,7 +247,7 @@ impl Git {
         // Track workspace link to bare repository
         let (relative_bare_store_path, name_dot_git) =
             git::BareRepository::url_to_relative_path_and_name(&self.url).context(
-                format_context!("Failed to parse url for workspace link tracking"),
+                format_context!("while parsing repository URL for store link"),
             )?;
         // `relative_bare_store_path` already ends with '/' so do NOT add
         // another separator before `name_dot_git` to avoid double-slash paths.
@@ -257,13 +262,17 @@ impl Git {
         // Ensure store entry exists before adding workspace link
         workspace
             .write()
-            .add_store_entry(store_relative_path.clone())?;
+            .add_store_entry(store_relative_path.clone())
+            .context(format_context!("while adding store entry"))?;
 
-        workspace.write().add_store_link(
-            store_relative_path,
-            self.spaces_key.clone(),
-            utils::store::CloneType::Worktree,
-        )?;
+        workspace
+            .write()
+            .add_store_link(
+                store_relative_path,
+                self.spaces_key.clone(),
+                utils::store::CloneType::Worktree,
+            )
+            .context(format_context!("while adding worktree store link"))?;
 
         Ok(())
     }
@@ -272,7 +281,6 @@ impl Git {
         &self,
         progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
-        name: &str,
         filter: Option<String>,
         is_new_branch: IsNewBranch,
     ) -> anyhow::Result<()> {
@@ -292,14 +300,15 @@ impl Git {
             return Ok(());
         }
 
-        let (bare_repo, _lock_file) =
-            self.ensure_bare_repository(progress, workspace.clone(), name, filter.clone())?;
+        let (bare_repo, _lock_file) = self
+            .ensure_bare_repository(progress, workspace.clone(), filter.clone())
+            .context(format_context!("while ensuring bare repository"))?;
 
         // Step 2: Handle existing workspace
         let workspace_path = std::path::Path::new(self.spaces_key.as_ref());
         if workspace_path.exists() {
             let entries = std::fs::read_dir(workspace_path).context(format_context!(
-                "Internal Error: failed to read directory {}",
+                "while reading existing workspace directory {}",
                 self.spaces_key
             ))?;
 
@@ -336,16 +345,14 @@ impl Git {
                 existing_repo
                     .fetch_with_tags(progress, force_fetch_tags)
                     .context(format_context!(
-                        "{name} - Failed to fetch repository {}",
-                        self.spaces_key
+                        "while fetching updates in existing workspace"
                     ))?;
 
                 // Checkout the desired revision
                 existing_repo
                     .checkout(progress, &self.checkout)
                     .context(format_context!(
-                        "{name} - Failed to checkout repository {}",
-                        self.spaces_key
+                        "while checking out existing workspace revision"
                     ))?;
 
                 // If on a branch, pull latest
@@ -353,8 +360,7 @@ impl Git {
                     && existing_repo.is_remote_branch_tracked(progress)
                 {
                     existing_repo.pull(progress).context(format_context!(
-                        "{name} - Failed to pull repository {} after switching to a branch",
-                        self.spaces_key
+                        "while pulling latest changes in existing workspace"
                     ))?;
                 }
 
@@ -436,8 +442,7 @@ impl Git {
             },
         )
         .context(format_context!(
-            "{name} - Failed to clone with reference from {}",
-            bare_repo.full_path
+            "while cloning repository with reference clone"
         ))?;
 
         // Step 4: Setup sparse checkout if needed
@@ -445,10 +450,7 @@ impl Git {
             let workspace_repo = git::Repository::new(self.url.clone(), self.spaces_key.clone());
             workspace_repo
                 .setup_sparse_checkout(progress, sparse_checkout)
-                .context(format_context!(
-                    "Failed to setup sparse checkout in {}",
-                    self.spaces_key
-                ))?;
+                .context(format_context!("while setting up sparse checkout"))?;
         }
 
         // Step 5: Checkout the desired revision
@@ -456,8 +458,7 @@ impl Git {
         workspace_repo
             .checkout(progress, &self.checkout)
             .context(format_context!(
-                "{name} - Failed to checkout revision in {}",
-                self.spaces_key
+                "while checking out revision in cloned repository"
             ))?;
 
         // Step 6: If on a branch, reset to origin
@@ -468,10 +469,7 @@ impl Git {
                 .debug(format!("Resetting to origin/{rev}").as_str());
             workspace_repo
                 .reset_hard_origin_branch(progress, rev)
-                .context(format_context!(
-                    "Failed to reset to origin/{rev} in {}",
-                    self.spaces_key
-                ))?;
+                .context(format_context!("while resetting to origin/{rev}"))?;
         }
 
         logger(progress.console.clone(), self.url.clone())
@@ -480,7 +478,7 @@ impl Git {
         // Track workspace link to bare repository
         let (relative_bare_store_path, name_dot_git) =
             git::BareRepository::url_to_relative_path_and_name(&self.url).context(
-                format_context!("Failed to parse url for workspace link tracking"),
+                format_context!("while parsing repository URL for store link"),
             )?;
         // `relative_bare_store_path` already ends with '/' so do NOT add
         // another separator before `name_dot_git` to avoid double-slash paths.
@@ -496,10 +494,7 @@ impl Git {
         workspace
             .write()
             .add_store_entry(store_relative_path.clone())
-            .context(format_context!(
-                "while adding store entry for {}",
-                store_relative_path
-            ))?;
+            .context(format_context!("while adding store entry"))?;
 
         workspace
             .write()
@@ -508,10 +503,7 @@ impl Git {
                 self.spaces_key.clone(),
                 utils::store::CloneType::Reference,
             )
-            .context(format_context!(
-                "while adding store link for {}",
-                store_relative_path
-            ))?;
+            .context(format_context!("while adding reference store link"))?;
 
         Ok(())
     }
@@ -520,15 +512,17 @@ impl Git {
         &self,
         progress: &mut console::Progress,
         workspace: workspace::WorkspaceArc,
-        name: &str,
     ) -> anyhow::Result<()> {
         let url_logger = logger(progress.console.clone(), self.url.clone());
         url_logger.message("execute shallow clone");
 
         let branch = match &self.checkout {
             git::Checkout::NewBranch(branch_name) => {
-                return Err(format_error!(
+                return Err(anyhow::anyhow!(
                     "Cannot create a new branch {branch_name} with a shallow clone"
+                ))
+                .context(format_context!(
+                    "while validating shallow clone checkout mode"
                 ));
             }
             git::Checkout::Revision(branch_name) => branch_name.clone(),
@@ -566,10 +560,7 @@ impl Git {
 
             progress
                 .execute_process("git", clone_options)
-                .context(format_context!(
-                    "{name} - Failed to clone repository {}",
-                    self.spaces_key
-                ))?;
+                .context(format_context!("while executing shallow clone"))?;
         }
 
         // Setup sparse checkout if needed
@@ -581,8 +572,7 @@ impl Git {
             workspace_repo
                 .setup_sparse_checkout(progress, sparse_checkout)
                 .context(format_context!(
-                    "Failed to setup sparse checkout in {}",
-                    self.spaces_key
+                    "while setting up sparse checkout for shallow clone"
                 ))?;
 
             // Checkout the files according to sparse checkout configuration
@@ -591,8 +581,7 @@ impl Git {
             workspace_repo
                 .checkout(progress, &self.checkout)
                 .context(format_context!(
-                    "{name} - Failed to checkout files in sparse shallow clone {}",
-                    self.spaces_key
+                    "while checking out sparse files for shallow clone"
                 ))?;
         }
 
@@ -620,16 +609,18 @@ impl Git {
         };
 
         match self.clone {
-            git::Clone::Worktree => self
-                .execute_worktree_clone(progress, workspace.clone(), name)
-                .context(format_context!("spaces clone failed"))?,
-            git::Clone::Default | git::Clone::Blobless => self
-                .execute_default_clone(progress, workspace.clone(), name, None, is_new_branch)
-                .context(format_context!("default clone failed"))?,
-            git::Clone::Shallow => self
-                .execute_shallow_clone(progress, workspace.clone(), name)
-                .context(format_context!("default clone failed"))?,
+            git::Clone::Worktree => self.execute_worktree_clone(progress, workspace.clone()),
+            git::Clone::Default | git::Clone::Blobless => {
+                self.execute_default_clone(progress, workspace.clone(), None, is_new_branch)
+            }
+            git::Clone::Shallow => self.execute_shallow_clone(progress, workspace.clone()),
         }
+        .map_err(|err| {
+            ecode::anyhow(
+                ecode::Ecode::GitExecutorFailedToExecuteGitCommand,
+                &format!("Failed to execute git clone workflow for rule {name}\n{err:?}"),
+            )
+        })?;
 
         let ref_name = match &self.checkout {
             git::Checkout::NewBranch(branch_name) => branch_name.clone(),
@@ -644,10 +635,13 @@ impl Git {
         let mut member = match self.get_member() {
             Ok(mut member) => {
                 if member.version.is_none() {
-                    let latest_tag =
-                        git::get_latest_tag(progress, &self.url, &self.spaces_key).context(
-                            format_context!("Failed to get latest tag for {}", self.spaces_key),
-                        )?;
+                    let latest_tag = git::get_latest_tag(progress, &self.url, &self.spaces_key)
+                        .map_err(|err| {
+                            ecode::anyhow(
+                                ecode::Ecode::GitExecutorFailedToExecuteGitCommand,
+                                &format!("Failed to get latest tag for rule {name}\n{err:?}"),
+                            )
+                        })?;
                     member.version = Self::rev_to_version(latest_tag.clone());
                 }
                 Some(member)
@@ -675,8 +669,13 @@ impl Git {
         if workspace.read().is_create_lock_file {
             logger(progress.console.clone(), self.url.clone()).debug("creating lock file");
             if let Some(commit_hash) =
-                git::get_commit_hash(progress, &self.url, working_directory.as_ref()).context(
-                    format_context!("Failed to get commit hash for {working_directory}"),
+                git::get_commit_hash(progress, &self.url, working_directory.as_ref()).map_err(
+                    |err| {
+                        ecode::anyhow(
+                            ecode::Ecode::GitExecutorFailedToExecuteGitCommand,
+                            &format!("Failed to get commit hash for rule {name}\n{err:?}"),
+                        )
+                    },
                 )?
             {
                 let rev: Arc<str> =
@@ -740,10 +739,12 @@ impl Git {
                 logger(progress.console.clone(), self.url.clone())
                     .debug(format!("{}: git {options:?}", self.spaces_key).as_str());
 
-                git::execute_git_command(progress, &self.url, options).context(format_context!(
-                    "Failed to checkout commit hash from {}",
-                    self.spaces_key
-                ))?;
+                git::execute_git_command(progress, &self.url, options).map_err(|err| {
+                    ecode::anyhow(
+                        ecode::Ecode::GitExecutorFailedToExecuteGitCommand,
+                        &format!("Failed to checkout lock revision for rule {name}\n{err:?}"),
+                    )
+                })?;
 
                 is_locked = true;
             }
@@ -761,10 +762,12 @@ impl Git {
             logger(progress.console.clone(), self.url.clone())
                 .debug(format!("{}: git {options:?}", self.spaces_key).as_str());
 
-            git::execute_git_command(progress, &self.url, options).context(format_context!(
-                "Failed to create new branch for {}",
-                self.spaces_key
-            ))?;
+            git::execute_git_command(progress, &self.url, options).map_err(|err| {
+                ecode::anyhow(
+                    ecode::Ecode::GitExecutorFailedToExecuteGitCommand,
+                    &format!("Failed to create branch for rule {name}\n{err:?}"),
+                )
+            })?;
         }
 
         // after possibly checking out the lock commit, check if on a branch or commit

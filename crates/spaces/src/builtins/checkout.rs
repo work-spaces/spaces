@@ -920,16 +920,20 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 .workspace
                 .clone()
                 .ok_or_else(|| format_error!("No active workspace found"))?;
-            add_http_archive(
+            let result = add_http_archive(
                 rule,
                 Some(archive),
                 workspace_arc,
                 &ctx.module_name,
                 ctx.default_module_visibility.clone(),
                 ctx,
-            )
-            .context(format_context!("Failed to add archive"))?;
-            Ok(NoneType)
+            );
+
+            if let Err(err) = result {
+                Err(anyhow::anyhow!("{err:?}"))
+            } else {
+                Ok(NoneType)
+            }
         })
     }
 
@@ -1496,8 +1500,8 @@ fn add_http_archive(
             &archive,
             format!("{}/sysroot/bin", eval_context.workspace_spaces_tools_path).as_str(),
         )
-        .context(format_context!(
-            "Failed to create http_archive {}",
+        .context(anyhow::anyhow!(
+            "Failed to create http_archive for rule :{}",
             rule.name
         ))?;
 

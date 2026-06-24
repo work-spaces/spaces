@@ -76,7 +76,7 @@ fn get_state() -> &'static lock::StateLock<State> {
         is_lsp: false,
         is_skip_deps: false,
         is_use_locks: false,
-        error_report: ErrorReport::Full,
+        error_report: ErrorReport::One,
         error_chain: Vec::new(),
         new_branches: Vec::new(),
         removed_branches: Vec::new(),

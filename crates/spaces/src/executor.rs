@@ -8,9 +8,9 @@ pub mod oras;
 
 use crate::workspace;
 use anyhow::Context;
-use anyhow_source_location::format_context;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use utils::ecode;
 
 pub use exec::UseWorkspaceEnv;
 
@@ -77,7 +77,10 @@ impl Task {
             }
             Task::Target => Ok(()),
         }
-        .context(format_context!("Failed to execute task {}", name))?;
+        .context(ecode::anyhow(
+            ecode::Ecode::ExecutorTaskExecutionFailed,
+            &format!("Failed to execute task {}", name),
+        ))?;
 
         let mut result = TaskResult {
             new_modules: Vec::new(),
@@ -94,9 +97,11 @@ impl Task {
                 // if the repo is a workflows repo, don't add the modules
                 if !workflows_file_path.exists() {
                     // add files in the directory that end in spaces.star
-                    let modules = std::fs::read_dir(new_repo_path.clone()).context(
-                        format_context!("Failed to read workspace directory {new_repo_path:?}"),
-                    )?;
+                    let modules =
+                        std::fs::read_dir(new_repo_path.clone()).context(ecode::anyhow(
+                            ecode::Ecode::ExecutorTaskExecutionFailed,
+                            &format!("Failed to read workspace directory {new_repo_path:?}"),
+                        ))?;
 
                     for module in modules.flatten() {
                         let path = module.path();

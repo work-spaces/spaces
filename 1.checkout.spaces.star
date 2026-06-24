@@ -11,6 +11,7 @@ load("//@star/sdk/star/asset.star", "asset_hard_link")
 load(
     "//@star/sdk/star/checkout.star",
     "checkout_add_any_assets",
+    "checkout_add_archive",
     "checkout_add_env_vars",
 )
 load("//@star/sdk/star/env.star", "env_assign")
@@ -66,7 +67,7 @@ checkout_add_any_assets(
     "cargo_workspace_assets",
     assets = [
         asset_hard_link(
-            source = "{}/rust-toolchain.toml".format(SPACES_CHECKOUT_PATH),
+            source = "{}/rust-toolchain1.toml".format(SPACES_CHECKOUT_PATH),
             destination = "rust-toolchain.toml",
         ),
         asset_hard_link(
@@ -112,3 +113,10 @@ checkout_add_env_vars(
         ),
     ],
 )
+
+if False:
+    checkout_add_archive(
+        "spaces_archive",
+        url = "https://github.com/work-spaces/spaces/releases/download/v0.15.50/spaces-linux-aarch64-v0.15.50.zip",
+        sha256 = "",
+    )
