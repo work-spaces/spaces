@@ -251,18 +251,6 @@ impl Exec {
         let workspace_root = absolute_path_to_workspace.as_ref();
         let working_dir = pwd.as_ref();
 
-        for arg in arguments.iter_mut() {
-            *arg = expand_exec_tokens(
-                name,
-                arg,
-                &workspace,
-                workspace_root,
-                working_dir,
-                &exec_env_vars,
-                "args",
-            )?;
-        }
-
         for (key, value) in self.env.clone().unwrap_or_default() {
             let context = format!("env var {key}");
             let expanded = expand_exec_tokens(
@@ -275,6 +263,19 @@ impl Exec {
                 &context,
             )?;
             exec_env_vars.insert(key, expanded);
+        }
+
+        for arg in arguments.iter_mut() {
+            let context = format!("arg {arg}");
+            *arg = expand_exec_tokens(
+                name,
+                arg,
+                &workspace,
+                workspace_root,
+                working_dir,
+                &exec_env_vars,
+                &context,
+            )?;
         }
 
         let command_line_target = workspace.read().target.clone();
