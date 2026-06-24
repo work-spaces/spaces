@@ -1,9 +1,10 @@
 use crate::{singleton, workspace};
 use anyhow::Context;
+use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use utils::{ecode, lock, logger, rule};
+use utils::{ecode, lock, logger, placeholder, rule};
 
 pub use rule::Expect;
 
@@ -51,38 +52,23 @@ fn expand_exit_value_tokens(
     value: &str,
     workspace: &workspace::WorkspaceArc,
 ) -> anyhow::Result<Arc<str>> {
-    let mut result = String::new();
-    let mut remaining = value;
-    let marker_open = format!("{}{{", rule::EXIT_VALUE_MARKER);
-
-    while let Some(start) = remaining.find(&marker_open) {
-        result.push_str(&remaining[..start]);
-        let after = &remaining[start + marker_open.len()..];
-        let end = after.find('}').ok_or_else(|| {
-            ecode::anyhow(
-                ecode::Ecode::ExecExecutorOperationFailed,
-                &format!("Unclosed $RUN_LOAD_EXIT_VALUE{{}} token in: {}", value),
-            )
-        })?;
-        let dep_rule = &after[..end];
-        let exit_code = workspace
-            .read()
-            .settings
-            .bin
-            .exit_codes
-            .get(dep_rule)
-            .copied()
-            .ok_or_else(|| {
-                ecode::anyhow(
-                    ecode::Ecode::ExecExecutorOperationFailed,
-                    &format!("No exit value stored for rule '{}'", dep_rule),
-                )
-            })?;
-        result.push_str(&exit_code.to_string());
-        remaining = &after[end + 1..];
-    }
-    result.push_str(remaining);
-    Ok(result.into())
+    placeholder::expand_placeholders(
+        value,
+        rule::EXIT_VALUE_MARKER,
+        |dep_rule| {
+            let exit_code = workspace
+                .read()
+                .settings
+                .bin
+                .exit_codes
+                .get(dep_rule)
+                .copied()
+                .ok_or_else(|| format_error!("No exit value stored for rule '{}'", dep_rule))?;
+            Ok(exit_code.to_string())
+        },
+        || format_error!("Unclosed $RUN_LOAD_EXIT_VALUE{{}} token in: {}", value),
+    )
+    .map(Into::into)
 }
 
 fn expand_file_tokens(
@@ -90,36 +76,75 @@ fn expand_file_tokens(
     workspace_root: &str,
     working_directory: &str,
 ) -> anyhow::Result<Arc<str>> {
-    let mut result = String::new();
-    let mut remaining = value;
-    let file_open = format!("{}{{", rule::FILE_CONTENT_MARKER);
+    placeholder::expand_placeholders(
+        value,
+        rule::FILE_CONTENT_MARKER,
+        |file_path| {
+            let abs_path = if let Some(ws_relative) = file_path.strip_prefix("//") {
+                format!("{workspace_root}/{ws_relative}")
+            } else {
+                format!("{working_directory}/{file_path}")
+            };
+            std::fs::read_to_string(&abs_path).with_context(|| {
+                format_context!("Failed to read $RUN_LOAD_FILE_CONTENTS{{{}}}", file_path)
+            })
+        },
+        || format_error!("Unclosed $RUN_LOAD_FILE_CONTENTS{{}} token in: {}", value),
+    )
+    .map(Into::into)
+}
 
-    while let Some(start) = remaining.find(&file_open) {
-        result.push_str(&remaining[..start]);
-        let after = &remaining[start + file_open.len()..];
-        let end = after.find('}').ok_or_else(|| {
-            ecode::anyhow(
-                ecode::Ecode::ExecExecutorOperationFailed,
-                &format!("Unclosed $RUN_LOAD_FILE_CONTENTS{{}} token in: {}", value),
-            )
-        })?;
-        let file_path = &after[..end];
-        let abs_path = if let Some(ws_relative) = file_path.strip_prefix("//") {
-            format!("{workspace_root}/{ws_relative}")
-        } else {
-            format!("{working_directory}/{file_path}")
-        };
-        let contents = std::fs::read_to_string(&abs_path).with_context(|| {
-            ecode::anyhow(
-                ecode::Ecode::ExecExecutorOperationFailed,
-                &format!("Failed to read $RUN_LOAD_FILE_CONTENTS{{{}}}", file_path),
-            )
-        })?;
-        result.push_str(&contents);
-        remaining = &after[end + 1..];
-    }
-    result.push_str(remaining);
-    Ok(result.into())
+fn expand_env_tokens(
+    value: &str,
+    env_vars: &HashMap<Arc<str>, Arc<str>>,
+) -> anyhow::Result<Arc<str>> {
+    placeholder::expand_placeholders(
+        value,
+        rule::ENV_MARKER,
+        |key| {
+            env_vars
+                .get(key)
+                .cloned()
+                .ok_or_else(|| format_error!("No env value stored for key '{}'", key))
+        },
+        || format_error!("Unclosed $RUN_LOAD_ENV{{}} token in: {}", value),
+    )
+    .map(Into::into)
+}
+
+fn expand_exec_tokens(
+    rule_name: &str,
+    value: &str,
+    workspace: &workspace::WorkspaceArc,
+    workspace_root: &str,
+    working_directory: &str,
+    env_vars: &HashMap<Arc<str>, Arc<str>>,
+    context: &str,
+) -> anyhow::Result<Arc<str>> {
+    let expanded = expand_file_tokens(value, workspace_root, working_directory).map_err(|err| {
+        ecode::anyhow(
+            ecode::Ecode::ExecExecutorOperationFailed,
+            &format!(
+                "{rule_name} Failed to expand $RUN_LOAD_FILE_CONTENTS tokens in {context}\n{err:?}"
+            ),
+        )
+    })?;
+
+    let expanded = expand_exit_value_tokens(&expanded, workspace).map_err(|err| {
+        ecode::anyhow(
+            ecode::Ecode::ExecExecutorOperationFailed,
+            &format!(
+                "{rule_name} Failed to expand $RUN_LOAD_EXIT_VALUE tokens in {context}\n{err:?}"
+            ),
+        )
+    })?;
+
+    expand_env_tokens(&expanded, env_vars).map_err(|err| {
+        ecode::anyhow(
+            ecode::Ecode::ExecExecutorOperationFailed,
+            &format!("{rule_name} Failed to expand $RUN_LOAD_ENV tokens in {context}\n{err:?}"),
+        )
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -226,39 +251,31 @@ impl Exec {
         let workspace_root = absolute_path_to_workspace.as_ref();
         let working_dir = pwd.as_ref();
 
-        for arg in arguments.iter_mut() {
-            *arg = expand_file_tokens(arg, workspace_root, working_dir).map_err(|err| {
-                ecode::anyhow(
-                    ecode::Ecode::ExecExecutorOperationFailed,
-                    &format!("Failed to expand $RUN_LOAD_FILE_CONTENTS tokens in args\n{err:?}"),
-                )
-            })?;
-            *arg = expand_exit_value_tokens(arg, &workspace).map_err(|err| {
-                ecode::anyhow(
-                    ecode::Ecode::ExecExecutorOperationFailed,
-                    &format!("Failed to expand $RUN_LOAD_EXIT_VALUE tokens in args\n{err:?}"),
-                )
-            })?;
+        for (key, value) in self.env.clone().unwrap_or_default() {
+            let context = format!("env var {key}");
+            let expanded = expand_exec_tokens(
+                name,
+                &value,
+                &workspace,
+                workspace_root,
+                working_dir,
+                &exec_env_vars,
+                &context,
+            )?;
+            exec_env_vars.insert(key, expanded);
         }
 
-        for (key, value) in self.env.clone().unwrap_or_default() {
-            let expanded = expand_file_tokens(&value, workspace_root, working_dir).map_err(|err| {
-                ecode::anyhow(
-                    ecode::Ecode::ExecExecutorOperationFailed,
-                    &format!(
-                        "Failed to expand $RUN_LOAD_FILE_CONTENTS tokens in env var {key}\n{err:?}"
-                    ),
-                )
-            })?;
-            let expanded = expand_exit_value_tokens(&expanded, &workspace).map_err(|err| {
-                ecode::anyhow(
-                    ecode::Ecode::ExecExecutorOperationFailed,
-                    &format!(
-                        "Failed to expand $RUN_LOAD_EXIT_VALUE tokens in env var {key}\n{err:?}"
-                    ),
-                )
-            })?;
-            exec_env_vars.insert(key, expanded);
+        for arg in arguments.iter_mut() {
+            let context = format!("arg {arg}");
+            *arg = expand_exec_tokens(
+                name,
+                arg,
+                &workspace,
+                workspace_root,
+                working_dir,
+                &exec_env_vars,
+                &context,
+            )?;
         }
 
         let command_line_target = workspace.read().target.clone();

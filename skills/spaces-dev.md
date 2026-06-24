@@ -17,13 +17,13 @@ To test spaces code changes, first check the changes using:
 spaces run //spaces:check
 ```
 
-Then build the changes and use the debug binary to run: 
+If running the binary is needed for testing, it can be built using (don't run this just for the sake of it):
 
 ```sh
 spaces run //spaces:build
 ```
 
-Then use:
+Then use this binary to run any testing on the build:
 
 ```sh
 build/target/debug/spaces ...
@@ -38,6 +38,8 @@ Prefer `spaces run <rule>` over invoking build/test tools directly.
 ```sh
 spaces query rules
 ```
+
+All rules support passing additional arguments to the rule invocation by adding the args after a trailing `--`.
 
 2. Run the most targeted relevant rules first.
 3. Then run broad validation using Spaces rules as much as possible.

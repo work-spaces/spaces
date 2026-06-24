@@ -40,7 +40,7 @@ RUN_SIGNAL_TERMINATE = "Terminate"
 RUN_SIGNAL_USER1 = "User1"
 RUN_SIGNAL_USER2 = "User2"
 
-def run_load_file_contents(path):
+def run_load_file_contents(path: str) -> str:
     """
     Load the contents of a file and return it as a string.
 
@@ -54,7 +54,7 @@ def run_load_file_contents(path):
     """
     return "$RUN_LOAD_FILE_CONTENTS{" + path + "}"
 
-def run_load_exit_code(rule):
+def run_load_exit_code(rule: str) -> str:
     """
     Load the exit code of a previous run rule and return it as a string.
 
@@ -67,6 +67,18 @@ def run_load_exit_code(rule):
         str: The contents of the file.
     """
     return "$RUN_LOAD_EXIT_VALUE{" + rule + "}"
+
+def run_load_env(key: str) -> str:
+    """
+    Load the value of an environment variable when the rule is executed.
+
+    Args:
+        key (str): The name of the environment variable to load.
+
+    Returns:
+        str: A token that will be replaced with the value of the environment variable at execution time.
+    """
+    return "$RUN_LOAD_ENV{" + key + "}"
 
 # Provide thin wrapper for constants so that they can have docstrings
 def run_inputs_once():
