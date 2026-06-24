@@ -3,26 +3,25 @@ Spaces starlark checkout/run script to make changes to spaces, printer, and arch
 With VSCode/Zed integration
 """
 
-load("//@star/prelude/rules/deps.star", "deps")
-load("//@star/prelude/rules/glob.star", "glob")
+load("//@star/sdk/star/deps.star", "deps")
+load("//@star/sdk/star/glob.star", "glob")
 load(
-    "//@star/prelude/rules/run.star",
+    "//@star/sdk/star/run.star",
     "run_add_exec",
     "run_add_exec_test",
-    "run_load_env",
 )
+load("//@star/sdk/star/shell.star", "shell")
 load(
-    "//@star/prelude/rules/visibility.star",
+    "//@star/sdk/star/visibility.star",
     "visibility_private",
     "visibility_public",
     "visibility_rules",
 )
 load(
-    "//@star/prelude/rules/ws.star",
+    "//@star/sdk/star/ws.star",
     "workspace_get_env_var",
     "workspace_is_env_var_set",
 )
-load("//@star/sdk/star/shell.star", "shell")
 
 GLOB_DEPS = glob(includes = [
     "//Cargo.toml",
@@ -129,14 +128,6 @@ run_add_exec(
     log_level = "Passthrough",
     deps = deps(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
     help = "Run cargo fmt on workspace",
-    visibility = visibility_private(),
-)
-
-run_add_exec(
-    "test_run_load_env",
-    command = "echo",
-    args = ["The value is " + run_load_env("BAT_PAGING")],
-    log_level = "Passthrough",
     visibility = visibility_private(),
 )
 
