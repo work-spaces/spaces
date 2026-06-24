@@ -575,7 +575,7 @@ fn get_destination_path(
 fn save_asset(workspace_path: Arc<str>, destination: &str, content: &str) -> anyhow::Result<()> {
     let output_path = get_destination_path(workspace_path, destination).context(ecode::anyhow(
         ecode::Ecode::AssetExecutorOperationFailed,
-        &format!("Failed to get destaiont for {destination}"),
+        &format!("Failed to get destination for {destination}"),
     ))?;
     if let Some(parent) = output_path.parent() {
         std::fs::create_dir_all(parent).context(ecode::anyhow(
