@@ -920,20 +920,16 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 .workspace
                 .clone()
                 .ok_or_else(|| format_error!("No active workspace found"))?;
-            let result = add_http_archive(
+            add_http_archive(
                 rule,
                 Some(archive),
                 workspace_arc,
                 &ctx.module_name,
                 ctx.default_module_visibility.clone(),
                 ctx,
-            );
-
-            if let Err(err) = result {
-                Err(anyhow::anyhow!("{err:?}"))
-            } else {
-                Ok(NoneType)
-            }
+            )
+            .context(format_context!("while adding http archive rule"))?;
+            Ok(NoneType)
         })
     }
 
