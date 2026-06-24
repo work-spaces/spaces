@@ -67,7 +67,7 @@ checkout_add_any_assets(
     "cargo_workspace_assets",
     assets = [
         asset_hard_link(
-            source = "{}/rust-toolchain1.toml".format(SPACES_CHECKOUT_PATH),
+            source = "{}/rust-toolchain.toml".format(SPACES_CHECKOUT_PATH),
             destination = "rust-toolchain.toml",
         ),
         asset_hard_link(
