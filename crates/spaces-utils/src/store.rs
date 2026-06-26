@@ -1004,7 +1004,7 @@ impl Store {
 
         emit_pretty_fix_report(&console, &fix_report);
 
-        bare_separator(&console, 72);
+        bare_separator(&console, console::bootstrap::Width::Large);
 
         Ok(())
     }
@@ -1228,7 +1228,7 @@ fn emit_pretty_fix_report(console: &console::Console, report: &FixActionReport) 
         .headers(vec!["Action".to_string(), "Outcome".to_string()])
         .alignments(vec![components::Align::Left, components::Align::Left])
         .rows(rows)
-        .width(72);
+        .width(console::bootstrap::Width::Large);
 
     console.emit_lines(table.render());
 
@@ -1242,7 +1242,7 @@ fn emit_pretty_fix_report(console: &console::Console, report: &FixActionReport) 
         ))
         .title("Bare repo repair warning")
         .variant(Variant::Warning)
-        .width(72);
+        .width(console::bootstrap::Width::Large);
         console.emit_lines(warning.render());
     }
 }
@@ -1618,7 +1618,7 @@ fn serialise_bare_info_yaml(
     serde_yaml::to_string(&output).context(format_context!("Failed to serialize bare info as YAML"))
 }
 
-fn bare_separator(console: &console::Console, width: usize) {
+fn bare_separator(console: &console::Console, width: console::bootstrap::Width) {
     let divider = components::Divider::new().width(width);
     console.emit_line(divider.render());
 }
@@ -1666,7 +1666,7 @@ fn emit_pretty_bare_info(
         console.emit_line(line);
     }
 
-    bare_separator(console, 56);
+    bare_separator(console, console::bootstrap::Width::Custom(56));
 }
 
 fn get_git_progress(
