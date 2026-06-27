@@ -1540,6 +1540,7 @@ fn build_query_rule(
     // Only compute expanded_deps if the config requires it
     let expanded_deps = if config.compute_expanded_deps {
         let mut progress = console::Progress::new(console.clone(), "query-deps", None, None);
+        progress.set_message("inspecting workspace inputs");
         let mut dep_strings: Vec<Arc<str>> = task.collect_rule_deps();
         let glob_deps = rules::collect_task_glob_deps(task);
         let files = workspace
