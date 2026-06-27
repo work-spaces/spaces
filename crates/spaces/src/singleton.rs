@@ -37,6 +37,7 @@ struct State {
     is_lsp: bool,
     is_use_locks: bool,
     is_skip_deps: bool,
+    is_create_digest_reports: bool,
     error_report: ErrorReport,
     error_chain: Vec<String>,
     args_env: HashMap<Arc<str>, Arc<str>>,
@@ -76,6 +77,7 @@ fn get_state() -> &'static lock::StateLock<State> {
         is_lsp: false,
         is_skip_deps: false,
         is_use_locks: false,
+        is_create_digest_reports: false,
         error_report: ErrorReport::One,
         error_chain: Vec::new(),
         new_branches: Vec::new(),
@@ -141,6 +143,16 @@ pub fn enable_skip_deps_mode() {
 pub fn is_skip_deps_mode() -> bool {
     let state = get_state().read();
     state.is_skip_deps
+}
+
+pub fn set_is_create_digest_reports(is_create_digest_reports: bool) {
+    let mut state = get_state().write();
+    state.is_create_digest_reports = is_create_digest_reports;
+}
+
+pub fn get_is_create_digest_reports() -> bool {
+    let state = get_state().read();
+    state.is_create_digest_reports
 }
 
 pub fn set_execution_phase(phase: task::Phase) {

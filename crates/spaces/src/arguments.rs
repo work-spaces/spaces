@@ -52,6 +52,9 @@ pub struct Arguments {
     /// Rescan the workspace for *spaces.star files
     #[arg(long)]
     rescan: bool,
+    /// Create per-rule digest reports under `.spaces/digests` when running rules.
+    #[arg(long)]
+    create_digest_reports: bool,
     #[command(subcommand)]
     commands: Commands,
 }
@@ -129,6 +132,7 @@ pub fn execute() -> anyhow::Result<()> {
         ci,
         disable_logs,
         rescan,
+        create_digest_reports,
         commands,
     } = args;
 
@@ -167,6 +171,7 @@ pub fn execute() -> anyhow::Result<()> {
         hide_progress_bars,
         show_elapsed_time,
     );
+    singleton::set_is_create_digest_reports(create_digest_reports);
 
     let refresh_handle = effective_console.start_refresh_thread();
     let result = execute_command(commands, effective_console.clone());

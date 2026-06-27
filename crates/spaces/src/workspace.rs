@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use utils::{
-    age, environment, features, fs_mutex, inputs, lock, logger, logs, mtarget, platform, rcache,
-    rule, store, ws,
+    age, changes, environment, features, fs_mutex, inputs, lock, logger, logs, mtarget, platform,
+    rcache, rule, store, ws,
 };
 
 pub use rcache::CacheStatus;
@@ -61,6 +61,12 @@ pub enum IsCreateLogFolder {
     Yes,
 }
 
+#[derive(Copy, Clone, PartialEq)]
+pub enum IsCreateDigestReport {
+    No,
+    Yes,
+}
+
 pub type WorkspaceArc = std::sync::Arc<lock::StateLock<Workspace>>;
 
 fn logger_printer(console: console::Console) -> logger::Logger {
@@ -81,6 +87,18 @@ pub struct RuleMetrics {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RuleMetricsFile {
     metrics: Vec<HashMap<Arc<str>, RuleMetrics>>,
+}
+
+#[derive(Debug, Serialize)]
+struct RuleDigestInput {
+    workspace_path: Arc<str>,
+    digest: Arc<str>,
+}
+
+#[derive(Debug, Serialize)]
+struct RuleDigestReport {
+    rule_digest: Arc<str>,
+    inputs: Vec<RuleDigestInput>,
 }
 
 impl RuleMetricsFile {
@@ -1088,7 +1106,6 @@ impl Workspace {
             .changes
             .update_from_globs(progress, &changes_globs)
             .context(format_context!("Failed to update workspace changes"))?;
-
         Ok(())
     }
 
@@ -1130,10 +1147,68 @@ impl Workspace {
         format!("{}/cargo_binstall_bin_dir", self.get_spaces_tools_path()).into()
     }
 
-    pub fn get_log_file(&self, rule_name: &str) -> Arc<str> {
+    fn get_log_file_safe_rule_name(rule_name: &str) -> String {
         let rule_name = rule_name.replace('/', "_");
-        let rule_name = rule_name.replace(':', "_");
-        format!("{}/{rule_name}.log", self.log_directory).into()
+        rule_name.replace(':', "_")
+    }
+
+    pub fn get_log_file(&self, rule_name: &str) -> Arc<str> {
+        let safe_rule_name = Self::get_log_file_safe_rule_name(rule_name);
+        format!("{}/{safe_rule_name}.log", self.log_directory).into()
+    }
+
+    fn get_digest_report_file(&self, rule_name: &str) -> Arc<str> {
+        let safe_rule_name = Self::get_log_file_safe_rule_name(rule_name);
+        format!(
+            "{}/.spaces/digests/{safe_rule_name}.yaml",
+            self.absolute_path
+        )
+        .into()
+    }
+
+    fn save_digest_report(
+        &self,
+        progress: &mut console::Progress,
+        rule_name: &str,
+        seed: &str,
+        inputs: &[Arc<str>],
+    ) -> anyhow::Result<()> {
+        let mut report_inputs = Vec::new();
+        for input in inputs {
+            if let Some(change_detail) = self.settings.bin.changes.entries.get(input.as_ref())
+                && let changes::ChangeDetailType::File(hash)
+                | changes::ChangeDetailType::Symlink(hash) = &change_detail.detail_type
+            {
+                report_inputs.push(RuleDigestInput {
+                    workspace_path: input.clone(),
+                    digest: hash.clone(),
+                });
+            }
+        }
+
+        let report = RuleDigestReport {
+            rule_digest: seed.into(),
+            inputs: report_inputs,
+        };
+
+        let digest_report_dir = ".spaces/digests";
+        std::fs::create_dir_all(digest_report_dir).context(format_context!(
+            "Failed to create digest reports directory {digest_report_dir}"
+        ))?;
+
+        let digest_report_file = self.get_digest_report_file(rule_name);
+        let report_yaml = serde_yaml::to_string(&report).context(format_context!(
+            "Failed to serialize digest report for rule {rule_name}"
+        ))?;
+
+        std::fs::write(digest_report_file.as_ref(), report_yaml).context(format_context!(
+            "Failed to write digest report file {digest_report_file}"
+        ))?;
+
+        logger(progress.console.clone())
+            .debug(format!("Saved digest report {digest_report_file}").as_str());
+
+        Ok(())
     }
 
     pub fn is_rule_deps_changed(
@@ -1142,14 +1217,25 @@ impl Workspace {
         rule_name: &str,
         seed: &str,
         globs: &[rule::Globs],
+        is_create_digest_repot: IsCreateDigestReport,
     ) -> anyhow::Result<inputs::IsChanged> {
         let changes_globs = rule::Globs::to_changes_globs(globs);
-        let digest = self
+        let (digest, inputs) = self
             .settings
             .bin
             .changes
             .calculate_digest(progress, seed, &changes_globs)
             .context(format_context!("Failed to get digest for rule {rule_name}"))?;
+
+        if is_create_digest_repot == IsCreateDigestReport::Yes {
+            logger(progress.console.clone())
+                .message(format!("Creating digest report for {rule_name}",).as_str());
+
+            self.save_digest_report(progress, rule_name, seed, &inputs)
+                .context(format_context!(
+                    "Failed to save digest report for rule {rule_name}"
+                ))?;
+        }
 
         let is_changed = self.settings.bin.inputs.is_changed(rule_name, digest);
 

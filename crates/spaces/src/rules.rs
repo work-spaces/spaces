@@ -215,6 +215,12 @@ pub fn execute_rule(
 
             logger.debug("check for new digest");
 
+            let is_create_digest_report = if singleton::get_is_create_digest_reports() {
+                workspace::IsCreateDigestReport::Yes
+            } else {
+                workspace::IsCreateDigestReport::No
+            };
+
             let check_changes = workspace
                 .read()
                 .is_rule_deps_changed(
@@ -222,6 +228,7 @@ pub fn execute_rule(
                     &rule_name,
                     task.digest.as_ref(),
                     &dep_globs[..],
+                    is_create_digest_report,
                 )
                 .context(format_context!("[{rule_name}] Failed to check deps globs"))?;
 
