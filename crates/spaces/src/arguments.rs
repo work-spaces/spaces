@@ -319,17 +319,16 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             if args.locked {
                 singleton::set_use_locks();
             }
-            let checkout_map =
+            let (checkout_map, checkout_file_path) =
                 co::Checkout::load().context(format_context!("Failed to load co file"))?;
 
-            let mut checkout = checkout_map
-                .get(&args.checkout)
-                .context(format_context!(
-                    "Failed to find `{}` in `{}`",
-                    args.checkout,
-                    co::CO_FILE_NAME
-                ))?
-                .clone();
+            let mut checkout = checkout_map.get(&args.checkout).cloned().ok_or_else(|| {
+                co::get_checkout_not_found_error(
+                    args.checkout.clone(),
+                    &checkout_map,
+                    checkout_file_path.as_path(),
+                )
+            })?;
 
             checkout
                 .apply_overrides(&args)
