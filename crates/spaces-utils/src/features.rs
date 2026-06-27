@@ -1,7 +1,7 @@
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use clap::ValueEnum as _;
-use console::{Console, style};
+use console::{Console, Line, Span, bootstrap, style};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -94,6 +94,16 @@ pub enum FeatureSource {
     Manifest,
     /// Using default value
     Default,
+}
+
+impl FeatureSource {
+    fn variant(self) -> bootstrap::Variant {
+        match self {
+            FeatureSource::Environment => bootstrap::Variant::Info,
+            FeatureSource::Manifest => bootstrap::Variant::Primary,
+            FeatureSource::Default => bootstrap::Variant::Secondary,
+        }
+    }
 }
 
 /// Features manifest containing the enabled/disabled state of features.
@@ -220,11 +230,8 @@ impl FeaturesCommand {
                 features
                     .save(store_path)
                     .context(format_context!("while saving features to store"))?;
-                let styled_message = style::StyledContent::new(
-                    console::primary_style(),
-                    format!("Enabled feature: {}", feature.into_kebab_case()),
-                );
-                console.info("Status", styled_message)?;
+
+                Self::emit_feature_toggle_banner(console, *feature, true);
                 Ok(())
             }
             FeaturesCommand::Disable { feature } => {
@@ -233,56 +240,114 @@ impl FeaturesCommand {
                 features
                     .save(store_path)
                     .context(format_context!("while saving features to store"))?;
-                let styled_message = style::StyledContent::new(
-                    console::primary_style(),
-                    format!("Disabled feature: {}", feature.into_kebab_case()),
-                );
-                console.info("Status", styled_message)?;
+
+                Self::emit_feature_toggle_banner(console, *feature, false);
                 Ok(())
             }
             FeaturesCommand::Info => {
                 let features = Features::new_from_json(store_path)?;
 
-                let title = style::StyledContent::new(console::bold_style(), "Feature Status:");
-                console.raw(format!("{}\n", title))?;
-                console.raw(format!("{}\n", "━".repeat(30)))?;
+                let mut container = bootstrap::Container::new();
+                container.add(
+                    bootstrap::Header::h1("Feature Status").variant(bootstrap::Variant::Primary),
+                );
 
                 // Iterate over all currently-known variants so the output is
                 // always complete, regardless of what is stored on disk.
                 for &feature in Feature::value_variants() {
                     let (enabled, source) = features.get_status_with_source(feature);
-                    let feature_name = style::StyledContent::new(
-                        console::primary_style(),
-                        format!("{}", feature.into_kebab_case()),
-                    );
 
-                    let status_style = if enabled {
-                        console::primary_style()
+                    let status_variant = if enabled {
+                        bootstrap::Variant::Success
                     } else {
-                        console::default_style()
+                        bootstrap::Variant::Secondary
                     };
                     let status = if enabled { "ON" } else { "OFF" };
-                    let status_styled = style::StyledContent::new(status_style, status);
 
-                    let source_styled =
-                        style::StyledContent::new(console::danger_style(), format!("{}", source));
+                    let mut status_line = Line::default();
+                    status_line.push(Span::new_styled_lossy(style::StyledContent::new(
+                        status_variant.style(),
+                        status.to_string(),
+                    )));
+                    status_line.push(Span::new_unstyled_lossy(" ("));
+                    status_line.push(Span::new_styled_lossy(style::StyledContent::new(
+                        source.variant().style(),
+                        source.to_string(),
+                    )));
+                    status_line.push(Span::new_unstyled_lossy(")"));
 
-                    console.raw(format!(
-                        "  {} - {} ({})\n",
-                        feature_name, status_styled, source_styled
-                    ))?;
-                    let description = feature
-                        .description()
-                        .lines()
-                        .map(str::trim)
-                        .collect::<Vec<_>>()
-                        .join("\n    ");
-                    console.raw(format!("    {}\n", description))?;
+                    let description = feature_description(feature);
+
+                    container.add(
+                        bootstrap::Header::h3(feature.into_kebab_case().to_string())
+                            .variant(bootstrap::Variant::Primary),
+                    );
+                    container.add(
+                        bootstrap::List::unordered()
+                            .item(status_line)
+                            .item(description),
+                    );
                 }
+
+                container.add(bootstrap::VerticalSpacer::new(1));
+
+                container.add(
+                    bootstrap::Alert::new("ENV > manifest > default (OFF)")
+                        .title("Precedence")
+                        .variant(bootstrap::Variant::Info),
+                );
+
+                console.emit_container(&container);
                 Ok(())
             }
         }
     }
+
+    fn emit_feature_toggle_banner(console: &Console, feature: Feature, enabled: bool) {
+        let icon = bootstrap::icon_success();
+        let banner_text = if icon.is_empty() {
+            "Feature updated".to_string()
+        } else {
+            format!("{icon} Feature updated")
+        };
+
+        let feature_name = feature.into_kebab_case();
+        let module_status = if enabled { "ON" } else { "OFF" };
+
+        let mut container = bootstrap::Container::new();
+        container.add(bootstrap::VerticalSpacer::new(1));
+        container.add(
+            bootstrap::Banner::new(banner_text)
+                .width(bootstrap::Width::Large)
+                .variant(bootstrap::Variant::Success),
+        );
+        container.add(
+            bootstrap::Header::h2(format!("{feature_name}: {module_status}"))
+                .variant(bootstrap::Variant::Primary),
+        );
+        container.add(
+            bootstrap::Blockquote::new()
+                .push(feature_description(feature))
+                .variant(bootstrap::Variant::Default),
+        );
+        container.add(
+            bootstrap::Divider::new()
+                .style(bootstrap::DividerStyle::Double)
+                .width(bootstrap::Width::Large),
+        );
+
+        console.emit_container(&container);
+    }
+}
+
+fn feature_description(feature: Feature) -> String {
+    feature
+        .description()
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[cfg(test)]
