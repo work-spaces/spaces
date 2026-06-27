@@ -25,12 +25,17 @@ pub fn get_checkout_not_found_error(
         .map(|(_, suggestion)| suggestion.to_string())
         .collect::<Vec<String>>();
 
-    format_error!(
-        "Source: {}\n Failed to find `{}`. Did you mean?\n  {}",
-        checkout_file_path.display(),
-        checkout,
-        suggestions.join("\n  ")
-    )
+    let checkout_display = checkout_file_path.display();
+    if suggestions.is_empty() {
+        format_error!(
+            "Source: {checkout_display}\n Failed to find {checkout}` or any similar entries."
+        )
+    } else {
+        format_error!(
+            "Source: {checkout_display}\n Failed to find `{checkout}`. Did you mean?\n  {}",
+            suggestions.join("\n  ")
+        )
+    }
 }
 
 fn handle_new_branch(new_branch: Vec<Arc<str>>) {
