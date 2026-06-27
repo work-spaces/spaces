@@ -1,7 +1,7 @@
 use crate::{deps, labels, logger, markdown, platform, targets};
 use anyhow_source_location::format_error;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use strum::Display;
 
@@ -53,9 +53,9 @@ pub struct Rule {
     /// help text displayed to the user when running inspect - use markdown format
     pub help: Option<Arc<str>>,
     /// list of globs that must have a change to re-run the rule (deprecated: use deps with Globs)
-    pub inputs: Option<HashSet<Arc<str>>>,
+    pub inputs: Option<Vec<Arc<str>>>,
     /// Not used - use targets
-    pub outputs: Option<HashSet<Arc<str>>>,
+    pub outputs: Option<Vec<Arc<str>>>,
     /// The targets can be files or directories - directory will use entire directory contents
     pub targets: Option<Vec<targets::Target>>,
     /// list of platforms that the rule will run on. default is to run on all platforms
@@ -70,7 +70,7 @@ pub struct Rule {
     pub apply_trailing_args_to: Option<Arc<str>>,
 }
 
-type RuleMap = HashMap<Arc<str>, (Rule, Option<String>)>;
+type RuleMap = BTreeMap<Arc<str>, (Rule, Option<String>)>;
 
 struct Section {
     name: Arc<str>,
@@ -99,7 +99,7 @@ impl Rule {
         }
 
         // Pull any glob values from inputs into deps as Deps::Any with AnyDep::Glob
-        if let Some(hash_set) = self.inputs.take() {
+        if let Some(inputs) = self.inputs.take() {
             logger::push_deprecation_warning(
                 latest_starlark_module.clone(),
                 "`inputs` will be deprecated in v0.16. Use `deps` with files instead",
@@ -109,7 +109,7 @@ impl Rule {
             let mut excludes = Vec::new();
 
             // Annotated set: +prefix means include, -prefix means exclude
-            for item in hash_set {
+            for item in inputs {
                 if let Some(stripped) = item.strip_prefix('+') {
                     includes.push(Arc::from(stripped));
                 } else if let Some(stripped) = item.strip_prefix('-') {
@@ -216,7 +216,7 @@ impl Rule {
     }
 
     fn get_hash_map(rules: &[(&Rule, Option<String>)]) -> RuleMap {
-        let mut map = HashMap::new();
+        let mut map = BTreeMap::new();
         for (rule, details) in rules {
             map.insert(rule.name.clone(), ((*rule).clone(), details.clone()));
         }

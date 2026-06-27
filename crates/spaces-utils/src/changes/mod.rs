@@ -229,14 +229,14 @@ impl Changes {
         progress: &mut console::Progress,
         seed: &str,
         globs: &glob::Globs,
-    ) -> anyhow::Result<Arc<str>> {
+    ) -> anyhow::Result<(Arc<str>, Vec<Arc<str>>)> {
         let logger = changes_logger(progress.console.clone());
         let mut inputs = Vec::new();
 
         for path in self.entries.keys() {
             let sane_path = Self::sanitize_path(path);
             if globs.is_match(sane_path) {
-                inputs.push(path);
+                inputs.push(path.clone());
             }
         }
 
@@ -247,7 +247,7 @@ impl Changes {
         let mut hasher = blake3::Hasher::new();
         hasher.update(seed.as_bytes());
         for input in inputs.iter() {
-            if let Some(change_detail) = self.entries.get(*input)
+            if let Some(change_detail) = self.entries.get(input)
                 && let ChangeDetailType::File(hash) | ChangeDetailType::Symlink(hash) =
                     &change_detail.detail_type
             {
@@ -261,7 +261,7 @@ impl Changes {
             logger.debug(format!("Hashed {count} items").as_str());
         }
 
-        Ok(hasher.finalize().to_string().into())
+        Ok((hasher.finalize().to_string().into(), inputs))
     }
 }
 
@@ -397,6 +397,7 @@ mod tests {
         changes
             .calculate_digest(&mut progress, seed, globs)
             .unwrap()
+            .0
     }
 
     #[test]
@@ -413,7 +414,8 @@ mod tests {
         let mut progress = make_progress();
         let digest = changes
             .calculate_digest(&mut progress, "seed", &globs)
-            .unwrap();
+            .unwrap()
+            .0;
         let baseline = seed_only_digest("seed", &globs);
         assert_ne!(
             digest, baseline,
@@ -470,7 +472,8 @@ mod tests {
         let mut progress = make_progress();
         let digest = changes
             .calculate_digest(&mut progress, "seed", &globs)
-            .unwrap();
+            .unwrap()
+            .0;
         let baseline = seed_only_digest("seed", &globs);
         assert_eq!(
             digest, baseline,

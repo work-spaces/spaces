@@ -2,7 +2,7 @@ use crate::{singleton, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use utils::{ecode, lock, logger, placeholder, rule};
 
@@ -152,7 +152,7 @@ fn expand_exec_tokens(
 pub struct Exec {
     pub command: Arc<str>,
     pub args: Option<Vec<Arc<str>>>,
-    pub env: Option<HashMap<Arc<str>, Arc<str>>>,
+    pub env: Option<BTreeMap<Arc<str>, Arc<str>>>,
     pub working_directory: Option<Arc<str>>,
     pub redirect_stdout: Option<Arc<str>>,
     pub expect: Option<Expect>,
