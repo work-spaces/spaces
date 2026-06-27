@@ -30,12 +30,13 @@ pub enum QueryCommand {
     #[command(about = r"List rules in the workspace.
   - `spaces query rules`: show run rules
   - `spaces query rules --filter='**/my-pkg:*'`: filter by glob pattern
+  - `spaces query rules --filter='//my-pkg/**'`: filter by label-style glob prefix
   - `spaces query rules --has-help`: show only rules with help populated
   - `spaces query rules --checkout`: include checkout-phase rules
   - `spaces query rules --deps`: include expanded deps and targets in output
   - `spaces query rules --raw`: emit full task YAML per rule")]
     Rules {
-        /// Filter rules with a glob pattern (e.g. `--filter=**/my-target`)
+        /// Filter rules with a glob pattern (e.g. `--filter=**/my-target` or `--filter=//my-pkg/**`)
         #[arg(long)]
         filter: Option<Arc<str>>,
         /// Only show rules with the help entry populated
@@ -276,7 +277,8 @@ impl QueryCommand {
 #[cfg(test)]
 mod tests {
     use super::{
-        DependencyNode, build_dependency_tree, dependency_node_to_tree, query_highlight_mask,
+        DependencyNode, build_dependency_tree, build_filter_globs, dependency_node_to_tree,
+        query_highlight_mask,
     };
     use crate::graph;
     use std::collections::HashSet;
@@ -372,6 +374,48 @@ mod tests {
         let json = serde_json::to_string(&node).unwrap();
         assert!(json.contains("//test:rule"));
     }
+
+    #[test]
+    fn filter_glob_normalizes_label_style_include_prefix() {
+        let globs = build_filter_globs("//spaces/**");
+        assert!(globs.includes.contains("spaces/**"));
+        assert!(globs.includes.contains("spaces:*"));
+        assert!(!globs.includes.contains("//spaces/**"));
+    }
+
+    #[test]
+    fn filter_glob_fuzzy_expansion_strips_label_prefix() {
+        let globs = build_filter_globs("//pkg:target");
+        assert!(globs.includes.contains("pkg:target"));
+        assert!(globs.includes.contains("**/*:*pkg:target*"));
+        assert!(globs.includes.contains("**/*pkg:target*:*"));
+        assert!(globs.includes.contains("**/pkg:target*:*"));
+        assert!(globs.includes.contains("**/*pkg:target*/*:*"));
+        assert!(!globs.includes.contains("**/*:*//pkg:target*"));
+    }
+
+    #[test]
+    fn filter_glob_exact_label_term_is_included() {
+        let globs = build_filter_globs("spaces:check");
+        assert!(globs.includes.contains("spaces:check"));
+    }
+
+    #[test]
+    fn filter_glob_exact_label_term_with_leading_slashes_is_included() {
+        let globs = build_filter_globs("//spaces:check");
+        assert!(globs.includes.contains("spaces:check"));
+        assert!(!globs.includes.contains("//spaces:check"));
+    }
+
+    #[test]
+    fn filter_glob_normalizes_label_style_annotated_prefixes() {
+        let globs = build_filter_globs("+//spaces/**,-//spaces/**:*test*");
+        assert!(globs.includes.contains("spaces/**"));
+        assert!(globs.includes.contains("spaces:*"));
+        assert!(globs.excludes.contains("spaces/**:*test*"));
+        assert!(!globs.includes.contains("//spaces/**"));
+        assert!(!globs.excludes.contains("//spaces/**:*test*"));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -462,25 +506,56 @@ fn extract_targets(r: &rule::Rule) -> Vec<Arc<str>> {
         .collect()
 }
 
-/// Build annotated glob expressions from a `--filter` value.
+/// Add a glob pattern to the include/exclude set based on `is_include`.
+fn insert_filter_glob(globs: &mut glob::Globs, is_include: bool, pattern: String) {
+    if is_include {
+        globs.includes.insert(pattern.into());
+    } else {
+        globs.excludes.insert(pattern.into());
+    }
+}
+
+/// Build filter glob expressions from a `--filter` value.
 /// Mirrors the expansion logic in `arguments.rs`.
-fn build_filter_globs(filter: &str) -> HashSet<Arc<str>> {
-    let mut globs = HashSet::new();
+fn build_filter_globs(filter: &str) -> glob::Globs {
+    let mut globs = glob::Globs::default();
     for expr in filter.split(',') {
-        let expanded: Vec<String> = if expr.starts_with('-') || expr.starts_with('+') {
-            vec![expr.to_string()]
+        let expr = expr.trim();
+        if expr.is_empty() {
+            continue;
+        }
+
+        let expr = expr.strip_prefix("//").unwrap_or(expr);
+
+        let expanded: Vec<(bool, String)> = if let Some(pattern) = expr.strip_prefix('+') {
+            vec![(true, pattern.to_string())]
+        } else if let Some(pattern) = expr.strip_prefix('-') {
+            vec![(false, pattern.to_string())]
         } else if expr.contains('*') {
-            vec![format!("+{expr}")]
+            vec![(true, expr.to_string())]
         } else {
             vec![
-                format!("+**/*:*{expr}*"),
-                format!("+**/*{expr}*:*"),
-                format!("+**/{expr}*:*"),
-                format!("+**/*{expr}*/*:*"),
+                (true, expr.to_string()),
+                (true, format!("**/*:*{expr}*")),
+                (true, format!("**/*{expr}*:*")),
+                (true, format!("**/{expr}*:*")),
+                (true, format!("**/*{expr}*/*:*")),
             ]
         };
-        for e in expanded {
-            globs.insert(e.into());
+
+        for (is_include, e) in expanded {
+            let normalized = e.strip_prefix("//").unwrap_or(e.as_str()).to_string();
+
+            // Label ergonomics: `//pkg/**` is commonly expected to include
+            // both subtree labels (`//pkg/sub:target`) and package-local labels
+            // (`//pkg:target`). Add `pkg:*` alongside `pkg/**`.
+            if let Some(pkg) = normalized.strip_suffix("/**")
+                && !pkg.is_empty()
+            {
+                insert_filter_glob(&mut globs, is_include, format!("{pkg}:*"));
+            }
+
+            insert_filter_glob(&mut globs, is_include, normalized);
         }
     }
     globs
@@ -488,12 +563,14 @@ fn build_filter_globs(filter: &str) -> HashSet<Arc<str>> {
 
 /// Returns the default (globs, strip_prefix) pair derived from the workspace
 /// invocation path when no explicit `--filter` is provided.
-fn default_globs(relative_invoked_path: &str) -> (HashSet<Arc<str>>, Option<Arc<str>>) {
+fn default_globs(relative_invoked_path: &str) -> (glob::Globs, Option<Arc<str>>) {
     if relative_invoked_path.is_empty() {
-        (HashSet::new(), None)
+        (glob::Globs::default(), None)
     } else {
-        let mut globs = HashSet::new();
-        globs.insert(format!("+{relative_invoked_path}**").into());
+        let mut globs = glob::Globs::default();
+        globs
+            .includes
+            .insert(format!("{relative_invoked_path}**").into());
         let strip_prefix = Some(format!("//{relative_invoked_path}").into());
         (globs, strip_prefix)
     }
@@ -503,20 +580,17 @@ fn default_globs(relative_invoked_path: &str) -> (HashSet<Arc<str>>, Option<Arc<
 /// pairs, applying glob filtering, `has_help`, and name prefix-stripping.
 fn collect_rule_infos(
     rules: &[QueryRule],
-    globs: &HashSet<Arc<str>>,
+    globs: &glob::Globs,
     strip_prefix: Option<&Arc<str>>,
     has_help: bool,
     deps: bool,
 ) -> HashMap<Arc<str>, RuleInfo> {
-    let glob_filter = glob::Globs::new_with_includes(globs);
     let mut map: HashMap<Arc<str>, RuleInfo> = HashMap::new();
 
     for qr in rules {
         let raw_name = qr.rule.name.as_ref();
 
-        if !globs.is_empty()
-            && !glob_filter.is_match(raw_name.strip_prefix("//").unwrap_or(raw_name))
-        {
+        if !globs.is_empty() && !globs.is_match(raw_name.strip_prefix("//").unwrap_or(raw_name)) {
             continue;
         }
 
@@ -1192,12 +1266,10 @@ impl QueryCommand {
                 };
 
                 if *raw {
-                    let glob_filter = glob::Globs::new_with_includes(&globs);
                     let emit = |qr: &QueryRule| -> anyhow::Result<()> {
                         let raw_name = qr.rule.name.as_ref();
                         if !globs.is_empty()
-                            && !glob_filter
-                                .is_match(raw_name.strip_prefix("//").unwrap_or(raw_name))
+                            && !globs.is_match(raw_name.strip_prefix("//").unwrap_or(raw_name))
                         {
                             return Ok(());
                         }
