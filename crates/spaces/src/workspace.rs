@@ -97,6 +97,7 @@ struct RuleDigestInput {
 
 #[derive(Debug, Serialize)]
 struct RuleDigestReport {
+    cache_digest: Arc<str>,
     rule_digest: Arc<str>,
     inputs: Vec<RuleDigestInput>,
 }
@@ -1172,6 +1173,7 @@ impl Workspace {
         rule_name: &str,
         seed: &str,
         inputs: &[Arc<str>],
+        cache_digest: &str,
     ) -> anyhow::Result<()> {
         let mut report_inputs = Vec::new();
         for input in inputs {
@@ -1187,6 +1189,7 @@ impl Workspace {
         }
 
         let report = RuleDigestReport {
+            cache_digest: cache_digest.into(),
             rule_digest: seed.into(),
             inputs: report_inputs,
         };
@@ -1231,7 +1234,7 @@ impl Workspace {
             logger(progress.console.clone())
                 .message(format!("Creating digest report for {rule_name}",).as_str());
 
-            self.save_digest_report(progress, rule_name, seed, &inputs)
+            self.save_digest_report(progress, rule_name, seed, &inputs, &digest)
                 .context(format_context!(
                     "Failed to save digest report for rule {rule_name}"
                 ))?;
