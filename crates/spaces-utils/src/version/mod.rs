@@ -309,11 +309,11 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
 
         let manifest = self
             .load_manifest(&mut progress_bar)
-            .context(format_context!("Failed to load/fetch available releases"))?;
+            .map_err(|err| format_error!("Failed to load/fetch available releases\n{err:?}"))?;
 
         manifest
             .create_hard_links_to_tools(console.clone())
-            .context(format_context!("Failed to create hard links to tools"))?;
+            .map_err(|err| format_error!("Failed to create hard links to tools\n{err:?}"))?;
 
         let mut ui = console::container::Container::new();
         ui.add(
@@ -423,7 +423,7 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
 
         let manifest = self
             .populate_manifest_from_source(&mut progress_bar)
-            .context(format_context!("Failed to fetch latest releases"))?;
+            .map_err(|err| format_error!("{err:?}"))?;
 
         let release = manifest.find_release(
             tag.as_deref(),
@@ -435,13 +435,12 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
 
             let binary_path = manifest
                 .sync_release_to_store(console.clone(), &mut progress_bar, release)
-                .context(format_context!(
-                    "Failed to download release {}",
-                    release.tag_name
-                ))?;
+                .map_err(|err| {
+                    format_error!("Failed to download release {}\n{err:?}", release.tag_name)
+                })?;
 
             let exec_path = std::env::current_exe()
-                .context(format_context!("Failed to get current executable path"))?;
+                .map_err(|err| format_error!("Failed to get current executable path\n{err:?}"))?;
             let command = format!("cp -lf {} {}", binary_path.display(), exec_path.display());
 
             let mut ui = console::container::Container::new();
@@ -469,7 +468,7 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
             if let Ok(mut clipboard) = arboard::Clipboard::new()
                 && clipboard
                     .set_text(command.clone())
-                    .context(format_context!("Failed to copy command to clipboard"))
+                    .map_err(|err| format_error!("Failed to copy command to clipboard\n{err:?}"))
                     .is_ok()
             {
                 ui.add(console::bootstrap::VerticalSpacer::new(1));
