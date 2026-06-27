@@ -20,6 +20,7 @@ pub struct RepoSyncPlan {
     path: Arc<str>,
     url: Arc<str>,
     is_dev_branch: bool,
+    is_rev_branch: bool,
     is_on_branch: bool,
     is_dirty: bool,
     pull_from: Option<Arc<str>>,
@@ -268,6 +269,7 @@ pub fn build_repo_sync_plan(
 
             let repo = git::Repository::new(url.clone(), member.path.clone());
             let is_dev_branch = dev_branch_paths.contains(&member.path);
+            let is_rev_branch = repo.is_branch(&mut repo_progress, &member.rev);
 
             let is_on_branch = repo
                 .get_current_branch(&mut repo_progress)
@@ -427,6 +429,7 @@ pub fn build_repo_sync_plan(
                 path: member.path.clone(),
                 url: url.clone(),
                 is_dev_branch,
+                is_rev_branch,
                 is_on_branch,
                 is_dirty,
                 pull_from,
@@ -532,6 +535,20 @@ pub fn build_repo_sync_plan(
     Ok(plans)
 }
 
+fn format_repo_label(plan: &RepoSyncPlan) -> String {
+    let mut label = format!("//{}", plan.path);
+
+    if plan.is_dev_branch {
+        label.push_str(" [dev-branch]");
+    } else if plan.is_rev_branch {
+        label.push_str(" [branch]");
+    } else {
+        label.push_str(" [commit]");
+    }
+
+    label
+}
+
 pub fn emit_dry_run_repo_plan(
     console: console::Console,
     plans: &[RepoSyncPlan],
@@ -551,35 +568,35 @@ pub fn emit_dry_run_repo_plan(
     for plan in plans {
         let action = if let Some(base_ref) = plan.rebase_from.as_ref() {
             if plan.is_dirty && plan.will_stash {
-                format!("would stash, rebase onto {base_ref}, and pop stash after sync")
+                format!("stash, rebase onto {base_ref}, and pop stash after sync")
             } else {
-                format!("would rebase onto {base_ref}")
+                format!("rebase onto {base_ref}")
             }
         } else if let Some(base_ref) = plan.merge_from.as_ref() {
             if plan.is_dirty && plan.will_stash {
-                format!("would stash, merge {base_ref}, and pop stash after sync")
+                format!("stash, merge {base_ref}, and pop stash after sync")
             } else {
-                format!("would merge {base_ref}")
+                format!("merge {base_ref}")
             }
         } else if let Some(base_ref) = plan.pull_from.as_ref() {
             if plan.is_dirty && plan.will_stash {
-                format!("would stash, pull from {base_ref}, and pop stash after sync")
+                format!("stash, pull from {base_ref}, and pop stash after sync")
             } else {
-                format!("would pull from {base_ref}")
+                format!("pull from {base_ref}")
             }
         } else if plan.is_dev_branch {
             let reason = plan
                 .skip_reason
                 .clone()
                 .unwrap_or_else(|| "no update requested".into());
-            format!("would skip rebase/merge ({reason})")
+            format!("skip rebase/merge ({reason})")
         } else if plan.is_on_branch {
-            "would pull".to_string()
+            "pull".to_string()
         } else {
-            "would skip pull (detached HEAD)".to_string()
+            "skip pull (detached HEAD)".to_string()
         };
 
-        description_list.add_item(format!("//{}", plan.path), action);
+        description_list.add_item(format_repo_label(plan), action);
     }
 
     container.add(description_list);
@@ -807,6 +824,22 @@ mod tests {
         }
     }
 
+    fn repo_sync_plan_for_label(is_dev_branch: bool, is_rev_branch: bool) -> RepoSyncPlan {
+        RepoSyncPlan {
+            path: "repo-a".into(),
+            url: "https://example.com/repo-a.git".into(),
+            is_dev_branch,
+            is_rev_branch,
+            is_on_branch: true,
+            is_dirty: false,
+            pull_from: None,
+            rebase_from: None,
+            merge_from: None,
+            will_stash: false,
+            skip_reason: None,
+        }
+    }
+
     #[test]
     fn parse_dev_branch_base_entries_parses_and_normalizes_repo_paths() {
         let parsed = parse_dev_branch_base_entries(&arcs(&[
@@ -934,5 +967,26 @@ mod tests {
             !msg.contains("Not dev-branch"),
             "unexpected error message: {msg}"
         );
+    }
+
+    #[test]
+    fn format_repo_label_marks_branch_revs() {
+        let plan = repo_sync_plan_for_label(false, true);
+
+        assert_eq!(format_repo_label(&plan), "//repo-a [branch]");
+    }
+
+    #[test]
+    fn format_repo_label_marks_commit_revs() {
+        let plan = repo_sync_plan_for_label(false, false);
+
+        assert_eq!(format_repo_label(&plan), "//repo-a [commit]");
+    }
+
+    #[test]
+    fn format_repo_label_prioritizes_dev_branch_over_branch_rev() {
+        let plan = repo_sync_plan_for_label(true, true);
+
+        assert_eq!(format_repo_label(&plan), "//repo-a [dev-branch]");
     }
 }
