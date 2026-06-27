@@ -112,6 +112,7 @@ impl Manifest {
             environment: vec![("GH_HOST".into(), host.clone())],
             ..Default::default()
         };
+        let fetch_command = format!("gh command: `GH_HOST={host} gh api repos/{repo}/releases`");
 
         progress_bar.set_message(format!("getting latest version from {host} using gh").as_str());
 
@@ -121,14 +122,17 @@ impl Manifest {
         if let Some(stdout) = progress_bar
             .execute_process(gh_command.to_string_lossy().as_ref(), options)
             .context(format_context!(
-                "Failed to execute gh to get the latest releases.\n{troubleshooting}"
+                "while executing gh to get the latest releases.\n{fetch_command}\n{troubleshooting}"
             ))?
             .stdout
         {
             self.set_releases_from_gh_json(stdout.as_str())
-                .context(format_context!("Failed to parse manifest response from gh"))?;
-            self.save_to_store()
-                .context(format_context!("Failed to save manifest from gh"))?;
+                .context(format_context!(
+                    "while parsing manifest response from gh\n{fetch_command}"
+                ))?;
+            self.save_to_store().context(format_context!(
+                "while saving manifest from gh\n{fetch_command}"
+            ))?;
             Ok(())
         } else {
             Err(format_error!(
@@ -268,7 +272,7 @@ impl Manifest {
     fn set_releases_from_gh_json(&mut self, json: &str) -> anyhow::Result<()> {
         let gh_releases: Vec<GhApiRelease> =
             serde_json::from_str(json).context(format_context!(
-                "Failed to parse GitHub API JSON response \
+                "while parsing GitHub API JSON response \
                  (expected a top-level array of \
                  {{tag_name, prerelease, assets[{{browser_download_url, name, digest}}]}} \
                  objects); body prefix: {}",
