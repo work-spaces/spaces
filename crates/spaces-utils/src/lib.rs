@@ -2,6 +2,7 @@ pub mod age;
 pub mod bin_detail;
 pub mod changes;
 pub mod ci;
+pub mod co;
 pub mod copy;
 pub mod deps;
 pub mod ecode;
