@@ -4,7 +4,7 @@ use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use utils::{ci, git, logger, workflows};
+use utils::{ci, git, logger, suggest, workflows};
 
 fn co_logger(console: console::Console) -> logger::Logger {
     logger::Logger::new(console, "co".into())
@@ -12,6 +12,26 @@ fn co_logger(console: console::Console) -> logger::Logger {
 
 pub const CO_FILE_NAME: &str = "co.spaces.toml";
 pub const CO_ENV_NAME: &str = "CO_SPACES_TOML";
+
+pub fn get_checkout_not_found_error(
+    checkout: Arc<str>,
+    checkout_map: &HashMap<Arc<str>, Checkout>,
+    checkout_file_path: &std::path::Path,
+) -> anyhow::Error {
+    let checkout_names = checkout_map.keys().cloned().collect::<Vec<Arc<str>>>();
+    let suggestions = suggest::get_suggestions(checkout.clone(), &checkout_names)
+        .iter()
+        .take(10)
+        .map(|(_, suggestion)| suggestion.to_string())
+        .collect::<Vec<String>>();
+
+    format_error!(
+        "Source: {}\n Failed to find `{}`. Did you mean?\n  {}",
+        checkout_file_path.display(),
+        checkout,
+        suggestions.join("\n  ")
+    )
+}
 
 fn handle_new_branch(new_branch: Vec<Arc<str>>) {
     // Add any new branches specified by the command line
@@ -450,7 +470,7 @@ pub enum Checkout {
 }
 
 impl Checkout {
-    pub fn load() -> anyhow::Result<HashMap<Arc<str>, Self>> {
+    pub fn load() -> anyhow::Result<(HashMap<Arc<str>, Self>, std::path::PathBuf)> {
         let co_file_path = std::path::Path::new(CO_FILE_NAME);
         let effective_path = if co_file_path.exists() {
             co_file_path.to_owned()
@@ -472,7 +492,7 @@ impl Checkout {
             "Failed to parse toml file {}",
             effective_path.display()
         ))?;
-        Ok(checkout)
+        Ok((checkout, effective_path))
     }
 
     pub fn apply_overrides(&mut self, args: &CoArgs) -> anyhow::Result<()> {
