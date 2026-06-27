@@ -366,6 +366,7 @@ pub struct CheckoutWorkflow {
     pub new_branch: Option<Vec<Arc<str>>>,
     #[serde(alias = "create-lock-file")]
     pub create_lock_file: Option<bool>,
+    pub help: Option<Arc<str>>,
 }
 
 impl CheckoutWorkflow {
@@ -423,6 +424,7 @@ pub struct CheckoutRepo {
     pub store: Option<HashMap<Arc<str>, toml::Value>>,
     #[serde(alias = "create-lock-file")]
     pub create_lock_file: Option<bool>,
+    pub help: Option<Arc<str>>,
 }
 
 impl CheckoutRepo {
