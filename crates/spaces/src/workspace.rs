@@ -1220,7 +1220,7 @@ impl Workspace {
         rule_name: &str,
         seed: &str,
         globs: &[rule::Globs],
-        is_create_digest_repot: IsCreateDigestReport,
+        is_create_digest_report: IsCreateDigestReport,
     ) -> anyhow::Result<inputs::IsChanged> {
         let changes_globs = rule::Globs::to_changes_globs(globs);
         let (digest, inputs) = self
@@ -1230,7 +1230,7 @@ impl Workspace {
             .calculate_digest(progress, seed, &changes_globs)
             .context(format_context!("Failed to get digest for rule {rule_name}"))?;
 
-        if is_create_digest_repot == IsCreateDigestReport::Yes {
+        if is_create_digest_report == IsCreateDigestReport::Yes {
             logger(progress.console.clone())
                 .message(format!("Creating digest report for {rule_name}",).as_str());
 
