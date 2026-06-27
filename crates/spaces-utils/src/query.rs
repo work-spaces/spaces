@@ -1,4 +1,4 @@
-use crate::{changes::glob, graph, inspect, markdown, rule, suggest, targets};
+use crate::{changes::glob, graph, inspect, markdown, rule, search, suggest, targets};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::Subcommand;
@@ -277,8 +277,7 @@ impl QueryCommand {
 #[cfg(test)]
 mod tests {
     use super::{
-        DependencyNode, build_dependency_tree, build_filter_globs, dependency_node_to_tree,
-        query_highlight_mask,
+        DependencyNode, build_dependency_tree, dependency_node_to_tree, query_highlight_mask,
     };
     use crate::graph;
     use std::collections::HashSet;
@@ -374,48 +373,6 @@ mod tests {
         let json = serde_json::to_string(&node).unwrap();
         assert!(json.contains("//test:rule"));
     }
-
-    #[test]
-    fn filter_glob_normalizes_label_style_include_prefix() {
-        let globs = build_filter_globs("//spaces/**");
-        assert!(globs.includes.contains("spaces/**"));
-        assert!(globs.includes.contains("spaces:*"));
-        assert!(!globs.includes.contains("//spaces/**"));
-    }
-
-    #[test]
-    fn filter_glob_fuzzy_expansion_strips_label_prefix() {
-        let globs = build_filter_globs("//pkg:target");
-        assert!(globs.includes.contains("pkg:target"));
-        assert!(globs.includes.contains("**/*:*pkg:target*"));
-        assert!(globs.includes.contains("**/*pkg:target*:*"));
-        assert!(globs.includes.contains("**/pkg:target*:*"));
-        assert!(globs.includes.contains("**/*pkg:target*/*:*"));
-        assert!(!globs.includes.contains("**/*:*//pkg:target*"));
-    }
-
-    #[test]
-    fn filter_glob_exact_label_term_is_included() {
-        let globs = build_filter_globs("spaces:check");
-        assert!(globs.includes.contains("spaces:check"));
-    }
-
-    #[test]
-    fn filter_glob_exact_label_term_with_leading_slashes_is_included() {
-        let globs = build_filter_globs("//spaces:check");
-        assert!(globs.includes.contains("spaces:check"));
-        assert!(!globs.includes.contains("//spaces:check"));
-    }
-
-    #[test]
-    fn filter_glob_normalizes_label_style_annotated_prefixes() {
-        let globs = build_filter_globs("+//spaces/**,-//spaces/**:*test*");
-        assert!(globs.includes.contains("spaces/**"));
-        assert!(globs.includes.contains("spaces:*"));
-        assert!(globs.excludes.contains("spaces/**:*test*"));
-        assert!(!globs.includes.contains("//spaces/**"));
-        assert!(!globs.excludes.contains("//spaces/**:*test*"));
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -506,61 +463,6 @@ fn extract_targets(r: &rule::Rule) -> Vec<Arc<str>> {
         .collect()
 }
 
-/// Add a glob pattern to the include/exclude set based on `is_include`.
-fn insert_filter_glob(globs: &mut glob::Globs, is_include: bool, pattern: String) {
-    if is_include {
-        globs.includes.insert(pattern.into());
-    } else {
-        globs.excludes.insert(pattern.into());
-    }
-}
-
-/// Build filter glob expressions from a `--filter` value.
-/// Mirrors the expansion logic in `arguments.rs`.
-fn build_filter_globs(filter: &str) -> glob::Globs {
-    let mut globs = glob::Globs::default();
-    for expr in filter.split(',') {
-        let expr = expr.trim();
-        if expr.is_empty() {
-            continue;
-        }
-
-        let expr = expr.strip_prefix("//").unwrap_or(expr);
-
-        let expanded: Vec<(bool, String)> = if let Some(pattern) = expr.strip_prefix('+') {
-            vec![(true, pattern.to_string())]
-        } else if let Some(pattern) = expr.strip_prefix('-') {
-            vec![(false, pattern.to_string())]
-        } else if expr.contains('*') {
-            vec![(true, expr.to_string())]
-        } else {
-            vec![
-                (true, expr.to_string()),
-                (true, format!("**/*:*{expr}*")),
-                (true, format!("**/*{expr}*:*")),
-                (true, format!("**/{expr}*:*")),
-                (true, format!("**/*{expr}*/*:*")),
-            ]
-        };
-
-        for (is_include, e) in expanded {
-            let normalized = e.strip_prefix("//").unwrap_or(e.as_str()).to_string();
-
-            // Label ergonomics: `//pkg/**` is commonly expected to include
-            // both subtree labels (`//pkg/sub:target`) and package-local labels
-            // (`//pkg:target`). Add `pkg:*` alongside `pkg/**`.
-            if let Some(pkg) = normalized.strip_suffix("/**")
-                && !pkg.is_empty()
-            {
-                insert_filter_glob(&mut globs, is_include, format!("{pkg}:*"));
-            }
-
-            insert_filter_glob(&mut globs, is_include, normalized);
-        }
-    }
-    globs
-}
-
 /// Returns the default (globs, strip_prefix) pair derived from the workspace
 /// invocation path when no explicit `--filter` is provided.
 fn default_globs(relative_invoked_path: &str) -> (glob::Globs, Option<Arc<str>>) {
@@ -590,7 +492,7 @@ fn collect_rule_infos(
     for qr in rules {
         let raw_name = qr.rule.name.as_ref();
 
-        if !globs.is_empty() && !globs.is_match(raw_name.strip_prefix("//").unwrap_or(raw_name)) {
+        if !search::matches_filter_in_any_field(globs, [raw_name]) {
             continue;
         }
 
@@ -1261,16 +1163,14 @@ impl QueryCommand {
                 format,
             } => {
                 let (globs, strip_prefix) = match filter {
-                    Some(f) => (build_filter_globs(f.as_ref()), None),
+                    Some(f) => (search::build_filter_globs(f.as_ref()), None),
                     None => default_globs(ctx.relative_invoked_path.as_ref()),
                 };
 
                 if *raw {
                     let emit = |qr: &QueryRule| -> anyhow::Result<()> {
                         let raw_name = qr.rule.name.as_ref();
-                        if !globs.is_empty()
-                            && !globs.is_match(raw_name.strip_prefix("//").unwrap_or(raw_name))
-                        {
+                        if !search::matches_filter_in_any_field(&globs, [raw_name]) {
                             return Ok(());
                         }
                         if *has_help && qr.rule.help.is_none() {
@@ -1475,45 +1375,6 @@ impl QueryCommand {
                     }
                 }
 
-                // Helper function to compute score with exact/prefix/substring bonuses
-                let score_match = |query_term: &str, target: &str| -> isize {
-                    let query_lower = query_term.to_lowercase();
-                    let target_lower = target.to_lowercase();
-
-                    // Check for exact case-sensitive match (best)
-                    if target == query_term {
-                        return 15000;
-                    }
-
-                    // Check for exact case-insensitive match
-                    if target_lower == query_lower {
-                        return 10000;
-                    }
-
-                    // Check for prefix match
-                    if target_lower.starts_with(&query_lower) {
-                        return 5000;
-                    }
-
-                    // Check for word boundary match (e.g., "test" matches "build-test", "pkg:test")
-                    if target_lower.contains(&format!("-{}", query_lower))
-                        || target_lower.contains(&format!("_{}", query_lower))
-                        || target_lower.contains(&format!(":{}", query_lower))
-                    {
-                        return 3000;
-                    }
-
-                    // Check for substring match
-                    if target_lower.contains(&query_lower) {
-                        return 2000;
-                    }
-
-                    // Fall back to fuzzy match
-                    sublime_fuzzy::best_match(query_term, target)
-                        .map(|m| m.score())
-                        .unwrap_or(0)
-                };
-
                 let mut score_rule = |qr: &QueryRule| {
                     let raw_name = qr.rule.name.as_ref();
                     let help_text = qr.rule.help.as_deref().unwrap_or("");
@@ -1540,10 +1401,10 @@ impl QueryCommand {
                     // Aggregate score across all search terms (non-filter terms)
                     for query_term in &search_terms {
                         // Score against name (higher weight)
-                        let name_score = score_match(query_term, raw_name);
+                        let name_score = search::score_match(query_term, raw_name);
 
                         // Score against help text (lower weight: 1/3 of name)
-                        let help_score = score_match(query_term, help_text) / 3;
+                        let help_score = search::score_match(query_term, help_text) / 3;
 
                         // Take the better of the two
                         let term_score = name_score.max(help_score);
