@@ -10,6 +10,17 @@ pub fn logger(console: console::Console) -> logger::Logger {
     logger::Logger::new(console, "version".into())
 }
 
+fn blockquote_from_multiline(
+    text: &str,
+    variant: console::bootstrap::Variant,
+) -> console::bootstrap::Blockquote {
+    let mut blockquote = console::bootstrap::Blockquote::new().variant(variant);
+    for line in text.lines() {
+        blockquote.push_line(line);
+    }
+    blockquote
+}
+
 #[derive(Debug, clap::Subcommand, Clone)]
 pub enum Command {
     /// Lists the versions of spaces available. Shows versions available in the store.
@@ -212,25 +223,12 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
 "#;
 
         let config_path = self.path_to_store.join(config::VERSION_CONFIG_FILE_NAME);
-        let divider = "━".repeat(56);
+        let mut ui = console::container::Container::new();
 
-        let write_header = |title: &str| -> anyhow::Result<()> {
-            let styled_title =
-                console::style::StyledContent::new(console::bold_style(), title.to_owned());
-            console.raw(format!("{divider}\n"))?;
-            console.raw(format!("{styled_title}\n"))?;
-            Ok(())
-        };
-
-        let write_subheader = |title: &str| -> anyhow::Result<()> {
-            let styled_title =
-                console::style::StyledContent::new(console::primary_style(), title.to_owned());
-            console.raw(format!("{divider}\n"))?;
-            console.raw(format!("{styled_title}\n"))?;
-            Ok(())
-        };
-
-        write_header("Version config")?;
+        ui.add(
+            console::bootstrap::Header::h1("Version config")
+                .variant(console::bootstrap::Variant::Primary),
+        );
 
         if config_path.exists() {
             let contents = std::fs::read_to_string(&config_path).context(format_context!(
@@ -238,68 +236,70 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
                 config_path.display()
             ))?;
 
-            let config_path_label =
-                console::style::StyledContent::new(console::default_style(), "Config path: ");
-            let config_path_value = console::style::StyledContent::new(
-                console::danger_style(),
-                config_path.display().to_string(),
+            ui.add(
+                console::bootstrap::DescriptionList::new()
+                    .variant(console::bootstrap::Variant::Info)
+                    .item("Config path:", config_path.display().to_string())
+                    .compact(true),
             );
-            console.raw(format!("{config_path_label}{config_path_value}\n\n"))?;
-
-            write_subheader("version.spaces.toml")?;
-            console.raw(format!("{contents}\n"))?;
+            ui.add(
+                console::bootstrap::Header::h2("version.spaces.toml")
+                    .variant(console::bootstrap::Variant::Primary),
+            );
+            ui.add(blockquote_from_multiline(
+                &contents,
+                console::bootstrap::Variant::Default,
+            ));
         } else {
-            let no_config_label = console::style::StyledContent::new(
-                console::danger_style(),
-                "No custom config found at:",
+            ui.add(
+                console::bootstrap::Alert::new(format!(
+                    "No custom config found at:\n{}",
+                    config_path.display()
+                ))
+                .title("Custom version config")
+                .variant(console::bootstrap::Variant::Warning)
+                .width(console::bootstrap::Width::Large),
             );
-            let no_config_bullet =
-                console::style::StyledContent::new(console::default_style(), "- ");
-            let no_config_path = console::style::StyledContent::new(
-                console::danger_style(),
-                config_path.display().to_string(),
+
+            ui.add(
+                console::bootstrap::Header::h2("Default gh lookup")
+                    .variant(console::bootstrap::Variant::Primary),
             );
-            console.raw(format!(
-                "{no_config_label}\n{no_config_bullet}{no_config_path}\n\n"
-            ))?;
-
-            let default_config_label = console::style::StyledContent::new(
-                console::bold_style(),
-                "Default config uses gh to fetch releases from:",
+            ui.add(
+                console::bootstrap::DescriptionList::new()
+                    .variant(console::bootstrap::Variant::Info)
+                    .item(manifest::GH_HOST_ENV, "github.com")
+                    .item(manifest::GH_REPO, "work-spaces/spaces")
+                    .compact(true),
             );
-            console.raw(format!("{default_config_label}\n"))?;
-
-            let bullet_prefix = console::style::StyledContent::new(console::default_style(), "- ");
-            let gh_host_env =
-                console::style::StyledContent::new(console::danger_style(), manifest::GH_HOST_ENV);
-            let separator = console::style::StyledContent::new(console::default_style(), ": ");
-            let gh_host_default =
-                console::style::StyledContent::new(console::primary_style(), "github.com");
-            console.raw(format!(
-                "{bullet_prefix}{gh_host_env}{separator}{gh_host_default}\n"
-            ))?;
-
-            let gh_repo_env =
-                console::style::StyledContent::new(console::danger_style(), manifest::GH_REPO);
-            let gh_repo_default =
-                console::style::StyledContent::new(console::primary_style(), "work-spaces/spaces");
-            console.raw(format!(
-                "{bullet_prefix}{gh_repo_env}{separator}{gh_repo_default}\n"
-            ))?;
-
-            let customize_message = console::style::StyledContent::new(
-                console::bold_style(),
-                "Update ^ env values to change where gh looks for releases",
+            ui.add(
+                console::bootstrap::Paragraph::new(
+                    "Update these env values to change where gh looks for releases.",
+                )
+                .variant(console::bootstrap::Variant::Default),
             );
-            console.raw(format!("{customize_message}\n\n"))?;
-
-            write_subheader("Sample version.spaces.toml")?;
-            console.raw(format!("{SAMPLE_CONFIG}\n"))?;
+            ui.add(
+                console::bootstrap::Header::h2("Sample version.spaces.toml")
+                    .variant(console::bootstrap::Variant::Primary),
+            );
+            ui.add(blockquote_from_multiline(
+                SAMPLE_CONFIG,
+                console::bootstrap::Variant::Default,
+            ));
         }
 
-        console.raw("\n")?;
-        write_subheader("Sample version.spaces.json served by your manifest_url")?;
-        console.raw(format!("{SAMPLE_MANIFEST}\n"))?;
+        ui.add(
+            console::bootstrap::Header::h2(
+                "Sample version.spaces.json served by your manifest_url",
+            )
+            .variant(console::bootstrap::Variant::Primary),
+        );
+        ui.add(blockquote_from_multiline(
+            SAMPLE_MANIFEST,
+            console::bootstrap::Variant::Default,
+        ));
+
+        console.emit_container(&ui);
 
         Ok(())
     }
@@ -309,109 +309,100 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
 
         let manifest = self
             .load_manifest(&mut progress_bar)
-            .context(format_context!("Failed to load/fetch available releases"))?;
+            .map_err(|err| format_error!("Failed to load/fetch available releases\n{err:?}"))?;
 
         manifest
             .create_hard_links_to_tools(console.clone())
-            .context(format_context!("Failed to create hard links to tools"))?;
+            .map_err(|err| format_error!("Failed to create hard links to tools\n{err:?}"))?;
 
-        let divider = console::style::StyledContent::new(console::default_style(), "─".repeat(56));
+        let mut ui = console::container::Container::new();
+        ui.add(
+            console::bootstrap::Header::h1("Available versions")
+                .variant(console::bootstrap::Variant::Primary),
+        );
+
+        if manifest.releases().is_empty() {
+            ui.add(
+                console::bootstrap::Alert::new("No releases are currently available")
+                    .title("Version list")
+                    .variant(console::bootstrap::Variant::Warning)
+                    .width(console::bootstrap::Width::Large),
+            );
+        }
 
         for release in manifest.releases() {
-            console.raw(format!("{divider}\n"))?;
-
-            // Release tag name + prerelease badge
-            let tag = console::style::StyledContent::new(
-                console::primary_style(),
-                release.tag_name.to_string(),
+            ui.add(
+                console::bootstrap::Divider::new()
+                    .style(console::bootstrap::DividerStyle::Double)
+                    .width(console::bootstrap::Width::Large),
             );
-            if release.prerelease {
-                let badge = console::style::StyledContent::new(
-                    console::danger_style(),
-                    " [pre-release]".to_owned(),
-                );
-                console.raw(format!("{tag}{badge}\n"))?;
+
+            let mut release_line = console::Line::default();
+            release_line.push(console::Span::new_styled_lossy(
+                console::style::StyledContent::new(
+                    console::primary_style(),
+                    release.tag_name.to_string(),
+                ),
+            ));
+            let badge_text = if release.prerelease {
+                " [pre-release]"
             } else {
-                let badge = console::style::StyledContent::new(
-                    console::danger_style(),
-                    " [stable]".to_owned(),
-                );
-                console.raw(format!("{tag}{badge}\n"))?;
-            }
+                " [stable]"
+            };
+            release_line.push(console::Span::new_styled_lossy(
+                console::style::StyledContent::new(console::danger_style(), badge_text.to_owned()),
+            ));
+            ui.add(console::bootstrap::Paragraph::from_line(release_line));
 
-            // Per-asset details
             for asset in release.assets.values() {
-                let asset_name = console::style::StyledContent::new(
-                    console::bold_style(),
-                    format!("  {}", asset.name),
+                ui.add(
+                    console::bootstrap::Header::h3(format!("Asset: {}", asset.name))
+                        .variant(console::bootstrap::Variant::Default),
                 );
-                console.raw(format!("{asset_name}\n"))?;
 
-                let url_label = console::style::StyledContent::new(
-                    console::default_style(),
-                    "    url:    ".to_owned(),
-                );
-                let url_value = console::style::StyledContent::new(
-                    console::danger_style(),
-                    asset.url.to_string(),
-                );
-                console.raw(format!("{url_label}{url_value}\n"))?;
-
-                let sha_label = console::style::StyledContent::new(
-                    console::default_style(),
-                    "    sha256: ".to_owned(),
-                );
-                let sha_value = console::style::StyledContent::new(
-                    console::danger_style(),
-                    asset.sha256.to_string(),
-                );
-                console.raw(format!("{sha_label}{sha_value}\n"))?;
+                let mut details = console::bootstrap::DescriptionList::new()
+                    .item("url:", asset.url.to_string())
+                    .item("sha256:", asset.sha256.to_string())
+                    .compact(true);
 
                 if let Some(path) = manifest.get_store_path_to_release(console.clone(), asset) {
-                    let store_label = console::style::StyledContent::new(
-                        console::default_style(),
-                        "    store:  ".to_owned(),
+                    details = details.item(
+                        "store:",
+                        if path.exists() {
+                            "Available".to_owned()
+                        } else {
+                            "Not available".to_owned()
+                        },
                     );
-                    if path.exists() {
-                        let status = console::style::StyledContent::new(
-                            console::primary_style(),
-                            "Available".to_owned(),
-                        );
-                        console.raw(format!("{store_label}{status}\n"))?;
-                    } else {
-                        let status = console::style::StyledContent::new(
-                            console::danger_style(),
-                            "Not available".to_owned(),
-                        );
-                        console.raw(format!("{store_label}{status}\n"))?;
-                    }
                 }
+
+                ui.add(details);
             }
 
-            // Tools binary path
             let binary_path = manifest.get_tools_path_to_binary(release.tag_name.as_ref());
-            let tools_label = console::style::StyledContent::new(
-                console::default_style(),
-                "  tools: ".to_owned(),
+            ui.add(
+                console::bootstrap::DescriptionList::new()
+                    .item(
+                        "tools:",
+                        if binary_path.exists() {
+                            binary_path.display().to_string()
+                        } else {
+                            "Not available in tools path".to_owned()
+                        },
+                    )
+                    .compact(true),
             );
-            if binary_path.exists() {
-                let tools_value = console::style::StyledContent::new(
-                    console::danger_style(),
-                    binary_path.display().to_string(),
-                );
-                console.raw(format!("{tools_label}{tools_value}\n"))?;
-            } else {
-                let tools_status = console::style::StyledContent::new(
-                    console::danger_style(),
-                    "Not available in tools path".to_owned(),
-                );
-                console.raw(format!("{tools_label}{tools_status}\n"))?;
-            }
         }
 
         if !manifest.releases().is_empty() {
-            console.raw(format!("{divider}\n"))?;
+            ui.add(
+                console::bootstrap::Divider::new()
+                    .style(console::bootstrap::DividerStyle::Double)
+                    .width(console::bootstrap::Width::Large),
+            );
         }
+
+        console.emit_container(&ui);
 
         progress_bar.set_finalize_lines(logger::make_finalize_line(
             logger::FinalType::Finished,
@@ -432,7 +423,7 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
 
         let manifest = self
             .populate_manifest_from_source(&mut progress_bar)
-            .context(format_context!("Failed to fetch latest releases"))?;
+            .map_err(|err| format_error!("{err:?}"))?;
 
         let release = manifest.find_release(
             tag.as_deref(),
@@ -444,63 +435,56 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
 
             let binary_path = manifest
                 .sync_release_to_store(console.clone(), &mut progress_bar, release)
-                .context(format_context!(
-                    "Failed to download release {}",
-                    release.tag_name
-                ))?;
+                .map_err(|err| {
+                    format_error!("Failed to download release {}\n{err:?}", release.tag_name)
+                })?;
 
             let exec_path = std::env::current_exe()
-                .context(format_context!("Failed to get current executable path"))?;
+                .map_err(|err| format_error!("Failed to get current executable path\n{err:?}"))?;
             let command = format!("cp -lf {} {}", binary_path.display(), exec_path.display());
 
-            let divider =
-                console::style::StyledContent::new(console::default_style(), "─".repeat(56));
-            console.raw(format!("{divider}\n"))?;
+            let mut ui = console::container::Container::new();
+            ui.add(
+                console::bootstrap::Banner::new("Release fetched")
+                    .width(console::bootstrap::Width::Large)
+                    .variant(console::bootstrap::Variant::Success),
+            );
+            ui.add(
+                console::bootstrap::DescriptionList::new()
+                    .item("release:", release.tag_name.to_string())
+                    .item("tools path:", binary_path.display().to_string())
+                    .compact(true)
+                    .variant(console::bootstrap::Variant::Primary),
+            );
 
-            let tag_label = console::style::StyledContent::new(
-                console::default_style(),
-                "Fetched release: ".to_owned(),
+            ui.add(
+                console::bootstrap::Header::h2("Run this command to install the fetched release")
+                    .variant(console::bootstrap::Variant::Default),
             );
-            let tag_value = console::style::StyledContent::new(
-                console::primary_style(),
-                release.tag_name.to_string(),
-            );
-            console.raw(format!("{tag_label}{tag_value}\n"))?;
-
-            let tools_label = console::style::StyledContent::new(
-                console::default_style(),
-                "  tools path:   ".to_owned(),
-            );
-            let tools_value = console::style::StyledContent::new(
-                console::danger_style(),
-                binary_path.display().to_string(),
-            );
-            console.raw(format!("{tools_label}{tools_value}\n"))?;
-
-            let install_header = console::style::StyledContent::new(
-                console::bold_style(),
-                "\nRun the following command to install the fetched release:".to_owned(),
-            );
-            console.raw(format!("{install_header}\n"))?;
-
-            let cmd_value =
-                console::style::StyledContent::new(console::danger_style(), command.clone());
-            console.raw(format!("{cmd_value}\n"))?;
+            ui.add(console::bootstrap::Paragraph::from_line(
+                console::bootstrap::code(command.clone()),
+            ));
 
             if let Ok(mut clipboard) = arboard::Clipboard::new()
                 && clipboard
-                    .set_text(command)
-                    .context(format_context!("Failed to copy command to clipboard"))
+                    .set_text(command.clone())
+                    .map_err(|err| format_error!("Failed to copy command to clipboard\n{err:?}"))
                     .is_ok()
             {
-                let clipboard_msg = console::style::StyledContent::new(
-                    console::primary_style(),
-                    "Command copied to clipboard".to_owned(),
+                ui.add(console::bootstrap::VerticalSpacer::new(1));
+                ui.add(
+                    console::bootstrap::Alert::new("Command copied to clipboard")
+                        .variant(console::bootstrap::Variant::Info),
                 );
-                console.raw(format!("\n{clipboard_msg}\n"))?;
             }
 
-            console.raw(format!("{divider}\n"))?;
+            ui.add(
+                console::bootstrap::Divider::new()
+                    .style(console::bootstrap::DividerStyle::Double)
+                    .width(console::bootstrap::Width::Large),
+            );
+
+            console.emit_container(&ui);
 
             progress_bar.set_finalize_lines(logger::make_finalize_line(
                 logger::FinalType::Finished,
@@ -508,20 +492,17 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
                 format!("downloaded release {}", release.tag_name).as_str(),
             ));
         } else {
-            let divider =
-                console::style::StyledContent::new(console::default_style(), "─".repeat(56));
-            console.raw(format!("{divider}\n"))?;
-
-            let error_msg = console::style::StyledContent::new(
-                console::danger_style(),
-                format!(
+            let mut ui = console::container::Container::new();
+            ui.add(
+                console::bootstrap::Alert::new(format!(
                     "Release for {} is not available",
                     tag.as_deref().unwrap_or("latest")
-                ),
+                ))
+                .title("Release unavailable")
+                .variant(console::bootstrap::Variant::Danger)
+                .width(console::bootstrap::Width::Large),
             );
-            console.raw(format!("{error_msg}\n"))?;
-
-            console.raw(format!("{divider}\n"))?;
+            console.emit_container(&ui);
 
             progress_bar.set_finalize_lines(logger::make_finalize_line(
                 logger::FinalType::Failed,
