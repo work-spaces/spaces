@@ -35,6 +35,14 @@ pub struct Verbosity {
     pub is_tty: bool,
 }
 
+fn ci_log_marker(level: Level) -> Option<&'static str> {
+    match level {
+        Level::Warning => Some("warning"),
+        Level::Error => Some("error"),
+        _ => None,
+    }
+}
+
 pub(crate) fn format_log(
     verbosity: &Verbosity,
     level: Level,
@@ -89,10 +97,27 @@ pub(crate) fn format_log(
         first.push(superconsole::Span::new_unstyled_lossy(format!(
             ":{first_line}"
         )));
-    } else {
-        let level_label = level.to_string().to_lowercase();
+    } else if let Some(marker) = ci_log_marker(level) {
+        let marker_message = if let Some(app_message) = app_message {
+            format!("{app_message}:{timestamp}{first_line}")
+        } else {
+            format!("{timestamp}{first_line}")
+        };
         first.push(superconsole::Span::new_unstyled_lossy(format!(
-            "::{level_label}::{timestamp}{first_line}"
+            "::{marker}::{marker_message}"
+        )));
+    } else {
+        if !timestamp.is_empty() {
+            first.push(superconsole::Span::new_unstyled_lossy(&timestamp));
+        }
+        if let Some(app_message) = app_message {
+            first.push(superconsole::Span::new_unstyled_lossy(app_message));
+        } else {
+            let level_label = level.to_string().to_lowercase();
+            first.push(superconsole::Span::new_unstyled_lossy(level_label));
+        }
+        first.push(superconsole::Span::new_unstyled_lossy(format!(
+            ":{first_line}"
         )));
     }
 
