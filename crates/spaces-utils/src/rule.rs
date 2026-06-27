@@ -1,7 +1,7 @@
 use crate::{deps, labels, logger, markdown, platform, targets};
 use anyhow_source_location::format_error;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use strum::Display;
 
@@ -70,7 +70,7 @@ pub struct Rule {
     pub apply_trailing_args_to: Option<Arc<str>>,
 }
 
-type RuleMap = HashMap<Arc<str>, (Rule, Option<String>)>;
+type RuleMap = BTreeMap<Arc<str>, (Rule, Option<String>)>;
 
 struct Section {
     name: Arc<str>,
@@ -216,7 +216,7 @@ impl Rule {
     }
 
     fn get_hash_map(rules: &[(&Rule, Option<String>)]) -> RuleMap {
-        let mut map = HashMap::new();
+        let mut map = BTreeMap::new();
         for (rule, details) in rules {
             map.insert(rule.name.clone(), ((*rule).clone(), details.clone()));
         }
