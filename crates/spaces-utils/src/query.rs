@@ -384,6 +384,30 @@ mod tests {
     }
 
     #[test]
+    fn filter_glob_fuzzy_expansion_strips_label_prefix() {
+        let globs = build_filter_globs("//pkg:target");
+        assert!(globs.includes.contains("pkg:target"));
+        assert!(globs.includes.contains("**/*:*pkg:target*"));
+        assert!(globs.includes.contains("**/*pkg:target*:*"));
+        assert!(globs.includes.contains("**/pkg:target*:*"));
+        assert!(globs.includes.contains("**/*pkg:target*/*:*"));
+        assert!(!globs.includes.contains("**/*:*//pkg:target*"));
+    }
+
+    #[test]
+    fn filter_glob_exact_label_term_is_included() {
+        let globs = build_filter_globs("spaces:check");
+        assert!(globs.includes.contains("spaces:check"));
+    }
+
+    #[test]
+    fn filter_glob_exact_label_term_with_leading_slashes_is_included() {
+        let globs = build_filter_globs("//spaces:check");
+        assert!(globs.includes.contains("spaces:check"));
+        assert!(!globs.includes.contains("//spaces:check"));
+    }
+
+    #[test]
     fn filter_glob_normalizes_label_style_annotated_prefixes() {
         let globs = build_filter_globs("+//spaces/**,-//spaces/**:*test*");
         assert!(globs.includes.contains("spaces/**"));
@@ -501,6 +525,8 @@ fn build_filter_globs(filter: &str) -> glob::Globs {
             continue;
         }
 
+        let expr = expr.strip_prefix("//").unwrap_or(expr);
+
         let expanded: Vec<(bool, String)> = if let Some(pattern) = expr.strip_prefix('+') {
             vec![(true, pattern.to_string())]
         } else if let Some(pattern) = expr.strip_prefix('-') {
@@ -509,6 +535,7 @@ fn build_filter_globs(filter: &str) -> glob::Globs {
             vec![(true, expr.to_string())]
         } else {
             vec![
+                (true, expr.to_string()),
                 (true, format!("**/*:*{expr}*")),
                 (true, format!("**/*{expr}*:*")),
                 (true, format!("**/{expr}*:*")),
