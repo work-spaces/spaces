@@ -221,7 +221,7 @@ fn describe_pre_sync_action(plan: &RepoSyncPlan) -> String {
 
 fn describe_post_sync_action(plan: &RepoSyncPlan) -> String {
     if plan.will_stash {
-        "pop stash after sync".to_string()
+        "will pop stash after sync".to_string()
     } else {
         "no post-sync action".to_string()
     }
