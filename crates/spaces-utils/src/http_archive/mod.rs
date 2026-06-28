@@ -48,8 +48,9 @@ fn url_to_host(url: &str) -> String {
 }
 
 fn is_s3_url(url: &str) -> bool {
-    url::Url::parse(url)
-        .map(|parsed| parsed.scheme() == "s3")
+    url.as_bytes()
+        .get(..5)
+        .map(|prefix| prefix.eq_ignore_ascii_case(b"s3://"))
         .unwrap_or(false)
 }
 
@@ -1302,6 +1303,16 @@ mod tests {
             err.to_string().contains("missing object key"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn test_is_s3_url_is_prefix_based_for_malformed_s3_inputs() {
+        assert!(is_s3_url("s3://my-bucket/path with spaces/archive.tar.gz"));
+    }
+
+    #[test]
+    fn test_is_s3_url_is_case_insensitive() {
+        assert!(is_s3_url("S3://my-bucket/path/to/archive.tar.gz"));
     }
 
     #[test]

@@ -88,6 +88,6 @@ mod tests {
             [("PATH", "/path"), ("EMPTY", "")],
         );
 
-        assert_eq!(replaced, "abc$AUTO{PATH}def");
+        assert_eq!(replaced, "abc$AUTO{PATH}/def");
     }
 }
