@@ -17,7 +17,6 @@ pub const EXIT_VALUE_MARKER: &str = "$RUN_LOAD_EXIT_VALUE";
 pub const ENV_MARKER: &str = "$RUN_LOAD_ENV";
 
 // add pub enum Inputs with globs and envs
-// add outputs as globs (includes/excludes)
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum RuleType {
@@ -54,8 +53,6 @@ pub struct Rule {
     pub help: Option<Arc<str>>,
     /// list of globs that must have a change to re-run the rule (deprecated: use deps with Globs)
     pub inputs: Option<Vec<Arc<str>>>,
-    /// Not used - use targets
-    pub outputs: Option<Vec<Arc<str>>>,
     /// The targets can be files or directories - directory will use entire directory contents
     pub targets: Option<Vec<targets::Target>>,
     /// list of platforms that the rule will run on. default is to run on all platforms
@@ -89,13 +86,6 @@ impl Rule {
             self.deps = Some(Deps::Any(
                 rules.iter_mut().map(|e| AnyDep::Rule(e.clone())).collect(),
             ));
-        }
-
-        if self.outputs.is_some() {
-            logger::push_deprecation_warning(
-                latest_starlark_module.clone(),
-                "`outputs` will be deprecated in v0.16. Use `targets` instead",
-            );
         }
 
         // Pull any glob values from inputs into deps as Deps::Any with AnyDep::Glob
