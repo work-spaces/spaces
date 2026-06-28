@@ -327,8 +327,6 @@ async fn download_s3(
             "Failed to flush downloaded S3 object to {destination}"
         ))?;
 
-        progress.increment(bytes_written);
-
         if let Some(expected) = total_size
             && expected != bytes_written
         {
@@ -345,6 +343,8 @@ async fn download_s3(
         }
 
         check_file_is_not_html(destination, url)?;
+
+        progress.increment(bytes_written);
 
         label_logger(console.clone(), url).debug(
             format!("Download complete: {bytes_written} bytes written to {destination}").as_str(),
