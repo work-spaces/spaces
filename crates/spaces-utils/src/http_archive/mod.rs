@@ -1,6 +1,7 @@
 use crate::{changes::glob, hash_streaming, lock, logger, ws};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
+use aws_config::BehaviorVersion;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
@@ -44,6 +45,33 @@ fn url_to_host(url: &str) -> String {
         .and_then(|parsed| parsed.host_str().map(|s| s.trim().to_string()))
         .filter(|host| !host.is_empty())
         .unwrap_or_else(|| "<unknown-host>".to_string())
+}
+
+fn is_s3_url(url: &str) -> bool {
+    url::Url::parse(url)
+        .map(|parsed| parsed.scheme() == "s3")
+        .unwrap_or(false)
+}
+
+fn parse_s3_url(url: &str) -> anyhow::Result<(String, String)> {
+    let parsed = url::Url::parse(url).context(format_context!("Failed to parse S3 URL: {url}"))?;
+
+    if parsed.scheme() != "s3" {
+        return Err(format_error!("Invalid S3 URL {url}: expected scheme s3://"));
+    }
+
+    let bucket = parsed
+        .host_str()
+        .map(ToOwned::to_owned)
+        .filter(|bucket| !bucket.is_empty())
+        .ok_or(format_error!("Invalid S3 URL {url}: missing bucket"))?;
+
+    let key = parsed.path().trim_start_matches('/').to_owned();
+    if key.is_empty() {
+        return Err(format_error!("Invalid S3 URL {url}: missing object key"));
+    }
+
+    Ok((bucket, key))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -219,6 +247,117 @@ fn cleanup_partial_download(destination: &str) {
     let _ = std::fs::remove_file(destination);
 }
 
+async fn download_s3(
+    console: console::Console,
+    url: &str,
+    destination: &str,
+    headers: Option<&HashMap<Arc<str>, Arc<str>>>,
+    retry_counter: Arc<AtomicU32>,
+) -> anyhow::Result<()> {
+    let (bucket, key) = parse_s3_url(url)?;
+
+    if headers.is_some() {
+        label_logger(console.clone(), url)
+            .warning("Custom headers are ignored for s3:// downloads");
+    }
+
+    let progress = console::Progress::new(console.clone(), url, None, None);
+    progress.set_prefix(url_to_filename(url));
+    progress.set_message(&format!("Downloading from s3://{bucket}"));
+
+    let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
+    let client = aws_sdk_s3::Client::new(&config);
+
+    let mut last_error: Option<anyhow::Error> = None;
+
+    for attempt in 0..=DEFAULT_MAX_RETRIES {
+        if attempt > 0 {
+            retry_counter.fetch_add(1, Ordering::Relaxed);
+            let wait = backoff_duration(attempt - 1);
+            label_logger(console.clone(), url).warning(
+                format!("Retry attempt {attempt}/{DEFAULT_MAX_RETRIES} for {url} after {wait:?}")
+                    .as_str(),
+            );
+            tokio::time::sleep(wait).await;
+        }
+
+        let response = match client.get_object().bucket(&bucket).key(&key).send().await {
+            Ok(response) => response,
+            Err(err) => {
+                if attempt < DEFAULT_MAX_RETRIES {
+                    last_error = Some(err.into());
+                    continue;
+                }
+                cleanup_partial_download(destination);
+                let human_attempt = attempt + 1;
+                return Err(err).context(format_context!(
+                    "Failed to download {url} after {human_attempt} attempt(s)"
+                ));
+            }
+        };
+
+        let total_size = response
+            .content_length()
+            .and_then(|size| u64::try_from(size).ok());
+        progress.set_total(total_size);
+
+        let mut file = tokio::fs::File::create(destination)
+            .await
+            .context(format_context!(
+                "Failed to create destination file {destination}"
+            ))?;
+
+        let mut body = response.body.into_async_read();
+        let bytes_written = match tokio::io::copy(&mut body, &mut file).await {
+            Ok(bytes_written) => bytes_written,
+            Err(err) => {
+                if attempt < DEFAULT_MAX_RETRIES {
+                    last_error = Some(err.into());
+                    continue;
+                }
+                cleanup_partial_download(destination);
+                return Err(err).context(format_context!(
+                    "Failed to stream S3 object {url} into {destination}"
+                ));
+            }
+        };
+
+        file.flush().await.context(format_context!(
+            "Failed to flush downloaded S3 object to {destination}"
+        ))?;
+
+        progress.increment(bytes_written);
+
+        if let Some(expected) = total_size
+            && expected != bytes_written
+        {
+            let msg = format!(
+                "Size mismatch for {url}: expected {expected} bytes, got {bytes_written} bytes"
+            );
+            if attempt < DEFAULT_MAX_RETRIES {
+                last_error = Some(format_error!("{msg}"));
+                cleanup_partial_download(destination);
+                continue;
+            }
+            cleanup_partial_download(destination);
+            return Err(format_error!("{msg}"));
+        }
+
+        check_file_is_not_html(destination, url)?;
+
+        label_logger(console.clone(), url).debug(
+            format!("Download complete: {bytes_written} bytes written to {destination}").as_str(),
+        );
+
+        return Ok(());
+    }
+
+    cleanup_partial_download(destination);
+    Err(last_error.unwrap_or_else(|| {
+        format_error!("Failed to download {url} after {DEFAULT_MAX_RETRIES} retries")
+    }))
+}
+
 pub fn download(
     console: console::Console,
     url: &str,
@@ -228,12 +367,22 @@ pub fn download(
     runtime: &tokio::runtime::Runtime,
 ) -> anyhow::Result<tokio::task::JoinHandle<anyhow::Result<()>>> {
     label_logger(console.clone(), url)
-        .trace(format!("Downloading using reqwest {url} -> {destination}").as_str());
+        .trace(format!("Downloading {url} -> {destination}").as_str());
 
     let destination = destination.to_string();
     let url = url.to_string();
 
     let join_handle = runtime.spawn(async move {
+        if is_s3_url(&url) {
+            return download_s3(
+                console.clone(),
+                &url,
+                &destination,
+                headers.as_ref(),
+                Arc::clone(&retry_counter),
+            )
+            .await;
+        }
 
         let progress = console::Progress::new(console.clone(), url.as_str(), None, None);
         progress.set_prefix(url_to_filename(&url));
@@ -1137,6 +1286,22 @@ mod tests {
         f.write_all(content).unwrap();
         f.flush().unwrap();
         f
+    }
+
+    #[test]
+    fn test_parse_s3_url() {
+        let (bucket, key) = parse_s3_url("s3://my-bucket/path/to/archive.tar.gz").unwrap();
+        assert_eq!(bucket, "my-bucket");
+        assert_eq!(key, "path/to/archive.tar.gz");
+    }
+
+    #[test]
+    fn test_parse_s3_url_without_key_fails() {
+        let err = parse_s3_url("s3://my-bucket").unwrap_err();
+        assert!(
+            err.to_string().contains("missing object key"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

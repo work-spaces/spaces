@@ -16,6 +16,8 @@ reqwest = { version = "0.12", default-features = false, features = [
     "blocking",
     "rustls-tls",
 ] }
+aws-config = "1"
+aws-sdk-s3 = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "time", "fs", "io-util"] }
 which = "7"
 sha2 = "0.10"
