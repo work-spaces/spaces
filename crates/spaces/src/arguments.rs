@@ -719,6 +719,16 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                 .context(format_context!("while executing query command"))?;
         }
 
+        Commands::QueryCo { command } => {
+            if effective_console.get_level() > console::Level::Info {
+                effective_console.set_level(console::Level::Info);
+            }
+
+            command
+                .execute(effective_console)
+                .context(format_context!("while executing query-co command"))?;
+        }
+
         Commands::Completions {
             shell,
             output,
@@ -1128,6 +1138,11 @@ create-lock-file = false # optionally create a lock file
     Query {
         #[command(subcommand)]
         command: utils::query::QueryCommand,
+    },
+    /// Query checkout entries from co.spaces.toml.
+    QueryCo {
+        #[command(subcommand)]
+        command: utils::co::QueryCoCommand,
     },
     /// Generates shell completions for the spaces command.
     Completions {

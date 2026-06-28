@@ -276,10 +276,8 @@ impl QueryCommand {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        DependencyNode, build_dependency_tree, dependency_node_to_tree, query_highlight_mask,
-    };
-    use crate::graph;
+    use super::{DependencyNode, build_dependency_tree, dependency_node_to_tree};
+    use crate::{graph, search};
     use std::collections::HashSet;
     use std::sync::Arc;
 
@@ -289,7 +287,7 @@ mod tests {
 
     #[test]
     fn only_highlights_whole_search_terms() {
-        let mask = query_highlight_mask("some search thing", &arc_terms(&["something"]));
+        let mask = search::keyword_highlight_mask("some search thing", &arc_terms(&["something"]));
         let highlighted: Vec<usize> = mask
             .into_iter()
             .enumerate()
@@ -301,7 +299,7 @@ mod tests {
 
     #[test]
     fn highlights_term_substrings_and_multiple_occurrences() {
-        let mask = query_highlight_mask("tested tests test", &arc_terms(&["test"]));
+        let mask = search::keyword_highlight_mask("tested tests test", &arc_terms(&["test"]));
         let highlighted: Vec<usize> = mask
             .into_iter()
             .enumerate()
@@ -316,7 +314,7 @@ mod tests {
         // 'ß'.to_lowercase() == "ss" (1 char expands to 2), which previously caused an
         // out-of-bounds panic because highlights was sized from the original char count
         // while value_lower used the expanded length.
-        let mask = query_highlight_mask("Straße", &arc_terms(&["straße"]));
+        let mask = search::keyword_highlight_mask("Straße", &arc_terms(&["straße"]));
         assert_eq!(mask.len(), "Straße".chars().count());
         // "Straße".to_ascii_lowercase() == "straße", so the full string should match.
         assert!(mask.iter().all(|&h| h));
@@ -324,7 +322,7 @@ mod tests {
 
     #[test]
     fn merges_highlights_from_multiple_terms() {
-        let mask = query_highlight_mask("build and test", &arc_terms(&["build", "test"]));
+        let mask = search::keyword_highlight_mask("build and test", &arc_terms(&["build", "test"]));
         let highlighted: Vec<usize> = mask
             .into_iter()
             .enumerate()
@@ -557,62 +555,9 @@ fn serialise_rule_map_yaml(map: &HashMap<Arc<str>, RuleInfo>) -> anyhow::Result<
     ))
 }
 
-fn query_highlight_mask(value: &str, query: &[Arc<str>]) -> Vec<bool> {
-    // ASCII-only folding preserves char count, so value_lower.len() == value.chars().count().
-    let value_lower: Vec<char> = value.to_ascii_lowercase().chars().collect();
-    let mut highlights = vec![false; value_lower.len()];
-
-    for term in query {
-        let term_lower: Vec<char> = term.as_ref().to_ascii_lowercase().chars().collect();
-        if term_lower.is_empty() || term_lower.len() > value_lower.len() {
-            continue;
-        }
-
-        for start in 0..=value_lower.len() - term_lower.len() {
-            if value_lower[start..start + term_lower.len()] == term_lower[..] {
-                for h in &mut highlights[start..start + term_lower.len()] {
-                    *h = true;
-                }
-            }
-        }
-    }
-    highlights
-}
-
-fn highlight_chunks(value: &str, highlight_terms: Option<&[Arc<str>]>) -> Vec<(String, bool)> {
-    let Some(highlight_terms) = highlight_terms.filter(|terms| !terms.is_empty()) else {
-        return vec![(value.to_owned(), false)];
-    };
-
-    let chars: Vec<char> = value.chars().collect();
-    if chars.is_empty() {
-        return vec![(String::new(), false)];
-    }
-
-    let highlights = query_highlight_mask(value, highlight_terms);
-    if !highlights.iter().any(|highlighted| *highlighted) {
-        return vec![(value.to_owned(), false)];
-    }
-
-    let mut chunks = Vec::new();
-    let mut current_highlighted = highlights[0];
-    let mut chunk = String::new();
-
-    for (ch, highlighted) in chars.into_iter().zip(highlights) {
-        if highlighted != current_highlighted {
-            chunks.push((std::mem::take(&mut chunk), current_highlighted));
-            current_highlighted = highlighted;
-        }
-        chunk.push(ch);
-    }
-
-    chunks.push((chunk, current_highlighted));
-    chunks
-}
-
 fn make_name_line(name: &str, highlight_terms: Option<&[Arc<str>]>) -> console::Line {
     let mut line = console::Line::default();
-    for (chunk, highlighted) in highlight_chunks(name, highlight_terms) {
+    for (chunk, highlighted) in search::highlight_chunks(name, highlight_terms) {
         let style = if highlighted {
             console::warning_style()
         } else {
@@ -647,7 +592,7 @@ fn make_help_lines(help: &str, highlight_terms: Option<&[Arc<str>]>) -> Vec<cons
                 }
 
                 let is_code = segment_idx % 2 == 1;
-                for (chunk, highlighted) in highlight_chunks(segment, highlight_terms) {
+                for (chunk, highlighted) in search::highlight_chunks(segment, highlight_terms) {
                     if chunk.is_empty() {
                         continue;
                     }
