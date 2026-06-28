@@ -1,4 +1,4 @@
-use crate::{changes::glob, graph, inspect, markdown, rule, suggest, targets};
+use crate::{changes::glob, graph, inspect, markdown, rule, search, suggest, targets};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::Subcommand;
@@ -276,11 +276,8 @@ impl QueryCommand {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        DependencyNode, build_dependency_tree, build_filter_globs, dependency_node_to_tree,
-        query_highlight_mask,
-    };
-    use crate::graph;
+    use super::{DependencyNode, build_dependency_tree, dependency_node_to_tree};
+    use crate::{graph, search};
     use std::collections::HashSet;
     use std::sync::Arc;
 
@@ -290,7 +287,7 @@ mod tests {
 
     #[test]
     fn only_highlights_whole_search_terms() {
-        let mask = query_highlight_mask("some search thing", &arc_terms(&["something"]));
+        let mask = search::keyword_highlight_mask("some search thing", &arc_terms(&["something"]));
         let highlighted: Vec<usize> = mask
             .into_iter()
             .enumerate()
@@ -302,7 +299,7 @@ mod tests {
 
     #[test]
     fn highlights_term_substrings_and_multiple_occurrences() {
-        let mask = query_highlight_mask("tested tests test", &arc_terms(&["test"]));
+        let mask = search::keyword_highlight_mask("tested tests test", &arc_terms(&["test"]));
         let highlighted: Vec<usize> = mask
             .into_iter()
             .enumerate()
@@ -317,7 +314,7 @@ mod tests {
         // 'ß'.to_lowercase() == "ss" (1 char expands to 2), which previously caused an
         // out-of-bounds panic because highlights was sized from the original char count
         // while value_lower used the expanded length.
-        let mask = query_highlight_mask("Straße", &arc_terms(&["straße"]));
+        let mask = search::keyword_highlight_mask("Straße", &arc_terms(&["straße"]));
         assert_eq!(mask.len(), "Straße".chars().count());
         // "Straße".to_ascii_lowercase() == "straße", so the full string should match.
         assert!(mask.iter().all(|&h| h));
@@ -325,7 +322,7 @@ mod tests {
 
     #[test]
     fn merges_highlights_from_multiple_terms() {
-        let mask = query_highlight_mask("build and test", &arc_terms(&["build", "test"]));
+        let mask = search::keyword_highlight_mask("build and test", &arc_terms(&["build", "test"]));
         let highlighted: Vec<usize> = mask
             .into_iter()
             .enumerate()
@@ -373,48 +370,6 @@ mod tests {
 
         let json = serde_json::to_string(&node).unwrap();
         assert!(json.contains("//test:rule"));
-    }
-
-    #[test]
-    fn filter_glob_normalizes_label_style_include_prefix() {
-        let globs = build_filter_globs("//spaces/**");
-        assert!(globs.includes.contains("spaces/**"));
-        assert!(globs.includes.contains("spaces:*"));
-        assert!(!globs.includes.contains("//spaces/**"));
-    }
-
-    #[test]
-    fn filter_glob_fuzzy_expansion_strips_label_prefix() {
-        let globs = build_filter_globs("//pkg:target");
-        assert!(globs.includes.contains("pkg:target"));
-        assert!(globs.includes.contains("**/*:*pkg:target*"));
-        assert!(globs.includes.contains("**/*pkg:target*:*"));
-        assert!(globs.includes.contains("**/pkg:target*:*"));
-        assert!(globs.includes.contains("**/*pkg:target*/*:*"));
-        assert!(!globs.includes.contains("**/*:*//pkg:target*"));
-    }
-
-    #[test]
-    fn filter_glob_exact_label_term_is_included() {
-        let globs = build_filter_globs("spaces:check");
-        assert!(globs.includes.contains("spaces:check"));
-    }
-
-    #[test]
-    fn filter_glob_exact_label_term_with_leading_slashes_is_included() {
-        let globs = build_filter_globs("//spaces:check");
-        assert!(globs.includes.contains("spaces:check"));
-        assert!(!globs.includes.contains("//spaces:check"));
-    }
-
-    #[test]
-    fn filter_glob_normalizes_label_style_annotated_prefixes() {
-        let globs = build_filter_globs("+//spaces/**,-//spaces/**:*test*");
-        assert!(globs.includes.contains("spaces/**"));
-        assert!(globs.includes.contains("spaces:*"));
-        assert!(globs.excludes.contains("spaces/**:*test*"));
-        assert!(!globs.includes.contains("//spaces/**"));
-        assert!(!globs.excludes.contains("//spaces/**:*test*"));
     }
 }
 
@@ -506,61 +461,6 @@ fn extract_targets(r: &rule::Rule) -> Vec<Arc<str>> {
         .collect()
 }
 
-/// Add a glob pattern to the include/exclude set based on `is_include`.
-fn insert_filter_glob(globs: &mut glob::Globs, is_include: bool, pattern: String) {
-    if is_include {
-        globs.includes.insert(pattern.into());
-    } else {
-        globs.excludes.insert(pattern.into());
-    }
-}
-
-/// Build filter glob expressions from a `--filter` value.
-/// Mirrors the expansion logic in `arguments.rs`.
-fn build_filter_globs(filter: &str) -> glob::Globs {
-    let mut globs = glob::Globs::default();
-    for expr in filter.split(',') {
-        let expr = expr.trim();
-        if expr.is_empty() {
-            continue;
-        }
-
-        let expr = expr.strip_prefix("//").unwrap_or(expr);
-
-        let expanded: Vec<(bool, String)> = if let Some(pattern) = expr.strip_prefix('+') {
-            vec![(true, pattern.to_string())]
-        } else if let Some(pattern) = expr.strip_prefix('-') {
-            vec![(false, pattern.to_string())]
-        } else if expr.contains('*') {
-            vec![(true, expr.to_string())]
-        } else {
-            vec![
-                (true, expr.to_string()),
-                (true, format!("**/*:*{expr}*")),
-                (true, format!("**/*{expr}*:*")),
-                (true, format!("**/{expr}*:*")),
-                (true, format!("**/*{expr}*/*:*")),
-            ]
-        };
-
-        for (is_include, e) in expanded {
-            let normalized = e.strip_prefix("//").unwrap_or(e.as_str()).to_string();
-
-            // Label ergonomics: `//pkg/**` is commonly expected to include
-            // both subtree labels (`//pkg/sub:target`) and package-local labels
-            // (`//pkg:target`). Add `pkg:*` alongside `pkg/**`.
-            if let Some(pkg) = normalized.strip_suffix("/**")
-                && !pkg.is_empty()
-            {
-                insert_filter_glob(&mut globs, is_include, format!("{pkg}:*"));
-            }
-
-            insert_filter_glob(&mut globs, is_include, normalized);
-        }
-    }
-    globs
-}
-
 /// Returns the default (globs, strip_prefix) pair derived from the workspace
 /// invocation path when no explicit `--filter` is provided.
 fn default_globs(relative_invoked_path: &str) -> (glob::Globs, Option<Arc<str>>) {
@@ -590,7 +490,7 @@ fn collect_rule_infos(
     for qr in rules {
         let raw_name = qr.rule.name.as_ref();
 
-        if !globs.is_empty() && !globs.is_match(raw_name.strip_prefix("//").unwrap_or(raw_name)) {
+        if !search::matches_filter_in_any_field(globs, [raw_name]) {
             continue;
         }
 
@@ -655,62 +555,9 @@ fn serialise_rule_map_yaml(map: &HashMap<Arc<str>, RuleInfo>) -> anyhow::Result<
     ))
 }
 
-fn query_highlight_mask(value: &str, query: &[Arc<str>]) -> Vec<bool> {
-    // ASCII-only folding preserves char count, so value_lower.len() == value.chars().count().
-    let value_lower: Vec<char> = value.to_ascii_lowercase().chars().collect();
-    let mut highlights = vec![false; value_lower.len()];
-
-    for term in query {
-        let term_lower: Vec<char> = term.as_ref().to_ascii_lowercase().chars().collect();
-        if term_lower.is_empty() || term_lower.len() > value_lower.len() {
-            continue;
-        }
-
-        for start in 0..=value_lower.len() - term_lower.len() {
-            if value_lower[start..start + term_lower.len()] == term_lower[..] {
-                for h in &mut highlights[start..start + term_lower.len()] {
-                    *h = true;
-                }
-            }
-        }
-    }
-    highlights
-}
-
-fn highlight_chunks(value: &str, highlight_terms: Option<&[Arc<str>]>) -> Vec<(String, bool)> {
-    let Some(highlight_terms) = highlight_terms.filter(|terms| !terms.is_empty()) else {
-        return vec![(value.to_owned(), false)];
-    };
-
-    let chars: Vec<char> = value.chars().collect();
-    if chars.is_empty() {
-        return vec![(String::new(), false)];
-    }
-
-    let highlights = query_highlight_mask(value, highlight_terms);
-    if !highlights.iter().any(|highlighted| *highlighted) {
-        return vec![(value.to_owned(), false)];
-    }
-
-    let mut chunks = Vec::new();
-    let mut current_highlighted = highlights[0];
-    let mut chunk = String::new();
-
-    for (ch, highlighted) in chars.into_iter().zip(highlights) {
-        if highlighted != current_highlighted {
-            chunks.push((std::mem::take(&mut chunk), current_highlighted));
-            current_highlighted = highlighted;
-        }
-        chunk.push(ch);
-    }
-
-    chunks.push((chunk, current_highlighted));
-    chunks
-}
-
 fn make_name_line(name: &str, highlight_terms: Option<&[Arc<str>]>) -> console::Line {
     let mut line = console::Line::default();
-    for (chunk, highlighted) in highlight_chunks(name, highlight_terms) {
+    for (chunk, highlighted) in search::highlight_chunks(name, highlight_terms) {
         let style = if highlighted {
             console::warning_style()
         } else {
@@ -745,7 +592,7 @@ fn make_help_lines(help: &str, highlight_terms: Option<&[Arc<str>]>) -> Vec<cons
                 }
 
                 let is_code = segment_idx % 2 == 1;
-                for (chunk, highlighted) in highlight_chunks(segment, highlight_terms) {
+                for (chunk, highlighted) in search::highlight_chunks(segment, highlight_terms) {
                     if chunk.is_empty() {
                         continue;
                     }
@@ -1261,16 +1108,14 @@ impl QueryCommand {
                 format,
             } => {
                 let (globs, strip_prefix) = match filter {
-                    Some(f) => (build_filter_globs(f.as_ref()), None),
+                    Some(f) => (search::build_filter_globs(f.as_ref()), None),
                     None => default_globs(ctx.relative_invoked_path.as_ref()),
                 };
 
                 if *raw {
                     let emit = |qr: &QueryRule| -> anyhow::Result<()> {
                         let raw_name = qr.rule.name.as_ref();
-                        if !globs.is_empty()
-                            && !globs.is_match(raw_name.strip_prefix("//").unwrap_or(raw_name))
-                        {
+                        if !search::matches_filter_in_any_field(&globs, [raw_name]) {
                             return Ok(());
                         }
                         if *has_help && qr.rule.help.is_none() {
@@ -1475,45 +1320,6 @@ impl QueryCommand {
                     }
                 }
 
-                // Helper function to compute score with exact/prefix/substring bonuses
-                let score_match = |query_term: &str, target: &str| -> isize {
-                    let query_lower = query_term.to_lowercase();
-                    let target_lower = target.to_lowercase();
-
-                    // Check for exact case-sensitive match (best)
-                    if target == query_term {
-                        return 15000;
-                    }
-
-                    // Check for exact case-insensitive match
-                    if target_lower == query_lower {
-                        return 10000;
-                    }
-
-                    // Check for prefix match
-                    if target_lower.starts_with(&query_lower) {
-                        return 5000;
-                    }
-
-                    // Check for word boundary match (e.g., "test" matches "build-test", "pkg:test")
-                    if target_lower.contains(&format!("-{}", query_lower))
-                        || target_lower.contains(&format!("_{}", query_lower))
-                        || target_lower.contains(&format!(":{}", query_lower))
-                    {
-                        return 3000;
-                    }
-
-                    // Check for substring match
-                    if target_lower.contains(&query_lower) {
-                        return 2000;
-                    }
-
-                    // Fall back to fuzzy match
-                    sublime_fuzzy::best_match(query_term, target)
-                        .map(|m| m.score())
-                        .unwrap_or(0)
-                };
-
                 let mut score_rule = |qr: &QueryRule| {
                     let raw_name = qr.rule.name.as_ref();
                     let help_text = qr.rule.help.as_deref().unwrap_or("");
@@ -1540,10 +1346,10 @@ impl QueryCommand {
                     // Aggregate score across all search terms (non-filter terms)
                     for query_term in &search_terms {
                         // Score against name (higher weight)
-                        let name_score = score_match(query_term, raw_name);
+                        let name_score = search::score_match(query_term, raw_name);
 
                         // Score against help text (lower weight: 1/3 of name)
-                        let help_score = score_match(query_term, help_text) / 3;
+                        let help_score = search::score_match(query_term, help_text) / 3;
 
                         // Take the better of the two
                         let term_score = name_score.max(help_score);
