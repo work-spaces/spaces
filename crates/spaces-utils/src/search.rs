@@ -1,12 +1,8 @@
 use crate::changes::glob;
 use std::sync::Arc;
 
-fn insert_filter_glob(globs: &mut glob::Globs, is_include: bool, pattern: String) {
-    if is_include {
-        globs.includes.insert(pattern.into());
-    } else {
-        globs.excludes.insert(pattern.into());
-    }
+fn insert_filter_glob(globs: &mut glob::Globs, pattern: String) {
+    globs.includes.insert(pattern.into());
 }
 
 /// Build filter glob expressions from a `--filter` value.
@@ -21,23 +17,22 @@ pub fn build_filter_globs(filter: &str) -> glob::Globs {
 
         let expr = expr.strip_prefix("//").unwrap_or(expr);
 
-        let expanded: Vec<(bool, String)> = if let Some(pattern) = expr.strip_prefix('+') {
-            vec![(true, pattern.to_string())]
-        } else if let Some(pattern) = expr.strip_prefix('-') {
-            vec![(false, pattern.to_string())]
-        } else if expr.contains('*') {
-            vec![(true, expr.to_string())]
-        } else {
-            vec![
-                (true, expr.to_string()),
-                (true, format!("**/*:*{expr}*")),
-                (true, format!("**/*{expr}*:*")),
-                (true, format!("**/{expr}*:*")),
-                (true, format!("**/*{expr}*/*:*")),
-            ]
-        };
+        let expanded: Vec<String> =
+            if let Some(pattern) = expr.strip_prefix('+').or_else(|| expr.strip_prefix('-')) {
+                vec![pattern.to_string()]
+            } else if expr.contains('*') {
+                vec![expr.to_string()]
+            } else {
+                vec![
+                    expr.to_string(),
+                    format!("**/*:*{expr}*"),
+                    format!("**/*{expr}*:*"),
+                    format!("**/{expr}*:*"),
+                    format!("**/*{expr}*/*:*"),
+                ]
+            };
 
-        for (is_include, e) in expanded {
+        for e in expanded {
             let normalized = e.strip_prefix("//").unwrap_or(e.as_str()).to_string();
 
             // Label ergonomics: `//pkg/**` is commonly expected to include
@@ -46,10 +41,10 @@ pub fn build_filter_globs(filter: &str) -> glob::Globs {
             if let Some(pkg) = normalized.strip_suffix("/**")
                 && !pkg.is_empty()
             {
-                insert_filter_glob(&mut globs, is_include, format!("{pkg}:*"));
+                insert_filter_glob(&mut globs, format!("{pkg}:*"));
             }
 
-            insert_filter_glob(&mut globs, is_include, normalized);
+            insert_filter_glob(&mut globs, normalized);
         }
     }
     globs
@@ -217,9 +212,9 @@ mod tests {
         let globs = build_filter_globs("+//spaces/**,-//spaces/**:*test*");
         assert!(globs.includes.contains("spaces/**"));
         assert!(globs.includes.contains("spaces:*"));
-        assert!(globs.excludes.contains("spaces/**:*test*"));
+        assert!(globs.includes.contains("spaces/**:*test*"));
         assert!(!globs.includes.contains("//spaces/**"));
-        assert!(!globs.excludes.contains("//spaces/**:*test*"));
+        assert!(!globs.includes.contains("//spaces/**:*test*"));
     }
 
     #[test]

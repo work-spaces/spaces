@@ -3,7 +3,7 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use console::style::StyledContent;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 pub const CO_FILE_NAME: &str = "co.spaces.toml";
@@ -105,7 +105,7 @@ pub enum QueryCoCommand {
         about = r"List checkout entries, optionally filtered across full entry content.
   - `spaces query-co list`: list all entries from co.spaces.toml
   - `spaces query-co list --filter=github`: filter by glob-like expression
-  - `spaces query-co list --filter='+github,-deprecated'`: include/exclude filtering
+  - `spaces query-co list --filter='*deprecated*'`: include matches for wildcard filter text
   - `spaces query-co list --format=yaml`: output structured YAML"
     )]
     List {
@@ -959,31 +959,8 @@ fn entry_matches_filter(
 
     let filter_fields = build_filter_fields(entry);
 
-    let include_globs = crate::changes::glob::Globs {
-        includes: globs.includes.clone(),
-        excludes: HashSet::new(),
-    };
-
-    let includes_match = search::matches_filter_in_any_field(
-        &include_globs,
-        filter_fields.iter().map(|field| field.as_str()),
-    );
-
-    let excludes_match = if globs.excludes.is_empty() {
-        false
-    } else {
-        let exclude_globs = crate::changes::glob::Globs {
-            includes: globs.excludes.clone(),
-            excludes: HashSet::new(),
-        };
-
-        search::matches_filter_in_any_field(
-            &exclude_globs,
-            filter_fields.iter().map(|field| field.as_str()),
-        )
-    };
-
-    if includes_match && !excludes_match {
+    if search::matches_filter_in_any_field(globs, filter_fields.iter().map(|field| field.as_str()))
+    {
         return true;
     }
 
@@ -1015,7 +992,6 @@ fn build_filter_fields(entry: &QueryCoEntry) -> Vec<String> {
 
 fn matches_simple_text_filter(entry: &QueryCoEntry, raw_filter: &str) -> Option<bool> {
     let mut includes = Vec::new();
-    let mut excludes = Vec::new();
 
     for expression in raw_filter.split(',') {
         let expression = expression.trim();
@@ -1023,14 +999,10 @@ fn matches_simple_text_filter(entry: &QueryCoEntry, raw_filter: &str) -> Option<
             continue;
         }
 
-        let (is_include, value) = if let Some(value) = expression.strip_prefix('+') {
-            (true, value)
-        } else if let Some(value) = expression.strip_prefix('-') {
-            (false, value)
-        } else {
-            (true, expression)
-        };
-
+        let value = expression
+            .strip_prefix('+')
+            .or_else(|| expression.strip_prefix('-'))
+            .unwrap_or(expression);
         let value = value.trim().strip_prefix("//").unwrap_or(value.trim());
         if value.is_empty() {
             continue;
@@ -1040,14 +1012,10 @@ fn matches_simple_text_filter(entry: &QueryCoEntry, raw_filter: &str) -> Option<
             return None;
         }
 
-        if is_include {
-            includes.push(value.to_lowercase());
-        } else {
-            excludes.push(value.to_lowercase());
-        }
+        includes.push(value.to_lowercase());
     }
 
-    if includes.is_empty() && excludes.is_empty() {
+    if includes.is_empty() {
         return Some(true);
     }
 
@@ -1060,13 +1028,6 @@ fn matches_simple_text_filter(entry: &QueryCoEntry, raw_filter: &str) -> Option<
     for include in includes {
         let include_match = lowered_fields.iter().any(|field| field.contains(&include));
         if !include_match {
-            return Some(false);
-        }
-    }
-
-    for exclude in excludes {
-        let exclude_match = lowered_fields.iter().any(|field| field.contains(&exclude));
-        if exclude_match {
             return Some(false);
         }
     }
@@ -1216,7 +1177,7 @@ mod tests {
     }
 
     #[test]
-    fn query_co_filter_include_exclude_across_full_entry_content() {
+    fn query_co_filter_matches_included_terms_only() {
         let (active_name, active_checkout) = repo_with_fields(
             "active",
             "https://github.com/work-spaces/active",
@@ -1242,10 +1203,18 @@ mod tests {
         ]);
         let entries = normalize_query_co_entries(&checkout_map);
 
-        let filtered = select_entries_for_list(&entries, Some("+github,-deprecated"));
+        let filtered = select_entries_for_list(&entries, Some("-deprecated"));
         let names: Vec<&str> = filtered.iter().map(|entry| entry.name.as_ref()).collect();
 
-        assert_eq!(names, vec!["active"]);
+        assert_eq!(names, vec!["deprecated"]);
+
+        let wildcard_filtered = select_entries_for_list(&entries, Some("-*deprecated*"));
+        let wildcard_names: Vec<&str> = wildcard_filtered
+            .iter()
+            .map(|entry| entry.name.as_ref())
+            .collect();
+
+        assert_eq!(wildcard_names, vec!["deprecated"]);
     }
 
     #[test]
