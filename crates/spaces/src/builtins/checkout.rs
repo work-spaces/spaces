@@ -114,6 +114,77 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         })
     }
 
+    /// Stores either an environment value or a fallback value in the checkout store.
+    ///
+    /// If environment variable `env` is available, its value is stored under `key`.
+    /// Otherwise `other` is stored under `key`.
+    ///
+    /// # Arguments
+    /// * `key`: A string key to identify the stored value.
+    /// * `env`: Environment variable name to read from process env.
+    /// * `other`: Fallback value to store when `env` is not available.
+    /// * `path`: Optional path to store under. When omitted, the member
+    ///   path for the calling module is used.
+    fn store_env_or(
+        key: &str,
+        env: &str,
+        other: starlark::values::Value,
+        #[starlark(require = named)] path: Option<String>,
+        eval: &mut Evaluator,
+    ) -> anyhow::Result<NoneType> {
+        evaluation_profile::profile_builtin_call("checkout", "store_env_or", || {
+            let json_value = match std::env::var_os(env) {
+                Some(value) => serde_json::Value::String(value.to_string_lossy().into_owned()),
+                None => other.to_json_value().context(format_context!(
+                    "Failed to convert fallback value to JSON for key '{key}'"
+                ))?,
+            };
+
+            if path.as_deref() == Some("//") {
+                return Err(format_error!(
+                    "path `//` is reserved for command-line --store values"
+                ));
+            }
+
+            let ctx = get_eval_context_mut(eval)?;
+
+            if (!ctx.is_checkout && !ctx.is_sync) || ctx.is_lsp {
+                return Ok(NoneType);
+            }
+
+            let module_path = ctx.module_name.clone();
+            let workspace_arc = ctx
+                .workspace
+                .clone()
+                .ok_or_else(|| format_error!("No active workspace found"))?;
+            let mut workspace = workspace_arc.write();
+
+            let path: Arc<str> = path.map(Into::into).unwrap_or_else(|| {
+                workspace
+                    .settings
+                    .json
+                    .get_member_from_module_path(module_path.clone())
+                    .map(|member| member.path.clone())
+                    .unwrap_or(module_path.clone())
+            });
+            let url: Arc<str> = "".into();
+
+            let entry = workspace
+                .settings
+                .checkout_store
+                .entries
+                .entry(path)
+                .or_insert_with(|| utils::ws::CheckoutStoreEntry {
+                    url: url.clone(),
+                    values: std::collections::HashMap::new(),
+                });
+            entry.url = url;
+            entry.values.insert(key.into(), json_value);
+
+            Ok(NoneType)
+        })
+    }
+
     /// Modifies a stored value by applying a lambda to the current value.
     ///
     /// The current value for `key` (or `None` if missing) is passed to `modifier`.
