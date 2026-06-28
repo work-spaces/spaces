@@ -592,6 +592,29 @@ def checkout_store_value(name: str, value, path: str | None = None):
     else:
         checkout.store_value(name, value)
 
+def checkout_store_env_or(name: str, env: str, other, path: str | None = None):
+    """
+    Stores an environment value or a fallback value for later retrieval.
+
+    If `env` exists in the process environment, its string value is stored.
+    Otherwise `other` is stored.
+
+    The value can be retrieved later using `workspace.load_value()` immediately
+    after calling this function.
+
+    Args:
+        name: The key to store the value under.
+        env: Environment variable name to read.
+        other: Fallback value to store when the environment variable is missing.
+        path: Optional path to store under. When omitted, the member
+            path for the calling module is used.
+    """
+
+    if path != None:
+        checkout.store_env_or(name, env, other, path = path)
+    else:
+        checkout.store_env_or(name, env, other)
+
 def checkout_modify_value(name: str, modifier, path: str | None = None):
     """
     Modifies a stored value by applying a callback to the current value.
