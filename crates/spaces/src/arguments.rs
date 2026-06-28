@@ -246,12 +246,12 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             co::checkout_workflow(
                 effective_console,
                 name,
-                co::CheckoutWorkflowArgs {
+                utils::co::CheckoutWorkflowArgs {
                     script,
                     workflow,
                     wf,
                 },
-                co::CheckoutArgs {
+                utils::co::CheckoutArgs {
                     env,
                     store,
                     new_branch,
@@ -294,13 +294,13 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             let result = co::checkout_repo(
                 effective_console.clone(),
                 name,
-                co::CheckoutRepoArgs {
+                utils::co::CheckoutRepoArgs {
                     rule_name,
                     url,
                     rev,
                     clone,
                 },
-                co::CheckoutArgs {
+                utils::co::CheckoutArgs {
                     env,
                     store,
                     new_branch,
@@ -320,10 +320,10 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                 singleton::set_use_locks();
             }
             let (checkout_map, checkout_file_path) =
-                co::Checkout::load().context(format_context!("Failed to load co file"))?;
+                utils::co::Checkout::load().context(format_context!("Failed to load co file"))?;
 
             let mut checkout = checkout_map.get(&args.checkout).cloned().ok_or_else(|| {
-                co::get_checkout_not_found_error(
+                utils::co::get_checkout_not_found_error(
                     args.checkout.clone(),
                     &checkout_map,
                     checkout_file_path.as_path(),
@@ -334,15 +334,14 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                 .apply_overrides(&args)
                 .context(format_context!("while applying co overrides"))?;
 
-            checkout
-                .clone()
-                .checkout(
-                    effective_console,
-                    args.name,
-                    args.keep_workspace_on_failure,
-                    args.lock,
-                )
-                .context(format_context!("while checking out repo"))?;
+            co::checkout_co(
+                checkout,
+                effective_console,
+                args.name,
+                args.keep_workspace_on_failure,
+                args.lock,
+            )
+            .context(format_context!("while checking out repo"))?;
         }
         Commands::Sync {
             env,
@@ -720,6 +719,16 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                 .context(format_context!("while executing query command"))?;
         }
 
+        Commands::QueryCo { command } => {
+            if effective_console.get_level() > console::Level::Info {
+                effective_console.set_level(console::Level::Info);
+            }
+
+            command
+                .execute(effective_console)
+                .context(format_context!("while executing query-co command"))?;
+        }
+
         Commands::Completions {
             shell,
             output,
@@ -984,7 +993,7 @@ create-lock-file = false # optionally create a lock file
 "#)]
     Co {
         #[command(flatten)]
-        args: co::CoArgs,
+        args: utils::co::CoArgs,
     },
     /// Runs checkout rules within an existing workspace
     Sync {
@@ -1129,6 +1138,11 @@ create-lock-file = false # optionally create a lock file
     Query {
         #[command(subcommand)]
         command: utils::query::QueryCommand,
+    },
+    /// Query checkout entries from co.spaces.toml.
+    QueryCo {
+        #[command(subcommand)]
+        command: utils::co::QueryCoCommand,
     },
     /// Generates shell completions for the spaces command.
     Completions {
