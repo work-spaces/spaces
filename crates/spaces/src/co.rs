@@ -252,6 +252,20 @@ fn checkout_co_workflow(
     Ok(())
 }
 
+fn render_store_for_docstring(
+    store: &std::collections::HashMap<Arc<str>, toml::Value>,
+) -> Vec<Arc<str>> {
+    let mut values: Vec<Arc<str>> = store
+        .iter()
+        .map(|(key, value)| {
+            let rendered_value = value.to_string();
+            format!("{key}={rendered_value}").into()
+        })
+        .collect();
+    values.sort();
+    values
+}
+
 fn checkout_co_repo(
     console: console::Console,
     co: utils::co::CheckoutRepo,
@@ -265,20 +279,7 @@ fn checkout_co_repo(
         is_ci,
         format!("Spaces Checkout Repo {}", co.url).as_str(),
     )?;
-    let store_for_docstring = co.store.as_ref().map(|store| {
-        let mut values: Vec<Arc<str>> = store
-            .iter()
-            .map(|(key, value)| {
-                let rendered_value = match value {
-                    toml::Value::String(str_value) => str_value.clone(),
-                    _ => value.to_string(),
-                };
-                format!("{key}={rendered_value}").into()
-            })
-            .collect();
-        values.sort();
-        values
-    });
+    let store_for_docstring = co.store.as_ref().map(render_store_for_docstring);
     if let Some(toml_store) = co.store {
         singleton::set_args_store_from_toml(toml_store)
             .context(format_context!("while setting toml store values"))?;
@@ -328,4 +329,62 @@ pub fn checkout_co(
     };
     result.context(format_context!("during co checkout"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render_store_for_docstring;
+    use std::{collections::HashMap, sync::Arc};
+
+    fn arc(value: &str) -> Arc<str> {
+        Arc::from(value)
+    }
+
+    #[test]
+    fn render_store_for_docstring_preserves_string_quoting_and_types() {
+        let store = HashMap::from([
+            (arc("bool_like"), toml::Value::String("true".to_string())),
+            (arc("actual_bool"), toml::Value::Boolean(true)),
+            (
+                arc("with_space"),
+                toml::Value::String("hello world".to_string()),
+            ),
+            (
+                arc("triple_quote"),
+                toml::Value::String("\"\"\"".to_string()),
+            ),
+        ]);
+
+        let rendered = render_store_for_docstring(&store);
+
+        let expected_actual_bool = format!("actual_bool={}", toml::Value::Boolean(true));
+        let expected_bool_like = format!("bool_like={}", toml::Value::String("true".to_string()));
+        let expected_with_space = format!(
+            "with_space={}",
+            toml::Value::String("hello world".to_string())
+        );
+        let expected_triple_quote =
+            format!("triple_quote={}", toml::Value::String("\"\"\"".to_string()));
+
+        assert!(
+            rendered
+                .iter()
+                .any(|value| value.as_ref() == expected_actual_bool)
+        );
+        assert!(
+            rendered
+                .iter()
+                .any(|value| value.as_ref() == expected_bool_like)
+        );
+        assert!(
+            rendered
+                .iter()
+                .any(|value| value.as_ref() == expected_with_space)
+        );
+        assert!(
+            rendered
+                .iter()
+                .any(|value| value.as_ref() == expected_triple_quote)
+        );
+    }
 }
