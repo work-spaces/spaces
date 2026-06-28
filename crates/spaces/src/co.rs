@@ -240,6 +240,7 @@ fn checkout_co_workflow(
         utils::co::CheckoutArgs {
             env: co.env.unwrap_or_default(),
             store: vec![],
+            store_for_docstring: None,
             new_branch: co.new_branch.unwrap_or_default(),
             create_lock_file: co.create_lock_file.unwrap_or_default(),
             force_install_tools: false,
@@ -264,6 +265,20 @@ fn checkout_co_repo(
         is_ci,
         format!("Spaces Checkout Repo {}", co.url).as_str(),
     )?;
+    let store_for_docstring = co.store.as_ref().map(|store| {
+        let mut values: Vec<Arc<str>> = store
+            .iter()
+            .map(|(key, value)| {
+                let rendered_value = match value {
+                    toml::Value::String(str_value) => str_value.clone(),
+                    _ => value.to_string(),
+                };
+                format!("{key}={rendered_value}").into()
+            })
+            .collect();
+        values.sort();
+        values
+    });
     if let Some(toml_store) = co.store {
         singleton::set_args_store_from_toml(toml_store)
             .context(format_context!("while setting toml store values"))?;
@@ -280,6 +295,7 @@ fn checkout_co_repo(
         utils::co::CheckoutArgs {
             env: co.env.unwrap_or_default(),
             store: vec![],
+            store_for_docstring,
             new_branch: co.new_branch.unwrap_or_default(),
             create_lock_file: co.create_lock_file.unwrap_or_default(),
             force_install_tools: false,

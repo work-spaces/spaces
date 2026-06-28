@@ -197,6 +197,7 @@ pub struct CheckoutWorkflowArgs {
 pub struct CheckoutArgs {
     pub env: Vec<Arc<str>>,
     pub store: Vec<Arc<str>>,
+    pub store_for_docstring: Option<Vec<Arc<str>>>,
     pub new_branch: Vec<Arc<str>>,
     pub create_lock_file: bool,
     pub force_install_tools: bool,
@@ -226,7 +227,11 @@ pub fn build_checkout_command_docstring(
         command_parts.push(format!("  --env={env_val}"));
     }
 
-    for store_val in &checkout_args.store {
+    let store_values = checkout_args
+        .store_for_docstring
+        .as_ref()
+        .unwrap_or(&checkout_args.store);
+    for store_val in store_values {
         command_parts.push(format!("  --store={store_val}"));
     }
 
@@ -1096,9 +1101,10 @@ fn score_entry_for_keywords(entry: &QueryCoEntry, keywords: &[Arc<str>]) -> Opti
 #[cfg(test)]
 mod tests {
     use super::{
-        Checkout, CheckoutRepo, CheckoutWorkflow, QueryCoEntryKind, entry_matches_filter,
-        normalize_query_co_entries, normalize_query_co_entry, score_entry_for_keywords,
-        search_query_co_entries, select_entries_for_list,
+        Checkout, CheckoutArgs, CheckoutRepo, CheckoutRepoArgs, CheckoutWorkflow, QueryCoEntryKind,
+        build_checkout_command_docstring, entry_matches_filter, normalize_query_co_entries,
+        normalize_query_co_entry, score_entry_for_keywords, search_query_co_entries,
+        select_entries_for_list,
     };
     use crate::search;
     use std::collections::HashMap;
@@ -1305,5 +1311,32 @@ mod tests {
             kinds_by_name.get("wf-entry"),
             Some(&QueryCoEntryKind::Workflow)
         );
+    }
+
+    #[test]
+    fn checkout_command_docstring_uses_store_for_docstring_when_present() {
+        let docstring = build_checkout_command_docstring(
+            "demo",
+            crate::git::Clone::Default,
+            &CheckoutRepoArgs {
+                rule_name: None,
+                url: arc("https://example.com/repo.git"),
+                rev: arc("main"),
+                clone: None,
+            },
+            &CheckoutArgs {
+                env: vec![],
+                store: vec![],
+                store_for_docstring: Some(vec![arc("region=us"), arc("enabled=true")]),
+                new_branch: vec![],
+                create_lock_file: false,
+                force_install_tools: false,
+                keep_workspace_on_failure: false,
+                lock: vec![],
+            },
+        );
+
+        assert!(docstring.contains("--store=region=us"));
+        assert!(docstring.contains("--store=enabled=true"));
     }
 }

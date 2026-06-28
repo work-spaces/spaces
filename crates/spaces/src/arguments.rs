@@ -254,6 +254,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                 utils::co::CheckoutArgs {
                     env,
                     store,
+                    store_for_docstring: None,
                     new_branch,
                     create_lock_file,
                     force_install_tools,
@@ -303,6 +304,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                 utils::co::CheckoutArgs {
                     env,
                     store,
+                    store_for_docstring: None,
                     new_branch,
                     create_lock_file,
                     force_install_tools,
