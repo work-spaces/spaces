@@ -1050,8 +1050,9 @@ create-lock-file = false # optionally create a lock file
         no_rebase: bool,
         #[arg(
             long,
-            help = r#"Override dev-branch base ref for a repo.
-  Use `--dev-branch-base=<repo-path>=<ref>`. This flag can be used multiple times."#
+            help = r#"Override sync base ref for a repo.
+  Use `--dev-branch-base=<repo-path>=<ref>`. This flag can be used multiple times.
+  Useful for dev-branch rebases/merges and for non-branch rev repos checked out on a local branch."#
         )]
         dev_branch_base: Vec<Arc<str>>,
         #[arg(
