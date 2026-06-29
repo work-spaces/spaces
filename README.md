@@ -1,3 +1,8 @@
+
+<p align="center">
+  <img src="https://github.com/work-spaces/work-spaces.github.io/releases/download/assets-v0.2.0/spaces-logo-gray-web.png" alt="spaces logo">
+</p>
+
 # spaces
 
 ## What is `spaces`?
