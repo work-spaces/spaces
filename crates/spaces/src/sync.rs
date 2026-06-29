@@ -1,7 +1,7 @@
 use crate::{singleton, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
-use console::bootstrap::IntoLine;
+use console::bootstrap::{IntoLine, replace_ascii_with_typography};
 use itertools::Itertools;
 use std::{
     collections::{HashMap, HashSet},
@@ -22,12 +22,22 @@ pub struct RepoSyncPlan {
     url: Arc<str>,
     is_dev_branch: bool,
     is_rev_branch: bool,
-    is_on_branch: bool,
+    rev: Arc<str>,
     pull_from: Option<Arc<str>>,
     rebase_from: Option<Arc<str>>,
     merge_from: Option<Arc<str>>,
     will_stash: bool,
-    skip_reason: Option<Arc<str>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RepoSyncSnapshot {
+    path: Arc<str>,
+    is_dev_branch: bool,
+    is_rev_branch: bool,
+    workspace_rev: Arc<str>,
+    current_branch: Option<Arc<str>>,
+    current_tag: Option<Arc<str>>,
+    current_commit_hash: Option<Arc<str>>,
 }
 
 #[derive(Debug, Clone)]
@@ -169,7 +179,9 @@ fn base_ref_exists(
     Ok(result.is_ok())
 }
 
+const DRY_RUN_CURRENT_STATUS_HEADER: &str = "Current Status";
 const DRY_RUN_PRE_SYNC_HEADER: &str = "Pre-Sync";
+const DRY_RUN_SYNC_HEADER: &str = "Sync (May Change Based on Updated Rules)";
 const DRY_RUN_POST_SYNC_HEADER: &str = "Post-Sync";
 
 fn has_rev_not_branch_mismatch(
@@ -189,41 +201,47 @@ fn resolve_pull_from(
     (!is_dev_branch && is_on_branch && is_rev_branch).then(|| format!("origin/{rev}").into())
 }
 
-fn describe_pre_sync_action(plan: &RepoSyncPlan) -> String {
-    if let Some(base_ref) = plan.rebase_from.as_ref() {
-        if plan.will_stash {
-            format!("stash, then rebase onto {base_ref}")
-        } else {
-            format!("rebase onto {base_ref}")
-        }
-    } else if let Some(base_ref) = plan.merge_from.as_ref() {
-        if plan.will_stash {
-            format!("stash, then merge {base_ref}")
-        } else {
-            format!("merge {base_ref}")
-        }
-    } else if let Some(base_ref) = plan.pull_from.as_ref() {
-        if plan.will_stash {
-            format!("stash, then pull from {base_ref}")
-        } else {
-            format!("pull from {base_ref}")
-        }
-    } else if let Some(reason) = plan.skip_reason.as_ref() {
-        format!("no pre-sync action ({reason})")
-    } else if !plan.is_rev_branch {
-        "no pre-sync action (rev is not a branch)".to_string()
-    } else if !plan.is_on_branch {
-        "no pre-sync action (detached HEAD)".to_string()
+fn describe_current_status(plan: &RepoSyncPlan) -> String {
+    if plan.is_dev_branch {
+        format!("dev-branch targeting origin/{}", plan.rev)
+    } else if plan.is_rev_branch {
+        format!("branch tracking remote origin/{}", plan.rev)
     } else {
-        "no pre-sync action".to_string()
+        format!("commit pinned to {}", plan.rev)
     }
 }
 
-fn describe_post_sync_action(plan: &RepoSyncPlan) -> String {
-    if plan.will_stash {
-        "will pop stash after sync".to_string()
+fn describe_pre_sync_action(plan: &RepoSyncPlan) -> Option<String> {
+    if let Some(base_ref) = plan.rebase_from.as_ref() {
+        if plan.will_stash {
+            Some(format!("stash, then rebase onto {base_ref}"))
+        } else {
+            Some(format!("rebase onto {base_ref}"))
+        }
+    } else if let Some(base_ref) = plan.merge_from.as_ref() {
+        if plan.will_stash {
+            Some(format!("stash, then merge {base_ref}"))
+        } else {
+            Some(format!("merge {base_ref}"))
+        }
+    } else if plan.will_stash {
+        Some("stash local changes".to_string())
     } else {
-        "no post-sync action".to_string()
+        None
+    }
+}
+
+fn describe_sync_action(plan: &RepoSyncPlan) -> Option<String> {
+    plan.pull_from
+        .as_ref()
+        .map(|base_ref| format!("pull from {base_ref}"))
+}
+
+fn describe_post_sync_action(plan: &RepoSyncPlan) -> Option<String> {
+    if plan.will_stash {
+        Some("pop stashed changes".to_string())
+    } else {
+        None
     }
 }
 
@@ -315,6 +333,13 @@ pub fn build_repo_sync_plan(
                     member.path
                 ))?
                 .is_some();
+
+            let detached_head_rev = if !is_on_branch {
+                repo.get_commit_tag(&mut repo_progress)
+                    .or_else(|| repo.get_commit_hash(&mut repo_progress).ok().flatten())
+            } else {
+                None
+            };
 
             let mut action = None;
             let mut skip_reason: Option<Arc<str>> = None;
@@ -461,7 +486,14 @@ pub fn build_repo_sync_plan(
             } else if !is_rev_branch {
                 format!("//{} no pre-sync action (rev is not a branch)", member.path)
             } else if !is_on_branch {
-                format!("//{} no pre-sync action (detached HEAD)", member.path)
+                if let Some(detached_rev) = detached_head_rev.as_ref() {
+                    format!(
+                        "//{} no pre-sync action (detached HEAD at `{detached_rev}`)",
+                        member.path
+                    )
+                } else {
+                    format!("//{} no pre-sync action (detached HEAD)", member.path)
+                }
             } else {
                 format!("//{} no pre-sync action", member.path)
             };
@@ -493,12 +525,11 @@ pub fn build_repo_sync_plan(
                 url: url.clone(),
                 is_dev_branch,
                 is_rev_branch,
-                is_on_branch,
+                rev: member.rev.clone(),
                 pull_from,
                 rebase_from,
                 merge_from,
                 will_stash,
-                skip_reason,
             });
         }
     }
@@ -663,18 +694,237 @@ pub fn build_repo_sync_plan(
     Ok(plans)
 }
 
-fn format_repo_label(plan: &RepoSyncPlan) -> String {
-    let mut label = format!("//{}", plan.path);
+fn format_repo_label_from_kind(path: &str, is_dev_branch: bool, is_rev_branch: bool) -> String {
+    let mut label = format!("//{path}");
 
-    if plan.is_dev_branch {
+    if is_dev_branch {
         label.push_str(" [dev-branch]");
-    } else if plan.is_rev_branch {
+    } else if is_rev_branch {
         label.push_str(" [branch]");
     } else {
         label.push_str(" [commit]");
     }
 
     label
+}
+
+fn format_repo_label(plan: &RepoSyncPlan) -> String {
+    format_repo_label_from_kind(plan.path.as_ref(), plan.is_dev_branch, plan.is_rev_branch)
+}
+
+fn short_commit(commit: Option<&Arc<str>>) -> Arc<str> {
+    commit
+        .map(|hash| hash.chars().take(8).collect::<String>().into())
+        .unwrap_or_else(|| "unknown".into())
+}
+
+fn describe_snapshot_ref(snapshot: &RepoSyncSnapshot) -> String {
+    if let Some(tag) = snapshot.current_tag.as_ref() {
+        return tag.to_string();
+    }
+
+    if let Some(branch) = snapshot.current_branch.as_ref() {
+        if let Some(hash) = snapshot.current_commit_hash.as_ref() {
+            return format!("{} {}", branch, hash.chars().take(8).collect::<String>());
+        }
+
+        return branch.to_string();
+    }
+
+    if let Some(hash) = snapshot.current_commit_hash.as_ref() {
+        return hash.chars().take(8).collect::<String>();
+    }
+
+    snapshot.workspace_rev.to_string()
+}
+
+fn describe_pre_sync_action_for_complete_summary(plan: &RepoSyncPlan) -> Option<String> {
+    if plan.will_stash {
+        return Some("stash local changes".to_string());
+    }
+
+    if plan.rebase_from.is_some() || plan.merge_from.is_some() {
+        return None;
+    }
+
+    describe_pre_sync_action(plan)
+}
+
+fn pre_post_actions(plan: Option<&RepoSyncPlan>) -> Vec<String> {
+    let mut actions = Vec::new();
+
+    if let Some(plan) = plan {
+        if let Some(action) = describe_pre_sync_action_for_complete_summary(plan) {
+            actions.push(format!("pre-sync: {action}"));
+        }
+
+        if let Some(action) = describe_post_sync_action(plan) {
+            actions.push(format!("post-sync: {action}"));
+        }
+    }
+
+    actions
+}
+
+fn describe_sync_complete_result(
+    before: &RepoSyncSnapshot,
+    after: &RepoSyncSnapshot,
+    plan: Option<&RepoSyncPlan>,
+) -> String {
+    let transition = replace_ascii_with_typography("->");
+
+    let mut summary = if let Some(plan) = plan {
+        if let Some(base_ref) = plan.rebase_from.as_ref() {
+            format!("rebased onto {base_ref}")
+        } else if let Some(base_ref) = plan.merge_from.as_ref() {
+            format!("merged {base_ref}")
+        } else if plan.pull_from.is_some() {
+            let before_hash = short_commit(before.current_commit_hash.as_ref());
+            let after_hash = short_commit(after.current_commit_hash.as_ref());
+            if before_hash == after_hash {
+                format!("pulled {} {before_hash} (no change)", plan.rev)
+            } else {
+                format!(
+                    "pulled {} {before_hash} {transition} {after_hash}",
+                    plan.rev,
+                )
+            }
+        } else {
+            format!(
+                "{} {transition} {}",
+                describe_snapshot_ref(before),
+                describe_snapshot_ref(after)
+            )
+        }
+    } else {
+        format!(
+            "{} {transition} {}",
+            describe_snapshot_ref(before),
+            describe_snapshot_ref(after)
+        )
+    };
+
+    let actions = pre_post_actions(plan);
+    if !actions.is_empty() {
+        summary.push_str(" | ");
+        summary.push_str(actions.join("; ").as_str());
+    }
+
+    summary
+}
+
+pub fn collect_repo_sync_snapshots(
+    console: console::Console,
+    workspace_arc: workspace::WorkspaceArc,
+    progress_name: &str,
+) -> anyhow::Result<Vec<RepoSyncSnapshot>> {
+    let workspace_members = workspace_arc.read().settings.json.members.clone();
+    let dev_branch_rules = workspace_arc.read().settings.json.dev_branches.clone();
+
+    let mut snapshots = Vec::new();
+    let mut progress = console::Progress::new(console, progress_name, None, None);
+
+    for (url, member_list) in workspace_members.iter() {
+        for member in member_list {
+            progress.set_message(format!("capturing //{}", member.path).as_str());
+
+            let member_git_path = std::path::Path::new(member.path.as_ref()).join(".git");
+            if !member_git_path.exists() {
+                continue;
+            }
+
+            let repo = git::Repository::new(url.clone(), member.path.clone());
+            let is_dev_branch = is_member_dev_branch(member.path.as_ref(), &dev_branch_rules);
+            let is_rev_branch = repo.is_branch(&mut progress, &member.rev);
+            let current_branch = repo.get_current_branch(&mut progress).ok().flatten();
+            let current_tag = repo.get_commit_tag(&mut progress);
+            let current_commit_hash = repo.get_commit_hash(&mut progress).ok().flatten();
+
+            snapshots.push(RepoSyncSnapshot {
+                path: member.path.clone(),
+                is_dev_branch,
+                is_rev_branch,
+                workspace_rev: member.rev.clone(),
+                current_branch,
+                current_tag,
+                current_commit_hash,
+            });
+        }
+    }
+
+    snapshots.sort_by(|a, b| a.path.cmp(&b.path));
+
+    progress.set_finalize_lines(console::make_finalize_line(
+        console::FinalType::Completed,
+        progress.elapsed(),
+        &format!(
+            "captured current revisions for {} repositories",
+            snapshots.len()
+        ),
+    ));
+
+    Ok(snapshots)
+}
+
+pub fn emit_sync_complete_report(
+    console: console::Console,
+    before_snapshots: &[RepoSyncSnapshot],
+    after_snapshots: &[RepoSyncSnapshot],
+    plans: &[RepoSyncPlan],
+) -> anyhow::Result<()> {
+    use console::container;
+
+    let after_by_path = after_snapshots
+        .iter()
+        .map(|snapshot| (snapshot.path.clone(), snapshot))
+        .collect::<HashMap<_, _>>();
+    let plan_by_path = plans
+        .iter()
+        .map(|plan| (plan.path.clone(), plan))
+        .collect::<HashMap<_, _>>();
+
+    let report_rows = before_snapshots
+        .iter()
+        .map(|before| {
+            let after = after_by_path.get(&before.path).copied().unwrap_or(before);
+            let plan = plan_by_path.get(&before.path).copied();
+            let label = format_repo_label_from_kind(
+                before.path.as_ref(),
+                before.is_dev_branch,
+                before.is_rev_branch,
+            );
+            let summary = describe_sync_complete_result(before, after, plan);
+            (label, summary)
+        })
+        .collect::<Vec<_>>();
+
+    let mut container = container::Container::new();
+
+    container.add(console::bootstrap::VerticalSpacer::new(1));
+    container.add(
+        console::bootstrap::Banner::new(format!(
+            "{} Sync Complete ",
+            console::bootstrap::icon_success()
+        ))
+        .width(console::bootstrap::Width::Large)
+        .variant(console::bootstrap::Variant::Success),
+    );
+
+    let mut report_list = console::bootstrap::DescriptionList::new()
+        .compact(true)
+        .variant(console::bootstrap::Variant::Primary);
+    for (label, summary) in report_rows {
+        report_list = report_list.item(label, summary);
+    }
+    container.add(report_list);
+
+    container.add(console::bootstrap::VerticalSpacer::new(1));
+    container
+        .add(console::bootstrap::Divider::new().style(console::bootstrap::DividerStyle::Double));
+
+    console.emit_container(&container);
+
+    Ok(())
 }
 
 pub fn emit_dry_run_repo_plan(
@@ -689,37 +939,109 @@ pub fn emit_dry_run_repo_plan(
         "Sync Dry Run Results",
     ));
 
-    container.add(components::Header::new(
-        components::HeaderLevel::H2,
-        DRY_RUN_PRE_SYNC_HEADER,
-    ));
+    let sorted_plans = plans
+        .iter()
+        .sorted_by(|a, b| a.path.cmp(&b.path))
+        .collect::<Vec<_>>();
 
-    let mut pre_sync_actions = components::DescriptionList::new()
-        .compact(true)
-        .variant(components::Variant::Primary);
+    let current_status_entries = sorted_plans
+        .iter()
+        .map(|plan| (format_repo_label(plan), describe_current_status(plan)))
+        .collect::<Vec<_>>();
 
-    for plan in plans {
-        pre_sync_actions.add_item(format_repo_label(plan), describe_pre_sync_action(plan));
+    if !current_status_entries.is_empty() {
+        container.add(components::Header::new(
+            components::HeaderLevel::H2,
+            DRY_RUN_CURRENT_STATUS_HEADER,
+        ));
+
+        let mut status_list = components::DescriptionList::new()
+            .compact(true)
+            .variant(components::Variant::Primary);
+
+        for (repo, status) in current_status_entries {
+            status_list.add_item(repo, status);
+        }
+
+        container.add(status_list);
+        container.add(console::bootstrap::VerticalSpacer::new(1));
     }
 
-    container.add(pre_sync_actions);
-    container.add(console::bootstrap::VerticalSpacer::new(1));
+    let pre_sync_entries = sorted_plans
+        .iter()
+        .filter_map(|plan| {
+            describe_pre_sync_action(plan).map(|action| (format_repo_label(plan), action))
+        })
+        .collect::<Vec<_>>();
 
-    container.add(components::Header::new(
-        components::HeaderLevel::H2,
-        DRY_RUN_POST_SYNC_HEADER,
-    ));
+    if !pre_sync_entries.is_empty() {
+        container.add(components::Header::new(
+            components::HeaderLevel::H2,
+            DRY_RUN_PRE_SYNC_HEADER,
+        ));
 
-    let mut post_sync_actions = components::DescriptionList::new()
-        .compact(true)
-        .variant(components::Variant::Primary);
+        let mut pre_sync_actions = components::DescriptionList::new()
+            .compact(true)
+            .variant(components::Variant::Primary);
 
-    for plan in plans {
-        post_sync_actions.add_item(format_repo_label(plan), describe_post_sync_action(plan));
+        for (repo, action) in pre_sync_entries {
+            pre_sync_actions.add_item(repo, action);
+        }
+
+        container.add(pre_sync_actions);
+        container.add(console::bootstrap::VerticalSpacer::new(1));
     }
 
-    container.add(post_sync_actions);
-    container.add(console::bootstrap::VerticalSpacer::new(1));
+    let sync_entries = sorted_plans
+        .iter()
+        .filter_map(|plan| {
+            describe_sync_action(plan).map(|action| (format_repo_label(plan), action))
+        })
+        .collect::<Vec<_>>();
+
+    if !sync_entries.is_empty() {
+        container.add(components::Header::new(
+            components::HeaderLevel::H2,
+            DRY_RUN_SYNC_HEADER,
+        ));
+
+        let mut sync_actions = components::DescriptionList::new()
+            .compact(true)
+            .variant(components::Variant::Primary);
+
+        for (repo, action) in sync_entries {
+            sync_actions.add_item(repo, action);
+        }
+
+        container.add(sync_actions);
+        container.add(console::bootstrap::VerticalSpacer::new(1));
+    }
+
+    let post_sync_entries = sorted_plans
+        .iter()
+        .filter_map(|plan| {
+            describe_post_sync_action(plan).map(|action| (format_repo_label(plan), action))
+        })
+        .collect::<Vec<_>>();
+
+    if !post_sync_entries.is_empty() {
+        container.add(components::Header::new(
+            components::HeaderLevel::H2,
+            DRY_RUN_POST_SYNC_HEADER,
+        ));
+
+        let mut post_sync_actions = components::DescriptionList::new()
+            .compact(true)
+            .variant(components::Variant::Primary);
+
+        for (repo, action) in post_sync_entries {
+            post_sync_actions.add_item(repo, action);
+        }
+
+        container.add(post_sync_actions);
+        container.add(console::bootstrap::VerticalSpacer::new(1));
+    }
+
     console.emit_container(&container);
 
     Ok(())
@@ -946,24 +1268,23 @@ mod tests {
     fn repo_sync_plan(
         is_dev_branch: bool,
         is_rev_branch: bool,
-        is_on_branch: bool,
+        _is_on_branch: bool,
         pull_from: Option<&str>,
         rebase_from: Option<&str>,
         merge_from: Option<&str>,
         will_stash: bool,
-        skip_reason: Option<&str>,
+        _skip_reason: Option<&str>,
     ) -> RepoSyncPlan {
         RepoSyncPlan {
             path: "repo-a".into(),
             url: "https://example.com/repo-a.git".into(),
             is_dev_branch,
             is_rev_branch,
-            is_on_branch,
+            rev: "main".into(),
             pull_from: pull_from.map(Arc::<str>::from),
             rebase_from: rebase_from.map(Arc::<str>::from),
             merge_from: merge_from.map(Arc::<str>::from),
             will_stash,
-            skip_reason: skip_reason.map(Arc::<str>::from),
         }
     }
 
@@ -978,6 +1299,25 @@ mod tests {
             false,
             None,
         )
+    }
+
+    fn repo_sync_snapshot(
+        is_dev_branch: bool,
+        is_rev_branch: bool,
+        workspace_rev: &str,
+        current_branch: Option<&str>,
+        current_tag: Option<&str>,
+        current_commit_hash: Option<&str>,
+    ) -> RepoSyncSnapshot {
+        RepoSyncSnapshot {
+            path: "repo-a".into(),
+            is_dev_branch,
+            is_rev_branch,
+            workspace_rev: workspace_rev.into(),
+            current_branch: current_branch.map(Arc::<str>::from),
+            current_tag: current_tag.map(Arc::<str>::from),
+            current_commit_hash: current_commit_hash.map(Arc::<str>::from),
+        }
     }
 
     #[test]
@@ -1091,13 +1431,10 @@ mod tests {
     }
 
     #[test]
-    fn describe_pre_sync_action_reports_non_branch_rev() {
+    fn describe_pre_sync_action_omits_non_action_entries() {
         let plan = repo_sync_plan(false, false, true, None, None, None, false, None);
 
-        assert_eq!(
-            describe_pre_sync_action(&plan),
-            "no pre-sync action (rev is not a branch)"
-        );
+        assert_eq!(describe_pre_sync_action(&plan), None);
     }
 
     #[test]
@@ -1115,8 +1452,62 @@ mod tests {
 
         assert_eq!(
             describe_pre_sync_action(&plan),
-            "stash, then rebase onto origin/main"
+            Some("stash, then rebase onto origin/main".to_string())
         );
+    }
+
+    #[test]
+    fn describe_pre_sync_action_reports_stash_for_dirty_repo() {
+        let plan = repo_sync_plan(
+            false,
+            true,
+            true,
+            Some("origin/main"),
+            None,
+            None,
+            true,
+            None,
+        );
+
+        assert_eq!(
+            describe_pre_sync_action(&plan),
+            Some("stash local changes".to_string())
+        );
+    }
+
+    #[test]
+    fn describe_sync_action_reports_pull() {
+        let plan = repo_sync_plan(
+            false,
+            true,
+            true,
+            Some("origin/main"),
+            None,
+            None,
+            false,
+            None,
+        );
+
+        assert_eq!(
+            describe_sync_action(&plan),
+            Some("pull from origin/main".to_string())
+        );
+    }
+
+    #[test]
+    fn describe_sync_action_omits_non_pull_entries() {
+        let plan = repo_sync_plan(
+            true,
+            true,
+            true,
+            None,
+            Some("origin/main"),
+            None,
+            false,
+            None,
+        );
+
+        assert_eq!(describe_sync_action(&plan), None);
     }
 
     #[test]
@@ -1134,14 +1525,49 @@ mod tests {
 
         assert_eq!(
             describe_post_sync_action(&plan),
-            "will pop stash after sync"
+            Some("pop stashed changes".to_string())
         );
     }
 
     #[test]
     fn dry_run_section_headers_are_stable() {
+        assert_eq!(DRY_RUN_CURRENT_STATUS_HEADER, "Current Status");
         assert_eq!(DRY_RUN_PRE_SYNC_HEADER, "Pre-Sync");
+        assert_eq!(
+            DRY_RUN_SYNC_HEADER,
+            "Sync (May Change Based on Updated Rules)"
+        );
         assert_eq!(DRY_RUN_POST_SYNC_HEADER, "Post-Sync");
+    }
+
+    #[test]
+    fn describe_current_status_for_dev_branch() {
+        let mut plan = repo_sync_plan_for_label(true, true);
+        plan.rev = "develop".into();
+
+        assert_eq!(
+            describe_current_status(&plan),
+            "dev-branch targeting origin/develop"
+        );
+    }
+
+    #[test]
+    fn describe_current_status_for_branch() {
+        let mut plan = repo_sync_plan_for_label(false, true);
+        plan.rev = "main".into();
+
+        assert_eq!(
+            describe_current_status(&plan),
+            "branch tracking remote origin/main"
+        );
+    }
+
+    #[test]
+    fn describe_current_status_for_commit() {
+        let mut plan = repo_sync_plan_for_label(false, false);
+        plan.rev = "deadbeef".into();
+
+        assert_eq!(describe_current_status(&plan), "commit pinned to deadbeef");
     }
 
     #[test]
@@ -1163,5 +1589,124 @@ mod tests {
         let plan = repo_sync_plan_for_label(true, true);
 
         assert_eq!(format_repo_label(&plan), "//repo-a [dev-branch]");
+    }
+
+    #[test]
+    fn describe_snapshot_ref_prefers_tag() {
+        let snapshot = repo_sync_snapshot(
+            false,
+            false,
+            "deadbeef",
+            None,
+            Some("v0.4.0"),
+            Some("0123456789abcdef"),
+        );
+
+        assert_eq!(describe_snapshot_ref(&snapshot), "v0.4.0");
+    }
+
+    #[test]
+    fn describe_sync_complete_result_reports_pull_with_short_hashes() {
+        let plan = repo_sync_plan(
+            false,
+            true,
+            true,
+            Some("origin/main"),
+            None,
+            None,
+            false,
+            None,
+        );
+        let before = repo_sync_snapshot(
+            false,
+            true,
+            "main",
+            Some("main"),
+            None,
+            Some("0123456789abcdef"),
+        );
+        let after = repo_sync_snapshot(
+            false,
+            true,
+            "main",
+            Some("main"),
+            None,
+            Some("fedcba9876543210"),
+        );
+
+        assert_eq!(
+            describe_sync_complete_result(&before, &after, Some(&plan)),
+            "pulled main 01234567 ⇒ fedcba98"
+        );
+    }
+
+    #[test]
+    fn describe_sync_complete_result_includes_pre_and_post_actions() {
+        let plan = repo_sync_plan(
+            true,
+            true,
+            true,
+            None,
+            Some("origin/main"),
+            None,
+            true,
+            None,
+        );
+        let before = repo_sync_snapshot(
+            true,
+            true,
+            "main",
+            Some("feature"),
+            None,
+            Some("0123456789abcdef"),
+        );
+        let after = repo_sync_snapshot(
+            true,
+            true,
+            "main",
+            Some("feature"),
+            None,
+            Some("fedcba9876543210"),
+        );
+
+        assert_eq!(
+            describe_sync_complete_result(&before, &after, Some(&plan)),
+            "rebased onto origin/main | pre-sync: stash local changes; post-sync: pop stashed changes"
+        );
+    }
+
+    #[test]
+    fn describe_sync_complete_result_omits_redundant_pre_sync_rebase() {
+        let plan = repo_sync_plan(
+            true,
+            true,
+            true,
+            None,
+            Some("origin/main"),
+            None,
+            false,
+            None,
+        );
+        let before = repo_sync_snapshot(
+            true,
+            true,
+            "main",
+            Some("feature"),
+            None,
+            Some("0123456789abcdef"),
+        );
+        let after = repo_sync_snapshot(
+            true,
+            true,
+            "main",
+            Some("feature"),
+            None,
+            Some("fedcba9876543210"),
+        );
+
+        assert_eq!(
+            describe_sync_complete_result(&before, &after, Some(&plan)),
+            "rebased onto origin/main"
+        );
     }
 }
