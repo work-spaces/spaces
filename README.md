@@ -1,6 +1,6 @@
 
 <p align="center">
-  <img src="https://github.com/work-spaces/work-spaces.github.io/releases/download/assets-v0.2.0/spaces-logo-transparent-web.png" alt="spaces logo" width="50%">
+  <img src="https://github.com/work-spaces/work-spaces.github.io/releases/download/assets-v0.2.0/spaces-logo-white-web.png" alt="spaces logo" width="40%">
 </p>
 
 # spaces
