@@ -234,6 +234,123 @@ pub fn icon_info() -> &'static str {
     }
 }
 
+/// Logical/comparison operator symbols.
+const OP_LESS_EQUAL_ASCII: &str = "<=";
+const OP_LESS_EQUAL_UNICODE: &str = "≤";
+const OP_GREATER_EQUAL_ASCII: &str = ">=";
+const OP_GREATER_EQUAL_UNICODE: &str = "≥";
+const OP_IMPLIES_ASCII: &str = "=>";
+const OP_IMPLIES_UNICODE: &str = "⇒";
+const OP_EQUIVALENT_ASCII: &str = "<=>";
+const OP_EQUIVALENT_UNICODE: &str = "⇔";
+const OP_ARROW_RIGHT_ASCII: &str = "->";
+const OP_ARROW_RIGHT_UNICODE: &str = "→";
+const OP_ARROW_LEFT_ASCII: &str = "<-";
+const OP_ARROW_LEFT_UNICODE: &str = "←";
+const OP_ARROW_BIDIRECTIONAL_ASCII: &str = "<->";
+const OP_ARROW_BIDIRECTIONAL_UNICODE: &str = "↔";
+const OP_DOUBLE_EQUAL_ASCII: &str = "==";
+// No direct Unicode equivalent is universally used for "==", so keep ASCII form.
+const OP_DOUBLE_EQUAL_UNICODE: &str = "==";
+
+/// Returns a less-than-or-equal operator (`<=` in ASCII, `≤` in Unicode).
+pub fn op_less_equal() -> &'static str {
+    match typography_mode() {
+        TypographyMode::Ascii => OP_LESS_EQUAL_ASCII,
+        TypographyMode::Unicode | TypographyMode::NerdFonts => OP_LESS_EQUAL_UNICODE,
+    }
+}
+
+/// Returns a greater-than-or-equal operator (`>=` in ASCII, `≥` in Unicode).
+pub fn op_greater_equal() -> &'static str {
+    match typography_mode() {
+        TypographyMode::Ascii => OP_GREATER_EQUAL_ASCII,
+        TypographyMode::Unicode | TypographyMode::NerdFonts => OP_GREATER_EQUAL_UNICODE,
+    }
+}
+
+/// Returns an implication operator (`=>` in ASCII, `⇒` in Unicode).
+pub fn op_implies() -> &'static str {
+    match typography_mode() {
+        TypographyMode::Ascii => OP_IMPLIES_ASCII,
+        TypographyMode::Unicode | TypographyMode::NerdFonts => OP_IMPLIES_UNICODE,
+    }
+}
+
+/// Returns an equivalence operator (`<=>` in ASCII, `⇔` in Unicode).
+pub fn op_equivalent() -> &'static str {
+    match typography_mode() {
+        TypographyMode::Ascii => OP_EQUIVALENT_ASCII,
+        TypographyMode::Unicode | TypographyMode::NerdFonts => OP_EQUIVALENT_UNICODE,
+    }
+}
+
+/// Returns a right arrow operator (`->` in ASCII, `→` in Unicode).
+pub fn op_arrow_right() -> &'static str {
+    match typography_mode() {
+        TypographyMode::Ascii => OP_ARROW_RIGHT_ASCII,
+        TypographyMode::Unicode | TypographyMode::NerdFonts => OP_ARROW_RIGHT_UNICODE,
+    }
+}
+
+/// Returns a left arrow operator (`<-` in ASCII, `←` in Unicode).
+pub fn op_arrow_left() -> &'static str {
+    match typography_mode() {
+        TypographyMode::Ascii => OP_ARROW_LEFT_ASCII,
+        TypographyMode::Unicode | TypographyMode::NerdFonts => OP_ARROW_LEFT_UNICODE,
+    }
+}
+
+/// Returns a bidirectional arrow operator (`<->` in ASCII, `↔` in Unicode).
+pub fn op_arrow_bidirectional() -> &'static str {
+    match typography_mode() {
+        TypographyMode::Ascii => OP_ARROW_BIDIRECTIONAL_ASCII,
+        TypographyMode::Unicode | TypographyMode::NerdFonts => OP_ARROW_BIDIRECTIONAL_UNICODE,
+    }
+}
+
+/// Returns an equality operator (`==` in both ASCII and Unicode modes).
+pub fn op_double_equal() -> &'static str {
+    match typography_mode() {
+        TypographyMode::Ascii => OP_DOUBLE_EQUAL_ASCII,
+        TypographyMode::Unicode | TypographyMode::NerdFonts => OP_DOUBLE_EQUAL_UNICODE,
+    }
+}
+
+/// Replaces ASCII typography sequences with their mode-appropriate equivalents.
+///
+/// In `Ascii` mode, returns the input unchanged.
+/// In `Unicode` and `NerdFonts` modes, replaces common ASCII operators and
+/// punctuation with their Unicode glyph equivalents.
+pub fn replace_ascii_with_typography(input: &str) -> String {
+    replace_ascii_with_typography_for_mode(input, typography_mode())
+}
+
+fn replace_ascii_with_typography_for_mode(input: &str, mode: TypographyMode) -> String {
+    if mode == TypographyMode::Ascii {
+        return input.to_string();
+    }
+
+    // Order matters: replace longer multi-character sequences before shorter ones.
+    let replacements = [
+        (OP_EQUIVALENT_ASCII, OP_EQUIVALENT_UNICODE),
+        (OP_ARROW_BIDIRECTIONAL_ASCII, OP_ARROW_BIDIRECTIONAL_UNICODE),
+        (OP_LESS_EQUAL_ASCII, OP_LESS_EQUAL_UNICODE),
+        (OP_GREATER_EQUAL_ASCII, OP_GREATER_EQUAL_UNICODE),
+        (OP_IMPLIES_ASCII, OP_IMPLIES_UNICODE),
+        (OP_ARROW_RIGHT_ASCII, OP_ARROW_RIGHT_UNICODE),
+        (OP_ARROW_LEFT_ASCII, OP_ARROW_LEFT_UNICODE),
+        ("...", "…"),
+    ];
+
+    let mut output = input.to_string();
+    for (ascii, replacement) in replacements {
+        output = output.replace(ascii, replacement);
+    }
+
+    output
+}
+
 // ---------------------------------------------------------------------------
 // Duration formatting
 // ---------------------------------------------------------------------------
@@ -311,5 +428,77 @@ mod tests {
         assert!(!icon_danger().is_empty());
         assert!(!icon_warning().is_empty());
         assert!(!icon_info().is_empty());
+    }
+
+    #[test]
+    fn test_operator_functions_unicode_mode() {
+        // In default Unicode mode, operators should use Unicode glyphs where available
+        assert_eq!(op_less_equal(), "≤");
+        assert_eq!(op_greater_equal(), "≥");
+        assert_eq!(op_implies(), "⇒");
+        assert_eq!(op_equivalent(), "⇔");
+        assert_eq!(op_arrow_right(), "→");
+        assert_eq!(op_arrow_left(), "←");
+        assert_eq!(op_arrow_bidirectional(), "↔");
+        assert_eq!(op_double_equal(), "==");
+    }
+
+    #[test]
+    fn test_operator_ascii_variants_are_ascii() {
+        assert!(OP_LESS_EQUAL_ASCII.chars().all(|c| c.is_ascii()));
+        assert!(OP_GREATER_EQUAL_ASCII.chars().all(|c| c.is_ascii()));
+        assert!(OP_IMPLIES_ASCII.chars().all(|c| c.is_ascii()));
+        assert!(OP_EQUIVALENT_ASCII.chars().all(|c| c.is_ascii()));
+        assert!(OP_ARROW_RIGHT_ASCII.chars().all(|c| c.is_ascii()));
+        assert!(OP_ARROW_LEFT_ASCII.chars().all(|c| c.is_ascii()));
+        assert!(OP_ARROW_BIDIRECTIONAL_ASCII.chars().all(|c| c.is_ascii()));
+        assert!(OP_DOUBLE_EQUAL_ASCII.chars().all(|c| c.is_ascii()));
+
+        assert!(!OP_LESS_EQUAL_UNICODE.chars().all(|c| c.is_ascii()));
+        assert!(!OP_GREATER_EQUAL_UNICODE.chars().all(|c| c.is_ascii()));
+        assert!(!OP_IMPLIES_UNICODE.chars().all(|c| c.is_ascii()));
+        assert!(!OP_EQUIVALENT_UNICODE.chars().all(|c| c.is_ascii()));
+        assert!(!OP_ARROW_RIGHT_UNICODE.chars().all(|c| c.is_ascii()));
+        assert!(!OP_ARROW_LEFT_UNICODE.chars().all(|c| c.is_ascii()));
+        assert!(!OP_ARROW_BIDIRECTIONAL_UNICODE.chars().all(|c| c.is_ascii()));
+        assert!(OP_DOUBLE_EQUAL_UNICODE.chars().all(|c| c.is_ascii()));
+    }
+
+    #[test]
+    fn test_replace_ascii_with_typography_for_ascii_mode() {
+        let input = "a <= b >= c => d <=> e -> f <- g <-> h ... == i";
+        assert_eq!(
+            replace_ascii_with_typography_for_mode(input, TypographyMode::Ascii),
+            input
+        );
+    }
+
+    #[test]
+    fn test_replace_ascii_with_typography_for_unicode_mode() {
+        let input = "a <= b >= c => d <=> e -> f <- g <-> h ... == i";
+        assert_eq!(
+            replace_ascii_with_typography_for_mode(input, TypographyMode::Unicode),
+            "a ≤ b ≥ c ⇒ d ⇔ e → f ← g ↔ h … == i"
+        );
+    }
+
+    #[test]
+    fn test_replace_ascii_with_typography_for_nerd_fonts_mode() {
+        let input = "a <= b >= c => d <=> e -> f <- g <-> h ... == i";
+        assert_eq!(
+            replace_ascii_with_typography_for_mode(input, TypographyMode::NerdFonts),
+            "a ≤ b ≥ c ⇒ d ⇔ e → f ← g ↔ h … == i"
+        );
+    }
+
+    #[test]
+    fn test_replace_ascii_with_typography_replacement_order() {
+        assert_eq!(
+            replace_ascii_with_typography_for_mode(
+                "<=> <-> <= >= => -> <-",
+                TypographyMode::Unicode
+            ),
+            "⇔ ↔ ≤ ≥ ⇒ → ←"
+        );
     }
 }
