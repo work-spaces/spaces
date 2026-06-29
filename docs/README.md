@@ -51,5 +51,5 @@ spaces run //spaces:check
 ```
 
 ```sh
-agg --theme=github-light --font-family="0xProto Nerd Font Mono" --speed=2 spaces-demo.cast spaces-demo.gif
+agg --theme=asciinema --font-family="0xProto Nerd Font Mono" --speed=2 spaces-demo.cast spaces-demo.gif
 ```

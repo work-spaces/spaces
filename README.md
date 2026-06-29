@@ -37,7 +37,7 @@
 - Checkout the `spaces` sources and dependencies including an isolated `rust` toolchain.
 - Use the `spaces` task runner to build or use `spaces shell` to access dev tools directly in the workspace environment.
 
-![spaces.run.shell](https://github.com/work-spaces/work-spaces.github.io/releases/download/assets-v0.1.0/spaces_demo.gif)
+![spaces.run.shell](https://github.com/work-spaces/work-spaces.github.io/releases/download/assets-v0.2.0/spaces-demo.gif)
 
 ## Read the Docs
 
