@@ -35,7 +35,7 @@ cargo install --locked --git https://github.com/asciinema/agg
 
 Make the font large (zoom in using iterm2)
 
-Commands (need to by hand typed):
+Commands (need to be typed by hand):
 
 ```sh
 asciinema rec spaces-demo.cast
@@ -47,7 +47,7 @@ spaces checkout-repo \
   --name=issue-x-fix-something
 cd issue-x-fix-something
 spaces run //spaces:check
-<ctrld+d>
+<ctrl+d>
 ```
 
 ```sh

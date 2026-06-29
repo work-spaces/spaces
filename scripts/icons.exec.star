@@ -5,7 +5,7 @@ Generate Icons
 Rasterize the Spaces logo SVGs into PNGs (and friends) using Inkscape.
 
 For every variant (black, gray, white, transparent) this produces:
-  - a macOS `.iconset` directory (iconutil-friendly) plus an assembled `.icns`
+  - an assembled macOS `.icns` (built from a temporary, iconutil-friendly `.iconset` dir)
   - a web-friendly `favicon.ico` (16/32/48 px PNG-encoded entries)
   - a plain web PNG for places where SVG can't be used
   - a Slack-emoji-sized PNG (128 px, under Slack's 128 KB limit)
@@ -121,7 +121,7 @@ def build_ico(png_paths, sizes, out_ico):
     fs_write_bytes(out_ico, header + entries + payload)
 
 def make_iconset(inkscape, svg, variant, output):
-    """Produce a `.iconset` dir and convert it to `.icns` via iconutil."""
+    """Produce an `.icns` via iconutil, using a temporary `.iconset` dir that is removed afterward."""
     iconset_dir = path_join([output, "spaces-logo-{}.iconset".format(variant)])
     fs_mkdir(iconset_dir, parents = True, exist_ok = True)
 
@@ -187,12 +187,11 @@ parser = args_parser(
 )
 args = args_parse(parser)
 
-icons_dir = args.get("icons_dir", "<not provided>")
 icons_dir = args.get("icons_dir", "icons-v0.17.0")
 output = args.get("output", "build/icons")
 inkscape = _resolve_inkscape(args.get("inkscape"))
 variants = args.get("variant") or VARIANTS
-web_size = args.get("web_size", 512)
+web_size = args.get("web_size", 1024)
 emoji_size = args.get("emoji_size", 128)
 
 log_info("Using inkscape: {}".format(inkscape))
