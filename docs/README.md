@@ -18,3 +18,38 @@ The included sample files below enable creating a custom server for distubuting 
 ```sh
 spaces version set-config <path to version.spaces.toml>
 ```
+
+## Demo GIF
+
+Created using:
+- https://github.com/asciinema/asciinema
+- https://github.com/asciinema/agg
+
+
+Tools
+
+```sh
+cargo install --locked --git https://github.com/asciinema/asciinema
+cargo install --locked --git https://github.com/asciinema/agg
+```
+
+Make the font large (zoom in using iterm2)
+
+Commands (need to be typed by hand):
+
+```sh
+asciinema rec spaces-demo.cast
+spaces about
+spaces checkout-repo \
+  --url=https://github.com/work-spaces/spaces \
+  --rev=main \
+  --new-branch=spaces \
+  --name=issue-x-fix-something
+cd issue-x-fix-something
+spaces run //spaces:check
+<ctrl+d>
+```
+
+```sh
+agg --theme=asciinema --font-family="0xProto Nerd Font Mono" --speed=2 spaces-demo.cast spaces-demo.gif
+```
