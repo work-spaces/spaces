@@ -1,3 +1,20 @@
+
+<h1 align="center">Spaces</h1>
+
+<p align="center">
+  <img src="https://github.com/work-spaces/work-spaces.github.io/releases/download/assets-v0.2.0/spaces-logo-white-web.png" alt="spaces logo" width="40%">
+</p>
+
+<p align="center">
+  Reproducible PolyRepo Workspaces with Starlark Build Rules
+</p>
+
+<p align="center">
+  <a href="https://work-spaces.github.io">Read the docs</a>
+</p>
+
+----
+
 # spaces
 
 ## What is `spaces`?
@@ -20,7 +37,7 @@
 - Checkout the `spaces` sources and dependencies including an isolated `rust` toolchain.
 - Use the `spaces` task runner to build or use `spaces shell` to access dev tools directly in the workspace environment.
 
-![spaces.run.shell](https://github.com/work-spaces/work-spaces.github.io/releases/download/assets-v0.1.0/spaces_demo.gif)
+![spaces.run.shell](https://github.com/work-spaces/work-spaces.github.io/releases/download/assets-v0.2.0/spaces-demo.gif)
 
 ## Read the Docs
 
