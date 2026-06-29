@@ -1,6 +1,7 @@
 #[macro_use]
 extern crate starlark;
 
+mod about;
 mod arguments;
 mod builtins;
 mod co;

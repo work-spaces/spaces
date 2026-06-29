@@ -1,4 +1,6 @@
-use crate::{co, completions, docs, evaluator, rules, runner, singleton, task, tools, workspace};
+use crate::{
+    about, co, completions, docs, evaluator, rules, runner, singleton, task, tools, workspace,
+};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
@@ -761,6 +763,9 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
         Commands::Docs {} => {
             docs::show(effective_console)?;
         }
+        Commands::About {} => {
+            about::show(effective_console).context(format_context!("Failed to show about"))?;
+        }
         Commands::Tools { command } => {
             effective_console.set_level(console::Level::Info);
             tools::handle_command(effective_console, command)
@@ -1160,6 +1165,8 @@ create-lock-file = false # optionally create a lock file
     },
     /// Shows the documentation for spaces starlark modules.
     Docs {},
+    /// Shows the spaces logo and version.
+    About {},
     /// Commands for managing internal spaces tools.
     Tools {
         /// The mode to run the command in.

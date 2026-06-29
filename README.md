@@ -1,7 +1,19 @@
 
+<h1 align="center">Spaces</h1>
+
 <p align="center">
   <img src="https://github.com/work-spaces/work-spaces.github.io/releases/download/assets-v0.2.0/spaces-logo-white-web.png" alt="spaces logo" width="40%">
 </p>
+
+<p align="center">
+  Reproducible PolyRepo Workspaces with Starlark Build Rules
+</p>
+
+<p align="center">
+  <a href="https://work-spaces.github.io">Read the docs</a>
+</p>
+
+----
 
 # spaces
 
