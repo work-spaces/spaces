@@ -1636,7 +1636,7 @@ mod tests {
 
         assert_eq!(
             describe_sync_complete_result(&before, &after, Some(&plan)),
-            "pulled main 01234567 ⇒ fedcba98"
+            "pulled main 01234567 → fedcba98"
         );
     }
 
