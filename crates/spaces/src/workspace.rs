@@ -1160,11 +1160,7 @@ impl Workspace {
 
     fn get_digest_report_file(&self, rule_name: &str) -> Arc<str> {
         let safe_rule_name = Self::get_log_file_safe_rule_name(rule_name);
-        format!(
-            "{}/.spaces/digests/{safe_rule_name}.yaml",
-            self.absolute_path
-        )
-        .into()
+        format!(".spaces/digests/{safe_rule_name}.yaml",).into()
     }
 
     fn save_digest_report(

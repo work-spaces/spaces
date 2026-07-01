@@ -24,7 +24,7 @@ pub fn get_checkout_not_found_error(
     let checkout_display = checkout_file_path.display();
     if suggestions.is_empty() {
         format_error!(
-            "Source: {checkout_display}\n Failed to find {checkout}` or any similar entries."
+            "Source: {checkout_display}\n Failed to find `{checkout}` or any similar entries."
         )
     } else {
         format_error!(
