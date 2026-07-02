@@ -297,23 +297,27 @@ impl Checkout {
         let effective_path = if co_file_path.exists() {
             co_file_path.to_owned()
         } else {
-            let env_path = std::env::var(CO_ENV_NAME).context(format_context!(
-                "{} does not exist in the current directory and {} is not set in ENV",
-                CO_FILE_NAME,
-                CO_ENV_NAME
-            ))?;
+            let env_path = std::env::var(CO_ENV_NAME).map_err(|err| {
+                format_error!(
+                    "{CO_FILE_NAME} does not exist in the current directory\n And {CO_ENV_NAME} is not set in ENV\n{err:?}",
+                )
+            })?;
             env_path.into()
         };
 
-        let contents = std::fs::read_to_string(effective_path.clone()).context(format_context!(
-            "Failed to open {} while loading `co` shortcuts",
-            effective_path.display()
-        ))?;
+        let contents = std::fs::read_to_string(effective_path.clone()).map_err(|err| {
+            format_error!(
+                "Failed to open {} while loading `co` shortcuts\n{err:?}",
+                effective_path.display()
+            )
+        })?;
 
-        let checkout = toml::from_str(&contents).context(format_context!(
-            "Failed to parse toml file {}",
-            effective_path.display()
-        ))?;
+        let checkout = toml::from_str(&contents).map_err(|err| {
+            format_error!(
+                "Failed to parse toml file {}\n{err:?}",
+                effective_path.display()
+            )
+        })?;
         Ok((checkout, effective_path))
     }
 
