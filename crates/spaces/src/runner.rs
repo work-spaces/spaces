@@ -722,6 +722,7 @@ pub fn run_starlark_modules_in_workspace(
     let (before_sync_snapshots, repo_sync_plan, stashed_repos) = if is_sync_checkout {
         let mut pre_sync_progress = console::Progress::new(console.clone(), "pre-sync", None, None);
 
+        pre_sync_progress.set_message("collecting pre sync repo status");
         let before_snapshots = sync::collect_repo_sync_snapshots(
             console.clone(),
             workspace_arc.clone(),
@@ -747,6 +748,7 @@ pub fn run_starlark_modules_in_workspace(
 
             (before_snapshots, Vec::new(), Vec::new())
         } else {
+            pre_sync_progress.set_message("building repo sync plan");
             let repo_sync_plan = sync::build_repo_sync_plan(
                 console.clone(),
                 &mut pre_sync_progress,
@@ -768,6 +770,7 @@ pub fn run_starlark_modules_in_workspace(
                 return Ok(());
             }
 
+            pre_sync_progress.set_message("executing pre sync actions");
             let stashed_repos = sync::execute_repo_sync_plan(
                 console.clone(),
                 workspace_arc.clone(),
@@ -797,37 +800,45 @@ pub fn run_starlark_modules_in_workspace(
         is_execute_tasks,
     );
 
-    // Pop stashes after sync is complete (or failed)
-    // This must happen regardless of sync success to avoid leaving the workspace in a stashed state
-    if is_sync_checkout && !stashed_repos.is_empty() {
-        let mut stash_pop_progress =
-            console::Progress::new(console.clone(), "pop stashes after sync", None, None);
-        sync::pop_stashed_repos(console.clone(), workspace_arc.clone(), stashed_repos)
-            .context(format_context!("while popping stashes after sync"))?;
-        stash_pop_progress.set_finalize_lines(console::make_finalize_line(
-            console::FinalType::Finished,
-            stash_pop_progress.elapsed(),
-            "stashes popped successfully",
-        ));
-    }
+    if is_sync_checkout {
+        let mut post_sync_progress =
+            console::Progress::new(console.clone(), "executing post sync actions", None, None);
 
-    if is_sync_checkout && sync_result.is_ok() {
-        let after_sync_snapshots = sync::collect_repo_sync_snapshots(
-            console.clone(),
-            workspace_arc.clone(),
-            "post-sync current revisions",
-        )
-        .context(format_context!(
-            "while collecting post-sync repository revisions"
-        ))?;
+        // Pop stashes after sync is complete (or failed)
+        // This must happen regardless of sync success to avoid leaving the workspace in a stashed state
+        if !stashed_repos.is_empty() {
+            post_sync_progress.set_message("popping stashes");
+            sync::pop_stashed_repos(console.clone(), workspace_arc.clone(), stashed_repos)
+                .context(format_context!("while popping stashes after sync"))?;
+        }
 
-        sync::emit_sync_complete_report(
-            console.clone(),
-            before_sync_snapshots.as_slice(),
-            after_sync_snapshots.as_slice(),
-            repo_sync_plan.as_slice(),
-        )
-        .context(format_context!("while emitting sync completion report"))?;
+        if sync_result.is_ok() {
+            post_sync_progress.set_message("collect post sync repo status");
+            let after_sync_snapshots = sync::collect_repo_sync_snapshots(
+                console.clone(),
+                workspace_arc.clone(),
+                "post-sync current revisions",
+            )
+            .context(format_context!(
+                "while collecting post-sync repository revisions"
+            ))?;
+
+            post_sync_progress.set_finalize_lines(console::make_finalize_line(
+                console::FinalType::Finished,
+                post_sync_progress.elapsed(),
+                "post sync successful",
+            ));
+
+            drop(post_sync_progress);
+
+            sync::emit_sync_complete_report(
+                console.clone(),
+                before_sync_snapshots.as_slice(),
+                after_sync_snapshots.as_slice(),
+                repo_sync_plan.as_slice(),
+            )
+            .context(format_context!("while emitting sync completion report"))?;
+        }
     }
 
     drop(workspace_lock);
