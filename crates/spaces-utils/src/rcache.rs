@@ -1,6 +1,6 @@
 /// Rule cache
 /// Cache the outputs of the rule based on the input digest
-use crate::{age, ci, hash_streaming, logger, targets};
+use crate::{age, ci, hash_streaming, lock, logger, targets};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use bytesize::ByteSize;
@@ -43,6 +43,7 @@ fn get_artifact_cache_path(cache_path: &std::path::Path, artifact: &str) -> std:
 }
 
 fn save_artifact_to_cache(
+    console: console::Console,
     cache_path: &std::path::Path,
     artifact_path: &std::path::Path,
 ) -> anyhow::Result<Arc<str>> {
@@ -53,8 +54,17 @@ fn save_artifact_to_cache(
             artifact_path.display()
         )
     })?;
+
     //path in cache is the hash of the artifact contents
     let path_in_cache = get_artifact_cache_path(cache_path, &artifact_hash);
+
+    let mut lock_file_path = path_in_cache.clone();
+    lock_file_path.add_extension("lock");
+    let mut file_lock = lock::FileLock::new(lock_file_path.clone().into());
+    file_lock.lock(console).context(format_context!(
+        "failed to acquire artifact hash file lock at {}",
+        lock_file_path.display(),
+    ))?;
 
     // skip caching if the artifact is already in the cache
     if !path_in_cache.exists() {
@@ -117,10 +127,11 @@ pub struct CachedTarget {
 
 impl CachedTarget {
     fn new_from_workspace_path(
+        console: console::Console,
         cache_path: &std::path::Path,
         path_in_workspace: &std::path::Path,
     ) -> anyhow::Result<Self> {
-        let path_in_cache = save_artifact_to_cache(cache_path, path_in_workspace)
+        let path_in_cache = save_artifact_to_cache(console, cache_path, path_in_workspace)
             .with_context(|| format_context!("Failed to save artifact to cache"))?;
         let path_in_workspace = path_in_workspace.to_string_lossy().into();
         Ok(CachedTarget {
@@ -213,6 +224,7 @@ impl RuleDigestCacheEntry {
     }
 
     fn create_cache_entry(
+        console: console::Console,
         cache_path: &std::path::Path,
         rule_digest: &str,
         workspace_outputs: &[Arc<std::path::Path>],
@@ -220,8 +232,12 @@ impl RuleDigestCacheEntry {
         let mut outputs = Vec::new();
         for path_in_workspace in workspace_outputs {
             outputs.push(
-                CachedTarget::new_from_workspace_path(cache_path, path_in_workspace)
-                    .with_context(|| format_context!("Failed to create cached output"))?,
+                CachedTarget::new_from_workspace_path(
+                    console.clone(),
+                    cache_path,
+                    path_in_workspace,
+                )
+                .with_context(|| format_context!("Failed to create cached output"))?,
             );
         }
 
@@ -590,6 +606,7 @@ fn remove_targets(targets: &[targets::Target]) -> anyhow::Result<()> {
 /// if the input digest does not exist, the task is executed and the outputs are cached
 /// if the task runs successfully.
 pub fn execute<Exec, ExecSuccess, GetTargetPaths>(
+    console: console::Console,
     cache_path: &std::path::Path,
     rule_digest: Arc<str>,
     targets: &[targets::Target],
@@ -629,6 +646,7 @@ where
 
             if exec_result.is_ok() {
                 let result = RuleDigestCacheEntry::create_cache_entry(
+                    console,
                     cache_path,
                     &rule_digest,
                     get_target_paths().as_slice(),
@@ -681,22 +699,24 @@ mod tests {
 
         let expected_hash = blake3::hash(content).to_string();
 
+        let console = console::Console::new_null();
+
         // First save
         assert!(artifact.exists());
-        let hash1 = save_artifact_to_cache(&cache_path, &artifact).unwrap();
+        let hash1 = save_artifact_to_cache(console.clone(), &cache_path, &artifact).unwrap();
         assert_eq!(hash1.as_ref(), expected_hash.as_str());
 
         // The artifacts directory should have been created
         assert!(cache_path.join(ARTIFACT_CACHE_DIR).exists());
 
         // Second save of the same content is idempotent (no error)
-        let hash2 = save_artifact_to_cache(&cache_path, &artifact).unwrap();
+        let hash2 = save_artifact_to_cache(console.clone(), &cache_path, &artifact).unwrap();
         assert_eq!(hash1, hash2);
 
         // Different content produces a different hash
         let artifact2 = workspace.join("output2.bin");
         write_test_file(&artifact2, b"different content");
-        let hash3 = save_artifact_to_cache(&cache_path, &artifact2).unwrap();
+        let hash3 = save_artifact_to_cache(console, &cache_path, &artifact2).unwrap();
         assert_ne!(hash1, hash3);
 
         let _ = std::fs::remove_dir_all(&root);
@@ -721,9 +741,10 @@ mod tests {
         // Before creation, loading returns None
         let before = RuleDigestCacheEntry::new_from_cache(&cache_path, digest).unwrap();
         assert!(before.is_none());
+        let console = console::Console::new_null();
 
         // Create the cache entry
-        RuleDigestCacheEntry::create_cache_entry(&cache_path, digest, &outputs).unwrap();
+        RuleDigestCacheEntry::create_cache_entry(console, &cache_path, digest, &outputs).unwrap();
 
         // The rule digest file should now exist on disk
         let digest_path = RuleDigestCacheEntry::get_path_in_cache(&cache_path, digest);
@@ -775,8 +796,10 @@ mod tests {
         write_test_file(&file_y, same_content);
 
         let outputs: Vec<Arc<std::path::Path>> = vec![file_x.clone().into(), file_y.clone().into()];
+        let console = console::Console::new_null();
 
-        RuleDigestCacheEntry::create_cache_entry(&cache_path, "dup_digest", &outputs).unwrap();
+        RuleDigestCacheEntry::create_cache_entry(console, &cache_path, "dup_digest", &outputs)
+            .unwrap();
 
         let entry = RuleDigestCacheEntry::new_from_cache(&cache_path, "dup_digest")
             .unwrap()

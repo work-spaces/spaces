@@ -299,6 +299,7 @@ pub fn execute_rule(
                 logger.debug(format!("rcache digest {effective_rule_digest}").as_str());
 
                 let task_result_option = rcache::execute(
+                    console.clone(),
                     cache_path.as_ref(),
                     effective_rule_digest.clone(),
                     targets.as_slice(),
