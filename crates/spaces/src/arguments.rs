@@ -226,6 +226,8 @@ pub fn execute() -> anyhow::Result<()> {
 
     effective_console.shutdown_refresh_thread();
     let _ = refresh_handle.join();
+    effective_console.finalize();
+
     result
 }
 

@@ -1,3 +1,5 @@
+use anyhow_source_location::format_error;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u32)]
 pub enum Ecode {
@@ -145,7 +147,7 @@ pub fn anyhow(ecode: Ecode, context: &str) -> anyhow::Error {
             result.push('\n');
         }
     }
-    anyhow::anyhow!(result)
+    format_error!("{result}")
 }
 
 pub fn anyhow_trace(ecode: Ecode) -> anyhow::Error {
