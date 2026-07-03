@@ -1203,22 +1203,30 @@ pub fn check_downloaded_archive(path_to_archive: &std::path::Path) -> anyhow::Re
     let mut count = collected_entries.len();
 
     if !is_compressed {
-        if let Some(Ok(first_entry)) = collected_entries.first() {
-            if count != 1 {
-                return Err(format_error!(
-                    "Expected 1 entries in archive, found {count}",
-                ));
-            }
-            let path_to_dir = path_to_archive.join(first_entry.path());
-            delete_ds_store(path_to_dir.as_path())?;
-            let entries = std::fs::read_dir(path_to_dir.as_path()).context(format_context!(
-                "Failed to read directory contents {}",
-                path_to_dir.display()
+        if count != 1 {
+            return Err(format_error!(
+                "Expected 1 entries in archive, found {count}",
+            ));
+        }
+
+        let first_entry = collected_entries
+            .into_iter()
+            .next()
+            .ok_or_else(|| format_error!("Expected 1 entries in archive, found {count}"))?
+            .context(format_context!(
+                "Failed to read first archive entry in {}",
+                path_to_archive.display()
             ))?;
 
-            collected_entries = entries.collect();
-            count = collected_entries.len();
-        }
+        let path_to_dir = path_to_archive.join(first_entry.path());
+        delete_ds_store(path_to_dir.as_path())?;
+        let entries = std::fs::read_dir(path_to_dir.as_path()).context(format_context!(
+            "Failed to read directory contents {}",
+            path_to_dir.display()
+        ))?;
+
+        collected_entries = entries.collect();
+        count = collected_entries.len();
 
         // For a plain (non-compressed) single file the downloaded artifact is
         // renamed into the `_files` directory during extraction, so only the
