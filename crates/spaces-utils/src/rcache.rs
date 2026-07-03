@@ -59,7 +59,7 @@ fn save_artifact_to_cache(
     let path_in_cache = get_artifact_cache_path(cache_path, &artifact_hash);
 
     let mut lock_file_path = path_in_cache.clone();
-    lock_file_path.add_extension("lock");
+    lock_file_path.add_extension(lock::LOCK_FILE_SUFFIX);
     let mut file_lock = lock::FileLock::new(lock_file_path.clone().into());
     file_lock.lock(console).context(format_context!(
         "failed to acquire artifact hash file lock at {}",
