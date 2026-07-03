@@ -508,8 +508,9 @@ impl Workspace {
 
         logger(console.clone()).message(absolute_path.as_ref());
 
-        let mut progress =
-            console::Progress::new(console.clone(), "Finding workspace root", None, None);
+        let mut progress = console::Progress::new(console.clone(), "workspace", None, None);
+
+        progress.set_message("Searching ancestors");
 
         let relative_invoked_path = Self::get_relative_invoked_path(
             &mut progress,
@@ -525,6 +526,7 @@ impl Workspace {
         std::fs::create_dir_all(build_directory())
             .context(format_context!("Failed to create build directory"))?;
 
+        progress.set_message("loading modules");
         // hash set to prevent loading the same module twice
         let mut loaded_modules = HashSet::new();
 
@@ -605,6 +607,7 @@ impl Workspace {
 
         if is_json_available == ws::IsJsonAvailable::Yes {
             logger(progress.console.clone()).debug("Loading modules from sync order");
+            progress.set_message("loading ordered modules");
             for module in settings.json.order.iter() {
                 if is_rules_module(module.as_ref()) {
                     progress.increment(1);
@@ -676,6 +679,7 @@ impl Workspace {
 
             logger(progress.console.clone()).debug(format!("Scanning {absolute_path}").as_str());
 
+            progress.set_message("scanning all dirs for spaces.star modules");
             // walkdir and find all .star files in the workspace
             // skip sysroot/build/logs directories
             let walkdir: Vec<_> = walkdir::WalkDir::new(absolute_path.as_ref())
@@ -750,6 +754,7 @@ impl Workspace {
 
         // checks if any of the modules have changed
         // checks modified time then hashes
+        progress.set_message("updating module hashes");
         let (updated_modules, settings_is_dirty) = settings
             .bin
             .update_hashes(&mut progress)
@@ -770,6 +775,7 @@ impl Workspace {
 
         // load the modules scanned from the workspace
         for module_path in settings.json.scanned_modules.iter() {
+            progress.set_message(&format!("loading content {module_path}"));
             if !loaded_modules.contains(module_path) {
                 let content: Arc<str> = std::fs::read_to_string(module_path.as_ref())
                     .context(format_context!("Failed to read file {module_path}"))?
@@ -791,6 +797,7 @@ impl Workspace {
                 .context(format_context!("Failed to clear inputs"))?;
         }
 
+        progress.set_message("processing command line args");
         // Workspace is assumed to reproducible until a rule is processed
         // that is not reproducible - such as a repo on tip of branch
         let mut env = environment::AnyEnvironment::default();
