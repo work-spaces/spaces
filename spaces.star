@@ -163,7 +163,13 @@ run_add_exec(
 run_add_exec(
     "install_dev",
     command = "cargo",
-    args = "install --force --path=spaces/crates/spaces --profile=dev --root={}".format(root).split(" "),
+    args = [
+        "install",
+        "--force",
+        "--path=spaces/crates/spaces",
+        "--profile=dev",
+        "--root={}".format(root),
+    ],
     deps = deps(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
     visibility = visibility_private(),
     help = "Install dev build on local system",
@@ -172,14 +178,29 @@ run_add_exec(
 run_add_exec(
     "install_release",
     command = "cargo",
-    args = "install --target-dir=build/target --force --path=spaces/crates/spaces --profile=release --root={}".format(root).split(" "),
+    args = [
+        "install",
+        "--target-dir=build/target",
+        "--force",
+        "--path=spaces/crates/spaces",
+        "--profile=release",
+        "--root={}".format(root),
+    ],
     deps = deps(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
 )
 
 run_add_exec(
     "install_dev_lsp",
     command = "cargo",
-    args = "install --target-dir=build/target --features=lsp-debug --force --path=spaces/crates/spaces --profile=dev --root={}".format(root).split(" "),
+    args = [
+        "install",
+        " --target-dir=build/target",
+        "--features=lsp-debug",
+        "--force",
+        "--path=spaces/crates/spaces",
+        "--profile=dev",
+        "--root={}".format(root),
+    ],
     deps = deps(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
     visibility = visibility_private(),
 )
