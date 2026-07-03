@@ -692,6 +692,7 @@ fn try_evaluate_with_cache(
 
     // Execute with rcache
     let result = rcache::execute(
+        console.clone(),
         cache_path.as_ref(),
         module_digest,
         &cache_targets,
