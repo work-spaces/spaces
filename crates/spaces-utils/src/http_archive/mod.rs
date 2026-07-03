@@ -1402,14 +1402,16 @@ pub fn check_downloaded_archive(path_to_archive: &std::path::Path) -> anyhow::Re
         collected_entries = entries.collect();
         count = collected_entries.len();
 
-        // For a plain (non-compressed) single file the downloaded artifact is
-        // renamed into the `_files` directory during extraction, so only the
-        // `_files` directory and its `.json` manifest remain. The original
-        // archive file is not kept alongside them as it is for compressed
-        // archives.
-        if count != 2 {
+        // For plain (non-compressed) single-file downloads, we expect the
+        // `_files` directory and its `.json` manifest.
+        //
+        // Depending on how the entry was produced, the original artifact file
+        // may also be present alongside them:
+        // - older layout: 2 entries (`*_files`, `*_files.json`)
+        // - current layout: 3 entries (plus the original artifact)
+        if count != 2 && count != 3 {
             return Err(format_error!(
-                "Expected 2 entries in archive, found {count}",
+                "Expected 2 or 3 entries in archive, found {count}",
             ));
         }
     } else if count != 3 {
@@ -1493,18 +1495,28 @@ mod tests {
     /// Layout:
     ///   {entry}/                         <- returned (extension `bin`)
     ///     {sha256}/
+    ///       {name}                       <- optional original artifact file
     ///       {name}_files/
-    ///         {name}                     <- artifact moved here on extract
+    ///         {name}                     <- artifact exposed for linking
     ///       {name}_files.json            <- manifest listing {name}
-    fn build_plain_file_layout(root: &std::path::Path, name: &str) -> std::path::PathBuf {
+    fn build_plain_file_layout(
+        root: &std::path::Path,
+        name: &str,
+        include_original_artifact: bool,
+    ) -> std::path::PathBuf {
         let sha256 = "0".repeat(64);
         let entry_dir = root.join(name);
         let sha_dir = entry_dir.join(&sha256);
         let files_dir = sha_dir.join(format!("{name}_files"));
         std::fs::create_dir_all(&files_dir).unwrap();
 
-        // artifact lives inside the `_files` directory
+        // artifact exposed via the `_files` directory
         std::fs::write(files_dir.join(name), b"binary payload").unwrap();
+
+        // optionally keep the original downloaded artifact in-place
+        if include_original_artifact {
+            std::fs::write(sha_dir.join(name), b"binary payload").unwrap();
+        }
 
         // manifest lists the artifact
         let manifest = format!("{{\"files\": [\"{name}\"]}}");
@@ -1514,9 +1526,9 @@ mod tests {
     }
 
     #[test]
-    fn test_check_downloaded_archive_accepts_plain_bin_file() {
+    fn test_check_downloaded_archive_accepts_plain_bin_file_legacy_layout() {
         let tmp = tempfile::tempdir().unwrap();
-        let entry_dir = build_plain_file_layout(tmp.path(), "mylib.bin");
+        let entry_dir = build_plain_file_layout(tmp.path(), "mylib.bin", false);
 
         check_downloaded_archive(&entry_dir).expect(
             "a valid non-compressed .bin entry with 2 inner entries should pass validation",
@@ -1524,9 +1536,19 @@ mod tests {
     }
 
     #[test]
+    fn test_check_downloaded_archive_accepts_plain_bin_file_current_layout() {
+        let tmp = tempfile::tempdir().unwrap();
+        let entry_dir = build_plain_file_layout(tmp.path(), "mylib.bin", true);
+
+        check_downloaded_archive(&entry_dir).expect(
+            "a valid non-compressed .bin entry with 3 inner entries should pass validation",
+        );
+    }
+
+    #[test]
     fn test_check_downloaded_archive_rejects_plain_bin_missing_manifest() {
         let tmp = tempfile::tempdir().unwrap();
-        let entry_dir = build_plain_file_layout(tmp.path(), "mylib.bin");
+        let entry_dir = build_plain_file_layout(tmp.path(), "mylib.bin", false);
 
         // Remove the manifest so only the `_files` directory remains (1 entry).
         let sha_dir = std::fs::read_dir(&entry_dir)
@@ -1539,7 +1561,8 @@ mod tests {
 
         let err = check_downloaded_archive(&entry_dir).unwrap_err();
         assert!(
-            err.to_string().contains("Expected 2 entries in archive"),
+            err.to_string()
+                .contains("Expected 2 or 3 entries in archive"),
             "unexpected error: {err}"
         );
     }
