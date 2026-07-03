@@ -1202,12 +1202,22 @@ pub fn check_downloaded_archive(path_to_archive: &std::path::Path) -> anyhow::Re
     let mut collected_entries: Vec<_> = entries.collect();
     let mut count = collected_entries.len();
 
-    if !is_compressed && let Some(Ok(first_entry)) = collected_entries.first() {
+    if !is_compressed {
         if count != 1 {
             return Err(format_error!(
                 "Expected 1 entries in archive, found {count}",
             ));
         }
+
+        let first_entry = collected_entries
+            .into_iter()
+            .next()
+            .ok_or_else(|| format_error!("Expected 1 entries in archive, found {count}"))?
+            .context(format_context!(
+                "Failed to read first archive entry in {}",
+                path_to_archive.display()
+            ))?;
+
         let path_to_dir = path_to_archive.join(first_entry.path());
         delete_ds_store(path_to_dir.as_path())?;
         let entries = std::fs::read_dir(path_to_dir.as_path()).context(format_context!(
@@ -1217,9 +1227,18 @@ pub fn check_downloaded_archive(path_to_archive: &std::path::Path) -> anyhow::Re
 
         collected_entries = entries.collect();
         count = collected_entries.len();
-    }
 
-    if count != 3 {
+        // For a plain (non-compressed) single file the downloaded artifact is
+        // renamed into the `_files` directory during extraction, so only the
+        // `_files` directory and its `.json` manifest remain. The original
+        // archive file is not kept alongside them as it is for compressed
+        // archives.
+        if count != 2 {
+            return Err(format_error!(
+                "Expected 2 entries in archive, found {count}",
+            ));
+        }
+    } else if count != 3 {
         return Err(format_error!(
             "Expected 3 entries in archive, found {count}",
         ));
@@ -1287,6 +1306,68 @@ mod tests {
         f.write_all(content).unwrap();
         f.flush().unwrap();
         f
+    }
+
+    // -------------------------------------------------------
+    // check_downloaded_archive – on-disk layout tests
+    // -------------------------------------------------------
+
+    /// Build the store layout for a plain (non-compressed) single-file
+    /// download such as a `.bin` artifact and return the store entry
+    /// directory that `check_downloaded_archive` is invoked with.
+    ///
+    /// Layout:
+    ///   {entry}/                         <- returned (extension `bin`)
+    ///     {sha256}/
+    ///       {name}_files/
+    ///         {name}                     <- artifact moved here on extract
+    ///       {name}_files.json            <- manifest listing {name}
+    fn build_plain_file_layout(root: &std::path::Path, name: &str) -> std::path::PathBuf {
+        let sha256 = "0".repeat(64);
+        let entry_dir = root.join(name);
+        let sha_dir = entry_dir.join(&sha256);
+        let files_dir = sha_dir.join(format!("{name}_files"));
+        std::fs::create_dir_all(&files_dir).unwrap();
+
+        // artifact lives inside the `_files` directory
+        std::fs::write(files_dir.join(name), b"binary payload").unwrap();
+
+        // manifest lists the artifact
+        let manifest = format!("{{\"files\": [\"{name}\"]}}");
+        std::fs::write(sha_dir.join(format!("{name}_files.json")), manifest).unwrap();
+
+        entry_dir
+    }
+
+    #[test]
+    fn test_check_downloaded_archive_accepts_plain_bin_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let entry_dir = build_plain_file_layout(tmp.path(), "mylib.bin");
+
+        check_downloaded_archive(&entry_dir).expect(
+            "a valid non-compressed .bin entry with 2 inner entries should pass validation",
+        );
+    }
+
+    #[test]
+    fn test_check_downloaded_archive_rejects_plain_bin_missing_manifest() {
+        let tmp = tempfile::tempdir().unwrap();
+        let entry_dir = build_plain_file_layout(tmp.path(), "mylib.bin");
+
+        // Remove the manifest so only the `_files` directory remains (1 entry).
+        let sha_dir = std::fs::read_dir(&entry_dir)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        std::fs::remove_file(sha_dir.join("mylib.bin_files.json")).unwrap();
+
+        let err = check_downloaded_archive(&entry_dir).unwrap_err();
+        assert!(
+            err.to_string().contains("Expected 2 entries in archive"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
