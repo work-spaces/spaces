@@ -322,6 +322,7 @@ pub fn build_repo_sync_plan(
                 Some(format!("//{} planning sync actions", member.path)),
             );
 
+            repo_progress.set_message("checking rev type");
             let repo = git::Repository::new(url.clone(), member.path.clone());
             let is_dev_branch = dev_branch_paths.contains(&member.path);
             let is_rev_branch = repo.is_branch(&mut repo_progress, &member.rev);
@@ -400,6 +401,7 @@ pub fn build_repo_sync_plan(
                     .or_else(|| merge_from.clone())
                     .expect("pre-sync action base ref should be present");
 
+                repo_progress.set_message("fetching latest");
                 repo.fetch_with_prune(&mut repo_progress, git::IgnoreSubmodules::Yes)
                     .context(format_context!(
                         "//{} while fetching updates before sync planning",
@@ -425,6 +427,7 @@ pub fn build_repo_sync_plan(
                         .into(),
                     );
                 } else if rebase_from.is_some() {
+                    repo_progress.set_message("checking for rebase conflicts");
                     match repo
                         .can_rebase_without_conflicts(
                             &mut repo_progress,
@@ -441,6 +444,7 @@ pub fn build_repo_sync_plan(
                         }
                     }
                 } else if merge_from.is_some() {
+                    repo_progress.set_message("checking for merge conflicts");
                     match repo
                         .can_merge_without_conflicts(
                             &mut repo_progress,
@@ -458,6 +462,7 @@ pub fn build_repo_sync_plan(
                 }
             }
 
+            repo_progress.set_message("checking if dirty");
             let is_dirty = repo.is_dirty(&mut repo_progress, git::IgnoreSubmodules::Yes);
             let mut will_stash = false;
 
