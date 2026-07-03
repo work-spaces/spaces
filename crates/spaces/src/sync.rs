@@ -462,7 +462,7 @@ pub fn build_repo_sync_plan(
                 }
             }
 
-            repo_progress.set_message("checking if is dirty");
+            repo_progress.set_message("checking if dirty");
             let is_dirty = repo.is_dirty(&mut repo_progress, git::IgnoreSubmodules::Yes);
             let mut will_stash = false;
 

@@ -810,11 +810,6 @@ pub fn run_starlark_modules_in_workspace(
             post_sync_progress.set_message("popping stashes");
             sync::pop_stashed_repos(console.clone(), workspace_arc.clone(), stashed_repos)
                 .context(format_context!("while popping stashes after sync"))?;
-            post_sync_progress.set_finalize_lines(console::make_finalize_line(
-                console::FinalType::Finished,
-                post_sync_progress.elapsed(),
-                "post sync successful",
-            ));
         }
 
         if sync_result.is_ok() {
@@ -827,6 +822,12 @@ pub fn run_starlark_modules_in_workspace(
             .context(format_context!(
                 "while collecting post-sync repository revisions"
             ))?;
+
+            post_sync_progress.set_finalize_lines(console::make_finalize_line(
+                console::FinalType::Finished,
+                post_sync_progress.elapsed(),
+                "post sync successful",
+            ));
 
             drop(post_sync_progress);
 
