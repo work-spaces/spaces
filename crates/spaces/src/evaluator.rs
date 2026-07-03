@@ -653,10 +653,10 @@ fn try_evaluate_with_cache(
             Some(console.clone()),
             load_result_cache,
         )
-        .map_err(|e| {
+        .map_err(|err| {
             ecode::anyhow(
                 ecode::Ecode::FailedToEvaluateModuleDuringCheckout,
-                &format!("{e}"),
+                &format!("{err:?}"),
             )
         })?;
         return Ok(());
@@ -711,8 +711,9 @@ fn try_evaluate_with_cache(
                 load_result_cache.clone(),
             )
             .map(|_| ());
-            result
-                .map_err(|e| ecode::anyhow(ecode::Ecode::FailedToEvaluateModule, &format!("{e:?}")))
+            result.map_err(|err| {
+                ecode::anyhow(ecode::Ecode::FailedToEvaluateModule, &format!("{err:?}"))
+            })
         },
         || vec![Arc::from(std::path::Path::new(json_target.as_ref()))],
     );
