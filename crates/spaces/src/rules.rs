@@ -37,6 +37,28 @@ fn task_logger(console: console::Console, name: Arc<str>) -> logger::Logger {
     logger::Logger::new(console, name)
 }
 
+fn rule_has_trailing_args(workspace: &workspace::WorkspaceArc, rule_name: &str) -> bool {
+    let workspace_read = workspace.read();
+    if workspace_read.trailing_args.is_empty() {
+        return false;
+    }
+
+    let Some(target) = workspace_read.target.as_ref() else {
+        return false;
+    };
+
+    if let Some(mapped_rule) = workspace_read
+        .settings
+        .bin
+        .trailing_args_rule_map
+        .get(target.as_ref())
+    {
+        mapped_rule.as_ref() == rule_name
+    } else {
+        target.as_ref() == rule_name
+    }
+}
+
 fn get_task_signal_deps(task: &task::Task) -> anyhow::Result<Vec<task::SignalArc>> {
     let state = get_state().read();
     let tasks = state.tasks.read();
@@ -127,6 +149,7 @@ pub fn execute_rule(
         };
 
         let displayed_rule = labels::sanitize_rule_for_display(name.clone());
+        let is_rule_with_trailing_args = rule_has_trailing_args(&workspace, name.as_ref());
         let mut skip_execute_message: Vec<console::Line> = Vec::new();
         if let (Some(platforms), Some(current_platform)) = (
             task.rule.platforms.as_ref(),
@@ -182,6 +205,7 @@ pub fn execute_rule(
                     displayed_rule.as_ref(),
                 );
             } else if skip_execute_message.is_empty()
+                && !is_rule_with_trailing_args
                 && task.rule.type_ == Some(rule::RuleType::Optional)
             {
                 logger.debug("Skipping because it is optional");
@@ -234,10 +258,13 @@ pub fn execute_rule(
 
             // digest has not changed
             if !check_changes.is_changed {
-                if task.rule.uses_rule_cache() {
+                if is_rule_with_trailing_args || task.rule.uses_rule_cache() {
                     // always run the rule cache even if inputs
                     // are the same, rule cache will restore targets
                     // if the user has manually deleted them
+                    //
+                    // rules with trailing args must also run even when inputs
+                    // have not changed.
                     Some(check_changes.digest)
                 } else {
                     skip_execute_message = logger::make_finalize_line(
@@ -290,7 +317,8 @@ pub fn execute_rule(
                 let store_path = workspace.read().get_store_path();
                 ws::get_rcache_path(std::path::Path::new(store_path.as_ref()))
             };
-            if task.rule.uses_rule_cache()
+            if !is_rule_with_trailing_args
+                && task.rule.uses_rule_cache()
                 && let Some(targets) = task.rule.targets.as_ref()
             {
                 // if the rule defines targets, the rule is run through
@@ -346,6 +374,14 @@ pub fn execute_rule(
                     }
                 }
             } else {
+                let use_workspace_env =
+                    if task.rule.uses_rule_cache() && task.rule.targets.as_ref().is_some() {
+                        // Keep env behavior consistent with cache-enabled rules,
+                        // even when bypassing rcache (e.g. trailing args).
+                        executor::UseWorkspaceEnv::No
+                    } else {
+                        executor::UseWorkspaceEnv::Yes
+                    };
                 (
                     true,
                     task.executor
@@ -353,7 +389,7 @@ pub fn execute_rule(
                             &mut progress,
                             workspace.clone(),
                             &rule_name,
-                            executor::UseWorkspaceEnv::Yes,
+                            use_workspace_env,
                         )
                         .context(format_context!("[{rule_name}] Failed to exec")),
                 )
