@@ -1493,10 +1493,38 @@ pub fn get_graph() -> graph::Graph {
     state.graph.clone()
 }
 
-pub fn collect_task_glob_deps(task: &task::Task) -> Vec<rule::Globs> {
+/// Splits a task's dependencies into rule dependencies (each paired with the
+/// target globs of that dependency's rule) and the task's own direct glob-file
+/// dependencies.
+///
+/// This mirrors [`task::Task::collects_glob_deps`] but keeps the per-rule
+/// grouping so callers (e.g. `query`) can present the expansion in a nested
+/// fashion instead of a single flat list.
+pub type NestedGlobDeps = (Vec<(Arc<str>, Vec<rule::Globs>)>, Vec<rule::Globs>);
+
+pub fn collect_task_nested_glob_deps(task: &task::Task) -> NestedGlobDeps {
     let state = get_state().read();
     let tasks = state.tasks.read();
-    task.collects_glob_deps(&tasks)
+
+    let mut rule_dep_globs: Vec<(Arc<str>, Vec<rule::Globs>)> = Vec::new();
+    let mut direct_globs: Vec<rule::Globs> = Vec::new();
+
+    if let Some(rule::Deps::Any(any_list)) = task.rule.deps.as_ref() {
+        for any in any_list.iter() {
+            match any {
+                rule::AnyDep::Rule(rule_name) => {
+                    let globs = tasks
+                        .get(rule_name.as_ref())
+                        .map(|dep_task| dep_task.rule.collect_target_globs())
+                        .unwrap_or_default();
+                    rule_dep_globs.push((rule_name.clone(), globs));
+                }
+                rule::AnyDep::Glob(glob) => direct_globs.push(glob.clone()),
+            }
+        }
+    }
+
+    (rule_dep_globs, direct_globs)
 }
 
 pub fn get_setup_rules() -> rule::Deps {
