@@ -1541,18 +1541,54 @@ fn build_query_rule(
     let expanded_deps = if config.compute_expanded_deps {
         let mut progress = console::Progress::new(console.clone(), "query-deps", None, None);
         progress.set_message("inspecting workspace inputs");
-        let mut dep_strings: Vec<Arc<str>> = task.collect_rule_deps();
-        let glob_deps = rules::collect_task_glob_deps(task);
-        let files = workspace
-            .read()
-            .inspect_inputs(
-                &mut progress,
-                &glob_deps,
-                utils::changes::IsAllowNoEntries::Yes,
-            )
-            .context(format_context!("Failed to inspect deps globs for query"))?;
-        dep_strings.extend(files.into_iter().map(|e| format!("//{e}").into()));
-        Some(dep_strings)
+
+        let (rule_dep_globs, direct_globs) = rules::collect_task_nested_glob_deps(task);
+
+        let mut result: Vec<query::ExpandedDep> = Vec::new();
+
+        // Each rule dependency lists its expanded target files nested underneath.
+        for (dep_name, globs) in rule_dep_globs {
+            let targets = if globs.is_empty() {
+                Vec::new()
+            } else {
+                let files = workspace
+                    .read()
+                    .inspect_inputs(&mut progress, &globs, utils::changes::IsAllowNoEntries::Yes)
+                    .context(format_context!(
+                        "Failed to inspect dep target globs for query"
+                    ))?;
+                files
+                    .into_iter()
+                    .map(query::ExpandedDep::format_path)
+                    .collect()
+            };
+            result.push(query::ExpandedDep {
+                type_: query::ExpandedDepType::Rule,
+                name: dep_name,
+                targets,
+            });
+        }
+
+        // Direct glob-file dependencies are listed flat (no nested targets).
+        if !direct_globs.is_empty() {
+            let files = workspace
+                .read()
+                .inspect_inputs(
+                    &mut progress,
+                    &direct_globs,
+                    utils::changes::IsAllowNoEntries::Yes,
+                )
+                .context(format_context!("Failed to inspect deps globs for query"))?;
+            for file in files {
+                result.push(query::ExpandedDep {
+                    type_: query::ExpandedDepType::File,
+                    name: query::ExpandedDep::format_path(file),
+                    targets: Vec::new(),
+                });
+            }
+        }
+
+        Some(result)
     } else {
         None
     };

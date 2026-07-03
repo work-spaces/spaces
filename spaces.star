@@ -3,18 +3,16 @@ Spaces starlark checkout/run script to make changes to spaces, printer, and arch
 With VSCode/Zed integration
 """
 
-load("//@star/sdk/star/deps.star", "deps")
-load("//@star/sdk/star/glob.star", "glob")
+load("//@star/prelude/rules/deps.star", "deps")
+load("//@star/prelude/rules/glob.star", "glob")
 load(
-    "//@star/sdk/star/run.star",
+    "//@star/prelude/rules/run.star",
     "run_add_exec",
     "run_add_exec_test",
 )
-load("//@star/sdk/star/shell.star", "shell")
 load(
     "//@star/sdk/star/visibility.star",
     "visibility_private",
-    "visibility_public",
     "visibility_rules",
 )
 load(
@@ -164,24 +162,25 @@ run_add_exec(
 
 run_add_exec(
     "install_dev",
-    command = "bash",
-    args = ["-c", "cargo install --force --path=spaces/crates/spaces --profile=dev --root={}".format(root)],
-    deps = [":cargo_tree"],
+    command = "cargo",
+    args = "install --force --path=spaces/crates/spaces --profile=dev --root={}".format(root).split(" "),
+    deps = deps(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
     visibility = visibility_private(),
     help = "Install dev build on local system",
 )
 
-shell(
+run_add_exec(
     "install_release",
-    script = "cargo install --target-dir=build/target --force --path=spaces/crates/spaces --profile=release --root={}".format(root),
-    deps = [":cargo_tree"],
-    visibility = visibility_public(),
+    command = "cargo",
+    args = "install --target-dir=build/target --force --path=spaces/crates/spaces --profile=release --root={}".format(root).split(" "),
+    deps = deps(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
 )
 
-shell(
+run_add_exec(
     "install_dev_lsp",
-    script = "cargo install --target-dir=build/target --features=lsp-debug --force --path=spaces/crates/spaces --profile=dev --root={}".format(root),
-    deps = [":cargo_tree"],
+    command = "cargo",
+    args = "install --target-dir=build/target --features=lsp-debug --force --path=spaces/crates/spaces --profile=dev --root={}".format(root).split(" "),
+    deps = deps(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
     visibility = visibility_private(),
 )
 

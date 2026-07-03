@@ -176,6 +176,43 @@ impl QueryContextConfig {
     }
 }
 
+/// Kind of expanded dependency represented by [`ExpandedDep`].
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ExpandedDepType {
+    Rule,
+    File,
+}
+
+/// A single expanded dependency entry.
+///
+/// A rule dependency carries its expanded target file paths as nested
+/// `targets`; a direct glob-file dependency is a leaf entry with no `targets`.
+#[derive(Debug, Clone, Serialize)]
+pub struct ExpandedDep {
+    /// Dependency type (`rule` or `file`).
+    #[serde(rename = "type")]
+    pub type_: ExpandedDepType,
+    /// The dependency label (a rule name, or a file path for glob deps).
+    pub name: Arc<str>,
+    /// Expanded target file paths for a rule dependency. Empty for glob-file deps.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub targets: Vec<Arc<str>>,
+}
+
+impl ExpandedDep {
+    /// Formats an inspected input path into a dependency label. Absolute paths
+    /// (already starting with `/`) are kept verbatim; workspace-relative paths
+    /// get the `//` label prefix.
+    pub fn format_path(path: String) -> Arc<str> {
+        if path.starts_with('/') {
+            path.into()
+        } else {
+            format!("//{path}").into()
+        }
+    }
+}
+
 /// Pre-computed display data for a single rule. Built by the evaluator from
 /// `task::Task` so that `query.rs` has no dependency on the `spaces` crate.
 #[derive(Debug)]
@@ -184,9 +221,10 @@ pub struct QueryRule {
     pub rule: rule::Rule,
     /// Pre-computed source path (from `labels::get_source_from_label`).
     pub source: String,
-    /// Rule-name deps plus workspace-expanded glob file paths.
+    /// Rule deps (each with their expanded target files nested underneath) plus
+    /// workspace-expanded glob file paths (listed flat).
     /// Only populated if `QueryContextConfig::compute_expanded_deps` is true.
-    pub expanded_deps: Option<Vec<Arc<str>>>,
+    pub expanded_deps: Option<Vec<ExpandedDep>>,
     /// Pre-computed executor markdown fragment, used by `Export`.
     pub executor_markdown: Option<String>,
     /// Full task serialised as YAML, used by `Rule --format=yaml`.
@@ -443,7 +481,7 @@ struct RuleInfo {
     source: String,
     help: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    deps: Option<Vec<Arc<str>>>,
+    deps: Option<Vec<ExpandedDep>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     targets: Option<Vec<Arc<str>>>,
 }
@@ -852,16 +890,7 @@ fn emit_pretty_rule_details(
                 qr.rule.name.as_ref()
             )
         })?;
-        let expanded_deps_value = serde_yaml::to_value(expanded_deps)
-            .context(format_context!("Failed to serialize expanded_deps"))?;
-        let expanded_deps_items = deps_to_unordered_items(&expanded_deps_value)
-            .context(format_context!("Failed to render expanded_deps"))?;
-
-        let mut expanded_deps_list =
-            console::components::List::unordered().variant(console::components::Variant::Info);
-        for dep in expanded_deps_items {
-            expanded_deps_list = expanded_deps_list.item(dep);
-        }
+        let expanded_deps_list = build_expanded_deps_list(expanded_deps);
 
         console.emit_lines(console::components::h3("Expanded Deps"));
         console.emit_lines(expanded_deps_list.render());
@@ -1055,12 +1084,50 @@ fn emit_pretty_rule_details(
     Ok(())
 }
 
+/// Renders a single expanded dependency as a name line followed by indented
+/// lines for each nested target file. Rule deps show their target files nested
+/// underneath; glob-file deps (no targets) render as a single line.
+fn expanded_dep_lines(dep: &ExpandedDep) -> Vec<console::Line> {
+    let mut name_line = console::Line::default();
+    name_line.push(console::Span::new_unstyled_lossy(dep.name.as_ref()));
+    let mut lines = vec![name_line];
+    for target in &dep.targets {
+        let mut line = console::Line::default();
+        line.push(console::Span::new_unstyled_lossy(format!("  - {target}")));
+        lines.push(line);
+    }
+    lines
+}
+
+/// Builds a (possibly nested) unordered list from expanded dependencies. Rule
+/// deps render their expanded target files as a nested list; glob-file deps
+/// render as flat leaf items.
+fn build_expanded_deps_list(expanded_deps: &[ExpandedDep]) -> console::components::List {
+    let mut list =
+        console::components::List::unordered().variant(console::components::Variant::Info);
+    if expanded_deps.is_empty() {
+        return list.item("<None>");
+    }
+    for dep in expanded_deps {
+        list = list.item(dep.name.as_ref());
+        if !dep.targets.is_empty() {
+            let mut nested =
+                console::components::List::unordered().variant(console::components::Variant::Info);
+            for target in &dep.targets {
+                nested = nested.item(target.as_ref());
+            }
+            list = list.nested(nested);
+        }
+    }
+    list
+}
+
 fn emit_styled_rule(
     console: &console::Console,
     name: &str,
     source: &str,
     help: &str,
-    deps: Option<&Vec<Arc<str>>>,
+    deps: Option<&Vec<ExpandedDep>>,
     targets: Option<&Vec<Arc<str>>>,
     highlight_terms: Option<&[Arc<str>]>,
 ) {
@@ -1077,7 +1144,7 @@ fn emit_styled_rule(
 
     if let Some(deps) = deps {
         for dep in deps {
-            description_list = description_list.item("dep", dep.as_ref());
+            description_list = description_list.item("dep", expanded_dep_lines(dep));
         }
     }
 
@@ -1287,7 +1354,7 @@ impl QueryCommand {
                     source: String,
                     help: String,
                     #[serde(skip_serializing_if = "Option::is_none")]
-                    deps: Option<Vec<Arc<str>>>,
+                    deps: Option<Vec<ExpandedDep>>,
                     #[serde(skip_serializing_if = "Option::is_none")]
                     targets: Option<Vec<Arc<str>>>,
                 }

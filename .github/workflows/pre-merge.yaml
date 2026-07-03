@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - uses: work-spaces/spaces-checkout-run@v0.1.4
+      - uses: work-spaces/spaces-checkout-run@v0.17.1
         with:
           checkout: --locked --url=https://github.com/work-spaces/spaces --rev=${{ github.head_ref }}
           run: //spaces:check_rust_clippy
