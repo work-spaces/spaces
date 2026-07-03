@@ -28,6 +28,142 @@ pub type ArchiveLink = crate::copy::LinkType;
 
 pub type MakeReadOnly = crate::copy::MakeReadOnly;
 
+pub const STAGING_DIR_PREFIX: &str = ".staging-";
+
+/// True if `name` is a transient staging directory created by `HttpArchive::sync`.
+pub fn is_staging_dir_name(name: &str) -> bool {
+    name.starts_with(STAGING_DIR_PREFIX)
+}
+
+static STAGING_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[derive(Debug)]
+struct Staging {
+    dir: std::path::PathBuf,
+    archive_path: std::path::PathBuf,
+    files_path: std::path::PathBuf,
+    json_path: std::path::PathBuf,
+}
+
+impl Staging {
+    fn new(final_archive_path: &str) -> anyhow::Result<Self> {
+        let final_archive_path = std::path::Path::new(final_archive_path);
+        let final_parent = final_archive_path.parent().ok_or(format_error!(
+            "No parent found for archive path {final_archive_path:?}"
+        ))?;
+
+        std::fs::create_dir_all(final_parent).context(format_context!(
+            "Failed to create archive parent {final_parent:?}"
+        ))?;
+
+        // Best-effort cleanup of stale sibling staging directories.
+        if let Ok(entries) = std::fs::read_dir(final_parent) {
+            for entry in entries.filter_map(Result::ok) {
+                if !entry.path().is_dir() {
+                    continue;
+                }
+                let name = entry.file_name().to_string_lossy().to_string();
+                if !is_staging_dir_name(&name) {
+                    continue;
+                }
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
+
+        let pid = std::process::id();
+        let unique = STAGING_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let archive_stem = final_archive_path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "archive".to_string());
+
+        let dir = final_parent.join(format!(
+            "{STAGING_DIR_PREFIX}{archive_stem}-{pid}-{unique}-{nanos}"
+        ));
+        std::fs::create_dir_all(&dir)
+            .context(format_context!("Failed to create staging dir {dir:?}"))?;
+
+        let archive_file_name = final_archive_path.file_name().ok_or(format_error!(
+            "No file name found in archive path {final_archive_path:?}"
+        ))?;
+        let archive_file_name = archive_file_name.to_string_lossy();
+
+        let archive_path = dir.join(archive_file_name.as_ref());
+        let files_name = format!("{archive_file_name}_files");
+        let files_path = dir.join(&files_name);
+        let json_path = dir.join(format!("{files_name}.json"));
+
+        Ok(Self {
+            dir,
+            archive_path,
+            files_path,
+            json_path,
+        })
+    }
+}
+
+impl Drop for Staging {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+fn verify_sha256(path: &std::path::Path, expected: &str) -> anyhow::Result<()> {
+    let actual = hash_streaming::stream_sha256_hash(path)
+        .context(format_context!("failed to hash {path:?}"))?
+        .to_ascii_lowercase();
+    let expected = expected.to_ascii_lowercase();
+    if actual != expected {
+        return Err(format_error!(
+            "SHA256 mismatch for {path:?}: expected {expected}, got {actual}"
+        ));
+    }
+    Ok(())
+}
+
+fn promote(
+    staging: &Staging,
+    final_archive: &std::path::Path,
+    final_files: &std::path::Path,
+    final_json: &std::path::Path,
+    publish_archive: bool,
+) -> anyhow::Result<()> {
+    if let Some(parent) = final_archive.parent() {
+        std::fs::create_dir_all(parent).context(format_context!(
+            "Failed to create archive parent {parent:?}"
+        ))?;
+    }
+
+    let _ = std::fs::remove_dir_all(final_files);
+    if publish_archive {
+        let _ = std::fs::remove_file(final_archive);
+    }
+    let _ = std::fs::remove_file(final_json);
+
+    std::fs::rename(&staging.files_path, final_files).context(format_context!(
+        "Failed to promote extracted files {:?} -> {final_files:?}",
+        staging.files_path
+    ))?;
+
+    if publish_archive {
+        std::fs::rename(&staging.archive_path, final_archive).context(format_context!(
+            "Failed to promote archive {:?} -> {final_archive:?}",
+            staging.archive_path
+        ))?;
+    }
+
+    std::fs::rename(&staging.json_path, final_json).context(format_context!(
+        "Failed to promote json manifest {:?} -> {final_json:?}",
+        staging.json_path
+    ))?;
+
+    Ok(())
+}
+
 fn label_logger(console: console::Console, label: &str) -> logger::Logger {
     logger::Logger::new(console, label.into())
 }
@@ -827,7 +963,10 @@ impl HttpArchive {
     }
 
     fn is_extract_required(&self) -> bool {
-        !std::path::Path::new(self.get_path_to_extracted_files().as_str()).exists()
+        let files_path = self.get_path_to_extracted_files();
+        let json_path = self.get_path_to_extracted_files_json();
+        !std::path::Path::new(files_path.as_str()).exists()
+            || !std::path::Path::new(json_path.as_str()).exists()
     }
 
     pub fn create_links(
@@ -940,17 +1079,29 @@ impl HttpArchive {
     }
 
     pub fn sync(&self, console: console::Console) -> anyhow::Result<()> {
+        let download_required = self.is_download_required();
+        let extract_required = self.is_extract_required();
+
+        if !download_required && !extract_required {
+            label_logger(console.clone(), &self.archive.url)
+                .debug(format!("{} download/extract not required", self.archive.url).as_str());
+            return Ok(());
+        }
+
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .enable_all()
             .build()
             .context(anyhow::anyhow!("Failed to create runtime"))?;
 
-        if self.is_download_required() {
+        let staging = Staging::new(&self.full_path_to_archive)?;
+
+        if download_required {
+            let staging_archive = staging.archive_path.to_string_lossy().to_string();
             if let Some(arguments) = gh::transform_url_to_arguments(
                 self.allow_gh_for_download,
                 self.archive.url.as_ref(),
-                &self.full_path_to_archive,
+                &staging_archive,
             ) {
                 // Create progress bar only for gh download
                 let mut progress_bar =
@@ -966,11 +1117,11 @@ impl HttpArchive {
                 if gh_result.is_err() {
                     // gh failed, fall back to HTTP download (which creates its own progress bar)
                     drop(progress_bar);
-                    let join_handle =
-                        self.download(&runtime, console.clone())
-                            .context(format_context!(
-                                "Failed to download using https after trying gh. Use `gh auth login` to authenticate"
-                            ))?;
+                    let join_handle = self
+                        .download(&runtime, console.clone(), &staging.archive_path)
+                        .context(format_context!(
+                            "Failed to download using https after trying gh. Use `gh auth login` to authenticate"
+                        ))?;
                     runtime.block_on(join_handle)??;
                 }
             } else {
@@ -979,21 +1130,52 @@ impl HttpArchive {
                     .debug(format!("{} Downloading using reqwest", self.archive.url).as_str());
 
                 let join_handle = self
-                    .download(&runtime, console.clone())
+                    .download(&runtime, console.clone(), &staging.archive_path)
                     .context(format_context!("Failed to download using reqwest"))?;
                 runtime.block_on(join_handle)??;
             }
         } else {
             label_logger(console.clone(), &self.archive.url)
                 .debug(format!("{} download not required", self.archive.url).as_str());
-        };
+
+            std::fs::copy(&self.full_path_to_archive, &staging.archive_path).context(
+                format_context!(
+                    "Failed to copy existing archive {} -> {:?}",
+                    self.full_path_to_archive,
+                    staging.archive_path
+                ),
+            )?;
+        }
+
+        verify_sha256(&staging.archive_path, self.archive.sha256.as_ref())
+            .context(format_context!("while verifying staged archive checksum"))?;
 
         label_logger(console.clone(), &self.archive.url).debug("Extracting archive");
 
-        self.extract(console.clone()).context(anyhow::anyhow!(
+        self.extract_into(
+            console.clone(),
+            &staging.archive_path,
+            &staging.files_path,
+            &staging.json_path,
+        )
+        .context(anyhow::anyhow!(
             "extract failed on file://{}",
-            self.full_path_to_archive,
+            staging.archive_path.display(),
         ))?;
+
+        let final_archive = std::path::Path::new(&self.full_path_to_archive);
+        let final_files = std::path::PathBuf::from(self.get_path_to_extracted_files());
+        let final_json = std::path::PathBuf::from(self.get_path_to_extracted_files_json());
+
+        promote(
+            &staging,
+            final_archive,
+            final_files.as_path(),
+            final_json.as_path(),
+            download_required,
+        )
+        .context(format_context!("failed to promote staged archive"))?;
+
         Ok(())
     }
 
@@ -1001,25 +1183,24 @@ impl HttpArchive {
         &self,
         runtime: &tokio::runtime::Runtime,
         console: console::Console,
+        destination: &std::path::Path,
     ) -> anyhow::Result<tokio::task::JoinHandle<anyhow::Result<()>>> {
-        let full_path_to_archive = self.full_path_to_archive.clone();
-        let full_path = std::path::Path::new(&full_path_to_archive);
-        if let Some(parent) = full_path.parent() {
+        if let Some(parent) = destination.parent() {
             std::fs::create_dir_all(parent)?;
         }
 
+        let destination = destination.to_string_lossy().to_string();
         download(
             console,
             self.archive.url.as_ref(),
-            full_path_to_archive.as_str(),
+            destination.as_str(),
             self.archive.headers.clone(),
             Arc::new(AtomicU32::new(0)),
             runtime,
         )
     }
 
-    fn save_files_json(&self, files: Files) -> anyhow::Result<()> {
-        let file_path = self.get_path_to_extracted_files_json();
+    fn save_files_json_to_path(file_path: &std::path::Path, files: Files) -> anyhow::Result<()> {
         let contents = serde_json::to_string_pretty(&files)?;
         std::fs::write(file_path, contents)?;
         Ok(())
@@ -1034,14 +1215,15 @@ impl HttpArchive {
         Ok(files.files)
     }
 
-    fn extract(&self, console: console::Console) -> anyhow::Result<()> {
-        if !self.is_extract_required() {
-            label_logger(console.clone(), &self.archive.url).debug("Extract not required");
-            return Ok(());
-        }
-
-        std::fs::create_dir_all(self.get_path_to_extracted_files().as_str())
-            .context(format_context!("creating {}", self.full_path_to_archive))?;
+    fn extract_into(
+        &self,
+        console: console::Console,
+        archive_path: &std::path::Path,
+        files_path: &std::path::Path,
+        json_path: &std::path::Path,
+    ) -> anyhow::Result<()> {
+        std::fs::create_dir_all(files_path)
+            .context(format_context!("creating staged directory {files_path:?}"))?;
 
         let mut extracted_files = HashSet::new();
 
@@ -1051,22 +1233,25 @@ impl HttpArchive {
         progress_bar.set_message("Extracting...");
 
         if self.archive_driver.is_some() {
+            let archive_path_str = archive_path.to_string_lossy().to_string();
+            let files_path_str = files_path.to_string_lossy().to_string();
+
             let decoder = archiver::Decoder::new(
-                &self.full_path_to_archive,
+                archive_path_str.as_str(),
                 Some(self.archive.sha256.to_string()),
-                &self.get_path_to_extracted_files(),
+                files_path_str.as_str(),
                 progress_bar,
             )
             .context(format_context!(
                 "{} -> {}",
-                self.full_path_to_archive.as_str(),
-                self.get_path_to_extracted_files()
+                archive_path_str,
+                files_path_str
             ))?;
 
             let extracted = decoder.extract().context(anyhow::anyhow!(
                 "{} ->\n{}",
-                self.full_path_to_archive,
-                self.get_path_to_extracted_files()
+                archive_path_str,
+                files_path_str
             ))?;
 
             extracted_files = extracted.files;
@@ -1078,29 +1263,16 @@ impl HttpArchive {
             ));
             progress
         } else {
-            let path_to_artifact = std::path::Path::new(self.full_path_to_archive.as_str());
-            let file_name = path_to_artifact.file_name().ok_or(format_error!(
-                "No file name found in archive path {path_to_artifact:?}"
+            let file_name = archive_path.file_name().ok_or(format_error!(
+                "No file name found in archive path {archive_path:?}"
             ))?;
 
-            // Check sha256 is correct
-            let file_digest = hash_streaming::stream_sha256_hash(path_to_artifact)
-                .context(format_context!("failed to hash {:?}", path_to_artifact))?
-                .to_ascii_lowercase();
-            let expected_digest = self.archive.sha256.to_lowercase();
-            if file_digest != expected_digest {
-                return Err(format_error!(
-                    "SHA256 mismatch for {path_to_artifact:?}, expected {expected_digest}, got {file_digest}"
-                ));
-            }
+            // For non-archive artifacts, expose the downloaded file under the
+            // extracted-files directory while keeping the staged archive file intact.
+            let target = files_path.join(file_name);
 
-            // the file needs to be moved to the extracted files directory
-            // that is where the create links function will look for it
-            let target =
-                std::path::Path::new(self.get_path_to_extracted_files().as_str()).join(file_name);
-
-            std::fs::rename(path_to_artifact, target.clone())
-                .context(format_context!("copy {path_to_artifact:?} -> {target:?}"))?;
+            std::fs::copy(archive_path, target.clone())
+                .context(format_context!("copy {archive_path:?} -> {target:?}"))?;
 
             extracted_files.insert(file_name.to_string_lossy().to_string());
             let mut progress = progress_bar;
@@ -1113,12 +1285,10 @@ impl HttpArchive {
         };
 
         for file in extracted_files.iter() {
-            let base_path = self.get_path_to_extracted_files();
-            let file_path = std::path::Path::new(base_path.as_str()).join(file);
+            let file_path = files_path.join(file.as_str());
             let metadata = std::fs::metadata(file_path.as_path())
                 .context(format_context!("Failed to get metadata for {file_path:?}"))?;
 
-            // mask out write permissions and allow read and execute
             let mut permissions: std::fs::Permissions = metadata.permissions();
             permissions.set_readonly(true);
             std::fs::set_permissions(file_path.as_path(), permissions).context(format_context!(
@@ -1126,13 +1296,17 @@ impl HttpArchive {
             ))?;
         }
 
-        self.save_files_json(Files {
-            files: extracted_files
-                .into_iter()
-                .map(|file| file.into())
-                .collect(),
-        })
+        Self::save_files_json_to_path(
+            json_path,
+            Files {
+                files: extracted_files
+                    .into_iter()
+                    .map(|file| file.into())
+                    .collect(),
+            },
+        )
         .context(format_context!("Failed to save json files manifest"))?;
+
         Ok(())
     }
 
@@ -1228,14 +1402,16 @@ pub fn check_downloaded_archive(path_to_archive: &std::path::Path) -> anyhow::Re
         collected_entries = entries.collect();
         count = collected_entries.len();
 
-        // For a plain (non-compressed) single file the downloaded artifact is
-        // renamed into the `_files` directory during extraction, so only the
-        // `_files` directory and its `.json` manifest remain. The original
-        // archive file is not kept alongside them as it is for compressed
-        // archives.
-        if count != 2 {
+        // For plain (non-compressed) single-file downloads, we expect the
+        // `_files` directory and its `.json` manifest.
+        //
+        // Depending on how the entry was produced, the original artifact file
+        // may also be present alongside them:
+        // - older layout: 2 entries (`*_files`, `*_files.json`)
+        // - current layout: 3 entries (plus the original artifact)
+        if count != 2 && count != 3 {
             return Err(format_error!(
-                "Expected 2 entries in archive, found {count}",
+                "Expected 2 or 3 entries in archive, found {count}",
             ));
         }
     } else if count != 3 {
@@ -1319,18 +1495,28 @@ mod tests {
     /// Layout:
     ///   {entry}/                         <- returned (extension `bin`)
     ///     {sha256}/
+    ///       {name}                       <- optional original artifact file
     ///       {name}_files/
-    ///         {name}                     <- artifact moved here on extract
+    ///         {name}                     <- artifact exposed for linking
     ///       {name}_files.json            <- manifest listing {name}
-    fn build_plain_file_layout(root: &std::path::Path, name: &str) -> std::path::PathBuf {
+    fn build_plain_file_layout(
+        root: &std::path::Path,
+        name: &str,
+        include_original_artifact: bool,
+    ) -> std::path::PathBuf {
         let sha256 = "0".repeat(64);
         let entry_dir = root.join(name);
         let sha_dir = entry_dir.join(&sha256);
         let files_dir = sha_dir.join(format!("{name}_files"));
         std::fs::create_dir_all(&files_dir).unwrap();
 
-        // artifact lives inside the `_files` directory
+        // artifact exposed via the `_files` directory
         std::fs::write(files_dir.join(name), b"binary payload").unwrap();
+
+        // optionally keep the original downloaded artifact in-place
+        if include_original_artifact {
+            std::fs::write(sha_dir.join(name), b"binary payload").unwrap();
+        }
 
         // manifest lists the artifact
         let manifest = format!("{{\"files\": [\"{name}\"]}}");
@@ -1340,9 +1526,9 @@ mod tests {
     }
 
     #[test]
-    fn test_check_downloaded_archive_accepts_plain_bin_file() {
+    fn test_check_downloaded_archive_accepts_plain_bin_file_legacy_layout() {
         let tmp = tempfile::tempdir().unwrap();
-        let entry_dir = build_plain_file_layout(tmp.path(), "mylib.bin");
+        let entry_dir = build_plain_file_layout(tmp.path(), "mylib.bin", false);
 
         check_downloaded_archive(&entry_dir).expect(
             "a valid non-compressed .bin entry with 2 inner entries should pass validation",
@@ -1350,9 +1536,19 @@ mod tests {
     }
 
     #[test]
+    fn test_check_downloaded_archive_accepts_plain_bin_file_current_layout() {
+        let tmp = tempfile::tempdir().unwrap();
+        let entry_dir = build_plain_file_layout(tmp.path(), "mylib.bin", true);
+
+        check_downloaded_archive(&entry_dir).expect(
+            "a valid non-compressed .bin entry with 3 inner entries should pass validation",
+        );
+    }
+
+    #[test]
     fn test_check_downloaded_archive_rejects_plain_bin_missing_manifest() {
         let tmp = tempfile::tempdir().unwrap();
-        let entry_dir = build_plain_file_layout(tmp.path(), "mylib.bin");
+        let entry_dir = build_plain_file_layout(tmp.path(), "mylib.bin", false);
 
         // Remove the manifest so only the `_files` directory remains (1 entry).
         let sha_dir = std::fs::read_dir(&entry_dir)
@@ -1365,8 +1561,185 @@ mod tests {
 
         let err = check_downloaded_archive(&entry_dir).unwrap_err();
         assert!(
-            err.to_string().contains("Expected 2 entries in archive"),
+            err.to_string()
+                .contains("Expected 2 or 3 entries in archive"),
             "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn test_is_staging_dir_name() {
+        assert!(is_staging_dir_name(".staging-abc-123"));
+        assert!(!is_staging_dir_name("abcd1234.zip"));
+        assert!(!is_staging_dir_name("abcd1234.zip_files"));
+        assert!(!is_staging_dir_name("abcd1234.zip_files.json"));
+        assert!(!is_staging_dir_name("rule.spaces.lock"));
+    }
+
+    #[test]
+    fn test_staging_new_and_drop() {
+        let temp = tempfile::tempdir().unwrap();
+        let final_archive = temp.path().join("1234abcd.zip");
+
+        let staging = Staging::new(final_archive.to_str().unwrap()).unwrap();
+        let staging_dir = staging.dir.clone();
+        assert!(staging_dir.exists());
+        assert_eq!(
+            staging.archive_path,
+            staging_dir.join("1234abcd.zip"),
+            "staging archive path should derive from final archive file name"
+        );
+
+        drop(staging);
+        assert!(
+            !staging_dir.exists(),
+            "staging directory should be deleted on drop"
+        );
+    }
+
+    #[test]
+    fn test_verify_sha256() {
+        let file = write_temp_file(b"hello world");
+        verify_sha256(
+            file.path(),
+            "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
+        )
+        .expect("expected matching checksum to pass");
+
+        let mismatch = verify_sha256(
+            file.path(),
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        );
+        assert!(mismatch.is_err(), "expected checksum mismatch to fail");
+    }
+
+    #[test]
+    fn test_promote_idempotent_over_existing_destinations() {
+        let temp = tempfile::tempdir().unwrap();
+        let final_archive = temp.path().join("abcd.zip");
+        let final_files = temp.path().join("abcd.zip_files");
+        let final_json = temp.path().join("abcd.zip_files.json");
+
+        std::fs::create_dir_all(&final_files).unwrap();
+        std::fs::write(final_files.join("old.txt"), b"old").unwrap();
+        std::fs::write(&final_archive, b"old-archive").unwrap();
+        std::fs::write(&final_json, b"old-json").unwrap();
+
+        let staging = Staging::new(final_archive.to_str().unwrap()).unwrap();
+        std::fs::write(&staging.archive_path, b"new-archive").unwrap();
+        std::fs::create_dir_all(&staging.files_path).unwrap();
+        std::fs::write(staging.files_path.join("new.txt"), b"new").unwrap();
+        std::fs::write(&staging.json_path, br#"{"files":["new.txt"]}"#).unwrap();
+
+        promote(&staging, &final_archive, &final_files, &final_json, true).unwrap();
+
+        assert_eq!(std::fs::read(&final_archive).unwrap(), b"new-archive");
+        assert!(final_files.join("new.txt").exists());
+        assert!(!final_files.join("old.txt").exists());
+        assert_eq!(
+            std::fs::read_to_string(&final_json).unwrap(),
+            "{\"files\":[\"new.txt\"]}"
+        );
+    }
+
+    #[test]
+    fn test_sync_sha_mismatch_keeps_store_pristine() {
+        let runtime = mock_runtime();
+        let server = runtime.block_on(MockServer::start());
+
+        runtime.block_on(
+            Mock::given(method("GET"))
+                .and(path("/tool.bin"))
+                .respond_with(ResponseTemplate::new(200).set_body_bytes(b"wrong content"))
+                .expect(1)
+                .mount(&server),
+        );
+
+        let temp_store = tempfile::tempdir().unwrap();
+        let archive = Archive {
+            url: format!("{}/tool.bin", server.uri()).into(),
+            sha256: "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9".into(),
+            ..Default::default()
+        };
+
+        let http_archive =
+            HttpArchive::new(temp_store.path().to_str().unwrap(), "rule", &archive, ".").unwrap();
+
+        let result = http_archive.sync(console::Console::new_null());
+        assert!(result.is_err(), "sync should fail on checksum mismatch");
+
+        let final_archive = std::path::Path::new(&http_archive.full_path_to_archive);
+        let final_files = std::path::PathBuf::from(http_archive.get_path_to_extracted_files());
+        let final_json = std::path::PathBuf::from(http_archive.get_path_to_extracted_files_json());
+
+        assert!(
+            !final_archive.exists(),
+            "final archive path should stay absent"
+        );
+        assert!(
+            !final_files.exists(),
+            "final extracted path should stay absent"
+        );
+        assert!(!final_json.exists(), "final json path should stay absent");
+
+        let parent = final_archive.parent().unwrap();
+        let has_staging = std::fs::read_dir(parent)
+            .unwrap()
+            .filter_map(Result::ok)
+            .any(|e| is_staging_dir_name(e.file_name().to_string_lossy().as_ref()));
+        assert!(
+            !has_staging,
+            "staging dir should be cleaned up after failure"
+        );
+    }
+
+    #[test]
+    fn test_sync_success_promotes_and_cleans_staging() {
+        let runtime = mock_runtime();
+        let server = runtime.block_on(MockServer::start());
+
+        runtime.block_on(
+            Mock::given(method("GET"))
+                .and(path("/tool.bin"))
+                .respond_with(ResponseTemplate::new(200).set_body_bytes(b"hello world"))
+                .expect(1)
+                .mount(&server),
+        );
+
+        let temp_store = tempfile::tempdir().unwrap();
+        let archive = Archive {
+            url: format!("{}/tool.bin", server.uri()).into(),
+            sha256: "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9".into(),
+            ..Default::default()
+        };
+
+        let http_archive =
+            HttpArchive::new(temp_store.path().to_str().unwrap(), "rule", &archive, ".").unwrap();
+
+        http_archive.sync(console::Console::new_null()).unwrap();
+
+        let final_archive = std::path::Path::new(&http_archive.full_path_to_archive);
+        let final_files = std::path::PathBuf::from(http_archive.get_path_to_extracted_files());
+        let final_json = std::path::PathBuf::from(http_archive.get_path_to_extracted_files_json());
+
+        assert!(final_archive.exists(), "final archive should be published");
+        assert!(
+            final_files.join("tool.bin").exists(),
+            "final extracted file should be published"
+        );
+        assert!(
+            final_json.exists(),
+            "final json manifest should be published"
+        );
+
+        let parent = final_archive.parent().unwrap();
+        let has_staging = std::fs::read_dir(parent)
+            .unwrap()
+            .filter_map(Result::ok)
+            .any(|e| is_staging_dir_name(e.file_name().to_string_lossy().as_ref()));
+        assert!(
+            !has_staging,
+            "staging dir should be cleaned up after success"
         );
     }
 
