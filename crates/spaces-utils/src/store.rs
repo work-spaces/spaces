@@ -601,6 +601,60 @@ impl Store {
         Ok(())
     }
 
+    /// Remove leftover `.staging-*` directories under managed store trees.
+    /// These are transient areas created by `HttpArchive::sync`; any that still
+    /// exist were orphaned by a crash and are safe to delete.
+    fn remove_stale_staging_areas(
+        &self,
+        console: console::Console,
+        is_dry_run: bool,
+    ) -> anyhow::Result<usize> {
+        let path_to_store = self.path_to_store.clone();
+        let managed_top_level_dirs = self.get_managed_top_level_dirs();
+        let mut removed = 0usize;
+
+        for dir in &managed_top_level_dirs {
+            let root = path_to_store.join(dir);
+            if !root.exists() {
+                continue;
+            }
+
+            for entry in walkdir::WalkDir::new(root)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_type().is_dir())
+            {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if !http_archive::is_staging_dir_name(&name) {
+                    continue;
+                }
+
+                let path = entry.path();
+                if !path.starts_with(&path_to_store) {
+                    continue;
+                }
+
+                let display = path.display();
+                if is_dry_run {
+                    logger(console.clone())
+                        .message(format!("Stale staging area (dry run): {display}").as_str());
+                } else {
+                    logger(console.clone())
+                        .message(format!("Removing stale staging area: {display}").as_str());
+                    if let Err(e) = std::fs::remove_dir_all(path) {
+                        logger(console.clone()).warning(
+                            format!("Failed to remove staging area {display}: {e}").as_str(),
+                        );
+                        continue;
+                    }
+                }
+                removed += 1;
+            }
+        }
+
+        Ok(removed)
+    }
+
     pub fn fix(
         &mut self,
         console: console::Console,
@@ -673,6 +727,10 @@ impl Store {
         let mut delete_directories = Vec::new();
         let path_to_store = self.path_to_store.clone();
         let managed_top_level_dirs = self.get_managed_top_level_dirs();
+
+        let staging_areas_removed = self
+            .remove_stale_staging_areas(console.clone(), is_dry_run)
+            .context(format_context!("While removing stale staging areas"))?;
 
         let unmanaged_candidates =
             get_unmanaged_dir_entries(&path_to_store, &managed_top_level_dirs);
@@ -959,6 +1017,14 @@ impl Store {
                     },
                 ),
                 (
+                    staging_areas_removed,
+                    if is_dry_run {
+                        "staging area(s) to remove"
+                    } else {
+                        "staging area(s) removed"
+                    },
+                ),
+                (
                     bare_repos_repaired,
                     if is_dry_run {
                         "bare repo(s) to repair"
@@ -991,6 +1057,7 @@ impl Store {
             entries_removed,
             unmanaged_refreshed,
             stale_links_cleaned,
+            staging_areas_removed,
             bare_repos_discovered: bare_repo_paths.len(),
             bare_repos_repair_attempted,
             bare_repos_repaired,
@@ -1123,6 +1190,7 @@ struct FixActionReport {
     entries_removed: usize,
     unmanaged_refreshed: usize,
     stale_links_cleaned: usize,
+    staging_areas_removed: usize,
     bare_repos_discovered: usize,
     bare_repos_repair_attempted: usize,
     bare_repos_repaired: usize,
@@ -1179,6 +1247,21 @@ fn emit_pretty_fix_report(console: &console::Console, report: &FixActionReport) 
         format!("removed {} stale link(s)", report.stale_links_cleaned)
     };
     rows.push(vec!["Workspace links".to_string(), stale_links_outcome]);
+
+    let staging_outcome = if report.staging_areas_removed == 0 {
+        "no stale staging areas found".to_string()
+    } else if report.is_dry_run {
+        format!(
+            "would remove {} stale staging area(s)",
+            report.staging_areas_removed
+        )
+    } else {
+        format!(
+            "removed {} stale staging area(s)",
+            report.staging_areas_removed
+        )
+    };
+    rows.push(vec!["Staging areas".to_string(), staging_outcome]);
 
     let bare_gc_outcome = if report.bare_repos_discovered == 0 {
         "no bare repos found".to_string()
@@ -1751,4 +1834,64 @@ fn show_bare_info(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_remove_stale_staging_areas_dry_run_and_live() {
+        let store_root = tempfile::tempdir().unwrap();
+        let outside_root = tempfile::tempdir().unwrap();
+
+        let mut store = Store::new(store_root.path());
+        store
+            .entries
+            .insert("https/example.com/archive".into(), Entry::default());
+
+        let archive_parent = store_root.path().join("https/example.com/archive");
+        std::fs::create_dir_all(&archive_parent).unwrap();
+
+        // Published siblings (must remain untouched).
+        let published_archive = archive_parent.join("abcd.zip");
+        let published_files = archive_parent.join("abcd.zip_files");
+        let published_json = archive_parent.join("abcd.zip_files.json");
+        std::fs::write(&published_archive, b"archive").unwrap();
+        std::fs::create_dir_all(&published_files).unwrap();
+        std::fs::write(published_files.join("bin"), b"tool").unwrap();
+        std::fs::write(&published_json, br#"{"files":["bin"]}"#).unwrap();
+
+        // Stale staging dir inside the store.
+        let stale_staging = archive_parent.join(".staging-abcd-123-1");
+        std::fs::create_dir_all(stale_staging.join("tmp")).unwrap();
+        std::fs::write(stale_staging.join("tmp/partial"), b"partial").unwrap();
+
+        // Directory outside the store (must never be touched).
+        let outside_staging = outside_root.path().join(".staging-outside");
+        std::fs::create_dir_all(&outside_staging).unwrap();
+
+        let dry_count = store
+            .remove_stale_staging_areas(console::Console::new_null(), true)
+            .unwrap();
+        assert_eq!(dry_count, 1, "dry run should count stale staging dirs");
+        assert!(
+            stale_staging.exists(),
+            "dry run should not delete staging dir"
+        );
+
+        let live_count = store
+            .remove_stale_staging_areas(console::Console::new_null(), false)
+            .unwrap();
+        assert_eq!(live_count, 1, "live run should delete stale staging dirs");
+        assert!(
+            !stale_staging.exists(),
+            "live run should remove stale staging dirs"
+        );
+
+        assert!(published_archive.exists());
+        assert!(published_files.exists());
+        assert!(published_json.exists());
+        assert!(outside_staging.exists());
+    }
 }
