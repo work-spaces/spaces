@@ -1,6 +1,6 @@
 use anyhow::Context;
 use anyhow::anyhow;
-use anyhow_source_location::format_context;
+use anyhow_source_location::{format_context, format_error};
 use regex::Regex;
 use starlark::environment::GlobalsBuilder;
 use starlark::values::none::NoneOr;
@@ -92,7 +92,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             } else {
                 from.to_string()
             };
-            let re = Regex::new(&pattern).context(format_context!("invalid regex pattern"))?;
+            let re = Regex::new(&pattern).map_err(|err| {
+                format_error!("while compiling regex pattern for replace because {err:?}")
+            })?;
             if n < 0 {
                 Ok(re.replace_all(s, to).to_string())
             } else {
@@ -112,7 +114,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         s: &str,
         eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<NoneOr<Value<'v>>> {
-        let re = Regex::new(pattern).context(format_context!("invalid regex pattern"))?;
+        let re = Regex::new(pattern).map_err(|err| {
+            format_error!("while compiling regex pattern for regex_match because {err:?}")
+        })?;
         if let Some(caps) = re.captures(s) {
             let heap = eval.heap();
             let map = build_match_map(heap, &re, s, &caps)?;
@@ -127,7 +131,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         s: &str,
         eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<Value<'v>> {
-        let re = Regex::new(pattern).context(format_context!("invalid regex pattern"))?;
+        let re = Regex::new(pattern).map_err(|err| {
+            format_error!("while compiling regex pattern for regex_find_all because {err:?}")
+        })?;
         let mut out = Vec::new();
         for caps in re.captures_iter(s) {
             let heap = eval.heap();
@@ -142,7 +148,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         s: &str,
         eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<NoneOr<Value<'v>>> {
-        let re = Regex::new(pattern).context(format_context!("invalid regex pattern"))?;
+        let re = Regex::new(pattern).map_err(|err| {
+            format_error!("while compiling regex pattern for regex_captures because {err:?}")
+        })?;
         if let Some(caps) = re.captures(s) {
             let mut named = BTreeMap::<String, String>::new();
             for name in re.capture_names().flatten() {
@@ -228,9 +236,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let mut materialized = Vec::<BTreeMap<String, String>>::new();
 
         for row in rows.items {
-            let json = row
-                .to_json_value()
-                .context(format_context!("failed to convert row"))?;
+            let json = row.to_json_value().map_err(|err| {
+                format_error!("while converting table row to JSON because {err:?}")
+            })?;
             let obj = json
                 .as_object()
                 .ok_or_else(|| anyhow!(format_context!("each row must be a dict/object")))?;

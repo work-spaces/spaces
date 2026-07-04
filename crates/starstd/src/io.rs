@@ -1,6 +1,6 @@
 use crate::is_lsp_mode;
 use anyhow::{Context, anyhow};
-use anyhow_source_location::format_context;
+use anyhow_source_location::{format_context, format_error};
 use starlark::environment::GlobalsBuilder;
 use starlark::values::none::NoneType;
 use std::io::{IsTerminal, Read, Write};
@@ -221,11 +221,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let mut stdout = std::io::stdout().lock();
         stdout
             .write_all(content.as_bytes())
-            .context(format_context!("Failed to write to stdout"))?;
+            .map_err(|err| format_error!("while writing to stdout because {err:?}"))?;
         if newline {
             stdout
                 .write_all(b"\n")
-                .context(format_context!("Failed to write newline to stdout"))?;
+                .map_err(|err| format_error!("while writing newline to stdout because {err:?}"))?;
         }
 
         Ok(NoneType)
@@ -248,11 +248,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let mut stderr = std::io::stderr().lock();
         stderr
             .write_all(content.as_bytes())
-            .context(format_context!("Failed to write to stderr"))?;
+            .map_err(|err| format_error!("while writing to stderr because {err:?}"))?;
         if newline {
             stderr
                 .write_all(b"\n")
-                .context(format_context!("Failed to write newline to stderr"))?;
+                .map_err(|err| format_error!("while writing newline to stderr because {err:?}"))?;
         }
 
         Ok(NoneType)
@@ -266,7 +266,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         std::io::stdout()
             .flush()
-            .context(format_context!("Failed to flush stdout"))?;
+            .map_err(|err| format_error!("while flushing stdout because {err:?}"))?;
         Ok(NoneType)
     }
 
@@ -278,7 +278,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         std::io::stderr()
             .flush()
-            .context(format_context!("Failed to flush stderr"))?;
+            .map_err(|err| format_error!("while flushing stderr because {err:?}"))?;
         Ok(NoneType)
     }
 }

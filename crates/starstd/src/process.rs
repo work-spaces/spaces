@@ -1,7 +1,7 @@
 use crate::is_lsp_mode;
 use crate::process_error::{format_command_line, format_failure, format_timeout};
 use anyhow::{Context, bail};
-use anyhow_source_location::format_context;
+use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use starlark::environment::GlobalsBuilder;
 use starlark::eval::Evaluator;
@@ -371,7 +371,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let heap = eval.heap();
 
         let exec: Exec = serde_json::from_value(exec.to_json_value()?)
-            .context(format_context!("bad options for exec"))?;
+            .map_err(|err| format_error!("while parsing options for exec because {err:?}"))?;
 
         let exec_stdin = exec.stdin;
         let invoke_command = exec.command.clone();
@@ -400,13 +400,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         if let Ok(mut child) = child_result {
             if let Some(stdin) = exec_stdin {
-                let child_stdin = child
-                    .stdin
-                    .as_mut()
-                    .context(format_context!("stdin pipe was not available"))?;
-                child_stdin
-                    .write_all(stdin.as_bytes())
-                    .context(format_context!("Failed to write to stdin"))?;
+                let child_stdin = child.stdin.as_mut().ok_or_else(|| {
+                    format_error!(
+                        "while writing stdin for exec because stdin pipe was not available"
+                    )
+                })?;
+                child_stdin.write_all(stdin.as_bytes()).map_err(|err| {
+                    format_error!("while writing to stdin for exec because {err:?}")
+                })?;
             }
 
             let output_result = child.wait_with_output();
@@ -432,9 +433,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             result_map.insert("stderr".to_string(), serde_json::Value::String(stderr));
             Ok(heap.alloc(serde_json::Value::Object(result_map)))
         } else {
-            Err(child_result.unwrap_err()).context(format_context!(
-                "Failed to spawn child process {invoke_command}"
-            ))
+            Err(child_result.unwrap_err()).map_err(|err| {
+                format_error!("while spawning child process {invoke_command} because {err:?}")
+            })
         }
     }
 
@@ -462,18 +463,19 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 stderr: String::new(),
                 duration_ms: 0,
             };
-            return Ok(heap.alloc(
-                serde_json::to_value(outcome)
-                    .context(format_context!("failed to serialize result"))?,
-            ));
+            return Ok(heap
+                .alloc(serde_json::to_value(outcome).map_err(|err| {
+                    format_error!("while serializing run result because {err:?}")
+                })?));
         }
         let heap = eval.heap();
 
         let opts: RunOptions = serde_json::from_value(options.to_json_value()?)
-            .context(format_context!("bad options for run"))?;
+            .map_err(|err| format_error!("while parsing options for run because {err:?}"))?;
         let outcome = execute_run(opts)?;
         Ok(heap.alloc(
-            serde_json::to_value(outcome).context(format_context!("failed to serialize result"))?,
+            serde_json::to_value(outcome)
+                .map_err(|err| format_error!("while serializing run result because {err:?}"))?,
         ))
     }
 
@@ -493,19 +495,20 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 stderr: String::new(),
                 duration_ms: 0,
             };
-            return Ok(heap.alloc(
-                serde_json::to_value(outcome)
-                    .context(format_context!("failed to serialize result"))?,
-            ));
+            return Ok(heap.alloc(serde_json::to_value(outcome).map_err(|err| {
+                format_error!("while serializing pipeline result because {err:?}")
+            })?));
         }
         let heap = eval.heap();
 
         let chain: Vec<RunOptions> = serde_json::from_value(steps.to_json_value()?)
-            .context(format_context!("bad options for pipeline"))?;
+            .map_err(|err| format_error!("while parsing options for pipeline because {err:?}"))?;
 
         let outcome = pipeline_execute(chain)?;
         Ok(heap.alloc(
-            serde_json::to_value(outcome).context(format_context!("failed to serialize result"))?,
+            serde_json::to_value(outcome).map_err(|err| {
+                format_error!("while serializing pipeline result because {err:?}")
+            })?,
         ))
     }
 
@@ -519,7 +522,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             return Ok(String::new());
         }
         let argv: Vec<String> = serde_json::from_value(argv.to_json_value()?)
-            .context(format_context!("bad argv for capture"))?;
+            .map_err(|err| format_error!("while parsing argv for capture because {err:?}"))?;
 
         if argv.is_empty() {
             bail!("capture requires at least one argv element");
@@ -562,7 +565,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             return Ok(0);
         }
         let opts: RunOptions = serde_json::from_value(options.to_json_value()?)
-            .context(format_context!("bad options for spawn"))?;
+            .map_err(|err| format_error!("while parsing options for spawn because {err:?}"))?;
 
         let (mut cmd, stdin_payload) = build_command(
             &opts.command,
@@ -591,11 +594,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 other => bail!("invalid stdout mode: {other}"),
             },
             StdoutSpec::File { file } => {
-                let file_handle = std::fs::File::create(&file)
-                    .context(format_context!("failed to open stdout file: {file}"))?;
-                let dup = file_handle.try_clone().context(format_context!(
-                    "failed to clone stdout file handle: {file}"
-                ))?;
+                let file_handle = std::fs::File::create(&file).map_err(|err| {
+                    format_error!("while opening stdout file {file} for spawn because {err:?}")
+                })?;
+                let dup = file_handle.try_clone().map_err(|err| {
+                    format_error!(
+                        "while cloning stdout file handle {file} for spawn because {err:?}"
+                    )
+                })?;
                 cmd.stdout(Stdio::from(file_handle));
                 stdout_file = Some(dup);
             }
@@ -633,16 +639,19 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 other => bail!("invalid stderr mode: {other}"),
             },
             StderrSpec::File { file } => {
-                let file_handle = std::fs::File::create(&file)
-                    .context(format_context!("failed to open stderr file: {file}"))?;
+                let file_handle = std::fs::File::create(&file).map_err(|err| {
+                    format_error!("while opening stderr file {file} for spawn because {err:?}")
+                })?;
                 cmd.stderr(Stdio::from(file_handle));
             }
         }
 
-        let mut child = cmd.spawn().context(format_context!(
-            "Failed to spawn child process {}",
-            opts.command
-        ))?;
+        let mut child = cmd.spawn().map_err(|err| {
+            format_error!(
+                "while spawning child process {} for spawn because {err:?}",
+                opts.command
+            )
+        })?;
 
         // DEFECT 4 FIX: Use take() so child_stdin is dropped immediately after write_all(),
         // sending EOF to the spawned process. Without this, the process never gets EOF on stdin.
@@ -651,7 +660,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         {
             child_stdin
                 .write_all(input.as_bytes())
-                .context(format_context!("Failed to write to stdin"))?;
+                .map_err(|err| format_error!("while writing to stdin for spawn because {err:?}"))?;
             // child_stdin dropped here → EOF sent to child
         }
 

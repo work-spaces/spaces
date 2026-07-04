@@ -1,6 +1,5 @@
 use crate::is_lsp_mode;
-use anyhow::Context;
-use anyhow_source_location::format_context;
+use anyhow_source_location::format_error;
 use starlark::environment::GlobalsBuilder;
 use std::path::PathBuf;
 
@@ -35,7 +34,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             return Ok(String::new());
         }
         let host = hostname::get()
-            .context(format_context!("Failed to get hostname"))?
+            .map_err(|err| format_error!("while getting hostname because {err:?}"))?
             .to_string_lossy()
             .into_owned();
         Ok(host)
@@ -63,8 +62,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         if is_lsp_mode() {
             return Ok(String::new());
         }
-        let home: PathBuf =
-            dirs::home_dir().context(format_context!("Failed to resolve user home directory"))?;
+        let home: PathBuf = dirs::home_dir().ok_or_else(|| {
+            format_error!("while resolving user home directory because directory is unavailable")
+        })?;
         Ok(home.to_string_lossy().into_owned())
     }
 
@@ -117,7 +117,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             return Ok(String::new());
         }
         let path = std::env::current_exe()
-            .context(format_context!("Failed to determine executable path"))?;
+            .map_err(|err| format_error!("while determining executable path because {err:?}"))?;
         Ok(path.to_string_lossy().into_owned())
     }
 

@@ -105,7 +105,7 @@ fn execute_script(filename: Arc<str>, input_contents: String) -> anyhow::Result<
         std::process::exit(exit_code);
     }
 
-    return Ok(());
+    Ok(())
 }
 
 pub fn execute() -> anyhow::Result<()> {

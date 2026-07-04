@@ -1,5 +1,4 @@
-use anyhow::Context;
-use anyhow_source_location::format_context;
+use anyhow_source_location::format_error;
 use starlark::environment::GlobalsBuilder;
 use starlark::eval::Evaluator;
 use starlark::values::Value;
@@ -111,15 +110,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 Err(_) => heap.alloc(serde_json::json!({})),
             });
         }
-        let yaml_value: serde_yaml::Value =
-            serde_yaml::from_str(content).context(format_context!("bad yaml string"))?;
+        let yaml_value: serde_yaml::Value = serde_yaml::from_str(content)
+            .map_err(|err| format_error!("while parsing YAML string because {err:?}"))?;
 
         // Convert YAML value into JSON value first, then allocate as Starlark value.
         // serde_yaml::Value::Number has a proper Serialize impl (dispatches to
         // serialize_u64 / serialize_i64 / serialize_f64), so serde_json::to_value
         // handles it correctly in this direction.
         let json_value = serde_json::to_value(yaml_value)
-            .context(format_context!("Failed to convert yaml to json value"))?;
+            .map_err(|err| format_error!("while converting YAML to JSON value because {err:?}"))?;
         let alloc_value = heap.alloc(json_value);
 
         Ok(alloc_value)
@@ -154,13 +153,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         //   count:
         //     $serde_json::private::Number: '42'
         // Instead, convert the JSON value into a native serde_yaml::Value first.
-        let json_value = value
-            .to_json_value()
-            .context(format_context!("Failed to convert Starlark value to JSON"))?;
-        let yaml_value =
-            json_to_yaml(json_value).context(format_context!("Failed to convert JSON to YAML"))?;
+        let json_value = value.to_json_value().map_err(|err| {
+            format_error!(
+                "while converting Starlark value to JSON for YAML serialization because {err:?}"
+            )
+        })?;
+        let yaml_value = json_to_yaml(json_value)
+            .map_err(|err| format_error!("while converting JSON to YAML because {err:?}"))?;
         let yaml_string = serde_yaml::to_string(&yaml_value)
-            .context(format_context!("Failed to serialize YAML string"))?;
+            .map_err(|err| format_error!("while serializing YAML string because {err:?}"))?;
         Ok(yaml_string)
     }
 
@@ -237,8 +238,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let heap = eval.heap();
         match serde_yaml::from_str::<serde_yaml::Value>(content) {
             Ok(yaml_value) => {
-                let json_value = serde_json::to_value(yaml_value)
-                    .context(format_context!("Failed to convert yaml to json value"))?;
+                let json_value = serde_json::to_value(yaml_value).map_err(|err| {
+                    format_error!("while converting YAML to JSON value because {err:?}")
+                })?;
                 let alloc_value = heap.alloc(json_value);
                 Ok(alloc_value)
             }

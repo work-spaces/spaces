@@ -1,5 +1,4 @@
-use anyhow::Context;
-use anyhow_source_location::{format_context, format_error};
+use anyhow_source_location::format_error;
 use clap::error::ErrorKind as ClapErrorKind;
 use clap::{Arg, ArgAction, Command, builder::PossibleValuesParser};
 use serde::{Deserialize, Serialize};
@@ -491,10 +490,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<Value<'v>> {
         let opts: ParserOptions = serde_json::from_value(options.to_json_value()?)
-            .context(format_context!("Invalid parser options"))?;
+            .map_err(|err| format_error!("while parsing parser options because {err:?}"))?;
         let spec: ParserSpec = opts.into();
         let json_value = serde_json::to_value(&spec)
-            .context(format_context!("Failed to serialize parser spec"))?;
+            .map_err(|err| format_error!("while serializing parser spec because {err:?}"))?;
         Ok(eval.heap().alloc(json_value))
     }
 
