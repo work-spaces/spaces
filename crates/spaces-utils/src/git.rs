@@ -342,6 +342,72 @@ pub fn get_commit_hash(
     Ok(commit_hash)
 }
 
+pub fn base_ref_exists(
+    progress_bar: &mut console::Progress,
+    url: &str,
+    directory: &str,
+    base_ref: &str,
+) -> anyhow::Result<bool> {
+    let result = execute_git_command(
+        progress_bar,
+        url,
+        console::ExecuteOptions {
+            working_directory: Some(directory.into()),
+            arguments: vec!["rev-parse".into(), "--verify".into(), base_ref.into()],
+            ..Default::default()
+        },
+    );
+
+    Ok(result.is_ok())
+}
+
+pub fn resolve_ref_to_commit(
+    progress_bar: &mut console::Progress,
+    url: &str,
+    directory: &str,
+    ref_name: &str,
+) -> anyhow::Result<Option<Arc<str>>> {
+    let ref_name_with_commit = format!("{ref_name}^{{commit}}");
+    let options = console::ExecuteOptions {
+        working_directory: Some(directory.into()),
+        arguments: vec![
+            "rev-parse".into(),
+            "--verify".into(),
+            ref_name_with_commit.into(),
+        ],
+        is_return_stdout: true,
+        ..Default::default()
+    };
+
+    let result = execute_git_command(progress_bar, url, options);
+
+    match result {
+        Ok(Some(output)) => {
+            let output = output.trim();
+            if output.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(output.into()))
+            }
+        }
+        Ok(None) | Err(_) => Ok(None),
+    }
+}
+
+pub fn local_branch_exists(
+    progress_bar: &mut console::Progress,
+    url: &str,
+    directory: &str,
+    branch_name: &str,
+) -> anyhow::Result<bool> {
+    base_ref_exists(
+        progress_bar,
+        url,
+        directory,
+        format!("refs/heads/{branch_name}").as_str(),
+    )
+}
+
 pub fn is_head_branch(progress_bar: &mut console::Progress, url: &str, directory: &str) -> bool {
     let options = console::ExecuteOptions {
         working_directory: Some(directory.into()),
@@ -1330,6 +1396,30 @@ impl Repository {
         progress_bar: &mut console::Progress,
     ) -> anyhow::Result<Option<Arc<str>>> {
         get_commit_hash(progress_bar, &self.url, &self.full_path)
+    }
+
+    pub fn base_ref_exists(
+        &self,
+        progress_bar: &mut console::Progress,
+        base_ref: &str,
+    ) -> anyhow::Result<bool> {
+        base_ref_exists(progress_bar, &self.url, &self.full_path, base_ref)
+    }
+
+    pub fn resolve_ref_to_commit(
+        &self,
+        progress_bar: &mut console::Progress,
+        ref_name: &str,
+    ) -> anyhow::Result<Option<Arc<str>>> {
+        resolve_ref_to_commit(progress_bar, &self.url, &self.full_path, ref_name)
+    }
+
+    pub fn local_branch_exists(
+        &self,
+        progress_bar: &mut console::Progress,
+        branch_name: &str,
+    ) -> anyhow::Result<bool> {
+        local_branch_exists(progress_bar, &self.url, &self.full_path, branch_name)
     }
 
     pub fn is_head_branch(&self, progress_bar: &mut console::Progress) -> bool {

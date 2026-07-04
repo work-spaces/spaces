@@ -372,6 +372,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             store,
             no_store,
             dev_branch,
+            new_branch,
             no_dev_branch,
             stash,
             allow_dirty,
@@ -401,17 +402,19 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                 && (!merge.is_empty()
                     || !no_rebase_repo.is_empty()
                     || no_rebase
-                    || !dev_branch_base.is_empty())
+                    || !dev_branch_base.is_empty()
+                    || !new_branch.is_empty())
             {
                 return Err(format_error!(
-                    "`--allow-dirty` cannot be combined with `--merge`, `--no-rebase`, `--no-rebase-repo`, or `--dev-branch-base`"
+                    "`--allow-dirty` cannot be combined with `--merge`, `--no-rebase`, `--no-rebase-repo`, `--dev-branch-base`, or `--new-branch`"
                 ));
             }
 
             // Add any dev branches specified by the command line
-            if !dev_branch.is_empty() {
+            if !dev_branch.is_empty() || !new_branch.is_empty() {
                 let mut new_branches = singleton::get_new_branches();
-                new_branches.extend(dev_branch);
+                new_branches.extend(dev_branch.iter().cloned());
+                new_branches.extend(new_branch.iter().cloned());
                 singleton::set_new_branches(new_branches);
             }
 
@@ -432,6 +435,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                 no_rebase_repos: no_rebase_repo,
                 no_rebase,
                 dev_branch_bases: dev_branch_base,
+                new_branch_repos: new_branch,
                 dry_run,
             });
 
@@ -1045,13 +1049,20 @@ create-lock-file = false # optionally create a lock file
         no_store: Vec<Arc<str>>,
         #[arg(
             long,
-            help = r#"Use --dev-branch=<rule> to add a repo to the dev-branch list.
-  Unlike --new-branch on checkout, this does not create a new git branch."#
+            help = r#"Use --dev-branch=<repo-path> to add a repo to the dev-branch list.
+  Unlike --new-branch, this does not create a new git branch."#
         )]
         dev_branch: Vec<Arc<str>>,
         #[arg(
             long,
-            help = r#"Use --no-dev-branch=<rule> to remove a repo from the dev-branch list.
+            help = r#"Use --new-branch=<repo-path> to create a new branch from the repo's configured workspace rev.
+  The new branch name matches the workspace name and the repo is marked as a dev-branch.
+  This flag can be used multiple times."#
+        )]
+        new_branch: Vec<Arc<str>>,
+        #[arg(
+            long,
+            help = r#"Use --no-dev-branch=<repo-path> to remove a repo from the dev-branch list.
   This has the opposite effect of --dev-branch."#
         )]
         no_dev_branch: Vec<Arc<str>>,

@@ -23,6 +23,7 @@ pub struct SyncOptions {
     pub no_rebase_repos: Vec<Arc<str>>,
     pub no_rebase: bool,
     pub dev_branch_bases: Vec<Arc<str>>,
+    pub new_branch_repos: Vec<Arc<str>>,
     pub dry_run: bool,
 }
 
