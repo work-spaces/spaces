@@ -1,5 +1,5 @@
 use anyhow::Context;
-use anyhow_source_location::format_context;
+use anyhow_source_location::{format_context, format_error};
 use starlark::environment::GlobalsBuilder;
 use starlark::values::none::NoneType;
 use std::borrow::Cow;
@@ -101,7 +101,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             p.to_path_buf()
         } else {
             std::env::current_dir()
-                .context(format_context!("Failed to read current working directory"))?
+                .map_err(|err| {
+                    format_error!("while reading current working directory because {err:?}")
+                })?
                 .join(p)
         };
         Ok(path_to_string_lossy(&abs).into_owned())
@@ -113,7 +115,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             return Ok(String::new());
         }
         let p = std::fs::canonicalize(path)
-            .context(format_context!("Failed to canonicalize path: {path}"))?;
+            .map_err(|err| format_error!("while canonicalizing path `{path}` because {err:?}"))?;
         Ok(path_to_string_lossy(&p).into_owned())
     }
 
@@ -145,9 +147,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             return Ok(path.to_string());
         }
         if path == "~" || path.starts_with("~/") || path.starts_with("~\\") {
-            let home = home_dir().context(format_context!(
-                "Cannot expand `~`: home directory is not available"
-            ))?;
+            let home = home_dir().ok_or_else(|| {
+                format_error!("while expanding `~` because home directory is not available")
+            })?;
             if path == "~" {
                 return Ok(path_to_string_lossy(&home).into_owned());
             }

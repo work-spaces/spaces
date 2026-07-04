@@ -1,5 +1,5 @@
 use anyhow::Context;
-use anyhow_source_location::format_context;
+use anyhow_source_location::{format_context, format_error};
 use starlark::environment::GlobalsBuilder;
 
 use crate::is_lsp_mode;
@@ -85,14 +85,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         // tempfile::Builder creates with mode 0700 on Unix, using OS-level
         // random bytes, giving far stronger uniqueness than a counter.
-        let tmp_dir =
-            tempfile::Builder::new()
-                .prefix(&prefix)
-                .tempdir()
-                .context(format_context!(
-                    "Failed to create temporary directory with prefix {:?}",
+        let tmp_dir = tempfile::Builder::new()
+            .prefix(&prefix)
+            .tempdir()
+            .map_err(|err| {
+                format_error!(
+                    "while creating temporary directory with prefix {:?} because {err:?}",
                     prefix
-                ))?;
+                )
+            })?;
 
         // Cancel RAII cleanup — our registry owns cleanup from here on.
         let path = tmp_dir.keep();
@@ -117,14 +118,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             return Ok(String::new());
         }
 
-        let tmp_dir =
-            tempfile::Builder::new()
-                .prefix(&prefix)
-                .tempdir()
-                .context(format_context!(
-                    "Failed to create temporary directory with prefix {:?}",
+        let tmp_dir = tempfile::Builder::new()
+            .prefix(&prefix)
+            .tempdir()
+            .map_err(|err| {
+                format_error!(
+                    "while creating temporary directory with prefix {:?} because {err:?}",
                     prefix
-                ))?;
+                )
+            })?;
 
         let path = tmp_dir.keep();
         register_temp(path.clone(), TempKind::Dir, true)?;
@@ -154,10 +156,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .prefix("tmp-")
             .suffix(&suffix)
             .tempfile()
-            .context(format_context!(
-                "Failed to create temporary file with suffix {:?}",
-                suffix
-            ))?;
+            .map_err(|err| {
+                format_error!(
+                    "while creating temporary file with suffix {:?} because {err:?}",
+                    suffix
+                )
+            })?;
 
         // Persist the file so it survives beyond the NamedTempFile drop;
         // our registry is responsible for cleanup from this point on.
@@ -191,8 +195,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             let mut map = tmp_registry()
                 .lock()
                 .map_err(|_| anyhow::anyhow!("temp registry lock poisoned"))?;
-            map.remove(path)
-                .context(format_context!("Unknown temp path (not tracked): {}", path))?
+            map.remove(path).ok_or_else(|| {
+                format_error!(
+                    "while cleaning up temp path because path was not tracked: {}",
+                    path
+                )
+            })?
         };
 
         cleanup_entry(&entry)?;

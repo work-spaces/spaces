@@ -4,7 +4,7 @@ use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
-use utils::{ecode, lock, logger, placeholder, rule};
+use utils::{ecode, environment, lock, logger, placeholder, rule};
 
 pub use rule::Expect;
 
@@ -247,6 +247,10 @@ impl Exec {
         };
 
         exec_env_vars.insert("PWD".into(), pwd.clone());
+        exec_env_vars.insert(
+            environment::SPACES_ENV_RUNNING_AS_A_RULE.into(),
+            "ON".into(),
+        );
 
         let workspace_root = absolute_path_to_workspace.as_ref();
         let working_dir = pwd.as_ref();

@@ -1,6 +1,6 @@
 use crate::is_lsp_mode;
-use anyhow::{Context, bail};
-use anyhow_source_location::format_context;
+use anyhow::bail;
+use anyhow_source_location::format_error;
 use starlark::environment::GlobalsBuilder;
 use starlark::values::none::NoneType;
 use std::collections::HashMap;
@@ -38,7 +38,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         }
         let current_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .context(format_context!("Failed to get current time"))?;
+            .map_err(|err| format_error!("while getting current time because {err:?}"))?;
         Ok((current_time.as_secs(), current_time.subsec_nanos()))
     }
 
@@ -78,7 +78,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         }
         let d = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .context(format_context!("Failed to get current unix time"))?;
+            .map_err(|err| format_error!("while getting current unix time because {err:?}"))?;
         Ok(d.as_secs())
     }
 
@@ -89,7 +89,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         }
         let d = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .context(format_context!("Failed to get current unix time"))?;
+            .map_err(|err| format_error!("while getting current unix time because {err:?}"))?;
         Ok(clamp_u128_to_u64(d.as_millis()))
     }
 
@@ -108,8 +108,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             return Ok(String::new());
         }
         use chrono::{DateTime, Utc};
-        let dt: DateTime<Utc> = DateTime::from_timestamp(secs, 0)
-            .context(format_context!("Invalid unix seconds value"))?;
+        let dt: DateTime<Utc> = DateTime::from_timestamp(secs, 0).ok_or_else(|| {
+            format_error!("while formatting unix seconds {secs} because timestamp was invalid")
+        })?;
         Ok(dt.format(fmt).to_string())
     }
 
@@ -131,9 +132,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         }
 
         if let Ok(naive_date) = NaiveDate::parse_from_str(s, fmt) {
-            let naive_dt = naive_date
-                .and_hms_opt(0, 0, 0)
-                .context(format_context!("Failed to construct midnight datetime"))?;
+            let naive_dt = naive_date.and_hms_opt(0, 0, 0).ok_or_else(|| {
+                format_error!("while constructing midnight datetime because value was invalid")
+            })?;
             return Ok(Utc.from_utc_datetime(&naive_dt).timestamp());
         }
 
@@ -175,9 +176,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let map = timer_registry()
             .lock()
             .map_err(|_| anyhow::anyhow!("Timer registry lock poisoned"))?;
-        let started = map
-            .get(&timer_id)
-            .context(format_context!("Invalid timer handle: {}", timer_id))?;
+        let started = map.get(&timer_id).ok_or_else(|| {
+            format_error!(
+                "while reading timer handle {} because handle was invalid",
+                timer_id
+            )
+        })?;
         Ok(clamp_u128_to_u64(started.elapsed().as_millis()))
     }
 
@@ -189,9 +193,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let map = timer_registry()
             .lock()
             .map_err(|_| anyhow::anyhow!("Timer registry lock poisoned"))?;
-        let started = map
-            .get(&timer_id)
-            .context(format_context!("Invalid timer handle: {}", timer_id))?;
+        let started = map.get(&timer_id).ok_or_else(|| {
+            format_error!(
+                "while reading timer handle {} because handle was invalid",
+                timer_id
+            )
+        })?;
         Ok(clamp_u128_to_u64(started.elapsed().as_nanos()))
     }
 
@@ -203,9 +210,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let mut map = timer_registry()
             .lock()
             .map_err(|_| anyhow::anyhow!("Timer registry lock poisoned"))?;
-        let started = map
-            .get_mut(&timer_id)
-            .context(format_context!("Invalid timer handle: {}", timer_id))?;
+        let started = map.get_mut(&timer_id).ok_or_else(|| {
+            format_error!(
+                "while resetting timer handle {} because handle was invalid",
+                timer_id
+            )
+        })?;
         *started = Instant::now();
         Ok(NoneType)
     }

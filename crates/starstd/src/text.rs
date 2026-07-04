@@ -1,6 +1,6 @@
 use crate::is_lsp_mode;
 use anyhow::{Context, anyhow};
-use anyhow_source_location::format_context;
+use anyhow_source_location::{format_context, format_error};
 use regex::{Regex, RegexSet};
 use serde::{Deserialize, Serialize};
 use serde_json;
@@ -267,13 +267,17 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         }
 
         let opts: ScanFileOptions = serde_json::from_value(options.to_json_value()?)
-            .context(format_context!("bad options for scan_file"))?;
+            .map_err(|err| format_error!("while parsing options for scan_file because {err:?}"))?;
 
         let encoding = opts.encoding.as_deref().unwrap_or("utf-8");
         let strip = opts.strip_newline.unwrap_or(true);
 
-        let file =
-            File::open(&opts.path).context(format_context!("failed to open file {}", opts.path))?;
+        let file = File::open(&opts.path).map_err(|err| {
+            format_error!(
+                "while opening file {} for scan_file because {err:?}",
+                opts.path
+            )
+        })?;
         let mut reader = BufReader::new(file);
         let mut buffer = Vec::new();
         let mut results = Vec::new();
@@ -281,9 +285,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         loop {
             buffer.clear();
-            let n = reader
-                .read_until(b'\n', &mut buffer)
-                .context(format_context!("failed to read line from {}", opts.path))?;
+            let n = reader.read_until(b'\n', &mut buffer).map_err(|err| {
+                format_error!(
+                    "while reading line from {} in scan_file because {err:?}",
+                    opts.path
+                )
+            })?;
 
             if n == 0 {
                 break;
@@ -293,11 +300,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 String::from_utf8_lossy(&buffer).to_string()
             } else if encoding == "utf-8" {
                 std::str::from_utf8(&buffer)
-                    .context(format_context!(
-                        "invalid UTF-8 at line {} in {}",
-                        line_number,
-                        opts.path
-                    ))?
+                    .map_err(|err| {
+                        format_error!(
+                            "while decoding UTF-8 at line {} in {} because {err:?}",
+                            line_number,
+                            opts.path
+                        )
+                    })?
                     .to_string()
             } else {
                 return Err(anyhow!(format_context!(
@@ -429,15 +438,17 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             return Ok(0);
         }
 
-        let mut file = File::open(path).context(format_context!("failed to open file {}", path))?;
+        let mut file = File::open(path).map_err(|err| {
+            format_error!("while opening file {} for line_count because {err:?}", path)
+        })?;
         let mut buffer = [0u8; 64 * 1024];
         let mut count = 0i32;
         let mut last_byte: Option<u8> = None;
 
         loop {
-            let n = file
-                .read(&mut buffer)
-                .context(format_context!("failed to read from {}", path))?;
+            let n = file.read(&mut buffer).map_err(|err| {
+                format_error!("while reading from {} for line_count because {err:?}", path)
+            })?;
             if n == 0 {
                 break;
             }
@@ -495,7 +506,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             return Err(anyhow!(format_context!("end must be >= start")));
         }
 
-        let file = File::open(path).context(format_context!("failed to open file {}", path))?;
+        let file = File::open(path).map_err(|err| {
+            format_error!(
+                "while opening file {} for read_line_range because {err:?}",
+                path
+            )
+        })?;
         let reader = BufReader::new(file);
         let mut result = Vec::new();
 
@@ -504,11 +520,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 break;
             }
 
-            let line_str = line.context(format_context!(
-                "failed to read line {} from {}",
-                line_number,
-                path
-            ))?;
+            let line_str = line.map_err(|err| {
+                format_error!(
+                    "while reading line {} from {} for read_line_range because {err:?}",
+                    line_number,
+                    path
+                )
+            })?;
 
             if line_number >= start {
                 result.push(line_str);
@@ -547,12 +565,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             return Err(anyhow!(format_context!("n must be non-negative")));
         }
 
-        let file = File::open(path).context(format_context!("failed to open file {}", path))?;
+        let file = File::open(path)
+            .map_err(|err| format_error!("while opening file {} for head because {err:?}", path))?;
         let reader = BufReader::new(file);
         let mut result = Vec::new();
 
         for line in reader.lines().take(n as usize) {
-            let line_str = line.context(format_context!("failed to read line from {}", path))?;
+            let line_str = line.map_err(|err| {
+                format_error!("while reading line from {} for head because {err:?}", path)
+            })?;
             result.push(line_str);
         }
 
@@ -592,12 +613,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             return Ok(Vec::new());
         }
 
-        let file = File::open(path).context(format_context!("failed to open file {}", path))?;
+        let file = File::open(path)
+            .map_err(|err| format_error!("while opening file {} for tail because {err:?}", path))?;
         let reader = BufReader::new(file);
         let mut ring = VecDeque::with_capacity(n as usize);
 
         for line in reader.lines() {
-            let line_str = line.context(format_context!("failed to read line from {}", path))?;
+            let line_str = line.map_err(|err| {
+                format_error!("while reading line from {} for tail because {err:?}", path)
+            })?;
 
             if ring.len() == n as usize {
                 ring.pop_front();
@@ -651,7 +675,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         }
 
         let opts: GrepOptions = serde_json::from_value(options.to_json_value()?)
-            .context(format_context!("bad options for grep"))?;
+            .map_err(|err| format_error!("while parsing options for grep because {err:?}"))?;
 
         let ignore_case = opts.ignore_case.unwrap_or(false);
         let invert = opts.invert.unwrap_or(false);
@@ -663,21 +687,28 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             opts.pattern.clone()
         };
 
-        let re = Regex::new(&pattern_str)
-            .context(format_context!("invalid regex pattern '{}'", opts.pattern))?;
+        let re = Regex::new(&pattern_str).map_err(|err| {
+            format_error!(
+                "while compiling regex pattern '{}' for grep because {err:?}",
+                opts.pattern
+            )
+        })?;
 
-        let file =
-            File::open(&opts.path).context(format_context!("failed to open file {}", opts.path))?;
+        let file = File::open(&opts.path).map_err(|err| {
+            format_error!("while opening file {} for grep because {err:?}", opts.path)
+        })?;
         let reader = BufReader::new(file);
         let mut results = Vec::new();
         let mut hit_count = 0i32;
 
         for (line_number, line) in (1i32..).zip(reader.lines()) {
-            let line_str = line.context(format_context!(
-                "failed to read line {} from {}",
-                line_number,
-                opts.path
-            ))?;
+            let line_str = line.map_err(|err| {
+                format_error!(
+                    "while reading line {} from {} for grep because {err:?}",
+                    line_number,
+                    opts.path
+                )
+            })?;
 
             let matches = re.is_match(&line_str);
             let include = if invert { !matches } else { matches };
@@ -911,7 +942,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         }
 
         let n_usize = n as usize;
-        let file = File::open(path).context(format_context!("failed to open file {}", path))?;
+        let file = File::open(path).map_err(|err| {
+            format_error!(
+                "while opening file {} for scan_windows_file because {err:?}",
+                path
+            )
+        })?;
         let mut reader = BufReader::new(file);
         let mut buffer = Vec::new();
         let mut window = VecDeque::with_capacity(n_usize);
@@ -921,19 +957,24 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         // Read lines and build full windows
         loop {
             buffer.clear();
-            let bytes_read = reader
-                .read_until(b'\n', &mut buffer)
-                .context(format_context!("failed to read line from {}", path))?;
+            let bytes_read = reader.read_until(b'\n', &mut buffer).map_err(|err| {
+                format_error!(
+                    "while reading line from {} for scan_windows_file because {err:?}",
+                    path
+                )
+            })?;
 
             if bytes_read == 0 {
                 break;
             }
 
-            let line_str = std::str::from_utf8(&buffer).context(format_context!(
-                "invalid UTF-8 at line {} in {}",
-                line_number,
-                path
-            ))?;
+            let line_str = std::str::from_utf8(&buffer).map_err(|err| {
+                format_error!(
+                    "while decoding UTF-8 at line {} in {} for scan_windows_file because {err:?}",
+                    line_number,
+                    path
+                )
+            })?;
             let line_str = strip_newline_str(line_str);
 
             window.push_back(line_str);
@@ -1037,17 +1078,20 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .iter()
             .enumerate()
             .map(|(i, p)| {
-                Regex::new(p).context(format_context!(
-                    "invalid regex pattern {} at index {}",
-                    p,
-                    i
-                ))
+                Regex::new(p).map_err(|err| {
+                    format_error!(
+                        "while compiling regex pattern {} at index {} for regex_scan because {err:?}",
+                        p,
+                        i
+                    )
+                })
             })
             .collect::<Result<Vec<_>, _>>()?;
 
         // Build a RegexSet for fast matching
-        let regex_set =
-            RegexSet::new(&patterns_vec).context(format_context!("failed to create RegexSet"))?;
+        let regex_set = RegexSet::new(&patterns_vec).map_err(|err| {
+            format_error!("while creating RegexSet for regex_scan because {err:?}")
+        })?;
 
         let heap = eval.heap();
         let mut results = Vec::new();
@@ -1132,19 +1176,27 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .iter()
             .enumerate()
             .map(|(i, p)| {
-                Regex::new(p).context(format_context!(
-                    "invalid regex pattern {} at index {}",
-                    p,
-                    i
-                ))
+                Regex::new(p).map_err(|err| {
+                    format_error!(
+                        "while compiling regex pattern {} at index {} for regex_scan_file because {err:?}",
+                        p,
+                        i
+                    )
+                })
             })
             .collect::<Result<Vec<_>, _>>()?;
 
         // Build a RegexSet for fast matching
-        let regex_set =
-            RegexSet::new(&patterns_vec).context(format_context!("failed to create RegexSet"))?;
+        let regex_set = RegexSet::new(&patterns_vec).map_err(|err| {
+            format_error!("while creating RegexSet for regex_scan_file because {err:?}")
+        })?;
 
-        let file = File::open(path).context(format_context!("failed to open file {}", path))?;
+        let file = File::open(path).map_err(|err| {
+            format_error!(
+                "while opening file {} for regex_scan_file because {err:?}",
+                path
+            )
+        })?;
         let mut reader = BufReader::new(file);
         let mut buffer = Vec::new();
         let heap = eval.heap();
@@ -1153,19 +1205,24 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         loop {
             buffer.clear();
-            let bytes_read = reader
-                .read_until(b'\n', &mut buffer)
-                .context(format_context!("failed to read line from {}", path))?;
+            let bytes_read = reader.read_until(b'\n', &mut buffer).map_err(|err| {
+                format_error!(
+                    "while reading line from {} for regex_scan_file because {err:?}",
+                    path
+                )
+            })?;
 
             if bytes_read == 0 {
                 break;
             }
 
-            let line = std::str::from_utf8(&buffer).context(format_context!(
-                "invalid UTF-8 at line {} in {}",
-                line_number,
-                path
-            ))?;
+            let line = std::str::from_utf8(&buffer).map_err(|err| {
+                format_error!(
+                    "while decoding UTF-8 at line {} in {} for regex_scan_file because {err:?}",
+                    line_number,
+                    path
+                )
+            })?;
             let line = strip_newline_str(line);
 
             // Check if any pattern matches
@@ -1251,11 +1308,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             return Ok(Vec::new());
         }
 
-        let options_json = options
-            .to_json_value()
-            .context(format_context!("failed to convert options to JSON"))?;
-        let scan_options: RegexScanTaggedOptions = serde_json::from_value(options_json)
-            .context(format_context!("failed to deserialize options"))?;
+        let options_json = options.to_json_value().map_err(|err| {
+            format_error!("while converting regex_scan_tagged options to JSON because {err:?}")
+        })?;
+        let scan_options: RegexScanTaggedOptions =
+            serde_json::from_value(options_json).map_err(|err| {
+                format_error!("while deserializing regex_scan_tagged options because {err:?}")
+            })?;
 
         if scan_options.patterns.is_empty() {
             return Ok(Vec::new());
@@ -1278,10 +1337,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             )?;
 
             for result in line_results {
-                let result_value = heap.alloc(
-                    serde_json::to_value(&result)
-                        .context(format_context!("failed to serialize regex match result"))?,
-                );
+                let result_value = heap.alloc(serde_json::to_value(&result).map_err(|err| {
+                    format_error!(
+                        "while serializing regex_scan_tagged match result because {err:?}"
+                    )
+                })?);
                 results.push(result_value);
             }
         }
@@ -1333,11 +1393,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             return Ok(Vec::new());
         }
 
-        let options_json = options
-            .to_json_value()
-            .context(format_context!("failed to convert options to JSON"))?;
-        let scan_options: RegexScanTaggedOptions = serde_json::from_value(options_json)
-            .context(format_context!("failed to deserialize options"))?;
+        let options_json = options.to_json_value().map_err(|err| {
+            format_error!("while converting regex_scan_tagged_file options to JSON because {err:?}")
+        })?;
+        let scan_options: RegexScanTaggedOptions =
+            serde_json::from_value(options_json).map_err(|err| {
+                format_error!("while deserializing regex_scan_tagged_file options because {err:?}")
+            })?;
 
         if scan_options.patterns.is_empty() {
             return Ok(Vec::new());
@@ -1346,7 +1408,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let (tags, pattern_strings) = extract_patterns_from_options(&scan_options);
         let (regexes, regex_set) = compile_tagged_regexes(&pattern_strings)?;
 
-        let file = File::open(path).context(format_context!("failed to open file {}", path))?;
+        let file = File::open(path).map_err(|err| {
+            format_error!(
+                "while opening file {} for regex_scan_tagged_file because {err:?}",
+                path
+            )
+        })?;
         let mut reader = BufReader::new(file);
         let mut buffer = Vec::new();
         let heap = eval.heap();
@@ -1355,19 +1422,24 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         loop {
             buffer.clear();
-            let bytes_read = reader
-                .read_until(b'\n', &mut buffer)
-                .context(format_context!("failed to read line from {}", path))?;
+            let bytes_read = reader.read_until(b'\n', &mut buffer).map_err(|err| {
+                format_error!(
+                    "while reading line from {} for regex_scan_tagged_file because {err:?}",
+                    path
+                )
+            })?;
 
             if bytes_read == 0 {
                 break;
             }
 
-            let line = std::str::from_utf8(&buffer).context(format_context!(
-                "invalid UTF-8 at line {} in {}",
-                line_number,
-                path
-            ))?;
+            let line = std::str::from_utf8(&buffer).map_err(|err| {
+                format_error!(
+                    "while decoding UTF-8 at line {} in {} for regex_scan_tagged_file because {err:?}",
+                    line_number,
+                    path
+                )
+            })?;
             let line = strip_newline_str(line);
 
             let line_results = process_line_for_matches(
@@ -1380,10 +1452,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             )?;
 
             for result in line_results {
-                let result_value = heap.alloc(
-                    serde_json::to_value(&result)
-                        .context(format_context!("failed to serialize regex match result"))?,
-                );
+                let result_value = heap.alloc(serde_json::to_value(&result).map_err(|err| {
+                    format_error!(
+                        "while serializing regex_scan_tagged_file match result because {err:?}"
+                    )
+                })?);
                 results.push(result_value);
             }
 
@@ -1442,7 +1515,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         }
 
         let opts: DiagnosticOptions = serde_json::from_value(options.to_json_value()?)
-            .context(format_context!("bad options for diagnostic"))?;
+            .map_err(|err| format_error!("while parsing options for diagnostic because {err:?}"))?;
 
         // Validate severity
         let severity_lower = opts.severity.to_lowercase();
@@ -1450,45 +1523,46 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             return Err(anyhow!(
                 "severity must be one of: error, warning, info, hint, note; got: {}",
                 opts.severity
-            )
-            .context(format_context!("invalid severity")));
+            ))
+            .map_err(|err| format_error!("while validating diagnostic severity because {err:?}"));
         }
 
         // Validate numeric fields
         if let Some(l) = opts.line
             && l < 1
         {
-            return Err(
-                anyhow!("line must be >= 1, got {}", l).context(format_context!("invalid line"))
-            );
+            return Err(anyhow!("line must be >= 1, got {}", l))
+                .map_err(|err| format_error!("while validating diagnostic line because {err:?}"));
         }
         if let Some(c) = opts.column
             && c < 1
         {
-            return Err(anyhow!("column must be >= 1, got {}", c)
-                .context(format_context!("invalid column")));
+            return Err(anyhow!("column must be >= 1, got {}", c)).map_err(|err| {
+                format_error!("while validating diagnostic column because {err:?}")
+            });
         }
         if let Some(el) = opts.end_line
             && el < 1
         {
-            return Err(anyhow!("end_line must be >= 1, got {}", el)
-                .context(format_context!("invalid end_line")));
+            return Err(anyhow!("end_line must be >= 1, got {}", el)).map_err(|err| {
+                format_error!("while validating diagnostic end_line because {err:?}")
+            });
         }
         if let Some(ec) = opts.end_column
             && ec < 1
         {
-            return Err(anyhow!("end_column must be >= 1, got {}", ec)
-                .context(format_context!("invalid end_column")));
+            return Err(anyhow!("end_column must be >= 1, got {}", ec)).map_err(|err| {
+                format_error!("while validating diagnostic end_column because {err:?}")
+            });
         }
 
         let heap = eval.heap();
 
         // Convert related Value to serde_json::Value if present
         let related_json = if let Some(rel) = related {
-            Some(
-                rel.to_json_value()
-                    .context(format_context!("failed to convert related diagnostics"))?,
-            )
+            Some(rel.to_json_value().map_err(|err| {
+                format_error!("while converting related diagnostics to JSON because {err:?}")
+            })?)
         } else {
             None
         };
@@ -1509,7 +1583,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         // Convert to serde_json::Value, then to Starlark Value
         let result_value = serde_json::to_value(&result)
-            .context(format_context!("failed to serialize diagnostic result"))?;
+            .map_err(|err| format_error!("while serializing diagnostic result because {err:?}"))?;
 
         Ok(heap.alloc(result_value))
     }
@@ -1577,7 +1651,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         }
 
         let opts: MatchToDiagnosticOptions = serde_json::from_value(options.to_json_value()?)
-            .context(format_context!("bad options for match_to_diagnostic"))?;
+            .map_err(|err| {
+                format_error!("while parsing options for match_to_diagnostic because {err:?}")
+            })?;
 
         // Validate severity
         let severity_lower = opts.severity.to_lowercase();
@@ -1585,13 +1661,17 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             return Err(anyhow!(
                 "severity must be one of: error, warning, info, hint, note; got: {}",
                 opts.severity
-            )
-            .context(format_context!("invalid severity")));
+            ))
+            .map_err(|err| {
+                format_error!("while validating match_to_diagnostic severity because {err:?}")
+            });
         }
 
         // Parse the match result
-        let match_result: RegexMatchResult = serde_json::from_value(opts.match_result)
-            .context(format_context!("bad match result for match_to_diagnostic"))?;
+        let match_result: RegexMatchResult =
+            serde_json::from_value(opts.match_result).map_err(|err| {
+                format_error!("while parsing match result for match_to_diagnostic because {err:?}")
+            })?;
 
         let named = &match_result.named;
 
@@ -1650,10 +1730,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         // Convert related Value to serde_json::Value if present
         let related_json = if let Some(rel) = related {
-            Some(
-                rel.to_json_value()
-                    .context(format_context!("failed to convert related diagnostics"))?,
-            )
+            Some(rel.to_json_value().map_err(|err| {
+                format_error!("while converting related diagnostics to JSON because {err:?}")
+            })?)
         } else {
             None
         };
@@ -1674,7 +1753,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         // Convert to serde_json::Value, then to Starlark Value
         let result_value = serde_json::to_value(&result)
-            .context(format_context!("failed to serialize diagnostic result"))?;
+            .map_err(|err| format_error!("while serializing diagnostic result because {err:?}"))?;
 
         Ok(heap.alloc(result_value))
     }
@@ -1708,11 +1787,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let mut result = Vec::new();
 
         for diag in diagnostics.items {
-            let json_value = diag
-                .to_json_value()
-                .context(format_context!("failed to convert diagnostic to JSON"))?;
-            let json_string = serde_json::to_string(&json_value)
-                .context(format_context!("failed to serialize diagnostic"))?;
+            let json_value = diag.to_json_value().map_err(|err| {
+                format_error!("while converting diagnostic to JSON for dedup because {err:?}")
+            })?;
+            let json_string = serde_json::to_string(&json_value).map_err(|err| {
+                format_error!("while serializing diagnostic for dedup because {err:?}")
+            })?;
 
             if seen.insert(json_string) {
                 result.push(diag);
@@ -1778,8 +1858,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             _ => Err(anyhow!(
                 "format must be one of: human, github, json, sarif; got: {}",
                 format
-            )
-            .context(format_context!("invalid format"))),
+            ))
+            .map_err(|err| format_error!("while validating diagnostics format because {err:?}")),
         }
     }
 }

@@ -1,5 +1,4 @@
-use anyhow::Context;
-use anyhow_source_location::format_context;
+use anyhow_source_location::format_error;
 use serde::Serialize;
 use starlark::environment::GlobalsBuilder;
 use starlark::eval::Evaluator;
@@ -40,8 +39,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 Err(_) => heap.alloc(serde_json::json!({})),
             });
         }
-        let json_value: serde_json::Value =
-            serde_json::from_str(content).context(format_context!("bad json string"))?;
+        let json_value: serde_json::Value = serde_json::from_str(content)
+            .map_err(|err| format_error!("while parsing JSON string because {err:?}"))?;
 
         // Convert the JSON value to a Starlark value
         let alloc_value = heap.alloc(json_value);
@@ -67,7 +66,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// * `str`: The JSON string representation of the input value.
     fn to_string(value: starlark::values::Value) -> anyhow::Result<String> {
         let json_string = serde_json::to_string(&value.to_json_value()?)
-            .context(format_context!("Failed to convert dict to json string"))?;
+            .map_err(|err| format_error!("while creating string from JSON because {err:?}"))?;
         Ok(json_string)
     }
 
@@ -89,8 +88,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `str`: The formatted, multi-line JSON string indented with 2 spaces.
     fn to_string_pretty(value: starlark::values::Value) -> anyhow::Result<String> {
-        let json_string = serde_json::to_string_pretty(&value.to_json_value()?)
-            .context(format_context!("Failed to convert dict to json string"))?;
+        let json_string = serde_json::to_string_pretty(&value.to_json_value()?).map_err(|err| {
+            format_error!("while creating pretty string from JSON because {err:?}")
+        })?;
 
         Ok(json_string)
     }
@@ -121,26 +121,26 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         value: starlark::values::Value,
         #[starlark(require = named)] indent: i32,
     ) -> anyhow::Result<String> {
-        if !(0..=16).contains(&indent) {
-            return Err(anyhow::anyhow!(
+        if !crate::is_lsp_mode() && !(0..=16).contains(&indent) {
+            return Err(format_error!(
                 "indent must be between 0 and 16, got {}",
                 indent
             ));
         }
         let json_value = value
             .to_json_value()
-            .context(format_context!("Failed to convert value to JSON"))?;
+            .map_err(|err| format_error!("while converting JSON to string because {err:?}"))?;
 
         let indent_bytes = " ".repeat(indent as usize);
         let formatter = serde_json::ser::PrettyFormatter::with_indent(indent_bytes.as_bytes());
         let mut buf = Vec::new();
         let mut ser = serde_json::Serializer::with_formatter(&mut buf, formatter);
-        json_value.serialize(&mut ser).context(format_context!(
-            "Failed to serialize JSON with indent {}",
-            indent
-        ))?;
+        json_value
+            .serialize(&mut ser)
+            .map_err(|err| format_error!("while serializing JSON value because {err:?}"))?;
 
-        String::from_utf8(buf).context(format_context!("Serialized JSON contained invalid UTF-8"))
+        String::from_utf8(buf)
+            .map_err(|err| format_error!("while encoding to UTF8 because {err:?}"))
     }
 
     /// Returns true if the given string is valid JSON.
