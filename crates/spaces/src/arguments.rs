@@ -380,6 +380,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             no_rebase_repo,
             no_rebase,
             dev_branch_base,
+            no_dev_branch_base,
             dry_run,
             locked,
         } => {
@@ -435,6 +436,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                 no_rebase_repos: no_rebase_repo,
                 no_rebase,
                 dev_branch_bases: dev_branch_base,
+                no_dev_branch_bases: no_dev_branch_base,
                 new_branch_repos: new_branch,
                 dry_run,
             });
@@ -1102,6 +1104,12 @@ create-lock-file = false # optionally create a lock file
   Useful for dev-branch rebases/merges and for non-branch rev repos checked out on a local branch."#
         )]
         dev_branch_base: Vec<Arc<str>>,
+        #[arg(
+            long,
+            help = r#"Remove a stored sync base override for a repo.
+  Use `--no-dev-branch-base=<repo-path>`. This has the opposite effect of --dev-branch-base."#
+        )]
+        no_dev_branch_base: Vec<Arc<str>>,
         #[arg(
             long,
             help = r#"Run pre-sync planning only and print what would happen.

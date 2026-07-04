@@ -76,6 +76,26 @@ fn logger(console: console::Console) -> logger::Logger {
     logger::Logger::new(console, "workspace".into())
 }
 
+fn normalize_repo_selector(selector: &str) -> Arc<str> {
+    selector.strip_prefix("//").unwrap_or(selector).into()
+}
+
+fn parse_dev_branch_base_argument(entry: &str) -> anyhow::Result<(Arc<str>, Arc<str>)> {
+    let Some((repo_selector, base_ref)) = entry.split_once('=') else {
+        return Err(format_error!(
+            "Bad --dev-branch-base argument `{entry}`: expected <repo-path>=<ref>"
+        ));
+    };
+
+    if repo_selector.is_empty() || base_ref.is_empty() {
+        return Err(format_error!(
+            "Bad --dev-branch-base argument `{entry}`: expected <repo-path>=<ref>"
+        ));
+    }
+
+    Ok((normalize_repo_selector(repo_selector), base_ref.into()))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuleMetrics {
     elapsed_time: f64,
@@ -602,6 +622,47 @@ impl Workspace {
                     r == b || b.as_ref().ends_with(r.as_ref()) || r.as_ref().ends_with(b.as_ref())
                 })
             });
+        }
+
+        let sync_options = singleton::get_sync_options();
+
+        if !sync_options.dev_branch_bases.is_empty() {
+            let mut seen_repo_paths: HashSet<Arc<str>> = HashSet::new();
+            for entry in sync_options.dev_branch_bases.iter() {
+                let (repo_path, base_ref) = parse_dev_branch_base_argument(entry.as_ref())?;
+                if !seen_repo_paths.insert(repo_path.clone()) {
+                    return Err(format_error!(
+                        "Duplicate --dev-branch-base for repo `//{repo_path}`"
+                    ));
+                }
+
+                settings.json.dev_branch_bases.insert(repo_path, base_ref);
+            }
+        }
+
+        if !sync_options.no_dev_branch_bases.is_empty() {
+            let mut keys_to_remove = Vec::new();
+            for selector in sync_options.no_dev_branch_bases.iter() {
+                let repo_selector = normalize_repo_selector(selector.as_ref());
+                if repo_selector.is_empty() {
+                    return Err(format_error!(
+                        "Bad --no-dev-branch-base argument `{selector}`: expected <repo-path>"
+                    ));
+                }
+
+                for repo_path in settings.json.dev_branch_bases.keys() {
+                    if repo_path == &repo_selector
+                        || repo_path.as_ref().ends_with(repo_selector.as_ref())
+                        || repo_selector.as_ref().ends_with(repo_path.as_ref())
+                    {
+                        keys_to_remove.push(repo_path.clone());
+                    }
+                }
+            }
+
+            for key in keys_to_remove {
+                settings.json.dev_branch_bases.remove(&key);
+            }
         }
 
         if is_json_available == ws::IsJsonAvailable::Yes {

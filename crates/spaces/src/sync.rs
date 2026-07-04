@@ -41,12 +41,6 @@ pub struct RepoSyncSnapshot {
     current_commit_hash: Option<Arc<str>>,
 }
 
-#[derive(Debug, Clone)]
-struct ParsedDevBranchBase {
-    repo_path: Arc<str>,
-    base_ref: Arc<str>,
-}
-
 type NewBranchRevMismatch = (Arc<str>, Arc<str>, Arc<str>, Arc<str>);
 type NewBranchAlreadyExists = (Arc<str>, Arc<str>);
 
@@ -97,72 +91,6 @@ fn resolve_selector_set(
     }
 
     Ok(resolved)
-}
-
-fn parse_dev_branch_base_entries(
-    raw_entries: &[Arc<str>],
-) -> anyhow::Result<Vec<ParsedDevBranchBase>> {
-    let mut parsed_entries = Vec::new();
-    let mut seen_repos: HashSet<Arc<str>> = HashSet::new();
-
-    for entry in raw_entries {
-        let Some((repo_selector, base_ref)) = entry.split_once('=') else {
-            return Err(format_error!(
-                "Bad --dev-branch-base argument `{entry}`: expected <repo-path>=<ref>"
-            ));
-        };
-
-        if repo_selector.is_empty() || base_ref.is_empty() {
-            return Err(format_error!(
-                "Bad --dev-branch-base argument `{entry}`: expected <repo-path>=<ref>"
-            ));
-        }
-
-        let repo_path = normalize_repo_selector(repo_selector);
-        if !seen_repos.insert(repo_path.clone()) {
-            return Err(format_error!(
-                "Duplicate --dev-branch-base for repo `//{repo_path}`"
-            ));
-        }
-
-        parsed_entries.push(ParsedDevBranchBase {
-            repo_path,
-            base_ref: base_ref.into(),
-        });
-    }
-
-    Ok(parsed_entries)
-}
-
-fn resolve_dev_branch_base_map(
-    parsed_entries: &[ParsedDevBranchBase],
-    member_paths: &HashSet<Arc<str>>,
-) -> anyhow::Result<HashMap<Arc<str>, Arc<str>>> {
-    let mut unknown = Vec::new();
-    let mut map = HashMap::new();
-
-    for entry in parsed_entries {
-        if !member_paths.contains(&entry.repo_path) {
-            unknown.push(entry.repo_path.clone());
-            continue;
-        }
-
-        map.insert(entry.repo_path.clone(), entry.base_ref.clone());
-    }
-
-    if !unknown.is_empty() {
-        unknown.sort();
-        return Err(format_error!(
-            "Unknown repo selectors for --dev-branch-base: {}",
-            unknown
-                .iter()
-                .map(|item| format!("//{item}"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-    }
-
-    Ok(map)
 }
 
 const DRY_RUN_CURRENT_STATUS_HEADER: &str = "Current Status";
@@ -245,6 +173,7 @@ pub fn build_repo_sync_plan(
 ) -> anyhow::Result<Vec<RepoSyncPlan>> {
     let workspace_members = workspace_arc.read().settings.json.members.clone();
     let dev_branch_rules = workspace_arc.read().settings.json.dev_branches.clone();
+    let stored_dev_branch_base_map = workspace_arc.read().settings.json.dev_branch_bases.clone();
     let sync_options = singleton::get_sync_options();
     let use_stash = sync_options.stash;
 
@@ -284,9 +213,11 @@ pub fn build_repo_sync_plan(
         ));
     }
 
-    let parsed_dev_branch_base = parse_dev_branch_base_entries(&sync_options.dev_branch_bases)?;
-    let dev_branch_base_map =
-        resolve_dev_branch_base_map(parsed_dev_branch_base.as_slice(), &member_paths)?;
+    let mut dev_branch_base_map = HashMap::new();
+    for (repo_selector, base_ref) in stored_dev_branch_base_map {
+        dev_branch_base_map.insert(normalize_repo_selector(repo_selector.as_ref()), base_ref);
+    }
+
     let new_branch_repos = resolve_selector_set(
         "--new-branch",
         &sync_options.new_branch_repos,
@@ -1407,13 +1338,6 @@ mod tests {
         items.iter().map(|item| Arc::<str>::from(*item)).collect()
     }
 
-    fn parsed_entry(repo_path: &str, base_ref: &str) -> ParsedDevBranchBase {
-        ParsedDevBranchBase {
-            repo_path: repo_path.into(),
-            base_ref: base_ref.into(),
-        }
-    }
-
     fn repo_sync_plan(
         is_dev_branch: bool,
         is_rev_branch: bool,
@@ -1471,39 +1395,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_dev_branch_base_entries_parses_and_normalizes_repo_paths() {
-        let parsed = parse_dev_branch_base_entries(&arcs(&[
-            "//repo-a=origin/main",
-            "repo-b=refs/heads/trunk",
-        ]))
-        .unwrap();
-
-        assert_eq!(parsed.len(), 2);
-        assert_eq!(parsed[0].repo_path.as_ref(), "repo-a");
-        assert_eq!(parsed[0].base_ref.as_ref(), "origin/main");
-        assert_eq!(parsed[1].repo_path.as_ref(), "repo-b");
-        assert_eq!(parsed[1].base_ref.as_ref(), "refs/heads/trunk");
-    }
-
-    #[test]
-    fn parse_dev_branch_base_entries_rejects_malformed_arguments() {
-        let err = parse_dev_branch_base_entries(&arcs(&["repo-a"])).unwrap_err();
-
-        assert!(format!("{err:#}").contains("expected <repo-path>=<ref>"));
-    }
-
-    #[test]
-    fn parse_dev_branch_base_entries_rejects_duplicate_repo_after_normalization() {
-        let err = parse_dev_branch_base_entries(&arcs(&[
-            "//repo-a=origin/main",
-            "repo-a=origin/release",
-        ]))
-        .unwrap_err();
-
-        assert!(format!("{err:#}").contains("Duplicate --dev-branch-base for repo `//repo-a`"));
-    }
-
-    #[test]
     fn resolve_selector_set_normalizes_and_deduplicates() {
         let member_paths = set(&["repo-a", "repo-b"]);
 
@@ -1528,42 +1419,6 @@ mod tests {
 
         assert!(
             format!("{err:#}").contains("Unknown repo selectors for --merge: //repo-b, //repo-z")
-        );
-    }
-
-    #[test]
-    fn resolve_dev_branch_base_map_returns_map_for_known_member_repos() {
-        let map = resolve_dev_branch_base_map(
-            &[
-                parsed_entry("repo-a", "origin/main"),
-                parsed_entry("repo-b", "origin/release"),
-            ],
-            &set(&["repo-a", "repo-b"]),
-        )
-        .unwrap();
-
-        assert_eq!(map.len(), 2);
-        assert_eq!(map.get("repo-a").map(|v| v.as_ref()), Some("origin/main"));
-        assert_eq!(
-            map.get("repo-b").map(|v| v.as_ref()),
-            Some("origin/release")
-        );
-    }
-
-    #[test]
-    fn resolve_dev_branch_base_map_errors_on_unknown_repo_selectors() {
-        let err = resolve_dev_branch_base_map(
-            &[
-                parsed_entry("repo-z", "origin/main"),
-                parsed_entry("repo-b", "origin/dev"),
-            ],
-            &set(&["repo-a"]),
-        )
-        .unwrap_err();
-
-        assert!(
-            format!("{err:#}")
-                .contains("Unknown repo selectors for --dev-branch-base: //repo-b, //repo-z")
         );
     }
 
