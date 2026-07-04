@@ -737,7 +737,7 @@ pub fn run_starlark_modules_in_workspace(
             pre_evaluation_sync_progress.set_finalize_lines(console::make_finalize_line(
                 console::FinalType::Completed,
                 pre_evaluation_sync_progress.elapsed(),
-                "pre-eval sync snapshots collected (--allow-dirty enabled; checks are non-blocking)",
+                "pre-eval sync snapshots collected (--skip-pre-evaluation/--allow-dirty enabled; checks are non-blocking)",
             ));
 
             if sync_options.dry_run {

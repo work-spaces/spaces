@@ -377,6 +377,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                 no_dev_branch,
                 stash,
                 allow_dirty,
+                skip_pre_evaluation,
                 merge,
                 no_rebase_repo,
                 no_rebase,
@@ -401,7 +402,9 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
 
             singleton::set_args_store_removals(no_store);
 
-            if allow_dirty
+            let skip_pre_evaluation_enabled = allow_dirty || skip_pre_evaluation;
+
+            if skip_pre_evaluation_enabled
                 && (!merge.is_empty()
                     || !no_rebase_repo.is_empty()
                     || no_rebase
@@ -409,7 +412,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                     || !new_branch.is_empty())
             {
                 return Err(format_error!(
-                    "`--allow-dirty` cannot be combined with `--merge`, `--no-rebase`, `--no-rebase-repo`, `--dev-branch-base`, or `--new-branch`"
+                    "`--skip-pre-evaluation` (or deprecated `--allow-dirty`) cannot be combined with `--merge`, `--no-rebase`, `--no-rebase-repo`, `--dev-branch-base`, or `--new-branch`"
                 ));
             }
 
@@ -432,7 +435,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             singleton::set_is_sync();
             singleton::set_sync_options(singleton::SyncOptions {
                 stash,
-                force: allow_dirty,
+                force: skip_pre_evaluation_enabled,
                 merge_repos: merge,
                 no_rebase_repos: no_rebase_repo,
                 no_rebase,

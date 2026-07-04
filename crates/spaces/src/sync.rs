@@ -95,10 +95,15 @@ pub struct SyncArgs {
     pub stash: bool,
     #[arg(
         long,
+        help = r#"Same as --skip-pre-evaluation. This option will be removed in a future version."#
+    )]
+    pub allow_dirty: bool,
+    #[arg(
+        long,
         help = r#"Skip repository status checks and rebase operations.
   Use with caution: this bypasses safety checks for dirty repos and rebase conflicts."#
     )]
-    pub allow_dirty: bool,
+    pub skip_pre_evaluation: bool,
     #[arg(
         long,
         help = r#"For matching dev-branch repos, merge instead of rebase.
@@ -1308,7 +1313,7 @@ pub fn emit_sync_complete_report(
     container.add(console::bootstrap::VerticalSpacer::new(1));
     container.add(
         console::bootstrap::Banner::new(format!(
-            "{} Evaluation Complete ",
+            "{} Sync Complete ",
             console::bootstrap::icon_success()
         ))
         .width(console::bootstrap::Width::Large)
