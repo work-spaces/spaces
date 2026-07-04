@@ -1627,11 +1627,11 @@ fn execute_pre_sync_actions_for_repo(
 fn collect_pre_sync_job_result(
     path: Arc<str>,
     may_have_stashed: bool,
-    handle: std::thread::JoinHandle<Result<PreSyncExecutionOutcome, PreSyncExecutionFailure>>,
+    result: std::thread::Result<Result<PreSyncExecutionOutcome, PreSyncExecutionFailure>>,
     stashed_repos: &mut Vec<Arc<str>>,
     errors: &mut Vec<String>,
 ) {
-    match handle.join() {
+    match result {
         Ok(Ok(outcome)) => {
             if outcome.stashed {
                 stashed_repos.push(outcome.path);
@@ -1670,33 +1670,32 @@ pub fn execute_repo_sync_plan(
 
     let mut stashed_repos = Vec::new();
     let mut errors = Vec::new();
-    let mut handles = Vec::new();
 
-    for plan in actionable_plans {
-        let path = plan.path.clone();
-        let may_have_stashed = plan.will_stash;
-        let worker_console = console.clone();
-        let handle =
-            std::thread::spawn(move || execute_pre_sync_actions_for_repo(worker_console, plan));
-        handles.push((path, may_have_stashed, handle));
+    let pre_sync_pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(MAX_REPO_SYNC_PARALLEL_JOBS)
+        .build()
+        .map_err(|error| format_error!("failed to create pre-sync worker pool: {error}"))?;
 
-        if handles.len() >= MAX_REPO_SYNC_PARALLEL_JOBS {
-            let (path, may_have_stashed, handle) = handles.remove(0);
-            collect_pre_sync_job_result(
-                path,
-                may_have_stashed,
-                handle,
-                &mut stashed_repos,
-                &mut errors,
-            );
-        }
-    }
+    let job_results = pre_sync_pool.install(|| {
+        actionable_plans
+            .into_par_iter()
+            .map(|plan| {
+                let path = plan.path.clone();
+                let may_have_stashed = plan.will_stash;
+                let worker_console = console.clone();
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                    execute_pre_sync_actions_for_repo(worker_console, plan)
+                }));
+                (path, may_have_stashed, result)
+            })
+            .collect::<Vec<_>>()
+    });
 
-    for (path, may_have_stashed, handle) in handles {
+    for (path, may_have_stashed, result) in job_results {
         collect_pre_sync_job_result(
             path,
             may_have_stashed,
-            handle,
+            result,
             &mut stashed_repos,
             &mut errors,
         );
