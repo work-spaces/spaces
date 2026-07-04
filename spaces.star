@@ -252,6 +252,41 @@ run_add_exec(
 )
 
 run_add_exec(
+    "create_exec_user_error_doc",
+    command = DEBUG_BINARY,
+    args = [
+        "./spaces/scripts/show-all-errors.exec.star",
+    ],
+    deps = deps(
+        rules = [":build"],
+        files = [
+            "scripts/errors/**",
+            "scripts/show-all-errors.exec.star",
+        ],
+    ),
+    target_files = ["//all-errors-output.txt"],
+    visibility = visibility_private(),
+    help = "Run all error scripts and write the output //all-errors-output.txt",
+)
+
+run_add_exec(
+    "run_error_script",
+    command = DEBUG_BINARY,
+    args = [
+        "./spaces/scripts/errors/error-toml-null-value.exec.star",
+    ],
+    deps = deps(
+        rules = [":build"],
+        files = [
+            "scripts/errors/**",
+            "scripts/errors/error-toml-null-value.exec.star",
+        ],
+    ),
+    visibility = visibility_private(),
+    help = "Run a single error script within a rule to check for a nested banner",
+)
+
+run_add_exec(
     "check_rust_clippy",
     command = "cargo",
     args = ["clippy"],

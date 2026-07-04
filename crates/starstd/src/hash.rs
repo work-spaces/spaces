@@ -1,6 +1,4 @@
-use anyhow::Context;
-use anyhow::anyhow;
-use anyhow_source_location::format_context;
+use anyhow_source_location::format_error;
 use starlark::environment::GlobalsBuilder;
 
 use crate::is_lsp_mode;
@@ -25,13 +23,14 @@ where
     Fi: FnOnce(S) -> String,
 {
     use std::io::Read;
-    let file = std::fs::File::open(file_path).context(format_context!("{file_path}"))?;
+    let file = std::fs::File::open(file_path)
+        .map_err(|err| format_error!("while opening file `{file_path}` because {err:?}"))?;
     let mut reader = std::io::BufReader::new(file);
     let mut buf = [0u8; 65536]; // 64 KiB read buffer
     loop {
         let n = reader
             .read(&mut buf)
-            .context(format_context!("{file_path}"))?;
+            .map_err(|err| format_error!("while reading file `{file_path}` because {err:?}"))?;
         if n == 0 {
             break;
         }
@@ -271,8 +270,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// decoded = hash.hex_decode("48656c6c6f")  # "Hello"
     /// ```
     fn hex_decode(input: &str) -> anyhow::Result<String> {
-        let bytes = hex::decode(input).context(format_context!("{input}"))?;
-        String::from_utf8(bytes).map_err(|e| anyhow!(format_context!("{e}")))
+        if is_lsp_mode() {
+            return Ok(String::new());
+        }
+
+        let bytes = hex::decode(input)
+            .map_err(|err| format_error!("while decoding hex `{input}` because {err:?}"))?;
+        String::from_utf8(bytes)
+            .map_err(|err| format_error!("while encoding decodec bytes as UTF-8 because {err:?}"))
     }
 
     // ── Base64 encoding / decoding ────────────────────────────────────────────
@@ -283,6 +288,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// encoded = hash.base64_encode("Hello, World!")  # "SGVsbG8sIFdvcmxkIQ=="
     /// ```
     fn base64_encode(bytes: &str) -> anyhow::Result<String> {
+        if is_lsp_mode() {
+            return Ok(String::new());
+        }
+
         use base64::Engine;
         Ok(base64::engine::general_purpose::STANDARD.encode(bytes.as_bytes()))
     }
@@ -297,10 +306,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// decoded = hash.base64_decode("SGVsbG8sIFdvcmxkIQ==")  # "Hello, World!"
     /// ```
     fn base64_decode(input: &str) -> anyhow::Result<String> {
+        if is_lsp_mode() {
+            return Ok(String::new());
+        }
+
         use base64::Engine;
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(input)
-            .context(format_context!("{input}"))?;
-        String::from_utf8(bytes).map_err(|e| anyhow!(format_context!("{e}")))
+            .map_err(|err| format_error!("while decoding base64 `{input}` because {err:?}"))?;
+        String::from_utf8(bytes)
+            .map_err(|err| format_error!("while encoding to UTF-8 because {err:?}"))
     }
 }

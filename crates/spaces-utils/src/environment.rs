@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+pub const SPACES_ENV_RUNNING_AS_A_RULE: &str = "SPACES_ENV_RUNNING_AS_A_RULE";
+
 const ASSIGN_VARIABLES_DESCRIPTION: &str = r#"Values set in checkout rules. Part of the rule digest unless filtered. Overridden by `--env=NAME=VALUE`."#;
 
 const AUTOMATIC_VARIABLES_DESCRIPTION: &str = r#"Workspace-specific values assigned by spaces during checkout (e.g. workspace path, digest). Other variables referencing these values use placeholders that are resolved at run time. This keeps rule digests stable across workspaces and enables cross-workspace rule caching."#;

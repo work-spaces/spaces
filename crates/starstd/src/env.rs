@@ -1,6 +1,5 @@
 use crate::is_lsp_mode;
-use anyhow::Context;
-use anyhow_source_location::format_context;
+use anyhow_source_location::format_error;
 use starlark::environment::GlobalsBuilder;
 use starlark::eval::Evaluator;
 use starlark::values::Value;
@@ -35,7 +34,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             Err(std::env::VarError::NotUnicode(_)) => Err(anyhow::anyhow!(
                 "Environment variable `{name}` is not valid UTF-8"
             ))
-            .context(format_context!("Failed to read environment variable")),
+            .map_err(|err| {
+                format_error!("while reading environment variable `{name}` because {err:?}")
+            }),
         }
     }
 
@@ -87,8 +88,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         if is_lsp_mode() {
             return Ok(String::new());
         }
-        let dir = std::env::current_dir()
-            .context(format_context!("Failed to get current working directory"))?;
+        let dir = std::env::current_dir().map_err(|err| {
+            format_error!("while getting current working directory because {err:?}")
+        })?;
         Ok(path_to_string_lossy(&dir))
     }
 
@@ -101,9 +103,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         if is_lsp_mode() {
             return Ok(NoneType);
         }
-        std::env::set_current_dir(path).context(format_context!(
-            "Failed to change working directory to `{path}`"
-        ))?;
+        std::env::set_current_dir(path).map_err(|err| {
+            format_error!("while changing working directory to `{path}` because {err:?}")
+        })?;
         Ok(NoneType)
     }
 
@@ -151,10 +153,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 .map(|s| std::path::Path::new(s.as_str())),
         )
         .map(|s| s.to_string_lossy().into_owned())
-        .context(format_context!(
-            "Failed to join PATH entries \
-                 (an entry may contain the platform path-list separator)"
-        ))
+        .map_err(|err| {
+            format_error!(
+                "while joining PATH entries (an entry may contain the platform path-list separator) because {err:?}"
+            )
+        })
     }
 
     /// Finds the first executable matching the given name in PATH.

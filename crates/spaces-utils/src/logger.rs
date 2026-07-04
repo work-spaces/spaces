@@ -111,6 +111,12 @@ pub enum StripSourceLocation {
     Yes,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ShowFailedBanner {
+    No,
+    Yes,
+}
+
 fn is_source_location_fragment(fragment: &str) -> bool {
     let Some((path, line)) = fragment.rsplit_once(':') else {
         return false;
@@ -156,19 +162,12 @@ pub fn show_error(
     input_error_chain: Vec<String>,
     show_backtrace: ShowBacktrace,
     strip_source_location: StripSourceLocation,
+    show_failed_banner: ShowFailedBanner,
 ) {
     let mut container = console::bootstrap::Container::new();
     container.add(console::bootstrap::VerticalSpacer::new(1));
 
-    container.add(
-        console::bootstrap::Banner::new(format!("{} Failed", console::bootstrap::icon_danger()))
-            .width(console::bootstrap::Width::Large)
-            .variant(console::bootstrap::Variant::Danger),
-    );
-
-    let mut error_quote =
-        console::bootstrap::Blockquote::new().variant(console::bootstrap::Variant::Danger);
-
+    let mut error_lines = Vec::new();
     let mut error_chain = Vec::new();
     if show_backtrace == ShowBacktrace::Yes {
         for cause in input_error_chain.into_iter().rev() {
@@ -189,18 +188,36 @@ pub fn show_error(
             if line.is_empty() {
                 continue;
             }
-
-            error_quote.push_line(line);
+            error_lines.push(line);
         }
     }
 
-    container.add(error_quote);
+    if show_failed_banner == ShowFailedBanner::Yes {
+        container.add(
+            console::bootstrap::Banner::new(format!(
+                "{} Failed",
+                console::bootstrap::icon_danger()
+            ))
+            .width(console::bootstrap::Width::Large)
+            .variant(console::bootstrap::Variant::Danger),
+        );
 
-    container.add(
-        console::bootstrap::Divider::new()
-            .style(console::bootstrap::DividerStyle::Double)
-            .width(console::bootstrap::Width::Large),
-    );
+        let mut error_quote =
+            console::bootstrap::Blockquote::new().variant(console::bootstrap::Variant::Danger);
+        for error_line in error_lines {
+            error_quote.push_line(error_line);
+        }
+        container.add(error_quote);
+        container.add(
+            console::bootstrap::Divider::new()
+                .style(console::bootstrap::DividerStyle::Double)
+                .width(console::bootstrap::Width::Large),
+        );
+    } else {
+        for error_line in error_lines {
+            container.add(console::bootstrap::Paragraph::new(error_line));
+        }
+    }
 
     console.emit_container(&container);
 }

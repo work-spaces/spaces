@@ -77,7 +77,7 @@
 use crate::is_lsp_mode;
 use crate::process_error::format_failure;
 use anyhow::Context;
-use anyhow_source_location::format_context;
+use anyhow_source_location::{format_context, format_error};
 use starlark::environment::GlobalsBuilder;
 use std::process::Command;
 
@@ -134,8 +134,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         if is_lsp_mode() {
             return Ok(serde_json::json!({"status": 0, "stdout": "", "stderr": ""}));
         }
-        let output = run_shell(command, cwd.as_deref())
-            .context(format_context!("Failed to execute shell command"))?;
+        let output = run_shell(command, cwd.as_deref()).map_err(|err| {
+            format_error!("while executing shell command `{command}` because {err:?}")
+        })?;
 
         let status = output.status.code().unwrap_or(1);
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -146,9 +147,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 "{}",
                 format_failure("shell command", command, cwd.as_deref(), status, &stderr)
             ))
-            .context(format_context!(
-                "Shell command returned non-zero exit status"
-            ));
+            .map_err(|err| {
+                format_error!("while checking shell command exit status because {err:?}")
+            });
         }
 
         Ok(serde_json::json!({
@@ -207,8 +208,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         if is_lsp_mode() {
             return Ok(String::new());
         }
-        let output = run_shell(command, cwd.as_deref())
-            .context(format_context!("Failed to execute shell command"))?;
+        let output = run_shell(command, cwd.as_deref()).map_err(|err| {
+            format_error!("while executing shell command `{command}` because {err:?}")
+        })?;
 
         let status = output.status.code().unwrap_or(1);
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -219,9 +221,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 "{}",
                 format_failure("shell command", command, cwd.as_deref(), status, &stderr)
             ))
-            .context(format_context!(
-                "Shell command returned non-zero exit status"
-            ));
+            .map_err(|err| {
+                format_error!("while checking shell command exit status because {err:?}")
+            });
         }
 
         Ok(stdout.trim_end_matches(['\n', '\r']).to_string())
@@ -276,8 +278,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         if is_lsp_mode() {
             return Ok(Vec::new());
         }
-        let output = run_shell(command, cwd.as_deref())
-            .context(format_context!("Failed to execute shell command"))?;
+        let output = run_shell(command, cwd.as_deref()).map_err(|err| {
+            format_error!("while executing shell command `{command}` because {err:?}")
+        })?;
 
         let status = output.status.code().unwrap_or(1);
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -288,9 +291,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 "{}",
                 format_failure("shell command", command, cwd.as_deref(), status, &stderr)
             ))
-            .context(format_context!(
-                "Shell command returned non-zero exit status"
-            ));
+            .map_err(|err| {
+                format_error!("while checking shell command exit status because {err:?}")
+            });
         }
 
         let text = stdout.trim_end_matches(['\n', '\r']);
@@ -344,8 +347,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         if is_lsp_mode() {
             return Ok(0);
         }
-        let output = run_shell(command, cwd.as_deref())
-            .context(format_context!("Failed to execute shell command"))?;
+        let output = run_shell(command, cwd.as_deref()).map_err(|err| {
+            format_error!("while executing shell command `{command}` because {err:?}")
+        })?;
         Ok(output.status.code().unwrap_or(1))
     }
 }
