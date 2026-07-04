@@ -27,6 +27,7 @@ pub struct SyncOptions {
     pub dev_branch_repos: Vec<Arc<str>>,
     pub new_branch_repos: Vec<Arc<str>>,
     pub dry_run: bool,
+    pub skip_evaluation: bool,
 }
 
 #[derive(Debug)]

@@ -791,14 +791,55 @@ pub fn run_starlark_modules_in_workspace(
     };
 
     // Capture the sync result so we can always pop stashes, even if sync fails
-    let sync_result = run_starlark_modules_with_workspace(
-        console.clone(),
-        workspace_arc.clone(),
-        phase,
-        run_workspace,
-        is_create_lock_file,
-        is_execute_tasks,
-    );
+    let sync_result = if is_sync_checkout && sync_options.skip_evaluation {
+        let mut skip_eval_progress = console::Progress::new(
+            console.clone(),
+            "sync",
+            None,
+            Some("sync --skip-evaluation".into()),
+        );
+        skip_eval_progress.set_message("saving sync metadata without starlark evaluation");
+
+        let save_result = (|| -> anyhow::Result<()> {
+            let workspace_read = workspace_arc.read();
+            workspace_read
+                .settings
+                .save_json()
+                .context(format_context!(
+                    "while saving sync settings for --skip-evaluation"
+                ))?;
+            Ok(())
+        })();
+
+        let (final_type, final_message) = if save_result.is_ok() {
+            (
+                console::FinalType::Completed,
+                "sync metadata saved; skipped starlark evaluation",
+            )
+        } else {
+            (
+                console::FinalType::Failed,
+                "failed to save sync metadata while skipping starlark evaluation",
+            )
+        };
+
+        skip_eval_progress.set_finalize_lines(console::make_finalize_line(
+            final_type,
+            skip_eval_progress.elapsed(),
+            final_message,
+        ));
+
+        save_result
+    } else {
+        run_starlark_modules_with_workspace(
+            console.clone(),
+            workspace_arc.clone(),
+            phase,
+            run_workspace,
+            is_create_lock_file,
+            is_execute_tasks,
+        )
+    };
 
     if is_sync_checkout {
         let mut post_sync_progress =

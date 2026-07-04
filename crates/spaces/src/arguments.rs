@@ -383,6 +383,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                 dev_branch_base,
                 no_dev_branch_base,
                 dry_run,
+                skip_evaluation,
                 locked,
             } = args;
             singleton::set_execution_phase(task::Phase::Checkout);
@@ -427,7 +428,6 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                 singleton::set_removed_branches(removed_branches);
             }
 
-            // Always need to evaluate when doing a sync
             singleton::set_rescan(true);
             singleton::set_is_sync();
             singleton::set_sync_options(singleton::SyncOptions {
@@ -441,6 +441,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                 dev_branch_repos: dev_branch,
                 new_branch_repos: new_branch,
                 dry_run,
+                skip_evaluation,
             });
 
             if locked {

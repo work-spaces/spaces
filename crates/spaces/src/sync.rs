@@ -134,6 +134,12 @@ pub struct SyncArgs {
   Does not modify repositories and does not execute sync tasks."#
     )]
     pub dry_run: bool,
+    #[arg(
+        long,
+        help = r#"Skip Starlark evaluation and task execution.
+  Still runs pre-sync and post-sync actions, including branch updates and stash pop."#
+    )]
+    pub skip_evaluation: bool,
     /// The workspace lock rev's will override the rule rev for repos during sync.
     #[arg(long)]
     pub locked: bool,
