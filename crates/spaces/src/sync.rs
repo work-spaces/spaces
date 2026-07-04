@@ -1282,12 +1282,16 @@ pub fn emit_dry_run_repo_plan(
         container.add(console::bootstrap::VerticalSpacer::new(1));
     }
 
-    let sync_entries = sorted_plans
-        .iter()
-        .filter_map(|plan| {
-            describe_sync_action(plan).map(|action| (format_repo_label(plan), action))
-        })
-        .collect::<Vec<_>>();
+    let sync_entries = if singleton::get_sync_options().skip_evaluation {
+        Vec::new()
+    } else {
+        sorted_plans
+            .iter()
+            .filter_map(|plan| {
+                describe_sync_action(plan).map(|action| (format_repo_label(plan), action))
+            })
+            .collect::<Vec<_>>()
+    };
 
     if !sync_entries.is_empty() {
         container.add(components::Header::new(
