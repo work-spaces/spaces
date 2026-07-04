@@ -1,5 +1,5 @@
 use crate::{
-    about, co, completions, docs, evaluator, rules, runner, singleton, task, tools, workspace,
+    about, co, completions, docs, evaluator, rules, runner, singleton, sync, task, tools, workspace,
 };
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
@@ -367,23 +367,24 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             )
             .context(format_context!("while checking out repo"))?;
         }
-        Commands::Sync {
-            env,
-            store,
-            no_store,
-            dev_branch,
-            new_branch,
-            no_dev_branch,
-            stash,
-            allow_dirty,
-            merge,
-            no_rebase_repo,
-            no_rebase,
-            dev_branch_base,
-            no_dev_branch_base,
-            dry_run,
-            locked,
-        } => {
+        Commands::Sync { args } => {
+            let sync::SyncArgs {
+                env,
+                store,
+                no_store,
+                dev_branch,
+                new_branch,
+                no_dev_branch,
+                stash,
+                allow_dirty,
+                merge,
+                no_rebase_repo,
+                no_rebase,
+                dev_branch_base,
+                no_dev_branch_base,
+                dry_run,
+                locked,
+            } = args;
             singleton::set_execution_phase(task::Phase::Checkout);
 
             if shell::is_spaces_shell() {
@@ -1031,95 +1032,8 @@ create-lock-file = false # optionally create a lock file
     },
     /// Runs checkout rules within an existing workspace
     Sync {
-        #[arg(
-            long,
-            help = r#"Environment variables to add to the workspace.
-  Use `--env=VAR=VALUE`. Makes workspace not reproducible."#
-        )]
-        env: Vec<Arc<str>>,
-        #[arg(
-            long,
-            help = r#"Store values accessible via workspace.load_value().
-  Use `--store=KEY=VALUE`. Values are stored with path `//` and url `<command line>`.
-  Command line store values take priority over all other path or url values."#
-        )]
-        store: Vec<Arc<str>>,
-        #[arg(
-            long,
-            help = r#"Remove a store value previously set via --store=KEY=VALUE.
-  Use `--no-store=KEY`. Removes the named key from the command-line store entry."#
-        )]
-        no_store: Vec<Arc<str>>,
-        #[arg(
-            long,
-            help = r#"Use --dev-branch=<repo-path> to add a repo to the dev-branch list.
-  Unlike --new-branch, this does not create a new git branch."#
-        )]
-        dev_branch: Vec<Arc<str>>,
-        #[arg(
-            long,
-            help = r#"Use --new-branch=<repo-path> to create a new branch from the repo's configured workspace rev.
-  The new branch name matches the workspace name and the repo is marked as a dev-branch.
-  This flag can be used multiple times."#
-        )]
-        new_branch: Vec<Arc<str>>,
-        #[arg(
-            long,
-            help = r#"Use --no-dev-branch=<repo-path> to remove a repo from the dev-branch list.
-  This has the opposite effect of --dev-branch."#
-        )]
-        no_dev_branch: Vec<Arc<str>>,
-        #[arg(
-            long,
-            help = r#"Stash uncommitted changes before sync and pop the stash after sync.
-  This allows syncing dirty repositories without manually stashing."#
-        )]
-        stash: bool,
-        #[arg(
-            long,
-            help = r#"Skip repository status checks and rebase operations.
-  Use with caution: this bypasses safety checks for dirty repos and rebase conflicts."#
-        )]
-        allow_dirty: bool,
-        #[arg(
-            long,
-            help = r#"For matching dev-branch repos, merge instead of rebase.
-  Use `--merge=<repo-path>`. This flag can be used multiple times."#
-        )]
-        merge: Vec<Arc<str>>,
-        #[arg(
-            long,
-            help = r#"For matching dev-branch repos, skip both rebase and merge.
-  Use `--no-rebase-repo=<repo-path>`. This flag can be used multiple times."#
-        )]
-        no_rebase_repo: Vec<Arc<str>>,
-        #[arg(
-            long,
-            help = r#"Skip rebase for all dev-branch repos unless explicitly listed in `--merge`."#
-        )]
-        no_rebase: bool,
-        #[arg(
-            long,
-            help = r#"Override sync base ref for a repo.
-  Use `--dev-branch-base=<repo-path>=<ref>`. This flag can be used multiple times.
-  Useful for dev-branch rebases/merges and for non-branch rev repos checked out on a local branch."#
-        )]
-        dev_branch_base: Vec<Arc<str>>,
-        #[arg(
-            long,
-            help = r#"Remove a stored sync base override for a repo.
-  Use `--no-dev-branch-base=<repo-path>`. This has the opposite effect of --dev-branch-base."#
-        )]
-        no_dev_branch_base: Vec<Arc<str>>,
-        #[arg(
-            long,
-            help = r#"Run pre-sync planning only and print what would happen.
-  Does not modify repositories and does not execute sync tasks."#
-        )]
-        dry_run: bool,
-        /// The workspace lock rev's will override the rule rev for repos during sync.
-        #[arg(long)]
-        locked: bool,
+        #[command(flatten)]
+        args: sync::SyncArgs,
     },
     #[command(about = r"Runs a spaces run rule.
   - `spaces run`: Run all non-optional rules with dependencies
