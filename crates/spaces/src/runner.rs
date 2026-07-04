@@ -71,6 +71,10 @@ fn get_workspace(
     .context(format_context!("while running workspace"))
 }
 
+fn normalize_repo_selector(selector: &str) -> Arc<str> {
+    selector.strip_prefix("//").unwrap_or(selector).into()
+}
+
 fn evaluate_environment(
     console: console::Console,
     workspace_arc: workspace::WorkspaceArc,
@@ -205,10 +209,16 @@ pub fn foreach_repo(
                 }
             } else if for_each_repo == ForEachRepo::DevBranch {
                 // get the dev-branches from the workspace settings
+                let normalized_member_path = normalize_repo_selector(member.path.as_ref());
                 for dev_branch_rule in dev_branch_rules.iter() {
                     let location_in_workspace =
                         labels::get_rule_name_from_label(dev_branch_rule.as_ref());
-                    if location_in_workspace == member.path.as_ref() {
+                    let normalized_location = normalize_repo_selector(location_in_workspace);
+                    if normalized_location == normalized_member_path
+                        || normalized_member_path
+                            .as_ref()
+                            .ends_with(normalized_location.as_ref())
+                    {
                         repos.push(member.clone());
                         // skip the rest of the loop
                         break;

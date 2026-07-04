@@ -156,15 +156,15 @@ fn normalize_repo_selector(selector: &str) -> Arc<str> {
 }
 
 fn is_member_dev_branch(member_path: &str, dev_branch_rules: &[Arc<str>]) -> bool {
-    if dev_branch_rules
-        .iter()
-        .any(|item| item.as_ref() == member_path)
-    {
-        return true;
-    }
+    let normalized_member_path = normalize_repo_selector(member_path);
 
     for item in dev_branch_rules {
-        if member_path.ends_with(item.as_ref()) {
+        let normalized_item = normalize_repo_selector(item.as_ref());
+        if normalized_item == normalized_member_path
+            || normalized_member_path
+                .as_ref()
+                .ends_with(normalized_item.as_ref())
+        {
             return true;
         }
     }
@@ -235,9 +235,19 @@ fn resolve_explicit_dev_branch_base(
 
     dev_branch_base_map
         .iter()
-        .filter(|(selector, _)| normalized_member_path.as_ref().ends_with(selector.as_ref()))
-        .max_by(|(selector_a, _), (selector_b, _)| selector_a.len().cmp(&selector_b.len()))
-        .map(|(_, base_ref)| base_ref.clone())
+        .filter_map(|(selector, base_ref)| {
+            let normalized_selector = normalize_repo_selector(selector.as_ref());
+            if normalized_member_path
+                .as_ref()
+                .ends_with(normalized_selector.as_ref())
+            {
+                Some((normalized_selector.len(), base_ref.clone()))
+            } else {
+                None
+            }
+        })
+        .max_by_key(|(selector_len, _)| *selector_len)
+        .map(|(_, base_ref)| base_ref)
 }
 
 fn describe_current_status(plan: &RepoSyncPlan) -> String {
@@ -411,9 +421,15 @@ pub fn build_repo_sync_plan(
     top_progress
         .set_message(format!("checking {} repositories in parallel", repo_entries.len()).as_str());
 
-    let repo_results = repo_entries
-        .par_iter()
-        .map(
+    let pre_eval_pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(MAX_REPO_SYNC_PARALLEL_JOBS)
+        .build()
+        .map_err(|error| format_error!("failed to create pre-evaluation worker pool: {error}"))?;
+
+    let repo_results = pre_eval_pool.install(|| {
+        repo_entries
+            .par_iter()
+            .map(
             |(url, member_path, member_rev)| -> anyhow::Result<Option<RepoPlanEvaluation>> {
                 let member_git_path = std::path::Path::new(member_path.as_ref()).join(".git");
                 if !member_git_path.exists() {
@@ -796,8 +812,9 @@ pub fn build_repo_sync_plan(
                     new_branch_already_exists: new_branch_already_exists_result,
                 }))
             },
-        )
-        .collect::<Vec<_>>();
+            )
+            .collect::<Vec<_>>()
+    });
 
     let mut plans = Vec::new();
 
@@ -1225,42 +1242,57 @@ pub fn collect_repo_sync_snapshots(
     let mut progress = console::Progress::new(console.clone(), progress_name, None, None);
     progress.set_message("capturing repositories in parallel");
 
-    let mut snapshots = workspace_members
-        .par_iter()
-        .flat_map(|(url, member_list)| {
-            member_list.par_iter().filter_map(|member| {
-                let member_git_path = std::path::Path::new(member.path.as_ref()).join(".git");
-                if !member_git_path.exists() {
-                    return None;
-                }
+    let snapshot_pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(MAX_REPO_SYNC_PARALLEL_JOBS)
+        .build()
+        .map_err(|error| format_error!("failed to create snapshot worker pool: {error}"))?;
 
-                let mut repo_progress = console::Progress::new(
-                    console.clone(),
-                    format!("//{}", member.path),
-                    None,
-                    Some(format!("//{} capturing current revision", member.path)),
-                );
-                repo_progress.set_message(format!("capturing //{}", member.path).as_str());
+    let mut snapshots = snapshot_pool.install(|| {
+        workspace_members
+            .par_iter()
+            .flat_map(|(url, member_list)| {
+                member_list.par_iter().filter_map(|member| {
+                    let member_git_path = std::path::Path::new(member.path.as_ref()).join(".git");
+                    if !member_git_path.exists() {
+                        return None;
+                    }
 
-                let repo = git::Repository::new(url.clone(), member.path.clone());
-                let is_dev_branch = is_member_dev_branch(member.path.as_ref(), &dev_branch_rules);
-                let is_rev_branch = repo.is_branch(&mut repo_progress, &member.rev);
-                let current_branch = repo.get_current_branch(&mut repo_progress).ok().flatten();
-                let current_tag = repo.get_commit_tag(&mut repo_progress);
-                let current_commit_hash = repo.get_commit_hash(&mut repo_progress).ok().flatten();
+                    let mut repo_progress = console::Progress::new(
+                        console.clone(),
+                        format!("//{}", member.path),
+                        None,
+                        None,
+                    );
+                    repo_progress.set_message(format!("capturing //{}", member.path).as_str());
 
-                Some(RepoSyncSnapshot {
-                    path: member.path.clone(),
-                    is_dev_branch,
-                    is_rev_branch,
-                    workspace_rev: member.rev.clone(),
-                    current_branch,
-                    current_tag,
-                    current_commit_hash,
+                    let repo = git::Repository::new(url.clone(), member.path.clone());
+                    let is_dev_branch =
+                        is_member_dev_branch(member.path.as_ref(), &dev_branch_rules);
+                    let is_rev_branch = repo.is_branch(&mut repo_progress, &member.rev);
+                    let current_branch = repo.get_current_branch(&mut repo_progress).ok().flatten();
+                    let current_tag = repo.get_commit_tag(&mut repo_progress);
+                    let current_commit_hash =
+                        repo.get_commit_hash(&mut repo_progress).ok().flatten();
+
+                    repo_progress.set_finalize_lines(console::make_finalize_line(
+                        console::FinalType::Completed,
+                        progress.elapsed(),
+                        &format!("//{} captured repo snapshot", member.path),
+                    ));
+
+                    Some(RepoSyncSnapshot {
+                        path: member.path.clone(),
+                        is_dev_branch,
+                        is_rev_branch,
+                        workspace_rev: member.rev.clone(),
+                        current_branch,
+                        current_tag,
+                        current_commit_hash,
+                    })
                 })
             })
-        })
-        .collect::<Vec<_>>();
+            .collect::<Vec<_>>()
+    });
 
     snapshots.sort_by(|a, b| a.path.cmp(&b.path));
 
@@ -1766,14 +1798,9 @@ fn pop_stash_for_repo(
     }
 }
 
-fn collect_stash_pop_job_result(
-    handle: std::thread::JoinHandle<anyhow::Result<()>>,
-    warnings: &mut Vec<String>,
-) {
-    match handle.join() {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) => warnings.push(format!("{error:#}")),
-        Err(_) => warnings.push("stash-pop worker thread panicked".to_string()),
+fn collect_stash_pop_job_result(result: anyhow::Result<()>, warnings: &mut Vec<String>) {
+    if let Err(err) = result {
+        warnings.push(format!("while popping stash because {err:?}"));
     }
 }
 
@@ -1800,21 +1827,24 @@ pub fn pop_stashed_repos(
     }
 
     let mut warnings = Vec::new();
-    let mut handles = Vec::new();
 
-    for (url, path) in repos_to_pop {
-        let worker_console = console.clone();
-        let handle = std::thread::spawn(move || pop_stash_for_repo(worker_console, url, path));
-        handles.push(handle);
+    let stash_pop_pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(MAX_REPO_SYNC_PARALLEL_JOBS)
+        .build()
+        .map_err(|error| format_error!("failed to create stash-pop worker pool: {error}"))?;
 
-        if handles.len() >= MAX_REPO_SYNC_PARALLEL_JOBS {
-            let handle = handles.remove(0);
-            collect_stash_pop_job_result(handle, &mut warnings);
-        }
-    }
+    let job_results = stash_pop_pool.install(|| {
+        repos_to_pop
+            .into_par_iter()
+            .map(|(url, path)| {
+                let worker_console = console.clone();
+                pop_stash_for_repo(worker_console, url, path)
+            })
+            .collect::<Vec<_>>()
+    });
 
-    for handle in handles {
-        collect_stash_pop_job_result(handle, &mut warnings);
+    for result in job_results {
+        collect_stash_pop_job_result(result, &mut warnings);
     }
 
     warnings.sort();
@@ -1923,6 +1953,13 @@ mod tests {
     }
 
     #[test]
+    fn is_member_dev_branch_accepts_selectors_with_or_without_prefix() {
+        assert!(is_member_dev_branch("@star/sdk", &arcs(&["@star/sdk"])));
+        assert!(is_member_dev_branch("@star/sdk", &arcs(&["//@star/sdk"])));
+        assert!(is_member_dev_branch("@star/sdk", &arcs(&["sdk"])));
+    }
+
+    #[test]
     fn resolve_pull_from_skips_non_branch_revs() {
         let pull_from = resolve_pull_from(false, true, false, "deadbeef");
 
@@ -1961,6 +1998,19 @@ mod tests {
                 Arc::<str>::from("origin/main"),
             ),
         ]);
+
+        assert_eq!(
+            resolve_explicit_dev_branch_base("@star/sdk", &base_map).as_deref(),
+            Some("origin/main")
+        );
+    }
+
+    #[test]
+    fn resolve_explicit_dev_branch_base_accepts_selectors_with_prefix() {
+        let base_map = HashMap::from([(
+            Arc::<str>::from("//@star/sdk"),
+            Arc::<str>::from("origin/main"),
+        )]);
 
         assert_eq!(
             resolve_explicit_dev_branch_base("@star/sdk", &base_map).as_deref(),
