@@ -97,6 +97,7 @@ const DRY_RUN_CURRENT_STATUS_HEADER: &str = "Current Status";
 const DRY_RUN_PRE_SYNC_HEADER: &str = "Pre-Sync";
 const DRY_RUN_SYNC_HEADER: &str = "Sync (May Change Based on Updated Rules)";
 const DRY_RUN_POST_SYNC_HEADER: &str = "Post-Sync";
+const MAX_REPO_SYNC_PARALLEL_JOBS: usize = 8;
 
 fn has_rev_not_branch_mismatch(
     is_rev_branch: bool,
@@ -1115,157 +1116,289 @@ fn pop_stashes_after_failed_pre_sync(
     Ok(())
 }
 
+struct PreSyncExecutionOutcome {
+    path: Arc<str>,
+    stashed: bool,
+}
+
+struct PreSyncExecutionFailure {
+    path: Arc<str>,
+    stashed: bool,
+    error_message: String,
+}
+
+fn execute_pre_sync_actions_for_repo(
+    console: console::Console,
+    plan: RepoSyncPlan,
+) -> Result<PreSyncExecutionOutcome, PreSyncExecutionFailure> {
+    let mut repo_progress = console::Progress::new(
+        console.clone(),
+        format!("//{}", plan.path),
+        None,
+        Some(format!("//{} applying pre-sync actions", plan.path)),
+    );
+
+    let repo = git::Repository::new(plan.url.clone(), plan.path.clone());
+
+    let mut stashed = false;
+
+    if plan.will_stash {
+        if let Err(error) = repo.stash(&mut repo_progress) {
+            repo_progress.set_finalize_lines(console::make_finalize_line(
+                console::FinalType::Failed,
+                repo_progress.elapsed(),
+                &format!("//{} failed to stash changes", plan.path),
+            ));
+            return Err(PreSyncExecutionFailure {
+                path: plan.path.clone(),
+                stashed,
+                error_message: format!("//{} failed to stash changes: {error}", plan.path),
+            });
+        }
+
+        stashed = true;
+    }
+
+    if let Some(base_ref) = plan.rebase_from.as_ref()
+        && let Err(error) = repo.rebase_onto(&mut repo_progress, base_ref.as_ref())
+    {
+        repo_progress.set_finalize_lines(console::make_finalize_line(
+            console::FinalType::Failed,
+            repo_progress.elapsed(),
+            &format!("//{} rebase failed", plan.path),
+        ));
+
+        return Err(PreSyncExecutionFailure {
+            path: plan.path.clone(),
+            stashed,
+            error_message: format!(
+                "//{} failed to rebase onto {}: {error}",
+                plan.path, base_ref
+            ),
+        });
+    }
+
+    if let Some(base_ref) = plan.merge_from.as_ref()
+        && let Err(error) = repo.merge_from(&mut repo_progress, base_ref.as_ref())
+    {
+        repo_progress.set_finalize_lines(console::make_finalize_line(
+            console::FinalType::Failed,
+            repo_progress.elapsed(),
+            &format!("//{} merge failed", plan.path),
+        ));
+
+        return Err(PreSyncExecutionFailure {
+            path: plan.path.clone(),
+            stashed,
+            error_message: format!("//{} failed to merge {}: {error}", plan.path, base_ref),
+        });
+    }
+
+    if let Some(branch_name) = plan.create_new_branch.as_ref()
+        && let Err(error) = repo.execute(
+            &mut repo_progress,
+            vec!["switch".into(), "-c".into(), branch_name.clone()],
+        )
+    {
+        repo_progress.set_finalize_lines(console::make_finalize_line(
+            console::FinalType::Failed,
+            repo_progress.elapsed(),
+            &format!("//{} new branch creation failed", plan.path),
+        ));
+
+        return Err(PreSyncExecutionFailure {
+            path: plan.path.clone(),
+            stashed,
+            error_message: format!(
+                "//{} failed to create new branch `{}`: {error}",
+                plan.path, branch_name,
+            ),
+        });
+    }
+
+    let final_message = if plan.will_stash {
+        if let Some(base_ref) = plan.rebase_from.as_ref() {
+            format!(
+                "//{} stashed changes and rebased onto {}",
+                plan.path, base_ref
+            )
+        } else if let Some(base_ref) = plan.merge_from.as_ref() {
+            format!("//{} stashed changes and merged {}", plan.path, base_ref)
+        } else {
+            format!("//{} stashed uncommitted changes", plan.path)
+        }
+    } else if let Some(base_ref) = plan.rebase_from.as_ref() {
+        format!("//{} rebased successfully on {}", plan.path, base_ref)
+    } else if let Some(base_ref) = plan.merge_from.as_ref() {
+        format!("//{} merged successfully from {}", plan.path, base_ref)
+    } else if let Some(branch_name) = plan.create_new_branch.as_ref() {
+        format!(
+            "//{} created new dev branch `{}` from {}",
+            plan.path, branch_name, plan.rev,
+        )
+    } else {
+        format!("//{} pre-sync actions complete", plan.path)
+    };
+
+    repo_progress.set_finalize_lines(console::make_finalize_line(
+        console::FinalType::Completed,
+        repo_progress.elapsed(),
+        &final_message,
+    ));
+
+    Ok(PreSyncExecutionOutcome {
+        path: plan.path,
+        stashed,
+    })
+}
+
+fn collect_pre_sync_job_result(
+    path: Arc<str>,
+    may_have_stashed: bool,
+    handle: std::thread::JoinHandle<Result<PreSyncExecutionOutcome, PreSyncExecutionFailure>>,
+    stashed_repos: &mut Vec<Arc<str>>,
+    errors: &mut Vec<String>,
+) {
+    match handle.join() {
+        Ok(Ok(outcome)) => {
+            if outcome.stashed {
+                stashed_repos.push(outcome.path);
+            }
+        }
+        Ok(Err(error)) => {
+            if error.stashed {
+                stashed_repos.push(error.path);
+            }
+            errors.push(error.error_message);
+        }
+        Err(_) => {
+            if may_have_stashed {
+                stashed_repos.push(path.clone());
+            }
+            errors.push(format!("//{} pre-sync worker thread panicked", path));
+        }
+    }
+}
+
 pub fn execute_repo_sync_plan(
     console: console::Console,
     workspace_arc: workspace::WorkspaceArc,
     plans: &[RepoSyncPlan],
 ) -> anyhow::Result<Vec<Arc<str>>> {
+    let actionable_plans = plans
+        .iter()
+        .filter(|plan| {
+            plan.will_stash
+                || plan.rebase_from.is_some()
+                || plan.merge_from.is_some()
+                || plan.create_new_branch.is_some()
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+
     let mut stashed_repos = Vec::new();
+    let mut errors = Vec::new();
+    let mut handles = Vec::new();
 
-    for plan in plans {
-        if !plan.will_stash
-            && plan.rebase_from.is_none()
-            && plan.merge_from.is_none()
-            && plan.create_new_branch.is_none()
-        {
-            continue;
+    for plan in actionable_plans {
+        let path = plan.path.clone();
+        let may_have_stashed = plan.will_stash;
+        let worker_console = console.clone();
+        let handle =
+            std::thread::spawn(move || execute_pre_sync_actions_for_repo(worker_console, plan));
+        handles.push((path, may_have_stashed, handle));
+
+        if handles.len() >= MAX_REPO_SYNC_PARALLEL_JOBS {
+            let (path, may_have_stashed, handle) = handles.remove(0);
+            collect_pre_sync_job_result(
+                path,
+                may_have_stashed,
+                handle,
+                &mut stashed_repos,
+                &mut errors,
+            );
         }
+    }
 
-        let mut repo_progress = console::Progress::new(
-            console.clone(),
-            format!("//{}", plan.path),
-            None,
-            Some(format!("//{} applying pre-sync actions", plan.path)),
+    for (path, may_have_stashed, handle) in handles {
+        collect_pre_sync_job_result(
+            path,
+            may_have_stashed,
+            handle,
+            &mut stashed_repos,
+            &mut errors,
         );
+    }
 
-        let repo = git::Repository::new(plan.url.clone(), plan.path.clone());
+    stashed_repos.sort();
+    stashed_repos.dedup();
 
-        if plan.will_stash {
-            if let Err(error) = repo.stash(&mut repo_progress) {
-                repo_progress.set_finalize_lines(console::make_finalize_line(
-                    console::FinalType::Failed,
-                    repo_progress.elapsed(),
-                    &format!("//{} failed to stash changes", plan.path),
-                ));
-                pop_stashes_after_failed_pre_sync(
-                    console.clone(),
-                    workspace_arc.clone(),
-                    &stashed_repos,
-                )?;
-                return Err(format_error!(
-                    "//{} failed to stash changes: {error}",
-                    plan.path
-                ));
-            }
-            stashed_repos.push(plan.path.clone());
+    if !errors.is_empty() {
+        errors.sort();
+        pop_stashes_after_failed_pre_sync(console, workspace_arc, &stashed_repos)?;
+
+        if errors.len() == 1 {
+            return Err(format_error!("{}", errors[0]));
         }
 
-        if let Some(base_ref) = plan.rebase_from.as_ref()
-            && let Err(error) = repo.rebase_onto(&mut repo_progress, base_ref.as_ref())
-        {
-            repo_progress.set_finalize_lines(console::make_finalize_line(
-                console::FinalType::Failed,
-                repo_progress.elapsed(),
-                &format!("//{} rebase failed", plan.path),
-            ));
-            pop_stashes_after_failed_pre_sync(
-                console.clone(),
-                workspace_arc.clone(),
-                &stashed_repos,
-            )?;
-            return Err(format_error!(
-                "//{} failed to rebase onto {}: {error}",
-                plan.path,
-                base_ref
-            ));
-        }
-
-        if let Some(base_ref) = plan.merge_from.as_ref()
-            && let Err(error) = repo.merge_from(&mut repo_progress, base_ref.as_ref())
-        {
-            repo_progress.set_finalize_lines(console::make_finalize_line(
-                console::FinalType::Failed,
-                repo_progress.elapsed(),
-                &format!("//{} merge failed", plan.path),
-            ));
-            pop_stashes_after_failed_pre_sync(
-                console.clone(),
-                workspace_arc.clone(),
-                &stashed_repos,
-            )?;
-            return Err(format_error!(
-                "//{} failed to merge {}: {error}",
-                plan.path,
-                base_ref
-            ));
-        }
-
-        if let Some(branch_name) = plan.create_new_branch.as_ref()
-            && let Err(error) = repo.execute(
-                &mut repo_progress,
-                vec!["switch".into(), "-c".into(), branch_name.clone()],
-            )
-        {
-            repo_progress.set_finalize_lines(console::make_finalize_line(
-                console::FinalType::Failed,
-                repo_progress.elapsed(),
-                &format!("//{} new branch creation failed", plan.path),
-            ));
-            pop_stashes_after_failed_pre_sync(
-                console.clone(),
-                workspace_arc.clone(),
-                &stashed_repos,
-            )?;
-            return Err(format_error!(
-                "//{} failed to create new branch `{}`: {error}",
-                plan.path,
-                branch_name,
-            ));
-        }
-
-        let final_message = if plan.will_stash && plan.rebase_from.is_some() {
-            format!(
-                "//{} stashed changes and rebased onto {}",
-                plan.path,
-                plan.rebase_from.clone().unwrap_or_default()
-            )
-        } else if plan.will_stash && plan.merge_from.is_some() {
-            format!(
-                "//{} stashed changes and merged {}",
-                plan.path,
-                plan.merge_from.clone().unwrap_or_default()
-            )
-        } else if plan.will_stash {
-            format!("//{} stashed uncommitted changes", plan.path)
-        } else if plan.rebase_from.is_some() {
-            format!(
-                "//{} rebased successfully on {}",
-                plan.path,
-                plan.rebase_from.clone().unwrap_or_default()
-            )
-        } else if plan.merge_from.is_some() {
-            format!(
-                "//{} merged successfully from {}",
-                plan.path,
-                plan.merge_from.clone().unwrap_or_default()
-            )
-        } else {
-            format!(
-                "//{} created new dev branch `{}` from {}",
-                plan.path,
-                plan.create_new_branch.clone().unwrap_or_default(),
-                plan.rev,
-            )
-        };
-
-        repo_progress.set_finalize_lines(console::make_finalize_line(
-            console::FinalType::Completed,
-            repo_progress.elapsed(),
-            &final_message,
+        return Err(format_error!(
+            "failed to apply pre-sync actions on {} repositories:\n{}",
+            errors.len(),
+            errors.iter().map(|error| format!("- {error}")).join("\n")
         ));
     }
 
     Ok(stashed_repos)
+}
+
+fn pop_stash_for_repo(
+    console: console::Console,
+    url: Arc<str>,
+    path: Arc<str>,
+) -> anyhow::Result<()> {
+    let mut repo_progress = console::Progress::new(
+        console.clone(),
+        format!("//{}", path),
+        None,
+        Some(format!("//{} popping stash", path)),
+    );
+
+    let repo = git::Repository::new(url, path.clone());
+
+    match repo.stash_pop(&mut repo_progress) {
+        Ok(_) => {
+            let lines = console::make_finalize_line(
+                console::FinalType::Completed,
+                repo_progress.elapsed(),
+                &format!("//{} popped stash successfully", path),
+            );
+            repo_progress.set_finalize_lines(lines);
+            Ok(())
+        }
+        Err(error) => {
+            let lines = console::make_finalize_line(
+                console::FinalType::Failed,
+                None,
+                &format!("//{} failed to pop stash", path),
+            );
+            repo_progress.set_finalize_lines(lines);
+            Err(format_error!(
+                "//{} {error}. Manually check this repo with 'git status'",
+                path
+            ))
+        }
+    }
+}
+
+fn collect_stash_pop_job_result(
+    handle: std::thread::JoinHandle<anyhow::Result<()>>,
+    warnings: &mut Vec<String>,
+) {
+    match handle.join() {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => warnings.push(format!("{error:#}")),
+        Err(_) => warnings.push("stash-pop worker thread panicked".to_string()),
+    }
 }
 
 /// Pop stashes on repositories that were stashed during pre-sync checks.
@@ -1278,49 +1411,39 @@ pub fn pop_stashed_repos(
         return Ok(());
     }
 
+    let stashed_set = stashed_repos.into_iter().collect::<HashSet<_>>();
     let workspace_members = workspace_arc.read().settings.json.members.clone();
 
+    let mut repos_to_pop = Vec::new();
     for (url, member_list) in workspace_members.iter() {
         for member in member_list.iter() {
-            if !stashed_repos.contains(&member.path) {
-                continue;
-            }
-
-            let mut repo_progress = console::Progress::new(
-                console.clone(),
-                format!("//{}", member.path),
-                None,
-                Some(format!("//{} popping stash", member.path)),
-            );
-
-            let repo = git::Repository::new(url.clone(), member.path.clone());
-
-            match repo.stash_pop(&mut repo_progress) {
-                Ok(_) => {
-                    let lines = console::make_finalize_line(
-                        console::FinalType::Completed,
-                        repo_progress.elapsed(),
-                        &format!("//{} popped stash successfully", member.path),
-                    );
-                    repo_progress.set_finalize_lines(lines);
-                }
-                Err(e) => {
-                    let lines = console::make_finalize_line(
-                        console::FinalType::Failed,
-                        None,
-                        &format!("//{} failed to pop stash", member.path),
-                    );
-                    repo_progress.set_finalize_lines(lines);
-                    console.warning(
-                        "Failed to pop stash",
-                        format!(
-                            "//{} {e}. Manually check this repo with 'git status'",
-                            member.path
-                        ),
-                    )?;
-                }
+            if stashed_set.contains(&member.path) {
+                repos_to_pop.push((url.clone(), member.path.clone()));
             }
         }
+    }
+
+    let mut warnings = Vec::new();
+    let mut handles = Vec::new();
+
+    for (url, path) in repos_to_pop {
+        let worker_console = console.clone();
+        let handle = std::thread::spawn(move || pop_stash_for_repo(worker_console, url, path));
+        handles.push(handle);
+
+        if handles.len() >= MAX_REPO_SYNC_PARALLEL_JOBS {
+            let handle = handles.remove(0);
+            collect_stash_pop_job_result(handle, &mut warnings);
+        }
+    }
+
+    for handle in handles {
+        collect_stash_pop_job_result(handle, &mut warnings);
+    }
+
+    warnings.sort();
+    for warning in warnings {
+        console.warning("Failed to pop stash", warning)?;
     }
 
     Ok(())
