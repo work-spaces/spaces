@@ -853,8 +853,8 @@ fn describe_sync_complete_result(
 
     let actions = pre_post_actions(plan);
     if !actions.is_empty() {
-        summary.push_str(" | ");
-        summary.push_str(actions.join("; ").as_str());
+        summary.push('\n');
+        summary.push_str(actions.join("\n").as_str());
     }
 
     summary
@@ -1810,7 +1810,7 @@ mod tests {
 
         assert_eq!(
             describe_sync_complete_result(&before, &after, Some(&plan)),
-            "rebased onto origin/main | pre-sync: stash local changes; post-sync: pop stashed changes"
+            "rebased onto origin/main\npre-sync: stash local changes\npost-sync: pop stashed changes"
         );
     }
 

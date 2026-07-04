@@ -530,14 +530,17 @@ pub fn get_commit_tag(
 ) -> Option<Arc<str>> {
     let options = console::ExecuteOptions {
         working_directory: Some(directory.into()),
-        arguments: vec!["describe".into(), "--exact-match".into(), "HEAD".into()],
+        arguments: vec!["tag".into(), "--points-at".into(), "HEAD".into()],
         is_return_stdout: true,
         ..Default::default()
     };
 
     if let Ok(Some(stdout)) = execute_git_command(progress_bar, url, options) {
-        let stdout_trimmed = stdout.trim();
-        Some(stdout_trimmed.into())
+        stdout
+            .lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty())
+            .map(Arc::<str>::from)
     } else {
         None
     }
