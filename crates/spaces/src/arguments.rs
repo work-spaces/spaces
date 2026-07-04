@@ -87,18 +87,34 @@ fn handle_verbosity(
     }
 }
 
+fn execute_script(filename: Arc<str>, input_contents: String) -> anyhow::Result<()> {
+    evaluator::run_starlark_script(filename.clone(), input_contents.into()).map_err(|err| {
+        let stdout_console = console::Console::new_stdout(console::Verbosity::default()).unwrap();
+
+        logger::show_error(
+            stdout_console,
+            err.chain().map(|e| e.to_string()).collect(),
+            logger::ShowBacktrace::No,
+            logger::StripSourceLocation::Yes,
+        );
+        anyhow::anyhow!("{filename} failed\n{err:?}")
+    })?;
+
+    let exit_code = starstd::script::get_exit_code();
+    if exit_code != 0 {
+        std::process::exit(exit_code);
+    }
+
+    return Ok(());
+}
+
 pub fn execute() -> anyhow::Result<()> {
     if std::env::args().len() == 1 {
         if !std::io::stdin().is_terminal() {
             let mut stdin_contents = String::new();
             use std::io::Read;
             std::io::stdin().read_to_string(&mut stdin_contents)?;
-            evaluator::run_starlark_script(
-                workspace::SPACES_STDIN_NAME.into(),
-                stdin_contents.into(),
-            )
-            .context(format_context!("Failed to run starlark script"))?;
-            return Ok(());
+            return execute_script("<stdin>".into(), stdin_contents);
         }
 
         return Err(format_error!(
@@ -111,18 +127,9 @@ pub fn execute() -> anyhow::Result<()> {
         let input = std::path::Path::new(filename.as_ref());
         if input.exists() && input.extension().unwrap_or_default() == "star" {
             starstd::script::set_args(std::env::args().skip(1).collect());
-
             let input_contents = std::fs::read_to_string(input)
                 .context(format_context!("Failed to read input file {input:?}"))?;
-            evaluator::run_starlark_script(filename.clone(), input_contents.into())
-                .context(format_context!("Failed to run starlark script {filename}"))?;
-
-            let exit_code = starstd::script::get_exit_code();
-            if exit_code != 0 {
-                std::process::exit(exit_code);
-            }
-
-            return Ok(());
+            return execute_script(filename, input_contents);
         }
     }
 

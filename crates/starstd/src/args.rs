@@ -1,5 +1,5 @@
 use anyhow::Context;
-use anyhow_source_location::format_context;
+use anyhow_source_location::{format_context, format_error};
 use clap::error::ErrorKind as ClapErrorKind;
 use clap::{Arg, ArgAction, Command, builder::PossibleValuesParser};
 use serde::{Deserialize, Serialize};
@@ -517,7 +517,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         }
 
         let parser_spec: ParserSpec = serde_json::from_value(spec.to_json_value()?)
-            .context(format_context!("Invalid parser spec"))?;
+            .map_err(|err| format_error!("while parsing spec because {err:?}"))?;
 
         let argv = script::get_args_vec();
         let slice: Vec<String> = if argv.is_empty() {
