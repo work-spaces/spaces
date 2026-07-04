@@ -432,19 +432,25 @@ fn matches_to_json(
 pub fn run_parse(req: ParseRequest) -> ParseOutcome {
     let (cmd, metas) = match build_command(&req.spec) {
         Ok(pair) => pair,
-        Err(e) => return ParseOutcome::Error(format!("{e}")),
+        Err(err) => {
+            return ParseOutcome::Error(format!(
+                "error: while building args parser because {err:?}"
+            ));
+        }
     };
 
     match cmd.try_get_matches_from(req.argv) {
         Ok(matches) => match matches_to_json(&matches, &metas) {
             Ok(value) => ParseOutcome::Parsed(value),
-            Err(msg) => ParseOutcome::Error(msg),
+            Err(err) => ParseOutcome::Error(format!(
+                "error: while getting matches for args parser because {err:?}"
+            )),
         },
         Err(err) => match err.kind() {
             ClapErrorKind::DisplayHelp | ClapErrorKind::DisplayVersion => {
                 ParseOutcome::Help(err.to_string())
             }
-            _ => ParseOutcome::Error(err.to_string()),
+            _ => ParseOutcome::Error(format!("error: while parsing arguments because {err:?}")),
         },
     }
 }

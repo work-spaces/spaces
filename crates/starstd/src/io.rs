@@ -19,7 +19,7 @@ fn get_stdin_bytes() -> anyhow::Result<&'static [u8]> {
 
     match cached {
         Ok(bytes) => Ok(bytes.as_slice()),
-        Err(err) => Err(anyhow!(err.clone())).context(format_context!("Failed to read stdin")),
+        Err(err) => Err(format_error!("while getting stdin bytes because {err:?}")),
     }
 }
 
@@ -221,11 +221,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let mut stdout = std::io::stdout().lock();
         stdout
             .write_all(content.as_bytes())
-            .map_err(|err| format_error!("while writing to stdout because {err:?}"))?;
+            .context(format_context!("Failed to write to stdout"))?;
         if newline {
             stdout
                 .write_all(b"\n")
-                .map_err(|err| format_error!("while writing newline to stdout because {err:?}"))?;
+                .context(format_context!("Failed to write newline to stdout"))?;
         }
 
         Ok(NoneType)
@@ -248,11 +248,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let mut stderr = std::io::stderr().lock();
         stderr
             .write_all(content.as_bytes())
-            .map_err(|err| format_error!("while writing to stderr because {err:?}"))?;
+            .context(format_context!("Failed to write to stderr"))?;
         if newline {
             stderr
                 .write_all(b"\n")
-                .map_err(|err| format_error!("while writing newline to stderr because {err:?}"))?;
+                .context(format_context!("Failed to write newline to stderr"))?;
         }
 
         Ok(NoneType)
@@ -266,7 +266,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         std::io::stdout()
             .flush()
-            .map_err(|err| format_error!("while flushing stdout because {err:?}"))?;
+            .context(format_context!("Failed to flush stdout"))?;
         Ok(NoneType)
     }
 
@@ -278,7 +278,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         std::io::stderr()
             .flush()
-            .map_err(|err| format_error!("while flushing stderr because {err:?}"))?;
+            .context(format_context!("Failed to flush stderr"))?;
         Ok(NoneType)
     }
 }

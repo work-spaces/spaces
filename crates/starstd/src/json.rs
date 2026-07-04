@@ -88,8 +88,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `str`: The formatted, multi-line JSON string indented with 2 spaces.
     fn to_string_pretty(value: starlark::values::Value) -> anyhow::Result<String> {
-        let json_string = serde_json::to_string_pretty(&value.to_json_value()?)
-            .map_err(|err| format_error!("while create pretty string from JSON because {err:?}"))?;
+        let json_string = serde_json::to_string_pretty(&value.to_json_value()?).map_err(|err| {
+            format_error!("while creating pretty string from JSON because {err:?}")
+        })?;
 
         Ok(json_string)
     }
@@ -120,7 +121,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         value: starlark::values::Value,
         #[starlark(require = named)] indent: i32,
     ) -> anyhow::Result<String> {
-        if !(0..=16).contains(&indent) {
+        if !crate::is_lsp_mode() && !(0..=16).contains(&indent) {
             return Err(format_error!(
                 "indent must be between 0 and 16, got {}",
                 indent
@@ -136,7 +137,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let mut ser = serde_json::Serializer::with_formatter(&mut buf, formatter);
         json_value
             .serialize(&mut ser)
-            .map_err(|err| format_error!("while serialize JSON value because {err:?}"))?;
+            .map_err(|err| format_error!("while serializing JSON value because {err:?}"))?;
 
         String::from_utf8(buf)
             .map_err(|err| format_error!("while encoding to UTF8 because {err:?}"))

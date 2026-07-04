@@ -89,13 +89,23 @@ fn handle_verbosity(
 
 fn execute_script(filename: Arc<str>, input_contents: String) -> anyhow::Result<()> {
     evaluator::run_starlark_script(filename.clone(), input_contents.into()).map_err(|err| {
-        let stdout_console = console::Console::new_stdout(console::Verbosity::default()).unwrap();
+        let stdout_console = console::Console::new_stdout(console::Verbosity::default())
+            .unwrap_or_else(|_| console::Console::new_null());
+
+        let is_running_in_rule = std::env::var(utils::environment::SPACES_ENV_RUNNING_AS_A_RULE)
+            .map(|value| value == "ON")
+            .unwrap_or(false);
 
         logger::show_error(
             stdout_console,
             err.chain().map(|e| e.to_string()).collect(),
             logger::ShowBacktrace::No,
             logger::StripSourceLocation::Yes,
+            if is_running_in_rule {
+                logger::ShowFailedBanner::No
+            } else {
+                logger::ShowFailedBanner::Yes
+            },
         );
         anyhow::anyhow!("{filename} failed\n{err:?}")
     })?;
@@ -222,6 +232,7 @@ pub fn execute() -> anyhow::Result<()> {
                 error_chain,
                 show_backtrace,
                 strip_source_location,
+                logger::ShowFailedBanner::Yes,
             ),
         };
 

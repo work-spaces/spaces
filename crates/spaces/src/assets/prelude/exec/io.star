@@ -60,10 +60,16 @@ def io_read_stdin_to_string(
         Error: On unsupported encoding, decode failure (utf-8 mode), invalid
                bounds, or when `max_bytes` is exceeded.
     """
+    if max_bytes != None:
+        return io.read_stdin_to_string(
+            encoding = encoding,
+            strip_trailing_newline = strip_trailing_newline,
+            max_bytes = max_bytes,
+        )
+
     return io.read_stdin_to_string(
         encoding = encoding,
         strip_trailing_newline = strip_trailing_newline,
-        max_bytes = max_bytes,
     )
 
 def io_read_stdin(
@@ -112,11 +118,31 @@ def io_read_stdin_lines(
         Error: On unsupported encoding, decode failure (utf-8 mode), invalid
                bounds, or when `max_lines` / `max_bytes` is exceeded.
     """
+    if max_lines != None and max_bytes != None:
+        return io.read_stdin_lines(
+            encoding = encoding,
+            strip_newline = strip_newline,
+            max_lines = max_lines,
+            max_bytes = max_bytes,
+        )
+
+    if max_lines != None:
+        return io.read_stdin_lines(
+            encoding = encoding,
+            strip_newline = strip_newline,
+            max_lines = max_lines,
+        )
+
+    if max_bytes != None:
+        return io.read_stdin_lines(
+            encoding = encoding,
+            strip_newline = strip_newline,
+            max_bytes = max_bytes,
+        )
+
     return io.read_stdin_lines(
         encoding = encoding,
         strip_newline = strip_newline,
-        max_lines = max_lines,
-        max_bytes = max_bytes,
     )
 
 # ============================================================================

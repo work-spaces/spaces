@@ -114,6 +114,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         s: &str,
         eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<NoneOr<Value<'v>>> {
+        if crate::is_lsp_mode() {
+            return Ok(NoneOr::None);
+        }
         let re = Regex::new(pattern).map_err(|err| {
             format_error!("while compiling regex pattern for regex_match because {err:?}")
         })?;
@@ -357,7 +360,7 @@ fn split_words(s: &str) -> Vec<String> {
 }
 
 fn pad_impl(s: &str, n: i32, fill: &str, left: bool) -> anyhow::Result<String> {
-    if n <= 0 {
+    if n <= 0 || crate::is_lsp_mode() {
         return Ok(s.to_string());
     }
     if fill.is_empty() {

@@ -277,7 +277,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let bytes = hex::decode(input)
             .map_err(|err| format_error!("while decoding hex `{input}` because {err:?}"))?;
         String::from_utf8(bytes)
-            .map_err(|err| format_error!(" while utf8 encoding result because {err:?}"))
+            .map_err(|err| format_error!("while encoding decodec bytes as UTF-8 because {err:?}"))
     }
 
     // ── Base64 encoding / decoding ────────────────────────────────────────────
@@ -313,8 +313,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         use base64::Engine;
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(input)
-            .map_err(|err| format_error!("while decoding based `{input}` because {err:?}"))?;
+            .map_err(|err| format_error!("while decoding base64 `{input}` because {err:?}"))?;
         String::from_utf8(bytes)
-            .map_err(|err| format_error!("while encoding to utf8 because {err:?}"))
+            .map_err(|err| format_error!("while encoding to UTF-8 because {err:?}"))
     }
 }

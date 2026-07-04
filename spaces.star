@@ -256,7 +256,6 @@ run_add_exec(
     command = DEBUG_BINARY,
     args = [
         "./spaces/scripts/show-all-errors.exec.star",
-        "--spaces={}".format(DEBUG_BINARY),
     ],
     deps = deps(
         rules = [":build"],
@@ -266,6 +265,25 @@ run_add_exec(
         ],
     ),
     target_files = ["//all-errors-output.txt"],
+    visibility = visibility_private(),
+    help = "Run all error scripts and write the output //all-errors-output.txt",
+)
+
+run_add_exec(
+    "run_error_script",
+    command = DEBUG_BINARY,
+    args = [
+        "./spaces/scripts/errors/error-toml-null-value.exec.star",
+    ],
+    deps = deps(
+        rules = [":build"],
+        files = [
+            "scripts/errors/**",
+            "scripts/errors/error-toml-null-value.exec.star",
+        ],
+    ),
+    visibility = visibility_private(),
+    help = "Run a single error script within a rule to check for a nested banner",
 )
 
 run_add_exec(

@@ -2,4 +2,5 @@
 
 load("//@star/prelude/exec/toml.star", "toml_encode")
 
-toml_encode({"x": None})
+if "spaces" in sys.executable():
+    toml_encode({"x": None})
