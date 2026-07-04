@@ -437,6 +437,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                 no_rebase,
                 dev_branch_bases: dev_branch_base,
                 no_dev_branch_bases: no_dev_branch_base,
+                dev_branch_repos: dev_branch,
                 new_branch_repos: new_branch,
                 dry_run,
             });
