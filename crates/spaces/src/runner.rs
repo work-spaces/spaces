@@ -720,27 +720,28 @@ pub fn run_starlark_modules_in_workspace(
     let is_sync_checkout = phase == task::Phase::Checkout && singleton::get_is_sync();
 
     let (before_sync_snapshots, repo_sync_plan, stashed_repos) = if is_sync_checkout {
-        let mut pre_sync_progress = console::Progress::new(console.clone(), "pre-sync", None, None);
+        let mut pre_evaluation_sync_progress =
+            console::Progress::new(console.clone(), "pre-eval sync", None, None);
 
-        pre_sync_progress.set_message("collecting pre sync repo status");
+        pre_evaluation_sync_progress.set_message("collecting pre-eval sync repo status");
         let before_snapshots = sync::collect_repo_sync_snapshots(
             console.clone(),
             workspace_arc.clone(),
-            "pre-sync current revisions",
+            "pre-eval sync current revisions",
         )
         .context(format_context!(
-            "while collecting pre-sync repository revisions"
+            "while collecting pre-eval repository revisions"
         ))?;
 
         if sync_options.force {
-            pre_sync_progress.set_finalize_lines(console::make_finalize_line(
+            pre_evaluation_sync_progress.set_finalize_lines(console::make_finalize_line(
                 console::FinalType::Completed,
-                pre_sync_progress.elapsed(),
-                "pre-sync snapshots collected (--allow-dirty enabled; checks are non-blocking)",
+                pre_evaluation_sync_progress.elapsed(),
+                "pre-eval sync snapshots collected (--allow-dirty enabled; checks are non-blocking)",
             ));
 
             if sync_options.dry_run {
-                drop(pre_sync_progress);
+                drop(pre_evaluation_sync_progress);
                 sync::emit_dry_run_repo_plan(console.clone(), &[])
                     .context(format_context!("while emitting dry-run sync plan"))?;
                 return Ok(());
@@ -748,40 +749,42 @@ pub fn run_starlark_modules_in_workspace(
 
             (before_snapshots, Vec::new(), Vec::new())
         } else {
-            pre_sync_progress.set_message("building repo sync plan");
+            pre_evaluation_sync_progress.set_message("building repo sync plan");
             let repo_sync_plan = sync::build_repo_sync_plan(
                 console.clone(),
-                &mut pre_sync_progress,
+                &mut pre_evaluation_sync_progress,
                 workspace_arc.clone(),
             )
             .context(format_context!("while building repositories sync plan"))?;
 
             if sync_options.dry_run {
-                pre_sync_progress.set_finalize_lines(console::make_finalize_line(
+                pre_evaluation_sync_progress.set_finalize_lines(console::make_finalize_line(
                     console::FinalType::Completed,
-                    pre_sync_progress.elapsed(),
-                    "pre-sync dry-run completed",
+                    pre_evaluation_sync_progress.elapsed(),
+                    "pre-eval sync dry-run completed",
                 ));
 
-                drop(pre_sync_progress);
+                drop(pre_evaluation_sync_progress);
                 sync::emit_dry_run_repo_plan(console.clone(), repo_sync_plan.as_slice())
                     .context(format_context!("while emitting dry-run sync plan"))?;
 
                 return Ok(());
             }
 
-            pre_sync_progress.set_message("executing pre sync actions");
+            pre_evaluation_sync_progress.set_message("executing pre sync actions");
             let stashed_repos = sync::execute_repo_sync_plan(
                 console.clone(),
                 workspace_arc.clone(),
                 repo_sync_plan.as_slice(),
             )
-            .context(format_context!("while applying repositories sync plan"))?;
+            .context(format_context!(
+                "while applying repositories pre-eval sync plan"
+            ))?;
 
-            pre_sync_progress.set_finalize_lines(console::make_finalize_line(
+            pre_evaluation_sync_progress.set_finalize_lines(console::make_finalize_line(
                 console::FinalType::Completed,
-                pre_sync_progress.elapsed(),
-                "pre-sync plan applied",
+                pre_evaluation_sync_progress.elapsed(),
+                "pre-eval sync plan applied",
             ));
 
             (before_snapshots, repo_sync_plan, stashed_repos)
@@ -791,7 +794,7 @@ pub fn run_starlark_modules_in_workspace(
     };
 
     // Capture the sync result so we can always pop stashes, even if sync fails
-    let sync_result = if is_sync_checkout && sync_options.skip_evaluation {
+    let evaluation_result = if is_sync_checkout && sync_options.skip_evaluation {
         let mut skip_eval_progress = console::Progress::new(
             console.clone(),
             "sync",
@@ -842,35 +845,39 @@ pub fn run_starlark_modules_in_workspace(
     };
 
     if is_sync_checkout {
-        let mut post_sync_progress =
-            console::Progress::new(console.clone(), "executing post sync actions", None, None);
+        let mut post_eval_sync_progress = console::Progress::new(
+            console.clone(),
+            "executing post-eval sync actions",
+            None,
+            None,
+        );
 
         // Pop stashes after sync is complete (or failed)
         // This must happen regardless of sync success to avoid leaving the workspace in a stashed state
         if !stashed_repos.is_empty() {
-            post_sync_progress.set_message("popping stashes");
+            post_eval_sync_progress.set_message("popping stashes");
             sync::pop_stashed_repos(console.clone(), workspace_arc.clone(), stashed_repos)
                 .context(format_context!("while popping stashes after sync"))?;
         }
 
-        if sync_result.is_ok() {
-            post_sync_progress.set_message("collect post sync repo status");
+        if evaluation_result.is_ok() {
+            post_eval_sync_progress.set_message("collect post-eval sync repo status");
             let after_sync_snapshots = sync::collect_repo_sync_snapshots(
                 console.clone(),
                 workspace_arc.clone(),
-                "post-sync current revisions",
+                "post-eval sync current revisions",
             )
             .context(format_context!(
-                "while collecting post-sync repository revisions"
+                "while collecting post-eval sync repository revisions"
             ))?;
 
-            post_sync_progress.set_finalize_lines(console::make_finalize_line(
+            post_eval_sync_progress.set_finalize_lines(console::make_finalize_line(
                 console::FinalType::Finished,
-                post_sync_progress.elapsed(),
-                "post sync successful",
+                post_eval_sync_progress.elapsed(),
+                "post-eval sync successful",
             ));
 
-            drop(post_sync_progress);
+            drop(post_eval_sync_progress);
 
             sync::emit_sync_complete_report(
                 console.clone(),
@@ -885,7 +892,7 @@ pub fn run_starlark_modules_in_workspace(
     drop(workspace_lock);
 
     // Now return the original sync result
-    sync_result
+    evaluation_result
 }
 
 pub fn run_lsp(console: console::Console) -> anyhow::Result<()> {

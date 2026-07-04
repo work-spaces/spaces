@@ -4714,6 +4714,7 @@ dependencies = [
  "num_cpus",
  "once_cell",
  "petgraph 0.8.3",
+ "rayon",
  "regex",
  "semver",
  "serde",
