@@ -20,7 +20,6 @@ pub const ENV_MD_FILE_NAME: &str = "env.spaces.md";
 pub const LOCK_FILE_NAME: &str = "lock.spaces.star";
 pub const SPACES_MODULE_NAME: &str = "spaces.star";
 pub const STAR_FILE_SUFFIX: &str = ".star";
-pub const SPACES_STDIN_NAME: &str = "stdin.star";
 const SPACES_SYSROOT_NAME: &str = "sysroot";
 
 const AUTOMATIC_WORKSPACE_ABSOLUTE_PATH: &str = "SPACES_WORKSPACE_ABSOLUTE_PATH";

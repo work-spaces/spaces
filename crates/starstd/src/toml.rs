@@ -1,5 +1,4 @@
-use anyhow::Context;
-use anyhow_source_location::format_context;
+use anyhow_source_location::format_error;
 use starlark::environment::GlobalsBuilder;
 use starlark::eval::Evaluator;
 use starlark::values::Value;
@@ -118,10 +117,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 Err(_) => heap.alloc(serde_json::json!({})),
             });
         }
-        let toml_value: toml::Value =
-            toml::from_str(content).context(format_context!("bad toml string"))?;
-        let json_value = toml_to_json(toml_value)
-            .context(format_context!("Failed to convert TOML to Starlark"))?;
+        let toml_value: toml::Value = toml::from_str(content)
+            .map_err(|err| format_error!("while parsing TOML string because {err:?}"))?;
+        let json_value = toml_to_json(toml_value).map_err(|err| {
+            format_error!("while converting TOML to Starlark value because {err:?}")
+        })?;
         Ok(heap.alloc(json_value))
     }
 
@@ -138,12 +138,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `str`: The TOML string representation of the input value.
     fn to_string(value: starlark::values::Value) -> anyhow::Result<String> {
-        let json_value = value
-            .to_json_value()
-            .context(format_context!("Failed to convert Starlark value to JSON"))?;
-        let toml_value =
-            json_to_toml(json_value).context(format_context!("Failed to convert value to TOML"))?;
-        toml::to_string(&toml_value).context(format_context!("Failed to serialize TOML string"))
+        let json_value = value.to_json_value().map_err(|err| {
+            format_error!(
+                "while converting Starlark value to JSON for TOML serialization because {err:?}"
+            )
+        })?;
+        let toml_value = json_to_toml(json_value)
+            .map_err(|err| format_error!("while converting value to TOML because {err:?}"))?;
+        toml::to_string(&toml_value)
+            .map_err(|err| format_error!("while serializing TOML string because {err:?}"))
     }
 
     /// Converts a dictionary or Starlark value into a pretty-printed TOML string.
@@ -160,13 +163,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `str`: The formatted TOML string.
     fn to_string_pretty(value: starlark::values::Value) -> anyhow::Result<String> {
-        let json_value = value
-            .to_json_value()
-            .context(format_context!("Failed to convert Starlark value to JSON"))?;
-        let toml_value =
-            json_to_toml(json_value).context(format_context!("Failed to convert value to TOML"))?;
+        let json_value = value.to_json_value().map_err(|err| {
+            format_error!(
+                "while converting Starlark value to JSON for pretty TOML serialization because {err:?}"
+            )
+        })?;
+        let toml_value = json_to_toml(json_value)
+            .map_err(|err| format_error!("while converting value to TOML because {err:?}"))?;
         toml::to_string_pretty(&toml_value)
-            .context(format_context!("Failed to serialize pretty TOML string"))
+            .map_err(|err| format_error!("while serializing pretty TOML string because {err:?}"))
     }
 
     /// Returns `True` if the given string is valid TOML, `False` otherwise.
@@ -237,8 +242,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let heap = eval.heap();
         match toml::from_str::<toml::Value>(content) {
             Ok(toml_value) => {
-                let json_value = toml_to_json(toml_value)
-                    .context(format_context!("Failed to convert TOML to Starlark"))?;
+                let json_value = toml_to_json(toml_value).map_err(|err| {
+                    format_error!("while converting TOML to Starlark value because {err:?}")
+                })?;
                 Ok(heap.alloc(json_value))
             }
             Err(_) => Ok(default.unwrap_or_else(Value::new_none)),

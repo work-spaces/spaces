@@ -1,5 +1,4 @@
-use anyhow::Context;
-use anyhow_source_location::format_context;
+use anyhow_source_location::format_error;
 use clap::error::ErrorKind as ClapErrorKind;
 use clap::{Arg, ArgAction, Command, builder::PossibleValuesParser};
 use serde::{Deserialize, Serialize};
@@ -433,19 +432,25 @@ fn matches_to_json(
 pub fn run_parse(req: ParseRequest) -> ParseOutcome {
     let (cmd, metas) = match build_command(&req.spec) {
         Ok(pair) => pair,
-        Err(e) => return ParseOutcome::Error(format!("{e}")),
+        Err(err) => {
+            return ParseOutcome::Error(format!(
+                "error: while building args parser because {err:?}"
+            ));
+        }
     };
 
     match cmd.try_get_matches_from(req.argv) {
         Ok(matches) => match matches_to_json(&matches, &metas) {
             Ok(value) => ParseOutcome::Parsed(value),
-            Err(msg) => ParseOutcome::Error(msg),
+            Err(err) => ParseOutcome::Error(format!(
+                "error: while getting matches for args parser because {err:?}"
+            )),
         },
         Err(err) => match err.kind() {
             ClapErrorKind::DisplayHelp | ClapErrorKind::DisplayVersion => {
                 ParseOutcome::Help(err.to_string())
             }
-            _ => ParseOutcome::Error(err.to_string()),
+            _ => ParseOutcome::Error(format!("error: while parsing arguments because {err:?}")),
         },
     }
 }
@@ -491,10 +496,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<Value<'v>> {
         let opts: ParserOptions = serde_json::from_value(options.to_json_value()?)
-            .context(format_context!("Invalid parser options"))?;
+            .map_err(|err| format_error!("while parsing parser options because {err:?}"))?;
         let spec: ParserSpec = opts.into();
         let json_value = serde_json::to_value(&spec)
-            .context(format_context!("Failed to serialize parser spec"))?;
+            .map_err(|err| format_error!("while serializing parser spec because {err:?}"))?;
         Ok(eval.heap().alloc(json_value))
     }
 
@@ -517,7 +522,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         }
 
         let parser_spec: ParserSpec = serde_json::from_value(spec.to_json_value()?)
-            .context(format_context!("Invalid parser spec"))?;
+            .map_err(|err| format_error!("while parsing spec because {err:?}"))?;
 
         let argv = script::get_args_vec();
         let slice: Vec<String> = if argv.is_empty() {

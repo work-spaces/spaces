@@ -1,6 +1,6 @@
 use crate::is_lsp_mode;
 use anyhow::{Context, anyhow};
-use anyhow_source_location::format_context;
+use anyhow_source_location::{format_context, format_error};
 use starlark::environment::GlobalsBuilder;
 use starlark::values::none::NoneType;
 use std::io::{IsTerminal, Read, Write};
@@ -19,7 +19,7 @@ fn get_stdin_bytes() -> anyhow::Result<&'static [u8]> {
 
     match cached {
         Ok(bytes) => Ok(bytes.as_slice()),
-        Err(err) => Err(anyhow!(err.clone())).context(format_context!("Failed to read stdin")),
+        Err(err) => Err(format_error!("while getting stdin bytes because {err:?}")),
     }
 }
 
