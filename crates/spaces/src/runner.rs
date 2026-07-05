@@ -1,7 +1,7 @@
 use crate::{completions, evaluator, executor, rules, task, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use utils::{
     ci, features, git, labels, lock, logger, logs, mtarget, rcache, shell, store, version, ws,
 };
@@ -69,10 +69,6 @@ fn get_workspace(
         is_create_log_folder,
     )
     .context(format_context!("while running workspace"))
-}
-
-fn normalize_repo_selector(selector: &str) -> Arc<str> {
-    selector.strip_prefix("//").unwrap_or(selector).into()
 }
 
 fn evaluate_environment(
@@ -209,16 +205,15 @@ pub fn foreach_repo(
                 }
             } else if for_each_repo == ForEachRepo::DevBranch {
                 // get the dev-branches from the workspace settings
-                let normalized_member_path = normalize_repo_selector(member.path.as_ref());
+                let normalized_member_path = ws::normalize_repo_selector(member.path.as_ref());
                 for dev_branch_rule in dev_branch_rules.iter() {
                     let location_in_workspace =
                         labels::get_rule_name_from_label(dev_branch_rule.as_ref());
-                    let normalized_location = normalize_repo_selector(location_in_workspace);
-                    if normalized_location == normalized_member_path
-                        || normalized_member_path
-                            .as_ref()
-                            .ends_with(normalized_location.as_ref())
-                    {
+                    let normalized_location = ws::normalize_repo_selector(location_in_workspace);
+                    if ws::normalized_selector_matches_member_path(
+                        normalized_member_path.as_ref(),
+                        normalized_location.as_ref(),
+                    ) {
                         repos.push(member.clone());
                         // skip the rest of the loop
                         break;
@@ -729,79 +724,92 @@ pub fn run_starlark_modules_in_workspace(
     let sync_options = singleton::get_sync_options();
     let is_sync_checkout = phase == task::Phase::Checkout && singleton::get_is_sync();
 
-    let (before_sync_snapshots, repo_sync_plan, stashed_repos) = if is_sync_checkout {
-        let mut pre_evaluation_sync_progress =
-            console::Progress::new(console.clone(), "pre-eval sync", None, None);
+    let (before_sync_snapshots, repo_sync_plan, stashed_repos, before_tracked_repos) =
+        if is_sync_checkout {
+            let mut pre_evaluation_sync_progress =
+                console::Progress::new(console.clone(), "pre-eval sync", None, None);
 
-        pre_evaluation_sync_progress.set_message("collecting pre-eval sync repo status");
-        let before_snapshots = sync::collect_repo_sync_snapshots(
-            console.clone(),
-            workspace_arc.clone(),
-            "pre-eval sync current revisions",
-        )
-        .context(format_context!(
-            "while collecting pre-eval repository revisions"
-        ))?;
+            pre_evaluation_sync_progress.set_message("collecting pre-eval sync repo status");
+            let before_snapshots = sync::collect_repo_sync_snapshots(
+                console.clone(),
+                workspace_arc.clone(),
+                "pre-eval sync current revisions",
+            )
+            .context(format_context!(
+                "while collecting pre-eval repository revisions"
+            ))?;
 
-        if sync_options.force {
-            pre_evaluation_sync_progress.set_finalize_lines(console::make_finalize_line(
+            let before_tracked_repos = ws::CheckoutSettings::load().unwrap_or_default().repos;
+
+            if sync_options.force {
+                pre_evaluation_sync_progress.set_finalize_lines(console::make_finalize_line(
                 console::FinalType::Completed,
                 pre_evaluation_sync_progress.elapsed(),
                 "pre-eval sync snapshots collected (--skip-pre-evaluation/--allow-dirty enabled; checks are non-blocking)",
             ));
 
-            if sync_options.dry_run {
-                drop(pre_evaluation_sync_progress);
-                sync::emit_dry_run_repo_plan(console.clone(), &[])
-                    .context(format_context!("while emitting dry-run sync plan"))?;
-                return Ok(());
-            }
+                if sync_options.dry_run {
+                    drop(pre_evaluation_sync_progress);
+                    sync::emit_dry_run_repo_plan(console.clone(), &[])
+                        .context(format_context!("while emitting dry-run sync plan"))?;
+                    return Ok(());
+                }
 
-            (before_snapshots, Vec::new(), Vec::new())
-        } else {
-            pre_evaluation_sync_progress.set_message("building repo sync plan");
-            let repo_sync_plan = sync::build_repo_sync_plan(
-                console.clone(),
-                &mut pre_evaluation_sync_progress,
-                workspace_arc.clone(),
-            )
-            .context(format_context!("while building repositories sync plan"))?;
+                (
+                    before_snapshots,
+                    Vec::new(),
+                    Vec::new(),
+                    before_tracked_repos,
+                )
+            } else {
+                pre_evaluation_sync_progress.set_message("building repo sync plan");
+                let repo_sync_plan = sync::build_repo_sync_plan(
+                    console.clone(),
+                    &mut pre_evaluation_sync_progress,
+                    workspace_arc.clone(),
+                )
+                .context(format_context!("while building repositories sync plan"))?;
 
-            if sync_options.dry_run {
+                if sync_options.dry_run {
+                    pre_evaluation_sync_progress.set_finalize_lines(console::make_finalize_line(
+                        console::FinalType::Completed,
+                        pre_evaluation_sync_progress.elapsed(),
+                        "pre-eval sync dry-run completed",
+                    ));
+
+                    drop(pre_evaluation_sync_progress);
+                    sync::emit_dry_run_repo_plan(console.clone(), repo_sync_plan.as_slice())
+                        .context(format_context!("while emitting dry-run sync plan"))?;
+
+                    return Ok(());
+                }
+
+                pre_evaluation_sync_progress.set_message("executing pre sync actions");
+                let stashed_repos = sync::execute_repo_sync_plan(
+                    console.clone(),
+                    workspace_arc.clone(),
+                    repo_sync_plan.as_slice(),
+                )
+                .context(format_context!(
+                    "while applying repositories pre-eval sync plan"
+                ))?;
+
                 pre_evaluation_sync_progress.set_finalize_lines(console::make_finalize_line(
                     console::FinalType::Completed,
                     pre_evaluation_sync_progress.elapsed(),
-                    "pre-eval sync dry-run completed",
+                    "pre-eval sync plan applied",
                 ));
 
-                drop(pre_evaluation_sync_progress);
-                sync::emit_dry_run_repo_plan(console.clone(), repo_sync_plan.as_slice())
-                    .context(format_context!("while emitting dry-run sync plan"))?;
-
-                return Ok(());
+                (
+                    before_snapshots,
+                    repo_sync_plan,
+                    stashed_repos,
+                    before_tracked_repos,
+                )
             }
-
-            pre_evaluation_sync_progress.set_message("executing pre sync actions");
-            let stashed_repos = sync::execute_repo_sync_plan(
-                console.clone(),
-                workspace_arc.clone(),
-                repo_sync_plan.as_slice(),
-            )
-            .context(format_context!(
-                "while applying repositories pre-eval sync plan"
-            ))?;
-
-            pre_evaluation_sync_progress.set_finalize_lines(console::make_finalize_line(
-                console::FinalType::Completed,
-                pre_evaluation_sync_progress.elapsed(),
-                "pre-eval sync plan applied",
-            ));
-
-            (before_snapshots, repo_sync_plan, stashed_repos)
-        }
-    } else {
-        (Vec::new(), Vec::new(), Vec::new())
-    };
+        } else {
+            (Vec::new(), Vec::new(), Vec::new(), HashMap::new())
+        };
 
     // Capture the sync result so we can always pop stashes, even if sync fails
     let evaluation_result = if is_sync_checkout && sync_options.skip_evaluation {
@@ -881,6 +889,8 @@ pub fn run_starlark_modules_in_workspace(
                 "while collecting post-eval sync repository revisions"
             ))?;
 
+            let after_tracked_repos = ws::CheckoutSettings::load().unwrap_or_default().repos;
+
             post_eval_sync_progress.set_finalize_lines(console::make_finalize_line(
                 console::FinalType::Finished,
                 post_eval_sync_progress.elapsed(),
@@ -888,6 +898,15 @@ pub fn run_starlark_modules_in_workspace(
             ));
 
             drop(post_eval_sync_progress);
+
+            sync::execute_removed_repo_post_sync_actions(
+                console.clone(),
+                &before_tracked_repos,
+                &after_tracked_repos,
+            )
+            .context(format_context!(
+                "while executing post-eval removed repository actions"
+            ))?;
 
             sync::emit_sync_complete_report(
                 console.clone(),

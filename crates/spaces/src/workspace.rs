@@ -76,28 +76,6 @@ fn logger(console: console::Console) -> logger::Logger {
     logger::Logger::new(console, "workspace".into())
 }
 
-fn normalize_repo_selector(selector: &str) -> Arc<str> {
-    selector.strip_prefix("//").unwrap_or(selector).into()
-}
-
-fn normalize_repo_selector_for_storage(selector: &str) -> Arc<str> {
-    format!("//{}", normalize_repo_selector(selector)).into()
-}
-
-fn normalize_repo_selectors_for_storage(selectors: Vec<Arc<str>>) -> Vec<Arc<str>> {
-    let mut seen: HashSet<Arc<str>> = HashSet::new();
-    let mut normalized = Vec::new();
-
-    for selector in selectors {
-        let normalized_selector = normalize_repo_selector_for_storage(selector.as_ref());
-        if seen.insert(normalized_selector.clone()) {
-            normalized.push(normalized_selector);
-        }
-    }
-
-    normalized
-}
-
 fn parse_dev_branch_base_argument(entry: &str) -> anyhow::Result<(Arc<str>, Arc<str>)> {
     let Some((repo_selector, base_ref)) = entry.split_once('=') else {
         return Err(format_error!(
@@ -111,7 +89,7 @@ fn parse_dev_branch_base_argument(entry: &str) -> anyhow::Result<(Arc<str>, Arc<
         ));
     }
 
-    Ok((normalize_repo_selector(repo_selector), base_ref.into()))
+    Ok((ws::normalize_repo_selector(repo_selector), base_ref.into()))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -388,20 +366,11 @@ impl Workspace {
     }
 
     pub fn is_dev_branch(&self, rule_name: &str) -> bool {
-        let normalized_rule_name = normalize_repo_selector(rule_name);
-
-        for item in &self.settings.json.dev_branches {
-            let normalized_item = normalize_repo_selector(item.as_ref());
-            if normalized_item == normalized_rule_name
-                || normalized_rule_name
-                    .as_ref()
-                    .ends_with(normalized_item.as_ref())
-            {
-                return true;
-            }
-        }
-
-        false
+        self.settings
+            .json
+            .dev_branches
+            .iter()
+            .any(|item| ws::repo_selector_matches(rule_name, item.as_ref()))
     }
 
     pub fn get_new_branch_name(&self) -> Arc<str> {
@@ -425,6 +394,10 @@ impl Workspace {
     }
 
     pub fn add_member(&mut self, member: ws::Member) {
+        let is_dev_branch = self.is_dev_branch(member.path.as_ref());
+        self.settings
+            .checkout
+            .insert_repo(member.path.clone(), member.url.clone(), is_dev_branch);
         self.settings.json.push_member(member);
     }
 
@@ -633,27 +606,25 @@ impl Workspace {
 
         let mut combined_dev_branches = settings.json.dev_branches.clone();
         combined_dev_branches.extend(singleton::get_new_branches());
-        settings.json.dev_branches = normalize_repo_selectors_for_storage(combined_dev_branches);
+        settings.json.dev_branches =
+            ws::normalize_repo_selectors_for_storage(combined_dev_branches);
 
         let removed_branches = singleton::get_removed_branches()
             .into_iter()
-            .map(|selector| normalize_repo_selector(selector.as_ref()))
+            .map(|selector| ws::normalize_repo_selector(selector.as_ref()))
             .collect::<Vec<_>>();
         if !removed_branches.is_empty() {
             settings.json.dev_branches.retain(|branch| {
-                let normalized_branch = normalize_repo_selector(branch.as_ref());
-                !removed_branches.iter().any(|removed| {
-                    normalized_branch == *removed
-                        || normalized_branch.as_ref().ends_with(removed.as_ref())
-                        || removed.as_ref().ends_with(normalized_branch.as_ref())
-                })
+                !removed_branches
+                    .iter()
+                    .any(|removed| ws::repo_selector_matches(branch.as_ref(), removed.as_ref()))
             });
         }
 
         let mut normalized_dev_branch_bases = HashMap::new();
         for (repo_selector, base_ref) in std::mem::take(&mut settings.json.dev_branch_bases) {
             normalized_dev_branch_bases.insert(
-                normalize_repo_selector_for_storage(repo_selector.as_ref()),
+                ws::normalize_repo_selector_for_storage(repo_selector.as_ref()),
                 base_ref,
             );
         }
@@ -672,7 +643,7 @@ impl Workspace {
                 }
 
                 settings.json.dev_branch_bases.insert(
-                    normalize_repo_selector_for_storage(repo_path.as_ref()),
+                    ws::normalize_repo_selector_for_storage(repo_path.as_ref()),
                     base_ref,
                 );
             }
@@ -681,7 +652,7 @@ impl Workspace {
         if !sync_options.no_dev_branch_bases.is_empty() {
             let mut keys_to_remove = Vec::new();
             for selector in sync_options.no_dev_branch_bases.iter() {
-                let repo_selector = normalize_repo_selector(selector.as_ref());
+                let repo_selector = ws::normalize_repo_selector(selector.as_ref());
                 if repo_selector.is_empty() {
                     return Err(format_error!(
                         "Bad --no-dev-branch-base argument `{selector}`: expected <repo-path>"
@@ -689,12 +660,11 @@ impl Workspace {
                 }
 
                 for repo_path in settings.json.dev_branch_bases.keys() {
-                    let normalized_repo_path = normalize_repo_selector(repo_path.as_ref());
-                    if normalized_repo_path == repo_selector
-                        || normalized_repo_path
-                            .as_ref()
-                            .ends_with(repo_selector.as_ref())
-                    {
+                    let normalized_repo_path = ws::normalize_repo_selector(repo_path.as_ref());
+                    if ws::normalized_selector_matches_member_path(
+                        normalized_repo_path.as_ref(),
+                        repo_selector.as_ref(),
+                    ) {
                         keys_to_remove.push(repo_path.clone());
                     }
                 }
@@ -1435,11 +1405,11 @@ mod tests {
     #[test]
     fn normalize_repo_selector_for_storage_always_adds_prefix() {
         assert_eq!(
-            normalize_repo_selector_for_storage("@star/sdk").as_ref(),
+            ws::normalize_repo_selector_for_storage("@star/sdk").as_ref(),
             "//@star/sdk"
         );
         assert_eq!(
-            normalize_repo_selector_for_storage("//@star/sdk").as_ref(),
+            ws::normalize_repo_selector_for_storage("//@star/sdk").as_ref(),
             "//@star/sdk"
         );
     }
@@ -1447,12 +1417,28 @@ mod tests {
     #[test]
     fn normalize_repo_selectors_for_storage_deduplicates_equivalent_entries() {
         let selectors = arcs(&["@star/sdk", "//@star/sdk", "spaces", "//spaces"]);
-        let normalized = normalize_repo_selectors_for_storage(selectors);
+        let normalized = ws::normalize_repo_selectors_for_storage(selectors);
         let as_str = normalized
             .iter()
             .map(|item| item.as_ref())
             .collect::<Vec<_>>();
 
         assert_eq!(as_str, vec!["//@star/sdk", "//spaces"]);
+    }
+
+    #[test]
+    fn repo_selector_matches_simple_repo_against_rule_label() {
+        assert!(ws::repo_selector_matches(
+            "//spaces/1.checkout:spaces",
+            "//spaces"
+        ));
+    }
+
+    #[test]
+    fn repo_selector_does_not_match_partial_suffixes() {
+        assert!(!ws::repo_selector_matches(
+            "//spaces/1.checkout:install-spaces",
+            "//spaces"
+        ));
     }
 }

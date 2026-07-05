@@ -1,5 +1,4 @@
 use crate::workspace;
-use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -61,10 +60,12 @@ impl OrasArchive {
                 &get_oras_command(&workspace.read().get_spaces_tools_path()),
                 options,
             )
-            .context(ecode::anyhow(
-                ecode::Ecode::FailedToCreateOrAcquireLockFile,
-                &format!("failed to download {artifact_label} using oras",),
-            ))?;
+            .map_err(|err| {
+                ecode::anyhow(
+                    ecode::Ecode::FailedToCreateOrAcquireLockFile,
+                    &format!("failed to download {artifact_label} using oras\n{err:?}",),
+                )
+            })?;
 
         Ok(())
     }
@@ -87,10 +88,12 @@ impl OrasArchive {
                 get_oras_command(&workspace.read().get_spaces_tools_path()).as_ref(),
                 options,
             )
-            .context(ecode::anyhow(
-                ecode::Ecode::FailedToCreateOrAcquireLockFile,
-                &format!("failed to fetch manifest for {artifact_label} using oras",),
-            ))?;
+            .map_err(|err| {
+                ecode::anyhow(
+                    ecode::Ecode::FailedToCreateOrAcquireLockFile,
+                    &format!("failed to fetch manifest for {artifact_label} using oras\n{err:?}",),
+                )
+            })?;
 
         if manifest.exit_code != 0 {
             return Err(ecode::anyhow(
@@ -103,11 +106,12 @@ impl OrasArchive {
         }
 
         if let Some(manifest) = manifest.stdout {
-            let value: serde_json::Value =
-                serde_json::from_str(&manifest).context(ecode::anyhow(
+            let value: serde_json::Value = serde_json::from_str(&manifest).map_err(|err| {
+                ecode::anyhow(
                     ecode::Ecode::FailedToCreateOrAcquireLockFile,
-                    &format!("failed to parse manifest from {artifact_label}"),
-                ))?;
+                    &format!("failed to parse manifest from {artifact_label}\n{err:?}"),
+                )
+            })?;
             let mut sha256_option: Option<Arc<str>> = None;
             let mut filename_option: Option<Arc<str>> = None;
 
