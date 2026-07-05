@@ -23,6 +23,7 @@ glob-match = "0.2.1"
 url = "2.5.2"
 toml = "0.9"
 serde_yaml = "0.9"
+rayon = "1"
 strum = { version = "0.26", features = ["derive"] }
 indexmap = { version = "2", features = ["serde"] }
 

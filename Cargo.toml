@@ -23,6 +23,7 @@ toml = "0.9"
 serde_yaml = "0.9"
 strum = { version = "0.26", features = ["derive"] }
 indexmap = { version = "2", features = ["serde"] }
+rayon = "1"
 
 archiver = { path = "crates/spaces-archiver", package = "spaces-archiver"  }
 utils = { path = "crates/spaces-utils", package = "spaces-utils" }

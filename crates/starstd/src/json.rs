@@ -65,8 +65,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `str`: The JSON string representation of the input value.
     fn to_string(value: starlark::values::Value) -> anyhow::Result<String> {
-        let json_string = serde_json::to_string(&value.to_json_value()?)
-            .map_err(|err| format_error!("while creating string from JSON because {err:?}"))?;
+        let json_string = serde_json::to_string(&value.to_json_value().map_err(|err| {
+            format_error!("while creating JSON value for string because {err:?}")
+        })?)
+        .map_err(|err| format_error!("while creating string from JSON because {err:?}"))?;
         Ok(json_string)
     }
 
@@ -88,9 +90,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// # Returns
     /// * `str`: The formatted, multi-line JSON string indented with 2 spaces.
     fn to_string_pretty(value: starlark::values::Value) -> anyhow::Result<String> {
-        let json_string = serde_json::to_string_pretty(&value.to_json_value()?).map_err(|err| {
-            format_error!("while creating pretty string from JSON because {err:?}")
-        })?;
+        let json_string = serde_json::to_string_pretty(&value.to_json_value().map_err(|err| {
+            format_error!("while creating JSON value for pretty string because {err:?}")
+        })?)
+        .map_err(|err| format_error!("while creating pretty string from JSON because {err:?}"))?;
 
         Ok(json_string)
     }
