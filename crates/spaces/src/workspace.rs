@@ -76,6 +76,44 @@ fn logger(console: console::Console) -> logger::Logger {
     logger::Logger::new(console, "workspace".into())
 }
 
+fn normalize_repo_selector(selector: &str) -> Arc<str> {
+    selector.strip_prefix("//").unwrap_or(selector).into()
+}
+
+fn normalize_repo_selector_for_storage(selector: &str) -> Arc<str> {
+    format!("//{}", normalize_repo_selector(selector)).into()
+}
+
+fn normalize_repo_selectors_for_storage(selectors: Vec<Arc<str>>) -> Vec<Arc<str>> {
+    let mut seen: HashSet<Arc<str>> = HashSet::new();
+    let mut normalized = Vec::new();
+
+    for selector in selectors {
+        let normalized_selector = normalize_repo_selector_for_storage(selector.as_ref());
+        if seen.insert(normalized_selector.clone()) {
+            normalized.push(normalized_selector);
+        }
+    }
+
+    normalized
+}
+
+fn parse_dev_branch_base_argument(entry: &str) -> anyhow::Result<(Arc<str>, Arc<str>)> {
+    let Some((repo_selector, base_ref)) = entry.split_once('=') else {
+        return Err(format_error!(
+            "Bad --dev-branch-base argument `{entry}`: expected <repo-path>=<ref>"
+        ));
+    };
+
+    if repo_selector.is_empty() || base_ref.is_empty() {
+        return Err(format_error!(
+            "Bad --dev-branch-base argument `{entry}`: expected <repo-path>=<ref>"
+        ));
+    }
+
+    Ok((normalize_repo_selector(repo_selector), base_ref.into()))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuleMetrics {
     elapsed_time: f64,
@@ -350,17 +388,20 @@ impl Workspace {
     }
 
     pub fn is_dev_branch(&self, rule_name: &str) -> bool {
-        if self.settings.json.dev_branches.contains(&rule_name.into()) {
-            true
-        } else {
-            for item in &self.settings.json.dev_branches {
-                // dev branch can be specified as just the location of the repository
-                if rule_name.ends_with(item.as_ref()) {
-                    return true;
-                }
+        let normalized_rule_name = normalize_repo_selector(rule_name);
+
+        for item in &self.settings.json.dev_branches {
+            let normalized_item = normalize_repo_selector(item.as_ref());
+            if normalized_item == normalized_rule_name
+                || normalized_rule_name
+                    .as_ref()
+                    .ends_with(normalized_item.as_ref())
+            {
+                return true;
             }
-            false
         }
+
+        false
     }
 
     pub fn get_new_branch_name(&self) -> Arc<str> {
@@ -590,18 +631,78 @@ impl Workspace {
             ws::Asset::new_contents(env_content.as_ref()),
         );
 
-        settings
-            .json
-            .dev_branches
-            .extend(singleton::get_new_branches());
+        let mut combined_dev_branches = settings.json.dev_branches.clone();
+        combined_dev_branches.extend(singleton::get_new_branches());
+        settings.json.dev_branches = normalize_repo_selectors_for_storage(combined_dev_branches);
 
-        let removed_branches = singleton::get_removed_branches();
+        let removed_branches = singleton::get_removed_branches()
+            .into_iter()
+            .map(|selector| normalize_repo_selector(selector.as_ref()))
+            .collect::<Vec<_>>();
         if !removed_branches.is_empty() {
-            settings.json.dev_branches.retain(|b| {
-                !removed_branches.iter().any(|r| {
-                    r == b || b.as_ref().ends_with(r.as_ref()) || r.as_ref().ends_with(b.as_ref())
+            settings.json.dev_branches.retain(|branch| {
+                let normalized_branch = normalize_repo_selector(branch.as_ref());
+                !removed_branches.iter().any(|removed| {
+                    normalized_branch == *removed
+                        || normalized_branch.as_ref().ends_with(removed.as_ref())
+                        || removed.as_ref().ends_with(normalized_branch.as_ref())
                 })
             });
+        }
+
+        let mut normalized_dev_branch_bases = HashMap::new();
+        for (repo_selector, base_ref) in std::mem::take(&mut settings.json.dev_branch_bases) {
+            normalized_dev_branch_bases.insert(
+                normalize_repo_selector_for_storage(repo_selector.as_ref()),
+                base_ref,
+            );
+        }
+        settings.json.dev_branch_bases = normalized_dev_branch_bases;
+
+        let sync_options = singleton::get_sync_options();
+
+        if !sync_options.dev_branch_bases.is_empty() {
+            let mut seen_repo_paths: HashSet<Arc<str>> = HashSet::new();
+            for entry in sync_options.dev_branch_bases.iter() {
+                let (repo_path, base_ref) = parse_dev_branch_base_argument(entry.as_ref())?;
+                if !seen_repo_paths.insert(repo_path.clone()) {
+                    return Err(format_error!(
+                        "Duplicate --dev-branch-base for repo `//{repo_path}`"
+                    ));
+                }
+
+                settings.json.dev_branch_bases.insert(
+                    normalize_repo_selector_for_storage(repo_path.as_ref()),
+                    base_ref,
+                );
+            }
+        }
+
+        if !sync_options.no_dev_branch_bases.is_empty() {
+            let mut keys_to_remove = Vec::new();
+            for selector in sync_options.no_dev_branch_bases.iter() {
+                let repo_selector = normalize_repo_selector(selector.as_ref());
+                if repo_selector.is_empty() {
+                    return Err(format_error!(
+                        "Bad --no-dev-branch-base argument `{selector}`: expected <repo-path>"
+                    ));
+                }
+
+                for repo_path in settings.json.dev_branch_bases.keys() {
+                    let normalized_repo_path = normalize_repo_selector(repo_path.as_ref());
+                    if normalized_repo_path == repo_selector
+                        || normalized_repo_path
+                            .as_ref()
+                            .ends_with(repo_selector.as_ref())
+                    {
+                        keys_to_remove.push(repo_path.clone());
+                    }
+                }
+            }
+
+            for key in keys_to_remove {
+                settings.json.dev_branch_bases.remove(&key);
+            }
         }
 
         if is_json_available == ws::IsJsonAvailable::Yes {
@@ -1320,5 +1421,38 @@ impl Workspace {
             .context(format_context!(
                 "Failed to compute checkout_state_digest after evaluating env.spaces.star"
             ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn arcs(items: &[&str]) -> Vec<Arc<str>> {
+        items.iter().map(|item| Arc::<str>::from(*item)).collect()
+    }
+
+    #[test]
+    fn normalize_repo_selector_for_storage_always_adds_prefix() {
+        assert_eq!(
+            normalize_repo_selector_for_storage("@star/sdk").as_ref(),
+            "//@star/sdk"
+        );
+        assert_eq!(
+            normalize_repo_selector_for_storage("//@star/sdk").as_ref(),
+            "//@star/sdk"
+        );
+    }
+
+    #[test]
+    fn normalize_repo_selectors_for_storage_deduplicates_equivalent_entries() {
+        let selectors = arcs(&["@star/sdk", "//@star/sdk", "spaces", "//spaces"]);
+        let normalized = normalize_repo_selectors_for_storage(selectors);
+        let as_str = normalized
+            .iter()
+            .map(|item| item.as_ref())
+            .collect::<Vec<_>>();
+
+        assert_eq!(as_str, vec!["//@star/sdk", "//spaces"]);
     }
 }

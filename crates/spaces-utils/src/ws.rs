@@ -305,6 +305,8 @@ pub struct JsonSettings {
     pub assets: HashMap<Arc<str>, Asset>,
     #[serde(default = "Vec::new")]
     pub dev_branches: Vec<Arc<str>>,
+    #[serde(default = "HashMap::new")]
+    pub dev_branch_bases: HashMap<Arc<str>, Arc<str>>,
     #[serde(default = "default_max_queue")]
     pub max_run_queue: i64,
     #[serde(default = "default_max_queue")]
@@ -334,6 +336,7 @@ impl JsonSettings {
             assets: HashMap::new(),
             minimum_version: None,
             dev_branches: Vec::new(),
+            dev_branch_bases: HashMap::new(),
             max_run_queue: 8,
             max_checkout_queue: 8,
             bin_settings: Default::default(),

@@ -3,6 +3,7 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use console::bootstrap::{IntoLine, replace_ascii_with_typography};
 use itertools::Itertools;
+use rayon::prelude::*;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -26,6 +27,8 @@ pub struct RepoSyncPlan {
     pull_from: Option<Arc<str>>,
     rebase_from: Option<Arc<str>>,
     merge_from: Option<Arc<str>>,
+    create_new_branch: Option<Arc<str>>,
+    new_branch_tracking_base: Option<Arc<str>>,
     will_stash: bool,
 }
 
@@ -40,10 +43,112 @@ pub struct RepoSyncSnapshot {
     current_commit_hash: Option<Arc<str>>,
 }
 
-#[derive(Debug, Clone)]
-struct ParsedDevBranchBase {
-    repo_path: Arc<str>,
-    base_ref: Arc<str>,
+type NewBranchRevMismatch = (Arc<str>, Arc<str>, Arc<str>, Arc<str>);
+type NewBranchAlreadyExists = (Arc<str>, Arc<str>);
+type NonBranchRevTrackingAttempt = (Arc<str>, Arc<str>, bool, bool);
+
+#[derive(Debug, clap::Args)]
+pub struct SyncArgs {
+    #[arg(
+        long,
+        help = r#"Environment variables to add to the workspace.
+  Use `--env=VAR=VALUE`. Makes workspace not reproducible."#
+    )]
+    pub env: Vec<Arc<str>>,
+    #[arg(
+        long,
+        help = r#"Store values accessible via workspace.load_value().
+  Use `--store=KEY=VALUE`. Values are stored with path `//` and url `<command line>`.
+  Command line store values take priority over all other path or url values."#
+    )]
+    pub store: Vec<Arc<str>>,
+    #[arg(
+        long,
+        help = r#"Remove a store value previously set via --store=KEY=VALUE.
+  Use `--no-store=KEY`. Removes the named key from the command-line store entry."#
+    )]
+    pub no_store: Vec<Arc<str>>,
+    #[arg(
+        long,
+        help = r#"Use --dev-branch=<repo-path> to add a repo to the dev-branch list.
+  Unlike --new-branch, this does not create a new git branch."#
+    )]
+    pub dev_branch: Vec<Arc<str>>,
+    #[arg(
+        long,
+        help = r#"Use --new-branch=<repo-path> to create a new branch from the repo's configured workspace rev.
+  The new branch name matches the workspace name and the repo is marked as a dev-branch.
+  This flag can be used multiple times."#
+    )]
+    pub new_branch: Vec<Arc<str>>,
+    #[arg(
+        long,
+        help = r#"Use --no-dev-branch=<repo-path> to remove a repo from the dev-branch list.
+  This has the opposite effect of --dev-branch."#
+    )]
+    pub no_dev_branch: Vec<Arc<str>>,
+    #[arg(
+        long,
+        help = r#"Stash uncommitted changes before sync and pop the stash after sync.
+  This allows syncing dirty repositories without manually stashing."#
+    )]
+    pub stash: bool,
+    #[arg(
+        long,
+        help = r#"Same as --skip-pre-evaluation. This option will be removed in a future version."#
+    )]
+    pub allow_dirty: bool,
+    #[arg(
+        long,
+        help = r#"Skip repository status checks and rebase operations.
+  Use with caution: this bypasses safety checks for dirty repos and rebase conflicts."#
+    )]
+    pub skip_pre_evaluation: bool,
+    #[arg(
+        long,
+        help = r#"For matching dev-branch repos, merge instead of rebase.
+  Use `--merge=<repo-path>`. This flag can be used multiple times."#
+    )]
+    pub merge: Vec<Arc<str>>,
+    #[arg(
+        long,
+        help = r#"For matching dev-branch repos, skip both rebase and merge.
+  Use `--no-rebase-repo=<repo-path>`. This flag can be used multiple times."#
+    )]
+    pub no_rebase_repo: Vec<Arc<str>>,
+    #[arg(
+        long,
+        help = r#"Skip rebase for all dev-branch repos unless explicitly listed in `--merge`."#
+    )]
+    pub no_rebase: bool,
+    #[arg(
+        long,
+        help = r#"Override sync base ref for a repo.
+  Use `--dev-branch-base=<repo-path>=<ref>`. This flag can be used multiple times.
+  Useful for dev-branch rebases/merges and for non-branch rev repos checked out on a local branch."#
+    )]
+    pub dev_branch_base: Vec<Arc<str>>,
+    #[arg(
+        long,
+        help = r#"Remove a stored sync base override for a repo.
+  Use `--no-dev-branch-base=<repo-path>`. This has the opposite effect of --dev-branch-base."#
+    )]
+    pub no_dev_branch_base: Vec<Arc<str>>,
+    #[arg(
+        long,
+        help = r#"Run sync pre-evaluation planning only and print what would happen.
+  Does not modify repositories and does not execute evaluation tasks."#
+    )]
+    pub dry_run: bool,
+    #[arg(
+        long,
+        help = r#"Skip Starlark evaluation and task execution.
+  Still runs sync pre-evaluation and sync post-evaluation actions, including branch updates and stash pop."#
+    )]
+    pub skip_evaluation: bool,
+    /// The workspace lock rev's will override the rule rev for repos during sync.
+    #[arg(long)]
+    pub locked: bool,
 }
 
 fn normalize_repo_selector(selector: &str) -> Arc<str> {
@@ -51,15 +156,15 @@ fn normalize_repo_selector(selector: &str) -> Arc<str> {
 }
 
 fn is_member_dev_branch(member_path: &str, dev_branch_rules: &[Arc<str>]) -> bool {
-    if dev_branch_rules
-        .iter()
-        .any(|item| item.as_ref() == member_path)
-    {
-        return true;
-    }
+    let normalized_member_path = normalize_repo_selector(member_path);
 
     for item in dev_branch_rules {
-        if member_path.ends_with(item.as_ref()) {
+        let normalized_item = normalize_repo_selector(item.as_ref());
+        if normalized_item == normalized_member_path
+            || normalized_member_path
+                .as_ref()
+                .ends_with(normalized_item.as_ref())
+        {
             return true;
         }
     }
@@ -95,94 +200,11 @@ fn resolve_selector_set(
     Ok(resolved)
 }
 
-fn parse_dev_branch_base_entries(
-    raw_entries: &[Arc<str>],
-) -> anyhow::Result<Vec<ParsedDevBranchBase>> {
-    let mut parsed_entries = Vec::new();
-    let mut seen_repos: HashSet<Arc<str>> = HashSet::new();
-
-    for entry in raw_entries {
-        let Some((repo_selector, base_ref)) = entry.split_once('=') else {
-            return Err(format_error!(
-                "Bad --dev-branch-base argument `{entry}`: expected <repo-path>=<ref>"
-            ));
-        };
-
-        if repo_selector.is_empty() || base_ref.is_empty() {
-            return Err(format_error!(
-                "Bad --dev-branch-base argument `{entry}`: expected <repo-path>=<ref>"
-            ));
-        }
-
-        let repo_path = normalize_repo_selector(repo_selector);
-        if !seen_repos.insert(repo_path.clone()) {
-            return Err(format_error!(
-                "Duplicate --dev-branch-base for repo `//{repo_path}`"
-            ));
-        }
-
-        parsed_entries.push(ParsedDevBranchBase {
-            repo_path,
-            base_ref: base_ref.into(),
-        });
-    }
-
-    Ok(parsed_entries)
-}
-
-fn resolve_dev_branch_base_map(
-    parsed_entries: &[ParsedDevBranchBase],
-    member_paths: &HashSet<Arc<str>>,
-) -> anyhow::Result<HashMap<Arc<str>, Arc<str>>> {
-    let mut unknown = Vec::new();
-    let mut map = HashMap::new();
-
-    for entry in parsed_entries {
-        if !member_paths.contains(&entry.repo_path) {
-            unknown.push(entry.repo_path.clone());
-            continue;
-        }
-
-        map.insert(entry.repo_path.clone(), entry.base_ref.clone());
-    }
-
-    if !unknown.is_empty() {
-        unknown.sort();
-        return Err(format_error!(
-            "Unknown repo selectors for --dev-branch-base: {}",
-            unknown
-                .iter()
-                .map(|item| format!("//{item}"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-    }
-
-    Ok(map)
-}
-
-fn base_ref_exists(
-    repo: &git::Repository,
-    progress: &mut console::Progress,
-    base_ref: &str,
-) -> anyhow::Result<bool> {
-    let result = git::execute_git_command(
-        progress,
-        &repo.url,
-        console::ExecuteOptions {
-            working_directory: Some(repo.full_path.clone()),
-            arguments: vec!["rev-parse".into(), "--verify".into(), base_ref.into()],
-            ..Default::default()
-        },
-    );
-
-    Ok(result.is_ok())
-}
-
 const DRY_RUN_CURRENT_STATUS_HEADER: &str = "Current Status";
-const DRY_RUN_PRE_SYNC_HEADER: &str = "Pre-Sync";
-const DRY_RUN_SYNC_HEADER: &str = "Sync (May Change Based on Updated Rules)";
-const DRY_RUN_POST_SYNC_HEADER: &str = "Post-Sync";
+const DRY_RUN_PRE_SYNC_HEADER: &str = "Sync Pre-Evaluation (Pre-Eval)";
+const DRY_RUN_SYNC_HEADER: &str = "Evaluation (May Change Based on Updated Rules)";
+const DRY_RUN_POST_SYNC_HEADER: &str = "Sync Post-Evaluation";
+const MAX_REPO_SYNC_PARALLEL_JOBS: usize = 8;
 
 fn has_rev_not_branch_mismatch(
     is_rev_branch: bool,
@@ -201,6 +223,33 @@ fn resolve_pull_from(
     (!is_dev_branch && is_on_branch && is_rev_branch).then(|| format!("origin/{rev}").into())
 }
 
+fn resolve_explicit_dev_branch_base(
+    member_path: &str,
+    dev_branch_base_map: &HashMap<Arc<str>, Arc<str>>,
+) -> Option<Arc<str>> {
+    let normalized_member_path = normalize_repo_selector(member_path);
+
+    if let Some(base_ref) = dev_branch_base_map.get(&normalized_member_path) {
+        return Some(base_ref.clone());
+    }
+
+    dev_branch_base_map
+        .iter()
+        .filter_map(|(selector, base_ref)| {
+            let normalized_selector = normalize_repo_selector(selector.as_ref());
+            if normalized_member_path
+                .as_ref()
+                .ends_with(normalized_selector.as_ref())
+            {
+                Some((normalized_selector.len(), base_ref.clone()))
+            } else {
+                None
+            }
+        })
+        .max_by_key(|(selector_len, _)| *selector_len)
+        .map(|(_, base_ref)| base_ref)
+}
+
 fn describe_current_status(plan: &RepoSyncPlan) -> String {
     if plan.is_dev_branch {
         format!("dev-branch targeting origin/{}", plan.rev)
@@ -212,6 +261,20 @@ fn describe_current_status(plan: &RepoSyncPlan) -> String {
 }
 
 fn describe_pre_sync_action(plan: &RepoSyncPlan) -> Option<String> {
+    if let Some(branch_name) = plan.create_new_branch.as_ref() {
+        if let Some(base_ref) = plan.new_branch_tracking_base.as_ref() {
+            return Some(format!(
+                "create dev branch `{branch_name}`\n  from {}\n  track {base_ref} via --dev-branch-base",
+                plan.rev
+            ));
+        }
+
+        return Some(format!(
+            "create dev branch `{branch_name}`\n   from {}",
+            plan.rev
+        ));
+    }
+
     if let Some(base_ref) = plan.rebase_from.as_ref() {
         if plan.will_stash {
             Some(format!("stash, then rebase onto {base_ref}"))
@@ -245,6 +308,17 @@ fn describe_post_sync_action(plan: &RepoSyncPlan) -> Option<String> {
     }
 }
 
+fn recommend_dev_branch(branch_flag: &str, repo: &str) -> Vec<console::Line> {
+    let mut result = Vec::new();
+    result.push(console::bootstrap::code("    spaces sync \\").into_line());
+    result.push(console::bootstrap::code(format!("      --{branch_flag}=//{repo} \\")).into_line());
+    result.push(
+        console::bootstrap::code(format!("      --dev-branch-base=//{repo}=<remote-branch>"))
+            .into_line(),
+    );
+    result
+}
+
 pub fn build_repo_sync_plan(
     console: console::Console,
     top_progress: &mut console::Progress,
@@ -252,6 +326,7 @@ pub fn build_repo_sync_plan(
 ) -> anyhow::Result<Vec<RepoSyncPlan>> {
     let workspace_members = workspace_arc.read().settings.json.members.clone();
     let dev_branch_rules = workspace_arc.read().settings.json.dev_branches.clone();
+    let stored_dev_branch_base_map = workspace_arc.read().settings.json.dev_branch_bases.clone();
     let sync_options = singleton::get_sync_options();
     let use_stash = sync_options.stash;
 
@@ -291,10 +366,24 @@ pub fn build_repo_sync_plan(
         ));
     }
 
-    let parsed_dev_branch_base = parse_dev_branch_base_entries(&sync_options.dev_branch_bases)?;
-    let dev_branch_base_map =
-        resolve_dev_branch_base_map(parsed_dev_branch_base.as_slice(), &member_paths)?;
+    let mut dev_branch_base_map = HashMap::new();
+    for (repo_selector, base_ref) in stored_dev_branch_base_map {
+        dev_branch_base_map.insert(normalize_repo_selector(repo_selector.as_ref()), base_ref);
+    }
 
+    let requested_dev_branch_selectors = sync_options
+        .dev_branch_repos
+        .iter()
+        .map(|selector| normalize_repo_selector(selector.as_ref()))
+        .collect::<Vec<_>>();
+
+    let new_branch_repos = resolve_selector_set(
+        "--new-branch",
+        &sync_options.new_branch_repos,
+        &member_paths,
+    )?;
+
+    let workspace_new_branch_name = workspace_arc.read().get_new_branch_name();
     let no_rebase_global = sync_options.no_rebase;
 
     let mut dev_branch_dirty = Vec::new();
@@ -303,240 +392,479 @@ pub fn build_repo_sync_plan(
     let mut rev_not_branch_but_on_branch: Vec<(Arc<str>, Arc<str>)> = Vec::new();
     let mut rebase_conflicts = Vec::new();
     let mut merge_conflicts = Vec::new();
+    let mut non_branch_rev_tracking_attempts: Vec<NonBranchRevTrackingAttempt> = Vec::new();
+    let mut new_branch_rev_mismatches: Vec<NewBranchRevMismatch> = Vec::new();
+    let mut new_branch_already_exists: Vec<NewBranchAlreadyExists> = Vec::new();
+
+    struct RepoPlanEvaluation {
+        plan: RepoSyncPlan,
+        dev_branch_dirty: Option<Arc<str>>,
+        branch_dirty: Option<Arc<str>>,
+        detached_dirty: Option<Arc<str>>,
+        rev_not_branch_but_on_branch: Option<(Arc<str>, Arc<str>)>,
+        rebase_conflict: Option<(Arc<str>, Arc<str>)>,
+        merge_conflict: Option<(Arc<str>, Arc<str>)>,
+        non_branch_rev_tracking_attempt: Option<NonBranchRevTrackingAttempt>,
+        new_branch_rev_mismatch: Option<NewBranchRevMismatch>,
+        new_branch_already_exists: Option<NewBranchAlreadyExists>,
+    }
+
+    let repo_entries = workspace_members
+        .iter()
+        .flat_map(|(url, member_list)| {
+            member_list
+                .iter()
+                .map(move |member| (url.clone(), member.path.clone(), member.rev.clone()))
+        })
+        .collect::<Vec<_>>();
+
+    top_progress
+        .set_message(format!("checking {} repositories in parallel", repo_entries.len()).as_str());
+
+    let pre_eval_pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(MAX_REPO_SYNC_PARALLEL_JOBS)
+        .build()
+        .map_err(|error| format_error!("failed to create pre-evaluation worker pool: {error}"))?;
+
+    let repo_results = pre_eval_pool.install(|| {
+        repo_entries
+            .par_iter()
+            .map(
+            |(url, member_path, member_rev)| -> anyhow::Result<Option<RepoPlanEvaluation>> {
+                let member_git_path = std::path::Path::new(member_path.as_ref()).join(".git");
+                if !member_git_path.exists() {
+                    return Ok(None);
+                }
+
+                let mut repo_progress = console::Progress::new(
+                    console.clone(),
+                    format!("//{}", member_path),
+                    None,
+                    Some(format!(
+                        "//{} planning sync pre-evaluation actions",
+                        member_path
+                    )),
+                );
+
+                repo_progress.set_message("checking rev type");
+                let repo = git::Repository::new(url.clone(), member_path.clone());
+                let is_dev_branch = dev_branch_paths.contains(member_path);
+                let is_rev_branch = repo.is_branch(&mut repo_progress, member_rev);
+
+                let is_on_branch = repo
+                    .get_current_branch(&mut repo_progress)
+                    .context(format_context!(
+                        "//{} while checking current branch",
+                        member_path
+                    ))?
+                    .is_some();
+
+                let detached_head_rev = if !is_on_branch {
+                    repo.get_commit_tag(&mut repo_progress)
+                        .or_else(|| repo.get_commit_hash(&mut repo_progress).ok().flatten())
+                } else {
+                    None
+                };
+
+                let is_new_branch_repo = new_branch_repos.contains(member_path);
+                let is_requested_dev_branch_repo =
+                    is_member_dev_branch(member_path.as_ref(), &requested_dev_branch_selectors);
+                let explicit_base_ref =
+                    resolve_explicit_dev_branch_base(member_path.as_ref(), &dev_branch_base_map);
+                let has_non_branch_rev_tracking_attempt = !is_rev_branch
+                    && explicit_base_ref.is_none()
+                    && (is_requested_dev_branch_repo || is_new_branch_repo);
+
+                let mut action = None;
+                let mut skip_reason: Option<Arc<str>> = None;
+                let mut create_new_branch = None;
+                let mut non_branch_rev_tracking_attempt = None;
+                let mut new_branch_rev_mismatch = None;
+                let mut new_branch_already_exists_result = None;
+                let mut rebase_conflict = None;
+                let mut merge_conflict = None;
+
+                if has_non_branch_rev_tracking_attempt {
+                    non_branch_rev_tracking_attempt = Some((
+                        member_path.clone(),
+                        member_rev.clone(),
+                        is_requested_dev_branch_repo,
+                        is_new_branch_repo,
+                    ));
+                    skip_reason = Some(
+                        "workspace rev is not a branch and no --dev-branch-base is configured"
+                            .into(),
+                    );
+                }
+
+                if is_new_branch_repo {
+                    repo_progress.set_message("validating --new-branch state");
+
+                    if !has_non_branch_rev_tracking_attempt {
+                        let head_commit = repo
+                            .resolve_ref_to_commit(&mut repo_progress, "HEAD")?
+                            .ok_or_else(|| {
+                                format_error!(
+                                    "//{} unable to resolve HEAD commit while validating `--new-branch`",
+                                    member_path
+                                )
+                            })?;
+
+                        let resolved_workspace_rev = repo
+                            .resolve_revision(&mut repo_progress, member_rev)
+                            .context(format_context!(
+                                "//{} while resolving workspace rev `{}` for `--new-branch`",
+                                member_path,
+                                member_rev
+                            ))?;
+
+                        let target_commit = repo
+                            .resolve_ref_to_commit(
+                                &mut repo_progress,
+                                resolved_workspace_rev.commit.as_ref(),
+                            )?
+                            .ok_or_else(|| {
+                                format_error!(
+                                    "//{} unable to resolve workspace rev `{}` while validating `--new-branch`",
+                                    member_path,
+                                    member_rev
+                                )
+                            })?;
+
+                        if head_commit != target_commit {
+                            new_branch_rev_mismatch = Some((
+                                member_path.clone(),
+                                member_rev.clone(),
+                                head_commit,
+                                target_commit,
+                            ));
+                            skip_reason = Some("not on workspace rev".into());
+                        } else if repo.local_branch_exists(
+                            &mut repo_progress,
+                            workspace_new_branch_name.as_ref(),
+                        )? {
+                            new_branch_already_exists_result = Some((
+                                member_path.clone(),
+                                workspace_new_branch_name.clone(),
+                            ));
+                            skip_reason = Some("new branch already exists".into());
+                        } else {
+                            create_new_branch = Some(workspace_new_branch_name.clone());
+                        }
+                    }
+                } else if is_dev_branch {
+                    if no_rebase_repos.contains(member_path) {
+                        action = Some(DevBranchAction::Skip);
+                        skip_reason = Some("--no-rebase-repo".into());
+                    } else if merge_repos.contains(member_path) {
+                        action = Some(DevBranchAction::Merge);
+                    } else if no_rebase_global {
+                        action = Some(DevBranchAction::Skip);
+                        skip_reason = Some("--no-rebase".into());
+                    } else {
+                        action = Some(DevBranchAction::Rebase);
+                    }
+                }
+
+                let rev_not_branch_mismatch = !is_requested_dev_branch_repo
+                    && !is_new_branch_repo
+                    && has_rev_not_branch_mismatch(
+                        is_rev_branch,
+                        is_on_branch,
+                        explicit_base_ref.is_some(),
+                    );
+                if rev_not_branch_mismatch {
+                    skip_reason = Some("rev is not a branch".into());
+                }
+
+                let pull_from = if create_new_branch.is_some() {
+                    None
+                } else {
+                    resolve_pull_from(is_dev_branch, is_on_branch, is_rev_branch, member_rev)
+                };
+                let mut rebase_from = None;
+                let mut merge_from = None;
+
+                if create_new_branch.is_none()
+                    && !has_non_branch_rev_tracking_attempt
+                    && matches!(
+                        action,
+                        Some(DevBranchAction::Rebase) | Some(DevBranchAction::Merge)
+                    )
+                {
+                    if !is_on_branch {
+                        skip_reason = Some("detached HEAD".into());
+                    } else if rev_not_branch_mismatch {
+                        skip_reason = Some("rev is not a branch".into());
+                    } else {
+                        let effective_base_ref = explicit_base_ref
+                            .clone()
+                            .unwrap_or_else(|| format!("origin/{}", member_rev).into());
+                        if matches!(action, Some(DevBranchAction::Rebase)) {
+                            rebase_from = Some(effective_base_ref);
+                        } else {
+                            merge_from = Some(effective_base_ref);
+                        }
+                    }
+                }
+
+                if rebase_from.is_some() || merge_from.is_some() {
+                    let effective_base_ref = rebase_from
+                        .clone()
+                        .or_else(|| merge_from.clone())
+                        .expect("sync pre-evaluation action base ref should be present");
+
+                    repo_progress.set_message("fetching latest");
+                    repo.fetch_with_prune(&mut repo_progress, git::IgnoreSubmodules::Yes)
+                        .context(format_context!(
+                            "//{} while fetching updates before sync pre-evaluation planning",
+                            member_path
+                        ))?;
+
+                    if !repo.base_ref_exists(&mut repo_progress, effective_base_ref.as_ref())? {
+                        if explicit_base_ref.is_some() {
+                            return Err(format_error!(
+                                "//{} explicit base ref `{}` from `--dev-branch-base` was not found after fetch",
+                                member_path,
+                                effective_base_ref
+                            ));
+                        }
+
+                        rebase_from = None;
+                        merge_from = None;
+                        skip_reason = Some(
+                            format!(
+                                "default base `{}` not found; use `--dev-branch-base={}=<ref>`",
+                                effective_base_ref, member_path
+                            )
+                            .into(),
+                        );
+                    } else if rebase_from.is_some() {
+                        repo_progress.set_message("checking for rebase conflicts");
+                        match repo
+                            .can_rebase_without_conflicts(
+                                &mut repo_progress,
+                                effective_base_ref.as_ref(),
+                            )
+                            .context(format_context!(
+                                "//{} while checking rebase conflicts",
+                                member_path
+                            ))? {
+                            true => {}
+                            false => {
+                                rebase_conflict = Some((
+                                    member_path.clone(),
+                                    effective_base_ref.clone(),
+                                ));
+                            }
+                        }
+                    } else if merge_from.is_some() {
+                        repo_progress.set_message("checking for merge conflicts");
+                        match repo
+                            .can_merge_without_conflicts(
+                                &mut repo_progress,
+                                effective_base_ref.as_ref(),
+                            )
+                            .context(format_context!(
+                                "//{} while checking merge conflicts",
+                                member_path
+                            ))? {
+                            true => {}
+                            false => {
+                                merge_conflict = Some((
+                                    member_path.clone(),
+                                    effective_base_ref.clone(),
+                                ));
+                            }
+                        }
+                    }
+                }
+
+                repo_progress.set_message("checking if dirty");
+                let is_dirty = repo.is_dirty(&mut repo_progress, git::IgnoreSubmodules::Yes);
+                let mut will_stash = false;
+                let mut dev_branch_dirty_result = None;
+                let mut branch_dirty_result = None;
+                let mut detached_dirty_result = None;
+
+                let requires_update =
+                    pull_from.is_some() || rebase_from.is_some() || merge_from.is_some();
+                if is_dirty && requires_update {
+                    if use_stash {
+                        will_stash = true;
+                    } else if is_dev_branch {
+                        dev_branch_dirty_result = Some(member_path.clone());
+                    } else if is_on_branch {
+                        branch_dirty_result = Some(member_path.clone());
+                    } else {
+                        detached_dirty_result = Some(member_path.clone());
+                    }
+                }
+
+                let new_branch_tracking_base = if create_new_branch.is_some() && !is_rev_branch {
+                    explicit_base_ref.clone()
+                } else {
+                    None
+                };
+
+                let finalize_message = if let Some(base_ref) = rebase_from.as_ref() {
+                    format!("//{} ready for rebase onto {}", member_path, base_ref)
+                } else if let Some(base_ref) = merge_from.as_ref() {
+                    format!("//{} ready for merge from {}", member_path, base_ref)
+                } else if let Some(branch_name) = create_new_branch.as_ref() {
+                    if let Some(base_ref) = new_branch_tracking_base.as_ref() {
+                        format!(
+                            "//{} ready to create dev branch `{}`\n  from {}\n  track {} via --dev-branch-base",
+                            member_path, branch_name, member_rev, base_ref
+                        )
+                    } else {
+                        format!(
+                            "//{} ready to create dev branch `{}`\n  from {}",
+                            member_path, branch_name, member_rev
+                        )
+                    }
+                } else if let Some(base_ref) = pull_from.as_ref() {
+                    format!("//{} ready for pull from {}", member_path, base_ref)
+                } else if let Some(reason) = skip_reason.as_ref() {
+                    format!("//{} no pre-eval action ({reason})", member_path)
+                } else if !is_rev_branch {
+                    format!("//{} no pre-eval action (rev is not a branch)", member_path)
+                } else if !is_on_branch {
+                    if let Some(detached_rev) = detached_head_rev.as_ref() {
+                        format!(
+                            "//{} no pre-eval action (detached HEAD at `{detached_rev}`)",
+                            member_path
+                        )
+                    } else {
+                        format!("//{} no pre-eval action (detached HEAD)", member_path)
+                    }
+                } else {
+                    format!("//{} no pre-eval action", member_path)
+                };
+
+                let is_new_branch_blocked = is_new_branch_repo && create_new_branch.is_none();
+
+                let (finalize_type, finalize_message) = if has_non_branch_rev_tracking_attempt {
+                    let attempted_flags = if is_requested_dev_branch_repo && is_new_branch_repo {
+                        "--dev-branch/--new-branch"
+                    } else if is_new_branch_repo {
+                        "--new-branch"
+                    } else {
+                        "--dev-branch"
+                    };
+                    (
+                        console::FinalType::Failed,
+                        format!(
+                            "//{} cannot evaluate ({attempted_flags} requires a branch rev or --dev-branch-base)",
+                            member_path
+                        ),
+                    )
+                } else if rev_not_branch_mismatch {
+                    (
+                        console::FinalType::Failed,
+                        format!("//{} cannot evaluate (rev is not a branch)", member_path),
+                    )
+                } else if is_new_branch_blocked {
+                    (
+                        console::FinalType::Failed,
+                        format!("//{} cannot create new branch", member_path),
+                    )
+                } else if is_dirty && requires_update && !use_stash {
+                    (
+                        console::FinalType::Failed,
+                        format!("//{} cannot evaluate", member_path),
+                    )
+                } else if skip_reason.is_some() {
+                    (console::FinalType::NotRequired, finalize_message)
+                } else {
+                    (console::FinalType::Completed, finalize_message)
+                };
+
+                repo_progress.set_finalize_lines(console::make_finalize_line(
+                    finalize_type,
+                    repo_progress.elapsed(),
+                    &finalize_message,
+                ));
+
+                Ok(Some(RepoPlanEvaluation {
+                    plan: RepoSyncPlan {
+                        path: member_path.clone(),
+                        url: url.clone(),
+                        is_dev_branch,
+                        is_rev_branch,
+                        rev: member_rev.clone(),
+                        pull_from,
+                        rebase_from,
+                        merge_from,
+                        create_new_branch,
+                        new_branch_tracking_base,
+                        will_stash,
+                    },
+                    dev_branch_dirty: dev_branch_dirty_result,
+                    branch_dirty: branch_dirty_result,
+                    detached_dirty: detached_dirty_result,
+                    rev_not_branch_but_on_branch: rev_not_branch_mismatch
+                        .then(|| (member_path.clone(), member_rev.clone())),
+                    rebase_conflict,
+                    merge_conflict,
+                    non_branch_rev_tracking_attempt,
+                    new_branch_rev_mismatch,
+                    new_branch_already_exists: new_branch_already_exists_result,
+                }))
+            },
+            )
+            .collect::<Vec<_>>()
+    });
 
     let mut plans = Vec::new();
 
-    for (url, member_list) in workspace_members.iter() {
-        for member in member_list.iter() {
-            top_progress.set_message(format!("checking {}", member.path).as_str());
+    for repo_result in repo_results {
+        let Some(repo_evaluation) = repo_result? else {
+            continue;
+        };
 
-            let member_git_path = std::path::Path::new(member.path.as_ref()).join(".git");
-            if !member_git_path.exists() {
-                continue;
-            }
+        let RepoPlanEvaluation {
+            plan,
+            dev_branch_dirty: dev_branch_dirty_result,
+            branch_dirty: branch_dirty_result,
+            detached_dirty: detached_dirty_result,
+            rev_not_branch_but_on_branch: rev_not_branch_but_on_branch_result,
+            rebase_conflict: rebase_conflict_result,
+            merge_conflict: merge_conflict_result,
+            non_branch_rev_tracking_attempt: non_branch_rev_tracking_attempt_result,
+            new_branch_rev_mismatch: new_branch_rev_mismatch_result,
+            new_branch_already_exists: new_branch_already_exists_result,
+        } = repo_evaluation;
 
-            let mut repo_progress = console::Progress::new(
-                console.clone(),
-                format!("//{}", member.path),
-                None,
-                Some(format!("//{} planning sync actions", member.path)),
-            );
-
-            repo_progress.set_message("checking rev type");
-            let repo = git::Repository::new(url.clone(), member.path.clone());
-            let is_dev_branch = dev_branch_paths.contains(&member.path);
-            let is_rev_branch = repo.is_branch(&mut repo_progress, &member.rev);
-
-            let is_on_branch = repo
-                .get_current_branch(&mut repo_progress)
-                .context(format_context!(
-                    "//{} while checking current branch",
-                    member.path
-                ))?
-                .is_some();
-
-            let detached_head_rev = if !is_on_branch {
-                repo.get_commit_tag(&mut repo_progress)
-                    .or_else(|| repo.get_commit_hash(&mut repo_progress).ok().flatten())
-            } else {
-                None
-            };
-
-            let mut action = None;
-            let mut skip_reason: Option<Arc<str>> = None;
-
-            if is_dev_branch {
-                if no_rebase_repos.contains(&member.path) {
-                    action = Some(DevBranchAction::Skip);
-                    skip_reason = Some("--no-rebase-repo".into());
-                } else if merge_repos.contains(&member.path) {
-                    action = Some(DevBranchAction::Merge);
-                } else if no_rebase_global {
-                    action = Some(DevBranchAction::Skip);
-                    skip_reason = Some("--no-rebase".into());
-                } else {
-                    action = Some(DevBranchAction::Rebase);
-                }
-            }
-
-            let explicit_base_ref = dev_branch_base_map.get(&member.path).cloned();
-            let rev_not_branch_mismatch = has_rev_not_branch_mismatch(
-                is_rev_branch,
-                is_on_branch,
-                explicit_base_ref.is_some(),
-            );
-            if rev_not_branch_mismatch {
-                rev_not_branch_but_on_branch.push((member.path.clone(), member.rev.clone()));
-                skip_reason = Some("rev is not a branch".into());
-            }
-
-            let pull_from =
-                resolve_pull_from(is_dev_branch, is_on_branch, is_rev_branch, &member.rev);
-            let mut rebase_from = None;
-            let mut merge_from = None;
-
-            if matches!(
-                action,
-                Some(DevBranchAction::Rebase) | Some(DevBranchAction::Merge)
-            ) {
-                if !is_on_branch {
-                    skip_reason = Some("detached HEAD".into());
-                } else if rev_not_branch_mismatch {
-                    skip_reason = Some("rev is not a branch".into());
-                } else {
-                    let effective_base_ref = explicit_base_ref
-                        .clone()
-                        .unwrap_or_else(|| format!("origin/{}", member.rev).into());
-                    if matches!(action, Some(DevBranchAction::Rebase)) {
-                        rebase_from = Some(effective_base_ref);
-                    } else {
-                        merge_from = Some(effective_base_ref);
-                    }
-                }
-            }
-
-            if rebase_from.is_some() || merge_from.is_some() {
-                let effective_base_ref = rebase_from
-                    .clone()
-                    .or_else(|| merge_from.clone())
-                    .expect("pre-sync action base ref should be present");
-
-                repo_progress.set_message("fetching latest");
-                repo.fetch_with_prune(&mut repo_progress, git::IgnoreSubmodules::Yes)
-                    .context(format_context!(
-                        "//{} while fetching updates before sync planning",
-                        member.path
-                    ))?;
-
-                if !base_ref_exists(&repo, &mut repo_progress, effective_base_ref.as_ref())? {
-                    if explicit_base_ref.is_some() {
-                        return Err(format_error!(
-                            "//{} explicit base ref `{}` from `--dev-branch-base` was not found after fetch",
-                            member.path,
-                            effective_base_ref
-                        ));
-                    }
-
-                    rebase_from = None;
-                    merge_from = None;
-                    skip_reason = Some(
-                        format!(
-                            "default base `{}` not found; use `--dev-branch-base={}=<ref>`",
-                            effective_base_ref, member.path
-                        )
-                        .into(),
-                    );
-                } else if rebase_from.is_some() {
-                    repo_progress.set_message("checking for rebase conflicts");
-                    match repo
-                        .can_rebase_without_conflicts(
-                            &mut repo_progress,
-                            effective_base_ref.as_ref(),
-                        )
-                        .context(format_context!(
-                            "//{} while checking rebase conflicts",
-                            member.path
-                        ))? {
-                        true => {}
-                        false => {
-                            rebase_conflicts
-                                .push((member.path.clone(), effective_base_ref.clone()));
-                        }
-                    }
-                } else if merge_from.is_some() {
-                    repo_progress.set_message("checking for merge conflicts");
-                    match repo
-                        .can_merge_without_conflicts(
-                            &mut repo_progress,
-                            effective_base_ref.as_ref(),
-                        )
-                        .context(format_context!(
-                            "//{} while checking merge conflicts",
-                            member.path
-                        ))? {
-                        true => {}
-                        false => {
-                            merge_conflicts.push((member.path.clone(), effective_base_ref.clone()));
-                        }
-                    }
-                }
-            }
-
-            repo_progress.set_message("checking if dirty");
-            let is_dirty = repo.is_dirty(&mut repo_progress, git::IgnoreSubmodules::Yes);
-            let mut will_stash = false;
-
-            let requires_update =
-                pull_from.is_some() || rebase_from.is_some() || merge_from.is_some();
-            if is_dirty && requires_update {
-                if use_stash {
-                    will_stash = true;
-                } else if is_dev_branch {
-                    dev_branch_dirty.push(member.path.clone());
-                } else if is_on_branch {
-                    branch_dirty.push(member.path.clone());
-                } else {
-                    detached_dirty.push(member.path.clone());
-                }
-            }
-
-            let finalize_message = if let Some(base_ref) = rebase_from.as_ref() {
-                format!("//{} ready for rebase onto {}", member.path, base_ref)
-            } else if let Some(base_ref) = merge_from.as_ref() {
-                format!("//{} ready for merge from {}", member.path, base_ref)
-            } else if let Some(base_ref) = pull_from.as_ref() {
-                format!("//{} ready for pull from {}", member.path, base_ref)
-            } else if let Some(reason) = skip_reason.as_ref() {
-                format!("//{} no pre-sync action ({reason})", member.path)
-            } else if !is_rev_branch {
-                format!("//{} no pre-sync action (rev is not a branch)", member.path)
-            } else if !is_on_branch {
-                if let Some(detached_rev) = detached_head_rev.as_ref() {
-                    format!(
-                        "//{} no pre-sync action (detached HEAD at `{detached_rev}`)",
-                        member.path
-                    )
-                } else {
-                    format!("//{} no pre-sync action (detached HEAD)", member.path)
-                }
-            } else {
-                format!("//{} no pre-sync action", member.path)
-            };
-
-            let (finalize_type, finalize_message) = if rev_not_branch_mismatch {
-                (
-                    console::FinalType::Failed,
-                    format!("//{} cannot sync (rev is not a branch)", member.path),
-                )
-            } else if is_dirty && requires_update && !use_stash {
-                (
-                    console::FinalType::Failed,
-                    format!("//{} cannot sync", member.path),
-                )
-            } else if skip_reason.is_some() {
-                (console::FinalType::NotRequired, finalize_message)
-            } else {
-                (console::FinalType::Completed, finalize_message)
-            };
-
-            repo_progress.set_finalize_lines(console::make_finalize_line(
-                finalize_type,
-                repo_progress.elapsed(),
-                &finalize_message,
-            ));
-
-            plans.push(RepoSyncPlan {
-                path: member.path.clone(),
-                url: url.clone(),
-                is_dev_branch,
-                is_rev_branch,
-                rev: member.rev.clone(),
-                pull_from,
-                rebase_from,
-                merge_from,
-                will_stash,
-            });
+        if let Some(path) = dev_branch_dirty_result {
+            dev_branch_dirty.push(path);
         }
+        if let Some(path) = branch_dirty_result {
+            branch_dirty.push(path);
+        }
+        if let Some(path) = detached_dirty_result {
+            detached_dirty.push(path);
+        }
+        if let Some(item) = rev_not_branch_but_on_branch_result {
+            rev_not_branch_but_on_branch.push(item);
+        }
+        if let Some(item) = rebase_conflict_result {
+            rebase_conflicts.push(item);
+        }
+        if let Some(item) = merge_conflict_result {
+            merge_conflicts.push(item);
+        }
+        if let Some(item) = non_branch_rev_tracking_attempt_result {
+            non_branch_rev_tracking_attempts.push(item);
+        }
+        if let Some(item) = new_branch_rev_mismatch_result {
+            new_branch_rev_mismatches.push(item);
+        }
+        if let Some(item) = new_branch_already_exists_result {
+            new_branch_already_exists.push(item);
+        }
+
+        plans.push(plan);
     }
 
     let dirty_repo_count = dev_branch_dirty.len() + branch_dirty.len() + detached_dirty.len();
@@ -598,6 +926,30 @@ pub fn build_repo_sync_plan(
         }
     }
 
+    if !non_branch_rev_tracking_attempts.is_empty() {
+        singleton::set_is_error_already_reported();
+
+        non_branch_rev_tracking_attempts
+            .sort_by(|(repo_a, _, _, _), (repo_b, _, _, _)| repo_a.cmp(repo_b));
+        for (repo, rev, is_dev_branch_request, is_new_branch_request) in
+            &non_branch_rev_tracking_attempts
+        {
+            let attempted_flags = if *is_dev_branch_request && *is_new_branch_request {
+                "--dev-branch/--new-branch"
+            } else if *is_new_branch_request {
+                "--new-branch"
+            } else {
+                "--dev-branch"
+            };
+            problems.add_item(
+                format!("//{repo}"),
+                format!(
+                    "{attempted_flags} cannot track workspace rev `{rev}` because it is not a branch\nset `--dev-branch-base=//{repo}=<remote-branch>` or use a branch rev."
+                ),
+            );
+        }
+    }
+
     if !rev_not_branch_but_on_branch.is_empty() {
         singleton::set_is_error_already_reported();
 
@@ -610,10 +962,38 @@ pub fn build_repo_sync_plan(
         }
     }
 
+    if !new_branch_rev_mismatches.is_empty() || !new_branch_already_exists.is_empty() {
+        singleton::set_is_error_already_reported();
+
+        new_branch_rev_mismatches
+            .sort_by(|(repo_a, _, _, _), (repo_b, _, _, _)| repo_a.cmp(repo_b));
+        for (repo, rev, current_commit, target_commit) in &new_branch_rev_mismatches {
+            let current_short = current_commit.chars().take(8).collect::<String>();
+            let target_short = target_commit.chars().take(8).collect::<String>();
+            problems.add_item(
+                format!("//{repo}"),
+                format!(
+                    "cannot create new branch: expected HEAD at `{rev}` ({target_short}), found {current_short}"
+                ),
+            );
+        }
+
+        new_branch_already_exists.sort_by(|(repo_a, _), (repo_b, _)| repo_a.cmp(repo_b));
+        for (repo, branch_name) in &new_branch_already_exists {
+            problems.add_item(
+                format!("//{repo}"),
+                format!("cannot create new branch: local branch `{branch_name}` already exists"),
+            );
+        }
+    }
+
     if dirty_repo_count > 0
         || !rebase_conflicts.is_empty()
         || !merge_conflicts.is_empty()
+        || !non_branch_rev_tracking_attempts.is_empty()
         || !rev_not_branch_but_on_branch.is_empty()
+        || !new_branch_rev_mismatches.is_empty()
+        || !new_branch_already_exists.is_empty()
     {
         container.add(console::bootstrap::VerticalSpacer::new(1));
         container.add(
@@ -637,6 +1017,26 @@ pub fn build_repo_sync_plan(
             recommended_actions.extend(console::bootstrap::VerticalSpacer::new(1).render());
         }
 
+        for (repo, _, is_dev_branch_request, is_new_branch_request) in
+            &non_branch_rev_tracking_attempts
+        {
+            let branch_flag = if *is_new_branch_request && !*is_dev_branch_request {
+                "new-branch"
+            } else {
+                "dev-branch"
+            };
+
+            recommended_actions
+                .push(console::bootstrap::plain_text(format!("For //{repo}")).into_line());
+            recommended_actions.push(
+                console::bootstrap::plain_text(
+                    "  Use a branch rev, or provide an explicit dev-branch base:",
+                )
+                .into_line(),
+            );
+            recommended_actions.extend(recommend_dev_branch(branch_flag, repo));
+        }
+
         for (repo, rev) in &rev_not_branch_but_on_branch {
             recommended_actions
                 .push(console::bootstrap::plain_text(format!("For //{repo}")).into_line());
@@ -654,22 +1054,23 @@ pub fn build_repo_sync_plan(
             ));
             recommended_actions.push(dev_branch_intro_line);
 
-            let mut dev_branch_cmd_line = console::Line::default();
-            dev_branch_cmd_line.push(console::bootstrap::code("    spaces sync \\"));
-            recommended_actions.push(dev_branch_cmd_line);
+            recommended_actions.extend(recommend_dev_branch("dev-branch", repo));
+        }
 
-            let mut dev_branch_repo_line = console::Line::default();
-            dev_branch_repo_line.push(console::bootstrap::code(format!(
-                "      --dev-branch=//{repo} \\"
-            )));
-            recommended_actions.push(dev_branch_repo_line);
-
-            let mut dev_branch_base_line = console::Line::default();
-            dev_branch_base_line.push(console::bootstrap::code(format!(
-                "      --dev-branch-base=//{repo}=<remote-branch>"
-            )));
-            dev_branch_base_line.push(console::bootstrap::plain_text("."));
-            recommended_actions.push(dev_branch_base_line);
+        for (repo, rev, _, _) in &new_branch_rev_mismatches {
+            recommended_actions
+                .push(console::bootstrap::plain_text(format!("For //{repo}")).into_line());
+            recommended_actions.push(
+                console::bootstrap::plain_text("  Checkout the workspace `rev`, then retry:")
+                    .into_line(),
+            );
+            recommended_actions.push(
+                console::bootstrap::code(format!("    git -C {repo} checkout {rev}")).into_line(),
+            );
+            recommended_actions.push(
+                console::bootstrap::code(format!("    spaces sync --new-branch=//{repo}"))
+                    .into_line(),
+            );
         }
 
         if !recommended_actions.is_empty() {
@@ -688,11 +1089,14 @@ pub fn build_repo_sync_plan(
         console.emit_container(&container);
 
         return Err(format_error!(
-            "Cannot sync: {} repositories need to be resolved manually",
+            "Cannot evaluate: {} repositories need to be resolved manually",
             dirty_repo_count
                 + rebase_conflicts.len()
                 + merge_conflicts.len()
+                + non_branch_rev_tracking_attempts.len()
                 + rev_not_branch_but_on_branch.len()
+                + new_branch_rev_mismatches.len()
+                + new_branch_already_exists.len()
         ));
     }
 
@@ -748,7 +1152,7 @@ fn describe_pre_sync_action_for_complete_summary(plan: &RepoSyncPlan) -> Option<
         return Some("stash local changes".to_string());
     }
 
-    if plan.rebase_from.is_some() || plan.merge_from.is_some() {
+    if plan.rebase_from.is_some() || plan.merge_from.is_some() || plan.create_new_branch.is_some() {
         return None;
     }
 
@@ -760,11 +1164,11 @@ fn pre_post_actions(plan: Option<&RepoSyncPlan>) -> Vec<String> {
 
     if let Some(plan) = plan {
         if let Some(action) = describe_pre_sync_action_for_complete_summary(plan) {
-            actions.push(format!("pre-sync: {action}"));
+            actions.push(format!("pre-eval: {action}"));
         }
 
         if let Some(action) = describe_post_sync_action(plan) {
-            actions.push(format!("post-sync: {action}"));
+            actions.push(format!("sync post-evaluation: {action}"));
         }
     }
 
@@ -783,6 +1187,15 @@ fn describe_sync_complete_result(
             format!("rebased onto {base_ref}")
         } else if let Some(base_ref) = plan.merge_from.as_ref() {
             format!("merged {base_ref}")
+        } else if let Some(branch_name) = plan.create_new_branch.as_ref() {
+            if let Some(base_ref) = plan.new_branch_tracking_base.as_ref() {
+                format!(
+                    "created dev branch `{branch_name}` from {} tracking {}",
+                    plan.rev, base_ref
+                )
+            } else {
+                format!("created dev branch `{branch_name}` from {}", plan.rev)
+            }
         } else if plan.pull_from.is_some() {
             let before_hash = short_commit(before.current_commit_hash.as_ref());
             let after_hash = short_commit(after.current_commit_hash.as_ref());
@@ -811,8 +1224,8 @@ fn describe_sync_complete_result(
 
     let actions = pre_post_actions(plan);
     if !actions.is_empty() {
-        summary.push_str(" | ");
-        summary.push_str(actions.join("; ").as_str());
+        summary.push('\n');
+        summary.push_str(actions.join("\n").as_str());
     }
 
     summary
@@ -826,36 +1239,60 @@ pub fn collect_repo_sync_snapshots(
     let workspace_members = workspace_arc.read().settings.json.members.clone();
     let dev_branch_rules = workspace_arc.read().settings.json.dev_branches.clone();
 
-    let mut snapshots = Vec::new();
-    let mut progress = console::Progress::new(console, progress_name, None, None);
+    let mut progress = console::Progress::new(console.clone(), progress_name, None, None);
+    progress.set_message("capturing repositories in parallel");
 
-    for (url, member_list) in workspace_members.iter() {
-        for member in member_list {
-            progress.set_message(format!("capturing //{}", member.path).as_str());
+    let snapshot_pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(MAX_REPO_SYNC_PARALLEL_JOBS)
+        .build()
+        .map_err(|error| format_error!("failed to create snapshot worker pool: {error}"))?;
 
-            let member_git_path = std::path::Path::new(member.path.as_ref()).join(".git");
-            if !member_git_path.exists() {
-                continue;
-            }
+    let mut snapshots = snapshot_pool.install(|| {
+        workspace_members
+            .par_iter()
+            .flat_map(|(url, member_list)| {
+                member_list.par_iter().filter_map(|member| {
+                    let member_git_path = std::path::Path::new(member.path.as_ref()).join(".git");
+                    if !member_git_path.exists() {
+                        return None;
+                    }
 
-            let repo = git::Repository::new(url.clone(), member.path.clone());
-            let is_dev_branch = is_member_dev_branch(member.path.as_ref(), &dev_branch_rules);
-            let is_rev_branch = repo.is_branch(&mut progress, &member.rev);
-            let current_branch = repo.get_current_branch(&mut progress).ok().flatten();
-            let current_tag = repo.get_commit_tag(&mut progress);
-            let current_commit_hash = repo.get_commit_hash(&mut progress).ok().flatten();
+                    let mut repo_progress = console::Progress::new(
+                        console.clone(),
+                        format!("//{}", member.path),
+                        None,
+                        None,
+                    );
+                    repo_progress.set_message(format!("capturing //{}", member.path).as_str());
 
-            snapshots.push(RepoSyncSnapshot {
-                path: member.path.clone(),
-                is_dev_branch,
-                is_rev_branch,
-                workspace_rev: member.rev.clone(),
-                current_branch,
-                current_tag,
-                current_commit_hash,
-            });
-        }
-    }
+                    let repo = git::Repository::new(url.clone(), member.path.clone());
+                    let is_dev_branch =
+                        is_member_dev_branch(member.path.as_ref(), &dev_branch_rules);
+                    let is_rev_branch = repo.is_branch(&mut repo_progress, &member.rev);
+                    let current_branch = repo.get_current_branch(&mut repo_progress).ok().flatten();
+                    let current_tag = repo.get_commit_tag(&mut repo_progress);
+                    let current_commit_hash =
+                        repo.get_commit_hash(&mut repo_progress).ok().flatten();
+
+                    repo_progress.set_finalize_lines(console::make_finalize_line(
+                        console::FinalType::Completed,
+                        progress.elapsed(),
+                        &format!("//{} captured repo snapshot", member.path),
+                    ));
+
+                    Some(RepoSyncSnapshot {
+                        path: member.path.clone(),
+                        is_dev_branch,
+                        is_rev_branch,
+                        workspace_rev: member.rev.clone(),
+                        current_branch,
+                        current_tag,
+                        current_commit_hash,
+                    })
+                })
+            })
+            .collect::<Vec<_>>()
+    });
 
     snapshots.sort_by(|a, b| a.path.cmp(&b.path));
 
@@ -941,7 +1378,7 @@ pub fn emit_dry_run_repo_plan(
 
     container.add(components::Header::new(
         components::HeaderLevel::H1,
-        "Sync Dry Run Results",
+        "Evaluation Dry Run Results",
     ));
 
     let sorted_plans = plans
@@ -997,12 +1434,16 @@ pub fn emit_dry_run_repo_plan(
         container.add(console::bootstrap::VerticalSpacer::new(1));
     }
 
-    let sync_entries = sorted_plans
-        .iter()
-        .filter_map(|plan| {
-            describe_sync_action(plan).map(|action| (format_repo_label(plan), action))
-        })
-        .collect::<Vec<_>>();
+    let sync_entries = if singleton::get_sync_options().skip_evaluation {
+        Vec::new()
+    } else {
+        sorted_plans
+            .iter()
+            .filter_map(|plan| {
+                describe_sync_action(plan).map(|action| (format_repo_label(plan), action))
+            })
+            .collect::<Vec<_>>()
+    };
 
     if !sync_entries.is_empty() {
         container.add(components::Header::new(
@@ -1074,126 +1515,296 @@ fn pop_stashes_after_failed_pre_sync(
     Ok(())
 }
 
+struct PreSyncExecutionOutcome {
+    path: Arc<str>,
+    stashed: bool,
+}
+
+struct PreSyncExecutionFailure {
+    path: Arc<str>,
+    stashed: bool,
+    error_message: String,
+}
+
+fn execute_pre_sync_actions_for_repo(
+    console: console::Console,
+    plan: RepoSyncPlan,
+) -> Result<PreSyncExecutionOutcome, PreSyncExecutionFailure> {
+    let mut repo_progress = console::Progress::new(
+        console.clone(),
+        format!("//{}", plan.path),
+        None,
+        Some(format!(
+            "//{} applying sync pre-evaluation actions",
+            plan.path
+        )),
+    );
+
+    let repo = git::Repository::new(plan.url.clone(), plan.path.clone());
+
+    let mut stashed = false;
+
+    if plan.will_stash {
+        if let Err(error) = repo.stash(&mut repo_progress) {
+            repo_progress.set_finalize_lines(console::make_finalize_line(
+                console::FinalType::Failed,
+                repo_progress.elapsed(),
+                &format!("//{} failed to stash changes", plan.path),
+            ));
+            return Err(PreSyncExecutionFailure {
+                path: plan.path.clone(),
+                stashed,
+                error_message: format!("//{} failed to stash changes: {error}", plan.path),
+            });
+        }
+
+        stashed = true;
+    }
+
+    if let Some(base_ref) = plan.rebase_from.as_ref()
+        && let Err(error) = repo.rebase_onto(&mut repo_progress, base_ref.as_ref())
+    {
+        repo_progress.set_finalize_lines(console::make_finalize_line(
+            console::FinalType::Failed,
+            repo_progress.elapsed(),
+            &format!("//{} rebase failed", plan.path),
+        ));
+
+        return Err(PreSyncExecutionFailure {
+            path: plan.path.clone(),
+            stashed,
+            error_message: format!(
+                "//{} failed to rebase onto {}: {error}",
+                plan.path, base_ref
+            ),
+        });
+    }
+
+    if let Some(base_ref) = plan.merge_from.as_ref()
+        && let Err(error) = repo.merge_from(&mut repo_progress, base_ref.as_ref())
+    {
+        repo_progress.set_finalize_lines(console::make_finalize_line(
+            console::FinalType::Failed,
+            repo_progress.elapsed(),
+            &format!("//{} merge failed", plan.path),
+        ));
+
+        return Err(PreSyncExecutionFailure {
+            path: plan.path.clone(),
+            stashed,
+            error_message: format!("//{} failed to merge {}: {error}", plan.path, base_ref),
+        });
+    }
+
+    if let Some(branch_name) = plan.create_new_branch.as_ref()
+        && let Err(error) = repo.execute(
+            &mut repo_progress,
+            vec!["switch".into(), "-c".into(), branch_name.clone()],
+        )
+    {
+        repo_progress.set_finalize_lines(console::make_finalize_line(
+            console::FinalType::Failed,
+            repo_progress.elapsed(),
+            &format!("//{} new branch creation failed", plan.path),
+        ));
+
+        return Err(PreSyncExecutionFailure {
+            path: plan.path.clone(),
+            stashed,
+            error_message: format!(
+                "//{} failed to create new branch `{}`: {error}",
+                plan.path, branch_name,
+            ),
+        });
+    }
+
+    let final_message = if plan.will_stash {
+        if let Some(base_ref) = plan.rebase_from.as_ref() {
+            format!(
+                "//{} stashed changes and rebased onto {}",
+                plan.path, base_ref
+            )
+        } else if let Some(base_ref) = plan.merge_from.as_ref() {
+            format!("//{} stashed changes and merged {}", plan.path, base_ref)
+        } else {
+            format!("//{} stashed uncommitted changes", plan.path)
+        }
+    } else if let Some(base_ref) = plan.rebase_from.as_ref() {
+        format!("//{} rebased successfully on {}", plan.path, base_ref)
+    } else if let Some(base_ref) = plan.merge_from.as_ref() {
+        format!("//{} merged successfully from {}", plan.path, base_ref)
+    } else if let Some(branch_name) = plan.create_new_branch.as_ref() {
+        if let Some(base_ref) = plan.new_branch_tracking_base.as_ref() {
+            format!(
+                "//{} created new dev branch `{}` from {} tracking {}",
+                plan.path, branch_name, plan.rev, base_ref,
+            )
+        } else {
+            format!(
+                "//{} created new dev branch `{}` from {}",
+                plan.path, branch_name, plan.rev,
+            )
+        }
+    } else {
+        format!("//{} sync pre-evaluation actions complete", plan.path)
+    };
+
+    repo_progress.set_finalize_lines(console::make_finalize_line(
+        console::FinalType::Completed,
+        repo_progress.elapsed(),
+        &final_message,
+    ));
+
+    Ok(PreSyncExecutionOutcome {
+        path: plan.path,
+        stashed,
+    })
+}
+
+fn collect_pre_sync_job_result(
+    path: Arc<str>,
+    may_have_stashed: bool,
+    result: std::thread::Result<Result<PreSyncExecutionOutcome, PreSyncExecutionFailure>>,
+    stashed_repos: &mut Vec<Arc<str>>,
+    errors: &mut Vec<String>,
+) {
+    match result {
+        Ok(Ok(outcome)) => {
+            if outcome.stashed {
+                stashed_repos.push(outcome.path);
+            }
+        }
+        Ok(Err(error)) => {
+            if error.stashed {
+                stashed_repos.push(error.path);
+            }
+            errors.push(error.error_message);
+        }
+        Err(_) => {
+            if may_have_stashed {
+                stashed_repos.push(path.clone());
+            }
+            errors.push(format!("//{} pre-eval worker thread panicked", path));
+        }
+    }
+}
+
 pub fn execute_repo_sync_plan(
     console: console::Console,
     workspace_arc: workspace::WorkspaceArc,
     plans: &[RepoSyncPlan],
 ) -> anyhow::Result<Vec<Arc<str>>> {
+    let actionable_plans = plans
+        .iter()
+        .filter(|plan| {
+            plan.will_stash
+                || plan.rebase_from.is_some()
+                || plan.merge_from.is_some()
+                || plan.create_new_branch.is_some()
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+
     let mut stashed_repos = Vec::new();
+    let mut errors = Vec::new();
 
-    for plan in plans {
-        if !plan.will_stash && plan.rebase_from.is_none() && plan.merge_from.is_none() {
-            continue;
-        }
+    let pre_sync_pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(MAX_REPO_SYNC_PARALLEL_JOBS)
+        .build()
+        .map_err(|error| format_error!("failed to create pre-sync worker pool: {error}"))?;
 
-        let mut repo_progress = console::Progress::new(
-            console.clone(),
-            format!("//{}", plan.path),
-            None,
-            Some(format!("//{} applying pre-sync actions", plan.path)),
+    let job_results = pre_sync_pool.install(|| {
+        actionable_plans
+            .into_par_iter()
+            .map(|plan| {
+                let path = plan.path.clone();
+                let may_have_stashed = plan.will_stash;
+                let worker_console = console.clone();
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                    execute_pre_sync_actions_for_repo(worker_console, plan)
+                }));
+                (path, may_have_stashed, result)
+            })
+            .collect::<Vec<_>>()
+    });
+
+    for (path, may_have_stashed, result) in job_results {
+        collect_pre_sync_job_result(
+            path,
+            may_have_stashed,
+            result,
+            &mut stashed_repos,
+            &mut errors,
         );
+    }
 
-        let repo = git::Repository::new(plan.url.clone(), plan.path.clone());
+    stashed_repos.sort();
+    stashed_repos.dedup();
 
-        if plan.will_stash {
-            if let Err(error) = repo.stash(&mut repo_progress) {
-                repo_progress.set_finalize_lines(console::make_finalize_line(
-                    console::FinalType::Failed,
-                    repo_progress.elapsed(),
-                    &format!("//{} failed to stash changes", plan.path),
-                ));
-                pop_stashes_after_failed_pre_sync(
-                    console.clone(),
-                    workspace_arc.clone(),
-                    &stashed_repos,
-                )?;
-                return Err(format_error!(
-                    "//{} failed to stash changes: {error}",
-                    plan.path
-                ));
-            }
-            stashed_repos.push(plan.path.clone());
+    if !errors.is_empty() {
+        errors.sort();
+        pop_stashes_after_failed_pre_sync(console, workspace_arc, &stashed_repos)?;
+
+        if errors.len() == 1 {
+            return Err(format_error!("{}", errors[0]));
         }
 
-        if let Some(base_ref) = plan.rebase_from.as_ref()
-            && let Err(error) = repo.rebase_onto(&mut repo_progress, base_ref.as_ref())
-        {
-            repo_progress.set_finalize_lines(console::make_finalize_line(
-                console::FinalType::Failed,
-                repo_progress.elapsed(),
-                &format!("//{} rebase failed", plan.path),
-            ));
-            pop_stashes_after_failed_pre_sync(
-                console.clone(),
-                workspace_arc.clone(),
-                &stashed_repos,
-            )?;
-            return Err(format_error!(
-                "//{} failed to rebase onto {}: {error}",
-                plan.path,
-                base_ref
-            ));
-        }
-
-        if let Some(base_ref) = plan.merge_from.as_ref()
-            && let Err(error) = repo.merge_from(&mut repo_progress, base_ref.as_ref())
-        {
-            repo_progress.set_finalize_lines(console::make_finalize_line(
-                console::FinalType::Failed,
-                repo_progress.elapsed(),
-                &format!("//{} merge failed", plan.path),
-            ));
-            pop_stashes_after_failed_pre_sync(
-                console.clone(),
-                workspace_arc.clone(),
-                &stashed_repos,
-            )?;
-            return Err(format_error!(
-                "//{} failed to merge {}: {error}",
-                plan.path,
-                base_ref
-            ));
-        }
-
-        let final_message = if plan.will_stash && plan.rebase_from.is_some() {
-            format!(
-                "//{} stashed changes and rebased onto {}",
-                plan.path,
-                plan.rebase_from.clone().unwrap_or_default()
-            )
-        } else if plan.will_stash && plan.merge_from.is_some() {
-            format!(
-                "//{} stashed changes and merged {}",
-                plan.path,
-                plan.merge_from.clone().unwrap_or_default()
-            )
-        } else if plan.will_stash {
-            format!("//{} stashed uncommitted changes", plan.path)
-        } else if plan.rebase_from.is_some() {
-            format!(
-                "//{} rebased successfully on {}",
-                plan.path,
-                plan.rebase_from.clone().unwrap_or_default()
-            )
-        } else {
-            format!(
-                "//{} merged successfully from {}",
-                plan.path,
-                plan.merge_from.clone().unwrap_or_default()
-            )
-        };
-
-        repo_progress.set_finalize_lines(console::make_finalize_line(
-            console::FinalType::Completed,
-            repo_progress.elapsed(),
-            &final_message,
+        return Err(format_error!(
+            "failed to apply sync pre-evaluation actions on {} repositories:\n{}",
+            errors.len(),
+            errors.iter().map(|error| format!("- {error}")).join("\n")
         ));
     }
 
     Ok(stashed_repos)
 }
 
-/// Pop stashes on repositories that were stashed during pre-sync checks.
+fn pop_stash_for_repo(
+    console: console::Console,
+    url: Arc<str>,
+    path: Arc<str>,
+) -> anyhow::Result<()> {
+    let mut repo_progress = console::Progress::new(
+        console.clone(),
+        format!("//{}", path),
+        None,
+        Some(format!("//{} popping stash", path)),
+    );
+
+    let repo = git::Repository::new(url, path.clone());
+
+    match repo.stash_pop(&mut repo_progress) {
+        Ok(_) => {
+            let lines = console::make_finalize_line(
+                console::FinalType::Completed,
+                repo_progress.elapsed(),
+                &format!("//{} popped stash successfully", path),
+            );
+            repo_progress.set_finalize_lines(lines);
+            Ok(())
+        }
+        Err(error) => {
+            let lines = console::make_finalize_line(
+                console::FinalType::Failed,
+                None,
+                &format!("//{} failed to pop stash", path),
+            );
+            repo_progress.set_finalize_lines(lines);
+            Err(format_error!(
+                "//{} {error}. Manually check this repo with 'git status'",
+                path
+            ))
+        }
+    }
+}
+
+fn collect_stash_pop_job_result(result: anyhow::Result<()>, warnings: &mut Vec<String>) {
+    if let Err(err) = result {
+        warnings.push(format!("while popping stash because {err:?}"));
+    }
+}
+
+/// Pop stashes on repositories that were stashed during sync pre-evaluation checks.
 pub fn pop_stashed_repos(
     console: console::Console,
     workspace_arc: workspace::WorkspaceArc,
@@ -1203,49 +1814,42 @@ pub fn pop_stashed_repos(
         return Ok(());
     }
 
+    let stashed_set = stashed_repos.into_iter().collect::<HashSet<_>>();
     let workspace_members = workspace_arc.read().settings.json.members.clone();
 
+    let mut repos_to_pop = Vec::new();
     for (url, member_list) in workspace_members.iter() {
         for member in member_list.iter() {
-            if !stashed_repos.contains(&member.path) {
-                continue;
-            }
-
-            let mut repo_progress = console::Progress::new(
-                console.clone(),
-                format!("//{}", member.path),
-                None,
-                Some(format!("//{} popping stash", member.path)),
-            );
-
-            let repo = git::Repository::new(url.clone(), member.path.clone());
-
-            match repo.stash_pop(&mut repo_progress) {
-                Ok(_) => {
-                    let lines = console::make_finalize_line(
-                        console::FinalType::Completed,
-                        repo_progress.elapsed(),
-                        &format!("//{} popped stash successfully", member.path),
-                    );
-                    repo_progress.set_finalize_lines(lines);
-                }
-                Err(e) => {
-                    let lines = console::make_finalize_line(
-                        console::FinalType::Failed,
-                        None,
-                        &format!("//{} failed to pop stash", member.path),
-                    );
-                    repo_progress.set_finalize_lines(lines);
-                    console.warning(
-                        "Failed to pop stash",
-                        format!(
-                            "//{} {e}. Manually check this repo with 'git status'",
-                            member.path
-                        ),
-                    )?;
-                }
+            if stashed_set.contains(&member.path) {
+                repos_to_pop.push((url.clone(), member.path.clone()));
             }
         }
+    }
+
+    let mut warnings = Vec::new();
+
+    let stash_pop_pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(MAX_REPO_SYNC_PARALLEL_JOBS)
+        .build()
+        .map_err(|error| format_error!("failed to create stash-pop worker pool: {error}"))?;
+
+    let job_results = stash_pop_pool.install(|| {
+        repos_to_pop
+            .into_par_iter()
+            .map(|(url, path)| {
+                let worker_console = console.clone();
+                pop_stash_for_repo(worker_console, url, path)
+            })
+            .collect::<Vec<_>>()
+    });
+
+    for result in job_results {
+        collect_stash_pop_job_result(result, &mut warnings);
+    }
+
+    warnings.sort();
+    for warning in warnings {
+        console.warning("Failed to pop stash", warning)?;
     }
 
     Ok(())
@@ -1261,13 +1865,6 @@ mod tests {
 
     fn set(items: &[&str]) -> HashSet<Arc<str>> {
         items.iter().map(|item| Arc::<str>::from(*item)).collect()
-    }
-
-    fn parsed_entry(repo_path: &str, base_ref: &str) -> ParsedDevBranchBase {
-        ParsedDevBranchBase {
-            repo_path: repo_path.into(),
-            base_ref: base_ref.into(),
-        }
     }
 
     fn repo_sync_plan(
@@ -1289,6 +1886,8 @@ mod tests {
             pull_from: pull_from.map(Arc::<str>::from),
             rebase_from: rebase_from.map(Arc::<str>::from),
             merge_from: merge_from.map(Arc::<str>::from),
+            create_new_branch: None,
+            new_branch_tracking_base: None,
             will_stash,
         }
     }
@@ -1326,39 +1925,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_dev_branch_base_entries_parses_and_normalizes_repo_paths() {
-        let parsed = parse_dev_branch_base_entries(&arcs(&[
-            "//repo-a=origin/main",
-            "repo-b=refs/heads/trunk",
-        ]))
-        .unwrap();
-
-        assert_eq!(parsed.len(), 2);
-        assert_eq!(parsed[0].repo_path.as_ref(), "repo-a");
-        assert_eq!(parsed[0].base_ref.as_ref(), "origin/main");
-        assert_eq!(parsed[1].repo_path.as_ref(), "repo-b");
-        assert_eq!(parsed[1].base_ref.as_ref(), "refs/heads/trunk");
-    }
-
-    #[test]
-    fn parse_dev_branch_base_entries_rejects_malformed_arguments() {
-        let err = parse_dev_branch_base_entries(&arcs(&["repo-a"])).unwrap_err();
-
-        assert!(format!("{err:#}").contains("expected <repo-path>=<ref>"));
-    }
-
-    #[test]
-    fn parse_dev_branch_base_entries_rejects_duplicate_repo_after_normalization() {
-        let err = parse_dev_branch_base_entries(&arcs(&[
-            "//repo-a=origin/main",
-            "repo-a=origin/release",
-        ]))
-        .unwrap_err();
-
-        assert!(format!("{err:#}").contains("Duplicate --dev-branch-base for repo `//repo-a`"));
-    }
-
-    #[test]
     fn resolve_selector_set_normalizes_and_deduplicates() {
         let member_paths = set(&["repo-a", "repo-b"]);
 
@@ -1387,39 +1953,10 @@ mod tests {
     }
 
     #[test]
-    fn resolve_dev_branch_base_map_returns_map_for_known_member_repos() {
-        let map = resolve_dev_branch_base_map(
-            &[
-                parsed_entry("repo-a", "origin/main"),
-                parsed_entry("repo-b", "origin/release"),
-            ],
-            &set(&["repo-a", "repo-b"]),
-        )
-        .unwrap();
-
-        assert_eq!(map.len(), 2);
-        assert_eq!(map.get("repo-a").map(|v| v.as_ref()), Some("origin/main"));
-        assert_eq!(
-            map.get("repo-b").map(|v| v.as_ref()),
-            Some("origin/release")
-        );
-    }
-
-    #[test]
-    fn resolve_dev_branch_base_map_errors_on_unknown_repo_selectors() {
-        let err = resolve_dev_branch_base_map(
-            &[
-                parsed_entry("repo-z", "origin/main"),
-                parsed_entry("repo-b", "origin/dev"),
-            ],
-            &set(&["repo-a"]),
-        )
-        .unwrap_err();
-
-        assert!(
-            format!("{err:#}")
-                .contains("Unknown repo selectors for --dev-branch-base: //repo-b, //repo-z")
-        );
+    fn is_member_dev_branch_accepts_selectors_with_or_without_prefix() {
+        assert!(is_member_dev_branch("@star/sdk", &arcs(&["@star/sdk"])));
+        assert!(is_member_dev_branch("@star/sdk", &arcs(&["//@star/sdk"])));
+        assert!(is_member_dev_branch("@star/sdk", &arcs(&["sdk"])));
     }
 
     #[test]
@@ -1427,6 +1964,58 @@ mod tests {
         let pull_from = resolve_pull_from(false, true, false, "deadbeef");
 
         assert_eq!(pull_from, None);
+    }
+
+    #[test]
+    fn resolve_explicit_dev_branch_base_uses_exact_match() {
+        let base_map = HashMap::from([(
+            Arc::<str>::from("@star/sdk"),
+            Arc::<str>::from("origin/main"),
+        )]);
+
+        assert_eq!(
+            resolve_explicit_dev_branch_base("@star/sdk", &base_map).as_deref(),
+            Some("origin/main")
+        );
+    }
+
+    #[test]
+    fn resolve_explicit_dev_branch_base_supports_suffix_selectors() {
+        let base_map = HashMap::from([(Arc::<str>::from("sdk"), Arc::<str>::from("origin/main"))]);
+
+        assert_eq!(
+            resolve_explicit_dev_branch_base("@star/sdk", &base_map).as_deref(),
+            Some("origin/main")
+        );
+    }
+
+    #[test]
+    fn resolve_explicit_dev_branch_base_prefers_most_specific_selector() {
+        let base_map = HashMap::from([
+            (Arc::<str>::from("sdk"), Arc::<str>::from("origin/develop")),
+            (
+                Arc::<str>::from("@star/sdk"),
+                Arc::<str>::from("origin/main"),
+            ),
+        ]);
+
+        assert_eq!(
+            resolve_explicit_dev_branch_base("@star/sdk", &base_map).as_deref(),
+            Some("origin/main")
+        );
+    }
+
+    #[test]
+    fn resolve_explicit_dev_branch_base_accepts_selectors_with_prefix() {
+        let base_map = HashMap::from([(
+            Arc::<str>::from("//@star/sdk"),
+            Arc::<str>::from("origin/main"),
+        )]);
+
+        assert_eq!(
+            resolve_explicit_dev_branch_base("@star/sdk", &base_map).as_deref(),
+            Some("origin/main")
+        );
     }
 
     #[test]
@@ -1477,6 +2066,33 @@ mod tests {
         assert_eq!(
             describe_pre_sync_action(&plan),
             Some("stash local changes".to_string())
+        );
+    }
+
+    #[test]
+    fn describe_pre_sync_action_reports_new_branch_creation() {
+        let mut plan = repo_sync_plan(false, true, true, None, None, None, false, None);
+        plan.create_new_branch = Some("my-workspace".into());
+
+        assert_eq!(
+            describe_pre_sync_action(&plan),
+            Some("create dev branch `my-workspace`\n   from main".to_string())
+        );
+    }
+
+    #[test]
+    fn describe_pre_sync_action_reports_new_branch_tracking_base_for_non_branch_rev() {
+        let mut plan = repo_sync_plan(false, false, true, None, None, None, false, None);
+        plan.rev = "v0.4.0".into();
+        plan.create_new_branch = Some("my-workspace".into());
+        plan.new_branch_tracking_base = Some("origin/main".into());
+
+        assert_eq!(
+            describe_pre_sync_action(&plan),
+            Some(
+                "create dev branch `my-workspace`\n  from v0.4.0\n  track origin/main via --dev-branch-base"
+                    .to_string()
+            )
         );
     }
 
@@ -1537,12 +2153,12 @@ mod tests {
     #[test]
     fn dry_run_section_headers_are_stable() {
         assert_eq!(DRY_RUN_CURRENT_STATUS_HEADER, "Current Status");
-        assert_eq!(DRY_RUN_PRE_SYNC_HEADER, "Pre-Sync");
+        assert_eq!(DRY_RUN_PRE_SYNC_HEADER, "Sync Pre-Evaluation (Pre-Eval)");
         assert_eq!(
             DRY_RUN_SYNC_HEADER,
-            "Sync (May Change Based on Updated Rules)"
+            "Evaluation (May Change Based on Updated Rules)"
         );
-        assert_eq!(DRY_RUN_POST_SYNC_HEADER, "Post-Sync");
+        assert_eq!(DRY_RUN_POST_SYNC_HEADER, "Sync Post-Evaluation");
     }
 
     #[test]
@@ -1676,7 +2292,63 @@ mod tests {
 
         assert_eq!(
             describe_sync_complete_result(&before, &after, Some(&plan)),
-            "rebased onto origin/main | pre-sync: stash local changes; post-sync: pop stashed changes"
+            "rebased onto origin/main\npre-eval: stash local changes\nsync post-evaluation: pop stashed changes"
+        );
+    }
+
+    #[test]
+    fn describe_sync_complete_result_reports_new_branch_creation() {
+        let mut plan = repo_sync_plan(false, true, true, None, None, None, false, None);
+        plan.create_new_branch = Some("my-workspace".into());
+        let before = repo_sync_snapshot(
+            false,
+            true,
+            "main",
+            Some("main"),
+            None,
+            Some("0123456789abcdef"),
+        );
+        let after = repo_sync_snapshot(
+            true,
+            true,
+            "main",
+            Some("my-workspace"),
+            None,
+            Some("0123456789abcdef"),
+        );
+
+        assert_eq!(
+            describe_sync_complete_result(&before, &after, Some(&plan)),
+            "created dev branch `my-workspace` from main"
+        );
+    }
+
+    #[test]
+    fn describe_sync_complete_result_reports_new_branch_creation_tracking_base() {
+        let mut plan = repo_sync_plan(false, false, true, None, None, None, false, None);
+        plan.rev = "v0.4.0".into();
+        plan.create_new_branch = Some("my-workspace".into());
+        plan.new_branch_tracking_base = Some("origin/main".into());
+        let before = repo_sync_snapshot(
+            false,
+            false,
+            "v0.4.0",
+            None,
+            Some("v0.4.0"),
+            Some("0123456789abcdef"),
+        );
+        let after = repo_sync_snapshot(
+            true,
+            false,
+            "v0.4.0",
+            Some("my-workspace"),
+            None,
+            Some("0123456789abcdef"),
+        );
+
+        assert_eq!(
+            describe_sync_complete_result(&before, &after, Some(&plan)),
+            "created dev branch `my-workspace` from v0.4.0 tracking origin/main"
         );
     }
 
