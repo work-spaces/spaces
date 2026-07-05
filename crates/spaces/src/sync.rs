@@ -1427,6 +1427,40 @@ fn is_git_repo_root_at_path(
     }
 }
 
+fn has_local_commits_not_on_remotes(
+    progress: &mut console::Progress,
+    repo: &git::Repository,
+) -> bool {
+    let output = git::execute_git_command(
+        progress,
+        repo.url.as_ref(),
+        console::ExecuteOptions {
+            working_directory: Some(repo.full_path.clone()),
+            arguments: vec![
+                "rev-list".into(),
+                "--count".into(),
+                "HEAD".into(),
+                "--branches".into(),
+                "--not".into(),
+                "--remotes".into(),
+            ],
+            is_return_stdout: true,
+            ..Default::default()
+        },
+    )
+    .unwrap_or(None);
+
+    let Some(output) = output else {
+        return true;
+    };
+
+    output
+        .trim()
+        .parse::<usize>()
+        .map(|count| count > 0)
+        .unwrap_or(true)
+}
+
 pub fn execute_removed_repo_post_sync_actions(
     console: console::Console,
     before_tracked_repos: &HashMap<Arc<str>, ws::CheckoutRepo>,
@@ -1440,6 +1474,7 @@ pub fn execute_removed_repo_post_sync_actions(
 
     let mut deleted_repos = Vec::new();
     let mut dirty_repos = Vec::new();
+    let mut repos_with_local_commits_not_on_remotes = Vec::new();
     let mut non_rooted_git_repos = Vec::new();
     let mut dev_branch_repos = Vec::new();
     let mut failed_deletions: Vec<(Arc<str>, String)> = Vec::new();
@@ -1494,6 +1529,17 @@ pub fn execute_removed_repo_post_sync_actions(
             continue;
         }
 
+        repo_progress.set_message("checking for local commits not present on remotes");
+        if has_local_commits_not_on_remotes(&mut repo_progress, &repo) {
+            repos_with_local_commits_not_on_remotes.push(path.clone());
+            repo_progress.set_finalize_lines(console::make_finalize_line(
+                console::FinalType::NotRequired,
+                repo_progress.elapsed(),
+                &format!("//{} kept (has local commits not present on remotes)", path),
+            ));
+            continue;
+        }
+
         repo_progress.set_message("deleting removed repository");
         let remove_result = if repo_path.is_dir() {
             std::fs::remove_dir_all(repo_path)
@@ -1523,6 +1569,7 @@ pub fn execute_removed_repo_post_sync_actions(
 
     if deleted_repos.is_empty()
         && dirty_repos.is_empty()
+        && repos_with_local_commits_not_on_remotes.is_empty()
         && non_rooted_git_repos.is_empty()
         && dev_branch_repos.is_empty()
         && failed_deletions.is_empty()
@@ -1545,7 +1592,7 @@ pub fn execute_removed_repo_post_sync_actions(
     for path in &deleted_repos {
         status_list.add_item(
             format!("//{path}"),
-            "deleted (clean and no longer in checkout rules)",
+            "deleted (clean, synced with remotes, and no longer in checkout rules)",
         );
     }
 
@@ -1553,6 +1600,13 @@ pub fn execute_removed_repo_post_sync_actions(
         status_list.add_item(
             format!("//{path}"),
             "kept (dirty repository; manual cleanup required)",
+        );
+    }
+
+    for path in &repos_with_local_commits_not_on_remotes {
+        status_list.add_item(
+            format!("//{path}"),
+            "kept (has local commits not present on remotes; manual cleanup required)",
         );
     }
 
@@ -2037,6 +2091,22 @@ fn collect_stash_pop_job_result(result: anyhow::Result<()>, warnings: &mut Vec<S
     }
 }
 
+fn resolve_stash_pop_targets(
+    stashed_repos: Vec<Arc<str>>,
+    current_repo_urls_by_path: &HashMap<Arc<str>, Arc<str>>,
+) -> Vec<(Arc<str>, Arc<str>)> {
+    stashed_repos
+        .into_iter()
+        .map(|path| {
+            let url = current_repo_urls_by_path
+                .get(&path)
+                .cloned()
+                .unwrap_or_else(|| path.clone());
+            (url, path)
+        })
+        .collect()
+}
+
 /// Pop stashes on repositories that were stashed during sync pre-evaluation checks.
 pub fn pop_stashed_repos(
     console: console::Console,
@@ -2047,17 +2117,17 @@ pub fn pop_stashed_repos(
         return Ok(());
     }
 
-    let stashed_set = stashed_repos.into_iter().collect::<HashSet<_>>();
     let workspace_members = workspace_arc.read().settings.json.members.clone();
+    let current_repo_urls_by_path = workspace_members
+        .iter()
+        .flat_map(|(url, member_list)| {
+            member_list
+                .iter()
+                .map(move |member| (member.path.clone(), url.clone()))
+        })
+        .collect::<HashMap<_, _>>();
 
-    let mut repos_to_pop = Vec::new();
-    for (url, member_list) in workspace_members.iter() {
-        for member in member_list.iter() {
-            if stashed_set.contains(&member.path) {
-                repos_to_pop.push((url.clone(), member.path.clone()));
-            }
-        }
-    }
+    let repos_to_pop = resolve_stash_pop_targets(stashed_repos, &current_repo_urls_by_path);
 
     let mut warnings = Vec::new();
 
@@ -2213,6 +2283,31 @@ mod tests {
         assert_eq!(
             resolve_removed_tracked_repo_paths(&before, &after),
             arcs(&["@star/dev", "@star/sdk"]),
+        );
+    }
+
+    #[test]
+    fn resolve_stash_pop_targets_includes_removed_repo_paths() {
+        let url_by_path = HashMap::from([(
+            Arc::<str>::from("@star/keep"),
+            Arc::<str>::from("https://example.com/keep.git"),
+        )]);
+
+        let targets =
+            resolve_stash_pop_targets(arcs(&["@star/removed", "@star/keep"]), &url_by_path);
+
+        assert_eq!(
+            targets,
+            vec![
+                (
+                    Arc::<str>::from("@star/removed"),
+                    Arc::<str>::from("@star/removed")
+                ),
+                (
+                    Arc::<str>::from("https://example.com/keep.git"),
+                    Arc::<str>::from("@star/keep")
+                )
+            ]
         );
     }
 
@@ -2556,7 +2651,7 @@ mod tests {
 
         assert_eq!(
             describe_sync_complete_result(&before, &after, Some(&plan)),
-            "rebased onto origin/main\npre-eval: stash local changes\nsync post-evaluation: pop stashed changes"
+            "rebased onto origin/main\npre-eval: stash local changes\npost-eval: pop stashed changes"
         );
     }
 

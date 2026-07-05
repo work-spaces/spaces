@@ -12,19 +12,18 @@ load(
     "info_get_path_to_store",
     "info_is_ci",
 )
-load("//@star/prelude/rules/checkout.star", "checkout_add_repo")
+load("//@star/prelude/rules/asset.star", "asset_hard_link")
+load(
+    "//@star/prelude/rules/checkout.star",
+    "checkout_add_any_assets",
+    "checkout_add_env_vars",
+    "checkout_add_repo",
+)
 load("//@star/prelude/rules/env.star", "env_assign")
 load(
     "//@star/prelude/rules/ws.star",
     "workspace_get_absolute_path",
     "workspace_get_path_to_checkout",
-)
-load("//@star/sdk/star/asset.star", "asset_hard_link")
-load(
-    "//@star/sdk/star/checkout.star",
-    "checkout_add_any_assets",
-    "checkout_add_archive",
-    "checkout_add_env_vars",
 )
 
 # Configure the top level workspace
@@ -114,3 +113,11 @@ checkout_add_env_vars(
         ),
     ],
 )
+
+# This can be used for testing spaces sync
+if workspace.load_value("CHECKOUT_INSTALL_SPACES") == "ON":
+    checkout_add_repo(
+        "install-spaces",
+        url = "https://github.com/work-spaces/install-spaces",
+        rev = "main",
+    )
