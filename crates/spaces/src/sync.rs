@@ -8,7 +8,7 @@ use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
 };
-use utils::git;
+use utils::{git, ws};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
 enum DevBranchAction {
@@ -151,20 +151,15 @@ pub struct SyncArgs {
     pub locked: bool,
 }
 
-fn normalize_repo_selector(selector: &str) -> Arc<str> {
-    selector.strip_prefix("//").unwrap_or(selector).into()
-}
-
 fn is_member_dev_branch(member_path: &str, dev_branch_rules: &[Arc<str>]) -> bool {
-    let normalized_member_path = normalize_repo_selector(member_path);
+    let normalized_member_path = ws::normalize_repo_selector(member_path);
 
     for item in dev_branch_rules {
-        let normalized_item = normalize_repo_selector(item.as_ref());
-        if normalized_item == normalized_member_path
-            || normalized_member_path
-                .as_ref()
-                .ends_with(normalized_item.as_ref())
-        {
+        let normalized_item = ws::normalize_repo_selector(item.as_ref());
+        if ws::normalized_selector_matches_member_path(
+            normalized_member_path.as_ref(),
+            normalized_item.as_ref(),
+        ) {
             return true;
         }
     }
@@ -181,7 +176,7 @@ fn resolve_selector_set(
     let mut unknown = Vec::new();
 
     for selector in selectors {
-        let normalized = normalize_repo_selector(selector.as_ref());
+        let normalized = ws::normalize_repo_selector(selector.as_ref());
         if member_paths.contains(&normalized) {
             resolved.insert(normalized);
         } else {
@@ -227,7 +222,7 @@ fn resolve_explicit_dev_branch_base(
     member_path: &str,
     dev_branch_base_map: &HashMap<Arc<str>, Arc<str>>,
 ) -> Option<Arc<str>> {
-    let normalized_member_path = normalize_repo_selector(member_path);
+    let normalized_member_path = ws::normalize_repo_selector(member_path);
 
     if let Some(base_ref) = dev_branch_base_map.get(&normalized_member_path) {
         return Some(base_ref.clone());
@@ -236,11 +231,11 @@ fn resolve_explicit_dev_branch_base(
     dev_branch_base_map
         .iter()
         .filter_map(|(selector, base_ref)| {
-            let normalized_selector = normalize_repo_selector(selector.as_ref());
-            if normalized_member_path
-                .as_ref()
-                .ends_with(normalized_selector.as_ref())
-            {
+            let normalized_selector = ws::normalize_repo_selector(selector.as_ref());
+            if ws::normalized_selector_matches_member_path(
+                normalized_member_path.as_ref(),
+                normalized_selector.as_ref(),
+            ) {
                 Some((normalized_selector.len(), base_ref.clone()))
             } else {
                 None
@@ -368,13 +363,16 @@ pub fn build_repo_sync_plan(
 
     let mut dev_branch_base_map = HashMap::new();
     for (repo_selector, base_ref) in stored_dev_branch_base_map {
-        dev_branch_base_map.insert(normalize_repo_selector(repo_selector.as_ref()), base_ref);
+        dev_branch_base_map.insert(
+            ws::normalize_repo_selector(repo_selector.as_ref()),
+            base_ref,
+        );
     }
 
     let requested_dev_branch_selectors = sync_options
         .dev_branch_repos
         .iter()
-        .map(|selector| normalize_repo_selector(selector.as_ref()))
+        .map(|selector| ws::normalize_repo_selector(selector.as_ref()))
         .collect::<Vec<_>>();
 
     let new_branch_repos = resolve_selector_set(
@@ -1328,15 +1326,23 @@ pub fn emit_sync_complete_report(
     let report_rows = before_snapshots
         .iter()
         .map(|before| {
-            let after = after_by_path.get(&before.path).copied().unwrap_or(before);
+            let after = after_by_path.get(&before.path).copied();
             let plan = plan_by_path.get(&before.path).copied();
-            let label = format_repo_label_from_kind(
-                before.path.as_ref(),
-                before.is_dev_branch,
-                before.is_rev_branch,
-            );
-            let summary = describe_sync_complete_result(before, after, plan);
-            (label, summary)
+
+            if let Some(after) = after {
+                let label = format_repo_label_from_kind(
+                    before.path.as_ref(),
+                    before.is_dev_branch,
+                    before.is_rev_branch,
+                );
+                let summary = describe_sync_complete_result(before, after, plan);
+                (label, summary)
+            } else {
+                (
+                    format!("//{} [removed]", before.path),
+                    "removed from checkout rules".to_string(),
+                )
+            }
         })
         .collect::<Vec<_>>();
 
@@ -1363,6 +1369,233 @@ pub fn emit_sync_complete_report(
     container.add(console::bootstrap::VerticalSpacer::new(1));
     container
         .add(console::bootstrap::Divider::new().style(console::bootstrap::DividerStyle::Double));
+
+    console.emit_container(&container);
+
+    Ok(())
+}
+
+fn resolve_removed_tracked_repo_paths(
+    before_tracked_repos: &HashMap<Arc<str>, ws::CheckoutRepo>,
+    after_tracked_repos: &HashMap<Arc<str>, ws::CheckoutRepo>,
+) -> Vec<Arc<str>> {
+    let mut removed_paths = before_tracked_repos
+        .keys()
+        .filter(|path| !after_tracked_repos.contains_key(*path))
+        .cloned()
+        .collect::<Vec<_>>();
+    removed_paths.sort();
+    removed_paths
+}
+
+fn is_git_repo_root_at_path(
+    progress: &mut console::Progress,
+    repo: &git::Repository,
+    path: &str,
+) -> anyhow::Result<bool> {
+    let git_dir_path = std::path::Path::new(path).join(".git");
+    if !git_dir_path.exists() || !git_dir_path.is_dir() {
+        return Ok(false);
+    }
+
+    let show_toplevel = git::execute_git_command(
+        progress,
+        repo.url.as_ref(),
+        console::ExecuteOptions {
+            working_directory: Some(path.into()),
+            arguments: vec!["rev-parse".into(), "--show-toplevel".into()],
+            is_return_stdout: true,
+            ..Default::default()
+        },
+    )?;
+
+    let Some(toplevel) = show_toplevel else {
+        return Ok(false);
+    };
+
+    let toplevel = toplevel.trim();
+    if toplevel.is_empty() {
+        return Ok(false);
+    }
+
+    let expected_root = std::fs::canonicalize(std::path::Path::new(path));
+    let resolved_root = std::fs::canonicalize(std::path::Path::new(toplevel));
+
+    match (expected_root, resolved_root) {
+        (Ok(expected), Ok(resolved)) => Ok(expected == resolved),
+        _ => Ok(false),
+    }
+}
+
+pub fn execute_removed_repo_post_sync_actions(
+    console: console::Console,
+    before_tracked_repos: &HashMap<Arc<str>, ws::CheckoutRepo>,
+    after_tracked_repos: &HashMap<Arc<str>, ws::CheckoutRepo>,
+) -> anyhow::Result<()> {
+    let removed_repo_paths =
+        resolve_removed_tracked_repo_paths(before_tracked_repos, after_tracked_repos);
+    if removed_repo_paths.is_empty() {
+        return Ok(());
+    }
+
+    let mut deleted_repos = Vec::new();
+    let mut dirty_repos = Vec::new();
+    let mut non_rooted_git_repos = Vec::new();
+    let mut dev_branch_repos = Vec::new();
+    let mut failed_deletions: Vec<(Arc<str>, String)> = Vec::new();
+
+    for path in removed_repo_paths {
+        let Some(repo_meta) = before_tracked_repos.get(path.as_ref()) else {
+            continue;
+        };
+
+        let repo_path = std::path::Path::new(path.as_ref());
+        if !repo_path.exists() {
+            continue;
+        }
+
+        if repo_meta.is_dev_branch {
+            dev_branch_repos.push(path.clone());
+            continue;
+        }
+
+        let mut repo_progress = console::Progress::new(
+            console.clone(),
+            format!("//{}", path),
+            None,
+            Some(format!(
+                "//{} evaluating post-eval removed repo actions",
+                path
+            )),
+        );
+        repo_progress.set_message("checking if repository is clean");
+
+        let repo = git::Repository::new(repo_meta.url.clone(), path.clone());
+        if !is_git_repo_root_at_path(&mut repo_progress, &repo, path.as_ref())? {
+            non_rooted_git_repos.push(path.clone());
+            repo_progress.set_finalize_lines(console::make_finalize_line(
+                console::FinalType::NotRequired,
+                repo_progress.elapsed(),
+                &format!(
+                    "//{} kept (.git root mismatch; not deleting to avoid ancestral git repo)",
+                    path
+                ),
+            ));
+            continue;
+        }
+
+        if repo.is_dirty(&mut repo_progress, git::IgnoreSubmodules::Yes) {
+            dirty_repos.push(path.clone());
+            repo_progress.set_finalize_lines(console::make_finalize_line(
+                console::FinalType::NotRequired,
+                repo_progress.elapsed(),
+                &format!("//{} kept (dirty repository)", path),
+            ));
+            continue;
+        }
+
+        repo_progress.set_message("deleting removed repository");
+        let remove_result = if repo_path.is_dir() {
+            std::fs::remove_dir_all(repo_path)
+        } else {
+            std::fs::remove_file(repo_path)
+        };
+
+        match remove_result {
+            Ok(()) => {
+                deleted_repos.push(path.clone());
+                repo_progress.set_finalize_lines(console::make_finalize_line(
+                    console::FinalType::Completed,
+                    repo_progress.elapsed(),
+                    &format!("//{} deleted (removed from checkout rules)", path),
+                ));
+            }
+            Err(error) => {
+                failed_deletions.push((path.clone(), error.to_string()));
+                repo_progress.set_finalize_lines(console::make_finalize_line(
+                    console::FinalType::Failed,
+                    repo_progress.elapsed(),
+                    &format!("//{} failed to delete", path),
+                ));
+            }
+        }
+    }
+
+    if deleted_repos.is_empty()
+        && dirty_repos.is_empty()
+        && non_rooted_git_repos.is_empty()
+        && dev_branch_repos.is_empty()
+        && failed_deletions.is_empty()
+    {
+        return Ok(());
+    }
+
+    let mut container = console::container::Container::new();
+    container.add(console::bootstrap::VerticalSpacer::new(1));
+    container.add(
+        console::bootstrap::Banner::new("Removed Repository Cleanup".to_string())
+            .variant(console::bootstrap::Variant::Warning)
+            .width(console::bootstrap::Width::Large),
+    );
+
+    let mut status_list = console::components::DescriptionList::new()
+        .compact(true)
+        .variant(console::components::Variant::Primary);
+
+    for path in &deleted_repos {
+        status_list.add_item(
+            format!("//{path}"),
+            "deleted (clean and no longer in checkout rules)",
+        );
+    }
+
+    for path in &dirty_repos {
+        status_list.add_item(
+            format!("//{path}"),
+            "kept (dirty repository; manual cleanup required)",
+        );
+    }
+
+    for path in &non_rooted_git_repos {
+        status_list.add_item(
+            format!("//{path}"),
+            "kept (.git root mismatch; git may be resolving an ancestor repository)",
+        );
+    }
+
+    for path in &dev_branch_repos {
+        status_list.add_item(
+            format!("//{path}"),
+            "kept (dev-branch repository; manual cleanup recommended)",
+        );
+    }
+
+    for (path, error) in &failed_deletions {
+        status_list.add_item(format!("//{path}"), format!("failed to delete: {error}"));
+    }
+
+    container.add(status_list);
+
+    if !dev_branch_repos.is_empty() {
+        let mut recommendation_lines = Vec::new();
+        for path in &dev_branch_repos {
+            recommendation_lines.push(
+                console::bootstrap::plain_text(format!(
+                    "//{path} is a dev-branch and was removed from checkout rules. Delete it manually when ready:"
+                ))
+                .into_line(),
+            );
+            recommendation_lines
+                .push(console::bootstrap::code(format!("  rm -rf {path}")).into_line());
+            recommendation_lines.extend(console::bootstrap::VerticalSpacer::new(1).render());
+        }
+
+        container.add(
+            console::components::Alert::new(recommendation_lines)
+                .title("Recommended Actions")
+                .width(console::bootstrap::Width::Large),
+        );
+    }
 
     console.emit_container(&container);
 
@@ -1867,6 +2100,22 @@ mod tests {
         items.iter().map(|item| Arc::<str>::from(*item)).collect()
     }
 
+    fn checkout_repo(url: &str, is_dev_branch: bool) -> ws::CheckoutRepo {
+        ws::CheckoutRepo {
+            url: url.into(),
+            is_dev_branch,
+        }
+    }
+
+    fn tracked_repo_map(items: &[(&str, &str, bool)]) -> HashMap<Arc<str>, ws::CheckoutRepo> {
+        items
+            .iter()
+            .map(|(path, url, is_dev_branch)| {
+                (Arc::<str>::from(*path), checkout_repo(url, *is_dev_branch))
+            })
+            .collect()
+    }
+
     fn repo_sync_plan(
         is_dev_branch: bool,
         is_rev_branch: bool,
@@ -1949,6 +2198,21 @@ mod tests {
 
         assert!(
             format!("{err:#}").contains("Unknown repo selectors for --merge: //repo-b, //repo-z")
+        );
+    }
+
+    #[test]
+    fn resolve_removed_tracked_repo_paths_returns_sorted_removed_repos() {
+        let before = tracked_repo_map(&[
+            ("@star/sdk", "https://example.com/sdk.git", false),
+            ("@star/dev", "https://example.com/dev.git", true),
+            ("@star/keep", "https://example.com/keep.git", false),
+        ]);
+        let after = tracked_repo_map(&[("@star/keep", "https://example.com/keep.git", false)]);
+
+        assert_eq!(
+            resolve_removed_tracked_repo_paths(&before, &after),
+            arcs(&["@star/dev", "@star/sdk"]),
         );
     }
 
