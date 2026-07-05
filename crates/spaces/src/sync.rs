@@ -1388,6 +1388,23 @@ fn resolve_removed_tracked_repo_paths(
     removed_paths
 }
 
+fn is_safe_repo_cleanup_path(path: &str) -> bool {
+    let repo_path = std::path::Path::new(path);
+    if path.is_empty() || repo_path.is_absolute() {
+        return false;
+    }
+
+    let mut has_normal_component = false;
+    for component in repo_path.components() {
+        match component {
+            std::path::Component::Normal(_) => has_normal_component = true,
+            _ => return false,
+        }
+    }
+
+    has_normal_component
+}
+
 fn is_git_repo_root_at_path(
     progress: &mut console::Progress,
     repo: &git::Repository,
@@ -1476,6 +1493,8 @@ pub fn execute_removed_repo_post_sync_actions(
     let mut dirty_repos = Vec::new();
     let mut repos_with_local_commits_not_on_remotes = Vec::new();
     let mut non_rooted_git_repos = Vec::new();
+    let mut non_directory_repo_paths = Vec::new();
+    let mut unsafe_repo_paths = Vec::new();
     let mut dev_branch_repos = Vec::new();
     let mut failed_deletions: Vec<(Arc<str>, String)> = Vec::new();
 
@@ -1483,6 +1502,11 @@ pub fn execute_removed_repo_post_sync_actions(
         let Some(repo_meta) = before_tracked_repos.get(path.as_ref()) else {
             continue;
         };
+
+        if !is_safe_repo_cleanup_path(path.as_ref()) {
+            unsafe_repo_paths.push(path.clone());
+            continue;
+        }
 
         let repo_path = std::path::Path::new(path.as_ref());
         if !repo_path.exists() {
@@ -1504,6 +1528,19 @@ pub fn execute_removed_repo_post_sync_actions(
             )),
         );
         repo_progress.set_message("checking if repository is clean");
+
+        if !repo_path.is_dir() {
+            non_directory_repo_paths.push(path.clone());
+            repo_progress.set_finalize_lines(console::make_finalize_line(
+                console::FinalType::NotRequired,
+                repo_progress.elapsed(),
+                &format!(
+                    "//{} kept (path is not a directory; cannot remove as repository)",
+                    path
+                ),
+            ));
+            continue;
+        }
 
         let repo = git::Repository::new(repo_meta.url.clone(), path.clone());
         if !is_git_repo_root_at_path(&mut repo_progress, &repo, path.as_ref())? {
@@ -1541,11 +1578,7 @@ pub fn execute_removed_repo_post_sync_actions(
         }
 
         repo_progress.set_message("deleting removed repository");
-        let remove_result = if repo_path.is_dir() {
-            std::fs::remove_dir_all(repo_path)
-        } else {
-            std::fs::remove_file(repo_path)
-        };
+        let remove_result = std::fs::remove_dir_all(repo_path);
 
         match remove_result {
             Ok(()) => {
@@ -1571,6 +1604,8 @@ pub fn execute_removed_repo_post_sync_actions(
         && dirty_repos.is_empty()
         && repos_with_local_commits_not_on_remotes.is_empty()
         && non_rooted_git_repos.is_empty()
+        && non_directory_repo_paths.is_empty()
+        && unsafe_repo_paths.is_empty()
         && dev_branch_repos.is_empty()
         && failed_deletions.is_empty()
     {
@@ -1614,6 +1649,20 @@ pub fn execute_removed_repo_post_sync_actions(
         status_list.add_item(
             format!("//{path}"),
             "kept (.git root mismatch; git may be resolving an ancestor repository)",
+        );
+    }
+
+    for path in &non_directory_repo_paths {
+        status_list.add_item(
+            format!("//{path}"),
+            "kept (path is not a directory; cannot remove as repository)",
+        );
+    }
+
+    for path in &unsafe_repo_paths {
+        status_list.add_item(
+            path.to_string(),
+            "kept (unsafe path in checkout settings; expected non-empty relative path without `.` or `..`)",
         );
     }
 
@@ -2284,6 +2333,22 @@ mod tests {
             resolve_removed_tracked_repo_paths(&before, &after),
             arcs(&["@star/dev", "@star/sdk"]),
         );
+    }
+
+    #[test]
+    fn is_safe_repo_cleanup_path_accepts_non_empty_relative_paths() {
+        assert!(is_safe_repo_cleanup_path("@star/sdk"));
+        assert!(is_safe_repo_cleanup_path("repos/sdk"));
+    }
+
+    #[test]
+    fn is_safe_repo_cleanup_path_rejects_unsafe_paths() {
+        assert!(!is_safe_repo_cleanup_path(""));
+        assert!(!is_safe_repo_cleanup_path("."));
+        assert!(!is_safe_repo_cleanup_path(".."));
+        assert!(!is_safe_repo_cleanup_path("../repo"));
+        assert!(!is_safe_repo_cleanup_path("repo/.."));
+        assert!(!is_safe_repo_cleanup_path("/tmp/repo"));
     }
 
     #[test]
