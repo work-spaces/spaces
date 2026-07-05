@@ -1,4 +1,4 @@
-use crate::{changes, fs_mutex, graph, inputs, logger, store};
+use crate::{changes, fs_mutex, graph, inputs, labels, logger, store};
 use anyhow::Context;
 use anyhow_source_location::format_context;
 
@@ -23,6 +23,53 @@ const SPACES_RCACHE_PATH_ENV_VAR: &str = "SPACES_ENV_RCACHE_PATH";
 
 fn logger(console: console::Console) -> logger::Logger {
     logger::Logger::new(console, "ws".into())
+}
+
+pub fn normalize_repo_selector(selector: &str) -> Arc<str> {
+    selector.strip_prefix("//").unwrap_or(selector).into()
+}
+
+pub fn normalize_repo_selector_for_storage(selector: &str) -> Arc<str> {
+    format!("//{}", normalize_repo_selector(selector)).into()
+}
+
+pub fn normalized_selector_matches_member_path(
+    normalized_member_path: &str,
+    normalized_selector: &str,
+) -> bool {
+    if normalized_member_path == normalized_selector {
+        return true;
+    }
+
+    normalized_member_path
+        .strip_suffix(normalized_selector)
+        .is_some_and(|prefix| prefix.ends_with('/'))
+}
+
+pub fn normalize_repo_selectors_for_storage(selectors: Vec<Arc<str>>) -> Vec<Arc<str>> {
+    let mut seen: HashSet<Arc<str>> = HashSet::new();
+    let mut normalized = Vec::new();
+
+    for selector in selectors {
+        let normalized_selector = normalize_repo_selector_for_storage(selector.as_ref());
+        if seen.insert(normalized_selector.clone()) {
+            normalized.push(normalized_selector);
+        }
+    }
+
+    normalized
+}
+
+pub fn repo_selector_matches(candidate: &str, selector: &str) -> bool {
+    let normalized_candidate = normalize_repo_selector(candidate);
+    let normalized_selector = normalize_repo_selector(selector);
+
+    if normalized_candidate == normalized_selector {
+        return true;
+    }
+
+    labels::get_rule_name_from_label(normalized_candidate.as_ref())
+        == labels::get_rule_name_from_label(normalized_selector.as_ref())
 }
 
 pub fn get_checkout_store_path() -> Arc<str> {
@@ -426,11 +473,20 @@ impl JsonSettings {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Default, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CheckoutRepo {
+    pub url: Arc<str>,
+    #[serde(default)]
+    pub is_dev_branch: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CheckoutSettings {
     pub links: HashSet<Arc<str>>,
     pub assets: HashMap<Arc<str>, Arc<str>>,
     pub updated_assets: HashSet<Arc<str>>,
+    #[serde(default = "HashMap::new")]
+    pub repos: HashMap<Arc<str>, CheckoutRepo>,
 }
 
 impl CheckoutSettings {
@@ -472,6 +528,10 @@ impl CheckoutSettings {
     pub fn insert_asset(&mut self, path: Arc<str>, contents: Arc<str>) {
         let content_hash = blake3::hash(contents.as_bytes());
         let _ = self.assets.insert(path, content_hash.to_string().into());
+    }
+
+    pub fn insert_repo(&mut self, path: Arc<str>, url: Arc<str>, is_dev_branch: bool) {
+        let _ = self.repos.insert(path, CheckoutRepo { url, is_dev_branch });
     }
 }
 

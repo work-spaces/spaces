@@ -7,21 +7,21 @@ load("//@star/packages/star/rust.star", "rust_add")
 load("//@star/packages/star/sccache.star", "sccache_add")
 load("//@star/packages/star/spaces-cli.star", "spaces_add_devutils", "spaces_add_star_formatter")
 load("//@star/packages/star/starship.star", "starship_add_bash")
-load("//@star/sdk/star/asset.star", "asset_hard_link")
 load(
-    "//@star/sdk/star/checkout.star",
-    "checkout_add_any_assets",
-    "checkout_add_archive",
-    "checkout_add_env_vars",
-)
-load("//@star/sdk/star/env.star", "env_assign")
-load(
-    "//@star/sdk/star/info.star",
+    "//@star/prelude/info.star",
     "info_get_path_to_store",
     "info_is_ci",
 )
+load("//@star/prelude/rules/asset.star", "asset_hard_link")
 load(
-    "//@star/sdk/star/ws.star",
+    "//@star/prelude/rules/checkout.star",
+    "checkout_add_any_assets",
+    "checkout_add_env_vars",
+    "checkout_add_repo",
+)
+load("//@star/prelude/rules/env.star", "env_assign")
+load(
+    "//@star/prelude/rules/ws.star",
     "workspace_get_absolute_path",
     "workspace_get_path_to_checkout",
 )
@@ -114,9 +114,10 @@ checkout_add_env_vars(
     ],
 )
 
-if False:
-    checkout_add_archive(
-        "spaces_archive",
-        url = "https://github.com/work-spaces/spaces/releases/download/v0.15.50/spaces-linux-aarch64-v0.15.50.zip",
-        sha256 = "",
+# This can be used for testing spaces sync
+if workspace.load_value("CHECKOUT_INSTALL_SPACES") == "ON":
+    checkout_add_repo(
+        "install-spaces",
+        url = "https://github.com/work-spaces/install-spaces",
+        rev = "main",
     )

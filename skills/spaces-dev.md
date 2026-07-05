@@ -67,3 +67,6 @@ PATH=<workspace_root>/sysroot/bin:/usr/bin:/bin:/usr/sbin:/sbin <command>
 ```
 
 sysroot/bin contains sccache, rg, and other helpful tools.
+
+
+Use `git -C spaces ...` if checking changes with git.
