@@ -512,18 +512,25 @@ fn normalize_home_asset_store_entry(
     }
 
     if store_is_dir {
-        std::fs::remove_dir_all(store_full).context(ecode::anyhow(
-            ecode::Ecode::AssetExecutorOperationFailed,
-            &format!(
-                "Failed to remove stale store directory {}",
-                store_full.display()
-            ),
-        ))?;
+        std::fs::remove_dir_all(store_full).map_err(|err| {
+            ecode::anyhow(
+                ecode::Ecode::AssetExecutorOperationFailed,
+                &format!(
+                    "Failed to remove stale store directory {} because {err:?}",
+                    store_full.display()
+                ),
+            )
+        })?;
     } else {
-        std::fs::remove_file(store_full).context(ecode::anyhow(
-            ecode::Ecode::AssetExecutorOperationFailed,
-            &format!("Failed to remove stale store file {}", store_full.display()),
-        ))?;
+        std::fs::remove_file(store_full).map_err(|err| {
+            ecode::anyhow(
+                ecode::Ecode::AssetExecutorOperationFailed,
+                &format!(
+                    "Failed to remove stale store file {} because {err:?}",
+                    store_full.display()
+                ),
+            )
+        })?;
     }
 
     Ok(())
@@ -573,26 +580,32 @@ fn get_destination_path(
 }
 
 fn save_asset(workspace_path: Arc<str>, destination: &str, content: &str) -> anyhow::Result<()> {
-    let output_path = get_destination_path(workspace_path, destination).context(ecode::anyhow(
-        ecode::Ecode::AssetExecutorOperationFailed,
-        &format!("Failed to get destination for {destination}"),
-    ))?;
+    let output_path = get_destination_path(workspace_path, destination).map_err(|err| {
+        ecode::anyhow(
+            ecode::Ecode::AssetExecutorOperationFailed,
+            &format!("Failed to get destination for {destination} because {err:?}"),
+        )
+    })?;
     if let Some(parent) = output_path.parent() {
-        std::fs::create_dir_all(parent).context(ecode::anyhow(
+        std::fs::create_dir_all(parent).map_err(|err| {
+            ecode::anyhow(
+                ecode::Ecode::AssetExecutorOperationFailed,
+                &format!(
+                    "Failed to create parent directories for asset file {} because {err:?}",
+                    output_path.to_string_lossy()
+                ),
+            )
+        })?;
+    }
+    std::fs::write(output_path.clone(), content).map_err(|err| {
+        ecode::anyhow(
             ecode::Ecode::AssetExecutorOperationFailed,
             &format!(
-                "Failed to create parent directories for asset file {}",
+                "Failed to write asset file {} because {err:?}",
                 output_path.to_string_lossy()
             ),
-        ))?;
-    }
-    std::fs::write(output_path.clone(), content).context(ecode::anyhow(
-        ecode::Ecode::AssetExecutorOperationFailed,
-        &format!(
-            "Failed to write asset file {}",
-            output_path.to_string_lossy()
-        ),
-    ))?;
+        )
+    })?;
 
     Ok(())
 }

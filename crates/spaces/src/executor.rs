@@ -97,11 +97,14 @@ impl Task {
                 // if the repo is a workflows repo, don't add the modules
                 if !workflows_file_path.exists() {
                     // add files in the directory that end in spaces.star
-                    let modules =
-                        std::fs::read_dir(new_repo_path.clone()).context(ecode::anyhow(
+                    let modules = std::fs::read_dir(new_repo_path.clone()).map_err(|err| {
+                        ecode::anyhow(
                             ecode::Ecode::ExecutorTaskExecutionFailed,
-                            &format!("Failed to read workspace directory {new_repo_path:?}"),
-                        ))?;
+                            &format!(
+                                "while reading workspace directory {new_repo_path:?}\n{err:#}"
+                            ),
+                        )
+                    })?;
 
                     for module in modules.flatten() {
                         let path = module.path();
