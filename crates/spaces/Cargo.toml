@@ -19,6 +19,7 @@ itertools = { version = "0.14" }
 lsp-types = { version = "0.97" }
 thiserror = "2"
 libc = { version = "0.2", optional = true }
+rayon.workspace = true
 
 console.workspace = true
 utils.workspace = true
