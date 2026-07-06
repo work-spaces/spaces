@@ -535,11 +535,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             } else {
                 return Err(format_error!("Cloned rules cannot specify inputs"));
             }
-            if rule.outputs.is_none() {
-                rule.outputs = cloned_rule.outputs;
-            } else {
-                return Err(format_error!("Cloned rules cannot specify outputs"));
-            }
+
             if rule.targets.is_none() {
                 rule.targets = cloned_rule.targets;
             } else {
