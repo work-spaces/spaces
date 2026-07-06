@@ -1562,6 +1562,24 @@ pub fn get_task(name: &str) -> anyhow::Result<task::Task> {
         .ok_or_else(|| format_error!("Rule {} not found", name))
 }
 
+/// Clone a task using a caller-supplied module name instead of global state.
+pub fn get_cloned_task_for_module(
+    name: &str,
+    module_name: &Arc<str>,
+) -> anyhow::Result<task::Task> {
+    let sanitized_name = get_sanitized_rule_name_for_module(name.into(), module_name);
+    let state = get_state().read();
+    let tasks = state.tasks.read();
+    if let Some(task) = tasks.get(&sanitized_name) {
+        Ok(task.clone())
+    } else {
+        Err(format_error!(
+            "Rule {} not found for cloning",
+            sanitized_name
+        ))
+    }
+}
+
 pub fn is_git_rule(name: &str) -> bool {
     let state = get_state().read();
     let tasks = state.tasks.read();
