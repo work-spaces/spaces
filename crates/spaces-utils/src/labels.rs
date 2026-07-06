@@ -31,6 +31,12 @@ pub fn get_path_from_path_label(label: &str) -> Arc<std::path::Path> {
     std::path::Path::new(path_str).into()
 }
 
+pub fn get_folder_name_from_rule(rule: &str) -> String {
+    let stripped = rule.strip_prefix("//").unwrap_or(rule);
+    let rule = stripped.replace('/', "_");
+    rule.replace(':', "_")
+}
+
 pub fn sanitize_rule_for_display(rule_name: Arc<str>) -> Arc<str> {
     // if length > MAX_RULE_NAME_LENGTH show firtst INTRO_LENGTH chars, then ... then the rest
     const MAX_RULE_NAME_LENGTH: usize = 64;
@@ -210,6 +216,20 @@ mod tests {
             get_path_label_from_rule_label("//path:nested:rule"),
             "//path"
         );
+    }
+
+    #[test]
+    fn test_get_folder_name_from_rule() {
+        assert_eq!(
+            get_folder_name_from_rule("//path/to/pkg:my_rule"),
+            "path_to_pkg_my_rule"
+        );
+        assert_eq!(get_folder_name_from_rule("plain_rule"), "plain_rule");
+        assert_eq!(
+            get_folder_name_from_rule("path/to:rule/name"),
+            "path_to_rule_name"
+        );
+        assert_eq!(get_folder_name_from_rule(""), "");
     }
 
     #[test]
