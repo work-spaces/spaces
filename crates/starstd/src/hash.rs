@@ -277,7 +277,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let bytes = hex::decode(input)
             .map_err(|err| format_error!("while decoding hex `{input}` because {err:?}"))?;
         String::from_utf8(bytes)
-            .map_err(|err| format_error!("while encoding decodec bytes as UTF-8 because {err:?}"))
+            .map_err(|err| format_error!("while encoding decoded bytes as UTF-8 because {err:?}"))
     }
 
     // ── Base64 encoding / decoding ────────────────────────────────────────────

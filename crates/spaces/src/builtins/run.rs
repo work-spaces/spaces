@@ -4,7 +4,7 @@ use starlark::eval::Evaluator;
 use starlark::{environment::GlobalsBuilder, values::none::NoneType};
 
 use std::sync::Arc;
-use utils::{logger, marker, rule, targets};
+use utils::{labels, logger, marker, rule, targets};
 
 use crate::builtins::eval_context::get_eval_context_mut;
 use crate::{evaluation_profile, executor, rules, task};
@@ -145,6 +145,27 @@ fn add_rule_to_all(
             ));
     }
     Ok(())
+}
+
+fn get_archive_input_relative_to_workspace(input: &str, module_name: &Arc<str>) -> String {
+    if let Some(stripped) = input.strip_prefix("//") {
+        return stripped.to_string();
+    }
+
+    if std::path::Path::new(input).is_absolute() {
+        return input.to_string();
+    }
+
+    let module_path = std::path::Path::new(module_name.as_ref())
+        .parent()
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    if module_path.is_empty() {
+        input.to_string()
+    } else {
+        format!("{module_path}/{input}")
+    }
 }
 
 /// These are the functions available in the `run` module.
@@ -417,13 +438,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             let mut rule: rule::Rule = serde_json::from_value(rule.to_json_value()?)?;
 
             if rule.inputs.is_some() {
-                return Err(anyhow::anyhow!(
+                return Err(format_error!(
                     "inputs are populated automatically by add_archive"
                 ));
             }
 
             if rule.targets.is_some() {
-                return Err(anyhow::anyhow!(
+                return Err(format_error!(
                     "outputs are populated automatically by add_archive"
                 ));
             }
@@ -434,12 +455,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
             let rule_name = rule.name.clone();
 
-            let input = create_archive
-                .input
-                .strip_prefix("//")
-                .unwrap_or(&create_archive.input)
-                .to_owned();
-            create_archive.input = input;
+            create_archive.input =
+                get_archive_input_relative_to_workspace(&create_archive.input, &ctx.module_name);
 
             // Add archive input globs to deps without clobbering existing deps
             let includes = vec![format!("//{}/**", create_archive.input).into()];
@@ -448,12 +465,18 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 rule::AnyDep::Glob(rule::Globs::Includes(includes)),
             );
 
-            let target_path = format!(
-                "//build/{}/{}",
-                rules::get_sanitized_rule_name_for_module(rule_name.clone(), &ctx.module_name),
-                create_archive.get_output_file()
+            let sane_rule_name =
+                rules::get_sanitized_rule_name_for_module(rule_name.clone(), &ctx.module_name);
+            let folder_name = labels::get_folder_name_from_rule(&sane_rule_name);
+
+            let target_path =
+                format!("//build/{folder_name}/{}", create_archive.get_output_file()).into();
+            let target_sha_path = format!(
+                "//build/{folder_name}/{}",
+                create_archive.get_output_sha256_file()
             )
             .into();
+            rule.push_target(targets::Target::File(target_sha_path));
             rule.push_target(targets::Target::File(target_path));
 
             let archive = executor::archive::Archive { create_archive };
@@ -569,5 +592,41 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             .context(format_context!("Failed to register rule {rule_name}"))?;
             Ok(NoneType)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::get_archive_input_relative_to_workspace;
+    use std::sync::Arc;
+
+    #[test]
+    fn archive_input_with_workspace_prefix_is_workspace_relative() {
+        let module_name: Arc<str> = "spaces/project/spaces.star".into();
+
+        assert_eq!(
+            get_archive_input_relative_to_workspace("//build/install", &module_name),
+            "build/install"
+        );
+    }
+
+    #[test]
+    fn archive_input_without_workspace_prefix_is_module_relative() {
+        let module_name: Arc<str> = "spaces/project/spaces.star".into();
+
+        assert_eq!(
+            get_archive_input_relative_to_workspace("build/install", &module_name),
+            "spaces/project/build/install"
+        );
+    }
+
+    #[test]
+    fn archive_input_without_workspace_prefix_in_root_module_stays_relative() {
+        let module_name: Arc<str> = "spaces.star".into();
+
+        assert_eq!(
+            get_archive_input_relative_to_workspace("build/install", &module_name),
+            "build/install"
+        );
     }
 }

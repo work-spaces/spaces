@@ -233,9 +233,9 @@ pub fn execute_rule(
             workspace
                 .write()
                 .update_changes(&mut progress, &dep_globs)
-                .context(format_context!(
-                    "[{rule_name}] Failed to update workspace changes"
-                ))?;
+                .map_err(|err| {
+                    format_error!("[{rule_name}] Failed to update workspace changes\n{err:?}")
+                })?;
 
             logger.debug("check for new digest");
 
@@ -254,7 +254,9 @@ pub fn execute_rule(
                     &dep_globs[..],
                     is_create_digest_report,
                 )
-                .context(format_context!("[{rule_name}] Failed to check deps globs"))?;
+                .map_err(|err| {
+                    format_error!("[{rule_name}] Failed to check deps globs\n{err:?}")
+                })?;
 
             // digest has not changed
             if !check_changes.is_changed {
@@ -358,8 +360,9 @@ pub fn execute_rule(
                         // logic in arguments.rs can't find the log to point at.
                         (
                             true,
-                            Err(err)
-                                .context(format_context!("[{rule_name}] while executing/caching")),
+                            Err(format_error!(
+                                "[{rule_name}] while executing/caching\n{err:?}"
+                            )),
                         )
                     }
                     None => {

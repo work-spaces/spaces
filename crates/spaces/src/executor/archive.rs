@@ -1,7 +1,7 @@
 use crate::workspace;
 
 use serde::{Deserialize, Serialize};
-use utils::{ecode, logger};
+use utils::{ecode, labels, logger};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -17,7 +17,8 @@ impl Archive {
         name: &str,
     ) -> anyhow::Result<()> {
         let workspace_directory = workspace.read().get_absolute_path();
-        let output_directory = format!("{workspace_directory}/build/{name}");
+        let folder_name = labels::get_folder_name_from_rule(name);
+        let output_directory = format!("{workspace_directory}/build/{folder_name}");
         let console = progress.console.clone();
 
         std::fs::create_dir_all(output_directory.as_str()).map_err(|err| {
