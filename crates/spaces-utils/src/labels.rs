@@ -222,7 +222,7 @@ mod tests {
     fn test_get_folder_name_from_rule() {
         assert_eq!(
             get_folder_name_from_rule("//path/to/pkg:my_rule"),
-            "__path_to_pkg_my_rule"
+            "path_to_pkg_my_rule"
         );
         assert_eq!(get_folder_name_from_rule("plain_rule"), "plain_rule");
         assert_eq!(

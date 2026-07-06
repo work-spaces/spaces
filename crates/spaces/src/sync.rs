@@ -1166,7 +1166,7 @@ fn pre_post_actions(plan: Option<&RepoSyncPlan>) -> Vec<String> {
         }
 
         if let Some(action) = describe_post_sync_action(plan) {
-            actions.push(format!("sync post-evaluation: {action}"));
+            actions.push(format!("post-eval: {action}"));
         }
     }
 
