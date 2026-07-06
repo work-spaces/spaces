@@ -8,7 +8,7 @@ use starlark::eval::Evaluator;
 use starlark::values::Value;
 use starlark::values::none::NoneType;
 use std::collections::HashMap;
-use utils::{environment, rule, ws};
+use utils::{environment, labels, rule, ws};
 
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
@@ -456,8 +456,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             let sanitized_rule_name =
                 rules::get_sanitized_rule_name_for_module(rule_name.into(), &ctx.module_name);
 
+            let folder_name = labels::get_folder_name_from_rule(&sanitized_rule_name);
+
             Ok(format!(
-                "//build/{sanitized_rule_name}/{}",
+                "//build/{folder_name}/{}",
                 create_archive.get_output_file()
             ))
         })
@@ -499,8 +501,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             let sanitized_rule_name =
                 rules::get_sanitized_rule_name_for_module(rule_name.into(), &ctx.module_name);
 
+            let folder_name = labels::get_folder_name_from_rule(&sanitized_rule_name);
+
             let mut output = HashMap::new();
-            let rule_output_path = format!("build/{sanitized_rule_name}");
+            let rule_output_path = format!("build/{folder_name}");
 
             output.insert(
                 "archive_path".to_string(),

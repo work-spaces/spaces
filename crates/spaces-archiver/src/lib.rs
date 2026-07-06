@@ -33,6 +33,15 @@ impl CreateArchive {
         result
     }
 
+    pub fn get_output_sha256_file(&self) -> String {
+        let mut result = format!("{}-v{}", self.name, self.version);
+        if let Some(platform) = self.platform.as_ref() {
+            result.push_str(format!("-{platform}").as_str());
+        }
+        result.push_str(".sha256.txt");
+        result
+    }
+
     pub fn build_file_list(&self) -> anyhow::Result<Vec<(String, String)>> {
         let input_as_path = std::path::Path::new(self.input.as_str());
 
