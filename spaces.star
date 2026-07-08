@@ -194,7 +194,7 @@ run_add_exec(
     command = "cargo",
     args = [
         "install",
-        " --target-dir=build/target",
+        "--target-dir=build/target",
         "--features=lsp-debug",
         "--force",
         "--path=spaces/crates/spaces",
