@@ -202,7 +202,7 @@ impl RuleDigestCacheEntry {
             // update last used and save the entry
             entry.last_used.update();
             let encoded = postcard::to_stdvec(&entry)
-                .context(format_context!("Failed to encode rcache entry"))?;
+                .context(format_context!("while encoding rcache entry"))?;
             std::fs::write(path_in_cache, encoded).context(format_context!(
                 "while writing cache entry for rule digest {}",
                 rule_digest
