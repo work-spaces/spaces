@@ -74,7 +74,7 @@ impl UpdateAsset {
                     ecode::Ecode::AssetExecutorOperationFailed,
                     &format!(
                         "Failed to get destination path for asset file {}\n{err:?}",
-                        &self.destination
+                        self.destination
                     ),
                 )
             })?;
@@ -99,7 +99,7 @@ impl UpdateAsset {
             let mut old_value = parse_value(self.format, &old_value).map_err(|err| {
                 ecode::anyhow(
                     ecode::Ecode::AssetExecutorOperationFailed,
-                    &format!("Failed to parse asset file {}\n{err:?}", &self.destination),
+                    &format!("Failed to parse asset file {}\n{err:?}", self.destination),
                 )
             })?;
 
@@ -117,14 +117,14 @@ impl UpdateAsset {
         let content = format_value(self.format, &new_value).map_err(|err| {
             ecode::anyhow(
                 ecode::Ecode::AssetExecutorOperationFailed,
-                &format!("Failed to format asset file {}\n{err:?}", &self.destination),
+                &format!("Failed to format asset file {}\n{err:?}", self.destination),
             )
         })?;
 
         save_asset(workspace_path, &self.destination, &content).map_err(|err| {
             ecode::anyhow(
                 ecode::Ecode::AssetExecutorOperationFailed,
-                &format!("Failed to save asset file {}\n{err:?}", &self.destination),
+                &format!("Failed to save asset file {}\n{err:?}", self.destination),
             )
         })?;
 

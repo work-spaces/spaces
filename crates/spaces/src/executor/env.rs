@@ -18,7 +18,7 @@ impl UpdateEnv {
     ) -> anyhow::Result<()> {
         let console = progress.console.clone();
         logger::Logger::new(console, name.into())
-            .debug(format!("Update env {name}: {:?}", &self).as_str());
+            .debug(format!("Update env {name}: {:?}", self).as_str());
         workspace
             .write()
             .update_env(self.environment.clone())
