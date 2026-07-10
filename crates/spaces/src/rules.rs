@@ -884,10 +884,12 @@ impl State {
             if !workspace_read.is_dirty {
                 return Ok(());
             }
-            workspace_read
+            let mut list = workspace_read
                 .get_automatic_vars()
                 .into_iter()
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            list.sort();
+            list
         };
         logger.info("sorting and hashing");
         let topo_sorted = self.graph.get_sorted_tasks(None).with_context(|| {
