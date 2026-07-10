@@ -1046,7 +1046,7 @@ impl Workspace {
         Ok(())
     }
 
-    fn get_automatic_vars(&self) -> HashMap<&'static str, Arc<str>> {
+    pub fn get_automatic_vars(&self) -> HashMap<&'static str, Arc<str>> {
         let mut vars = HashMap::new();
         vars.insert(AUTOMATIC_WORKSPACE_ABSOLUTE_PATH, self.get_absolute_path());
         vars.insert(AUTOMATIC_WORKSPACE_DIGEST, self.get_short_digest());
@@ -1091,7 +1091,7 @@ impl Workspace {
 
         let automatic_vars = self.get_automatic_vars();
 
-        for (_replace_key, replace_value) in env_vars.iter_mut() {
+        for replace_value in env_vars.values_mut() {
             let mut new_value = replace_value.to_string();
             for (with_key, with_value) in automatic_vars.iter() {
                 let automatic_token = environment::Value::get_automatic_placeholder(with_key);
@@ -1323,7 +1323,7 @@ impl Workspace {
 
     pub fn save_bin(&self, console: console::Console) -> anyhow::Result<()> {
         if !self.settings.bin.changes.entries.is_empty() {
-            for (key, _) in self.settings.bin.changes.entries.iter() {
+            for key in self.settings.bin.changes.entries.keys() {
                 logger_printer(console.clone()).trace(format!("Changes: {key}").as_str());
             }
         } else {

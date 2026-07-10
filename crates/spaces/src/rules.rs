@@ -879,9 +879,18 @@ impl State {
         workspace: WorkspaceArc,
     ) -> anyhow::Result<()> {
         let logger = rules_printer_logger(console.clone());
-        if !workspace.read().is_dirty {
-            return Ok(());
-        }
+        let automatic_vars = {
+            let workspace_read = workspace.read();
+            if !workspace_read.is_dirty {
+                return Ok(());
+            }
+            let mut list = workspace_read
+                .get_automatic_vars()
+                .into_iter()
+                .collect::<Vec<_>>();
+            list.sort();
+            list
+        };
         logger.info("sorting and hashing");
         let topo_sorted = self.graph.get_sorted_tasks(None).with_context(|| {
             singleton::set_is_show_latest_error();
@@ -903,7 +912,7 @@ impl State {
                 let task = tasks.get(task_name).cloned();
                 if let Some(task) = task {
                     let mut task_hasher = blake3::Hasher::new();
-                    task_hasher.update(task.calculate_digest().as_bytes());
+                    task_hasher.update(task.calculate_digest(&automatic_vars).as_bytes());
                     if let Some(task_mut) = tasks.get_mut(task_name) {
                         task_mut.digest = task_hasher.finalize().to_string().into();
                     }
