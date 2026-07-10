@@ -329,7 +329,7 @@ impl Store {
         for entry in self.entries.values_mut() {
             let mut stale_keys = Vec::new();
 
-            for (workspace_root, _) in entry.workspace_links.iter() {
+            for workspace_root in entry.workspace_links.keys() {
                 let workspace_path = std::path::Path::new(workspace_root.as_ref());
                 if !workspace_path.exists() {
                     stale_keys.push(workspace_root.clone());

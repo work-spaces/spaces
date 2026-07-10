@@ -103,10 +103,16 @@ impl Task {
         result
     }
 
-    pub fn calculate_digest(&self) -> blake3::Hash {
+    pub fn calculate_digest(&self, replacements: &[(&'static str, Arc<str>)]) -> blake3::Hash {
         let mut self_clone = self.clone();
         self_clone.digest = "".into();
         let seed = serde_json::to_string(&self_clone).unwrap();
+        let seed = replacements
+            .iter()
+            .fold(seed, |seed, (normalized_value, concrete_value)| {
+                seed.replace(concrete_value.as_ref(), normalized_value)
+            });
+
         let mut digest = blake3::Hasher::new();
         digest.update(seed.as_bytes());
         digest.finalize()

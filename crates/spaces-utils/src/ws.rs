@@ -632,7 +632,7 @@ impl Settings {
         // which files exist in previous but not self
         let previous = self.clone_existing_checkout();
         let mut result = Vec::new();
-        for (key, _hash) in previous.assets.iter() {
+        for key in previous.assets.keys() {
             if !self.checkout.assets.contains_key(key) && !previous.is_asset_modified(key.clone()) {
                 result.push(key.clone());
             }
