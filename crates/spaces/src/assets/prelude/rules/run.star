@@ -3,7 +3,12 @@ User friendly wrapper functions for the spaces run built-in functions.
 """
 
 load("visibility.star", "visibility_private")
-load("ws.star", "workspace_get_build_archive_info", "workspace_get_env_var_or")
+load(
+    "ws.star",
+    "workspace_get_build_archive_info",
+    "workspace_get_env_var",
+    "workspace_is_env_var_set",
+)
 
 RUN_INPUTS_ONCE = []
 RUN_INPUTS_ALWAYS = None
@@ -260,7 +265,8 @@ def _run_get_effective_env(env: dict, workspace_vars: list[str]) -> dict:
     effective_env = {}
 
     for workspace_var in workspace_vars:
-        effective_env[workspace_var] = workspace_get_env_var_or(workspace_var, "")
+        if workspace_is_env_var_set(workspace_var):
+            effective_env[workspace_var] = workspace_get_env_var(workspace_var)
 
     effective_env |= env
 
