@@ -1,0 +1,6 @@
+[packages-main.Repo]
+url = "https://github.com/work-spaces/packages"
+rule-name = "@star/packages"
+rev = "main"
+clone = "Default"
+help = "Checkout @star/packages from github.com/work-spaces/packages"
