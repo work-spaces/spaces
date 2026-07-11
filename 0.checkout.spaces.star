@@ -7,7 +7,7 @@ load("//@star/prelude/rules/env.star", "env_append")
 
 workspace.set_locks(locks = {
     "@star/sdk": "v0.4.0",
-    "@star/packages": "v0.2.58",
+    "@star/packages": "v0.2.61",
 })
 
 # Ensure tools checked out to sysroot/bin are available

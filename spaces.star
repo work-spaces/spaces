@@ -232,6 +232,48 @@ run_add_exec(
 )
 
 DEBUG_BINARY = "build/target/debug/spaces"
+CO_SPACES_TOML_DOCS_DIR = "spaces/docs/co-spaces-toml"
+
+run_add_exec(
+    "co_query_list_docs",
+    command = DEBUG_BINARY,
+    args = [
+        "query-co",
+        "list",
+    ],
+    env = {
+        "CO_SPACES_TOML": CO_SPACES_TOML_DOCS_DIR,
+    },
+    deps = deps(
+        rules = [":build"],
+        files = [
+            "docs/co-spaces-toml/*.co.spaces.toml",
+        ],
+    ),
+    visibility = visibility_private(),
+    help = "Run `spaces query-co list` using the docs/co-spaces-toml directory",
+)
+
+run_add_exec(
+    "co_query_list_docs_json",
+    command = DEBUG_BINARY,
+    args = [
+        "query-co",
+        "list",
+        "--format=json",
+    ],
+    env = {
+        "CO_SPACES_TOML": CO_SPACES_TOML_DOCS_DIR,
+    },
+    deps = deps(
+        rules = [":build"],
+        files = [
+            "docs/co-spaces-toml/*.co.spaces.toml",
+        ],
+    ),
+    visibility = visibility_private(),
+    help = "Run `spaces query-co list --format=json` using the docs/co-spaces-toml directory",
+)
 
 run_add_exec(
     "script_tests",
