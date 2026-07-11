@@ -406,7 +406,7 @@ impl Checkout {
         Ok(resolved_repo)
     }
 
-    fn load_checkout_file(file_path: &std::path::Path) -> anyhow::Result<HashMap<Arc<str>, Self>> {
+    fn parse_checkout_file(file_path: &std::path::Path) -> anyhow::Result<HashMap<Arc<str>, Self>> {
         let contents = std::fs::read_to_string(file_path).map_err(|err| {
             format_error!(
                 "Failed to open {} while loading `co` shortcuts\n{err:?}",
@@ -414,10 +414,13 @@ impl Checkout {
             )
         })?;
 
-        let checkout_map: HashMap<Arc<str>, Checkout> =
-            toml::from_str(&contents).map_err(|err| {
-                format_error!("while parsing toml file {}\n{err:#}", file_path.display())
-            })?;
+        toml::from_str(&contents).map_err(|err| {
+            format_error!("while parsing toml file {}\n{err:#}", file_path.display())
+        })
+    }
+
+    fn load_checkout_file(file_path: &std::path::Path) -> anyhow::Result<HashMap<Arc<str>, Self>> {
+        let checkout_map = Self::parse_checkout_file(file_path)?;
 
         Self::resolve_checkout_map(checkout_map).map_err(|err| {
             format_error!(
@@ -464,7 +467,7 @@ impl Checkout {
         let mut checkout_source_map: HashMap<Arc<str>, std::path::PathBuf> = HashMap::new();
 
         for manifest_path in manifest_paths {
-            let entries = Self::load_checkout_file(&manifest_path)?;
+            let entries = Self::parse_checkout_file(&manifest_path)?;
             for (name, checkout) in entries {
                 if let Some(existing_source) =
                     checkout_source_map.insert(name.clone(), manifest_path.clone())
@@ -481,7 +484,12 @@ impl Checkout {
             }
         }
 
-        Ok(checkout_map)
+        Self::resolve_checkout_map(checkout_map).map_err(|err| {
+            format_error!(
+                "while resolving derived checkout repos while aggregating {}\n{err}",
+                directory_path.display()
+            )
+        })
     }
 
     pub fn load() -> anyhow::Result<(HashMap<Arc<str>, Self>, std::path::PathBuf)> {
@@ -1489,6 +1497,44 @@ rev = "main"
         let message = format!("{err:#}");
 
         assert!(message.contains("duplicate checkout entry `shared`"));
+    }
+
+    #[test]
+    fn load_checkout_directory_resolves_derive_from_across_manifest_files() {
+        let temp_dir = tempdir().expect("failed to create tempdir");
+
+        fs::write(
+            temp_dir.path().join("a.derived.co.spaces.toml"),
+            r#"
+[derived.RepoDerived]
+derive-from = "base"
+rev = "feature"
+"#,
+        )
+        .expect("failed to write derived manifest");
+
+        fs::write(
+            temp_dir.path().join("b.base.co.spaces.toml"),
+            r#"
+[base.Repo]
+url = "https://example.com/base"
+rev = "main"
+rule-name = "spaces"
+"#,
+        )
+        .expect("failed to write base manifest");
+
+        let checkout_map = Checkout::load_checkout_directory(temp_dir.path())
+            .expect("failed to load directory with cross-file derive-from");
+
+        let repo = match checkout_map.get("derived") {
+            Some(Checkout::Repo(repo)) => repo,
+            _ => panic!("expected derived checkout repo entry"),
+        };
+
+        assert_eq!(repo.url.as_ref(), "https://example.com/base");
+        assert_eq!(repo.rev.as_ref(), "feature");
+        assert_eq!(repo.rule_name.as_deref(), Some("spaces"));
     }
 
     #[test]
