@@ -326,6 +326,11 @@ pub fn checkout_co(
         utils::co::Checkout::Repo(repo) => {
             checkout_co_repo(console.clone(), repo, name, keep_workspace_on_failure, lock)
         }
+        utils::co::Checkout::RepoDerived(_) => {
+            return Err(format_error!(
+                "Internal Error: RepoDerived should be resolved before checkout"
+            ));
+        }
     };
     result.context(format_context!("during co checkout"))?;
     Ok(())
