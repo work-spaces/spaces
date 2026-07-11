@@ -1,0 +1,30 @@
+[spaces-main.Repo]
+url = "https://github.com/work-spaces/spaces"
+rule-name = "spaces"
+rev = "main"
+clone = "Default"
+help = "Checkout spaces from github.com/work-spaces/spaces"
+
+[spaces-patch.Repo]
+url = "https://github.com/work-spaces/spaces"
+rev = "main"
+new-branch = ["spaces"]
+env = ["SPACES_INSTALL_ROOT=/Volumes/Code/workspace/.local"]
+
+[spaces-dev.RepoDerived]
+derive-from = "spaces-patch"
+rev = "feature/v0.19"
+
+[spaces-patch-default-install.RepoDerived]
+derive-from = "spaces-dev"
+env = ["SPACES_INSTALL_ROOT=/Volumes/Code/workspace/.local2"]
+
+[devutils.Repo]
+url = "https://github.com/work-spaces/devutils"
+rev = "main"
+new-branch = ["devutils"]
+
+[testlab.Repo]
+url = "https://github.com/work-spaces/spaces-e2e-testlab"
+rev = "main"
+new-branch = ["spaces-e2e-testlab"]

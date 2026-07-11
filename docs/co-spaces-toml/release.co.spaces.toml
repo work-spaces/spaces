@@ -1,0 +1,4 @@
+[spaces-release.Repo]
+url = "https://github.com/work-spaces/release"
+rev = "main"
+store = { RELEASE_SPACES_TAG="v0.0.0", RELEASE_SDK_TAG="v0.0.0", RELEASE_PACKAGES_TAG="v0.0.0" }

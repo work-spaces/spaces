@@ -286,12 +286,126 @@ pub struct CheckoutRepo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct CheckoutDerivedRepo {
+    #[serde(alias = "derive-from")]
+    pub derive_from: Arc<str>,
+    pub url: Option<Arc<str>>,
+    #[serde(alias = "rule-name")]
+    pub rule_name: Option<Arc<str>>,
+    pub rev: Option<Arc<str>>,
+    #[serde(alias = "new-branch")]
+    pub new_branch: Option<Vec<Arc<str>>>,
+    pub clone: Option<git::Clone>,
+    pub env: Option<Vec<Arc<str>>>,
+    pub store: Option<HashMap<Arc<str>, toml::Value>>,
+    #[serde(alias = "create-lock-file")]
+    pub create_lock_file: Option<bool>,
+    pub help: Option<Arc<str>>,
+}
+
+impl CheckoutDerivedRepo {
+    fn resolve(self, base: CheckoutRepo) -> CheckoutRepo {
+        CheckoutRepo {
+            url: self.url.unwrap_or(base.url),
+            rule_name: self.rule_name.or(base.rule_name),
+            rev: self.rev.unwrap_or(base.rev),
+            new_branch: self.new_branch.or(base.new_branch),
+            clone: self.clone.or(base.clone),
+            env: self.env.or(base.env),
+            store: self.store.or(base.store),
+            create_lock_file: self.create_lock_file.or(base.create_lock_file),
+            help: self.help.or(base.help),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum Checkout {
     Workflow(CheckoutWorkflow),
     Repo(CheckoutRepo),
+    RepoDerived(CheckoutDerivedRepo),
 }
 
 impl Checkout {
+    fn resolve_checkout_map(
+        checkout_map: HashMap<Arc<str>, Checkout>,
+    ) -> Result<HashMap<Arc<str>, Self>, String> {
+        let mut resolved_checkout_map = HashMap::with_capacity(checkout_map.len());
+        let mut resolved_repo_map: HashMap<Arc<str>, CheckoutRepo> = HashMap::new();
+
+        for (checkout_name, checkout) in &checkout_map {
+            let checkout = match checkout {
+                Checkout::Workflow(workflow) => Checkout::Workflow(workflow.clone()),
+                Checkout::Repo(_) | Checkout::RepoDerived(_) => Checkout::Repo(Self::resolve_repo(
+                    checkout_name,
+                    &checkout_map,
+                    &mut resolved_repo_map,
+                    &mut Vec::new(),
+                )?),
+            };
+
+            resolved_checkout_map.insert(checkout_name.clone(), checkout);
+        }
+
+        Ok(resolved_checkout_map)
+    }
+
+    fn resolve_repo(
+        checkout_name: &Arc<str>,
+        checkout_map: &HashMap<Arc<str>, Checkout>,
+        resolved_repo_map: &mut HashMap<Arc<str>, CheckoutRepo>,
+        derive_stack: &mut Vec<Arc<str>>,
+    ) -> Result<CheckoutRepo, String> {
+        if let Some(resolved_repo) = resolved_repo_map.get(checkout_name) {
+            return Ok(resolved_repo.clone());
+        }
+
+        if let Some(start_index) = derive_stack.iter().position(|entry| entry == checkout_name) {
+            let mut cycle = derive_stack[start_index..]
+                .iter()
+                .map(|entry| entry.to_string())
+                .collect::<Vec<_>>();
+            cycle.push(checkout_name.to_string());
+            return Err(format!("found `derive-from` cycle: {}", cycle.join(" -> ")));
+        }
+
+        let checkout = match checkout_map.get(checkout_name) {
+            Some(checkout) => checkout.clone(),
+            None => {
+                return Err(format!("checkout entry `{checkout_name}` was not found"));
+            }
+        };
+
+        derive_stack.push(checkout_name.clone());
+        let resolved_repo: Result<CheckoutRepo, String> = match checkout {
+            Checkout::Repo(repo) => Ok(repo),
+            Checkout::RepoDerived(derived_repo) => {
+                let base_checkout_name = derived_repo.derive_from.clone();
+                let base_repo = Self::resolve_repo(
+                    &base_checkout_name,
+                    checkout_map,
+                    resolved_repo_map,
+                    derive_stack,
+                )
+                .map_err(|err| {
+                    format!(
+                        "while resolving `derive-from`\n  for `{checkout_name}`\n  from `{base_checkout_name}`\n  {err:?}"
+                    )
+                })?;
+                Ok(derived_repo.resolve(base_repo))
+            }
+            Checkout::Workflow(_) => Err(format!(
+                "checkout entry `{checkout_name}` is a Workflow and cannot be used with `derive-from`"
+            )),
+        };
+        derive_stack.pop();
+
+        let resolved_repo = resolved_repo?;
+        resolved_repo_map.insert(checkout_name.clone(), resolved_repo.clone());
+        Ok(resolved_repo)
+    }
+
     fn load_checkout_file(file_path: &std::path::Path) -> anyhow::Result<HashMap<Arc<str>, Self>> {
         let contents = std::fs::read_to_string(file_path).map_err(|err| {
             format_error!(
@@ -300,8 +414,16 @@ impl Checkout {
             )
         })?;
 
-        toml::from_str(&contents).map_err(|err| {
-            format_error!("Failed to parse toml file {}\n{err:?}", file_path.display())
+        let checkout_map: HashMap<Arc<str>, Checkout> =
+            toml::from_str(&contents).map_err(|err| {
+                format_error!("while parsing toml file {}\n{err:#}", file_path.display())
+            })?;
+
+        Self::resolve_checkout_map(checkout_map).map_err(|err| {
+            format_error!(
+                "while resolving derived checkout repos in {}\n{err}",
+                file_path.display()
+            )
         })
     }
 
@@ -311,14 +433,14 @@ impl Checkout {
         let mut manifest_paths = std::fs::read_dir(directory_path)
             .map_err(|err| {
                 format_error!(
-                    "Failed to read {CO_ENV_NAME} directory {}\n{err:?}",
+                    "while reading entries in {CO_ENV_NAME} directory {}\n{err:?}",
                     directory_path.display()
                 )
             })?
             .map(|entry| {
                 entry
                     .map(|entry| entry.path())
-                    .map_err(|err| format_error!("Failed to inspect directory entry\n{err:?}"))
+                    .map_err(|err| format_error!("while reading directory entry\n{err:?}"))
             })
             .collect::<anyhow::Result<Vec<std::path::PathBuf>>>()?;
 
@@ -416,6 +538,11 @@ impl Checkout {
                     repo.new_branch.get_or_insert_default().push(entry);
                 }
             }
+            Checkout::RepoDerived(_) => {
+                return Err(format_error!(
+                    "Internal Error: RepoDerived should be resolved before applying overrides"
+                ));
+            }
             Checkout::Workflow(workflow) => {
                 if args.rule_name.is_some() {
                     return Err(format_error!(
@@ -454,6 +581,11 @@ impl Checkout {
                 repo.store.clone(),
                 repo.new_branch.clone(),
             ),
+            Checkout::RepoDerived(_) => {
+                return Err(format_error!(
+                    "Internal Error: RepoDerived should be resolved before applying overrides"
+                ));
+            }
             Checkout::Workflow(workflow) => (
                 workflow.env.clone(),
                 workflow.store.clone(),
@@ -514,6 +646,11 @@ impl Checkout {
                     nb_list
                         .retain(|e| !args.no_new_branch.iter().any(|n| n.as_ref() == e.as_ref()));
                 }
+            }
+            Checkout::RepoDerived(_) => {
+                return Err(format_error!(
+                    "Internal Error: RepoDerived should be resolved before applying overrides"
+                ));
             }
             Checkout::Workflow(workflow) => {
                 if let Some(env_list) = workflow.env.as_mut() {
@@ -973,6 +1110,79 @@ fn normalize_query_co_entry(name: &Arc<str>, checkout: &Checkout) -> QueryCoEntr
                 searchable_fields,
             }
         }
+        Checkout::RepoDerived(repo) => {
+            let env = repo.env.clone().unwrap_or_default();
+            let store = normalize_store_entries(repo.store.as_ref());
+            let new_branch = repo.new_branch.clone().unwrap_or_default();
+
+            let mut searchable_fields = Vec::new();
+            push_searchable_field(&mut searchable_fields, name.as_ref());
+            push_searchable_field(&mut searchable_fields, QueryCoEntryKind::Repo.as_str());
+            push_searchable_field(&mut searchable_fields, format!("name={name}"));
+            push_searchable_field(
+                &mut searchable_fields,
+                format!("derive-from={}", repo.derive_from),
+            );
+
+            if let Some(url) = repo.url.as_deref() {
+                push_searchable_field(&mut searchable_fields, url);
+                push_searchable_field(&mut searchable_fields, format!("url={url}"));
+            }
+            if let Some(rev) = repo.rev.as_deref() {
+                push_searchable_field(&mut searchable_fields, rev);
+                push_searchable_field(&mut searchable_fields, format!("rev={rev}"));
+            }
+
+            if let Some(rule_name) = repo.rule_name.as_deref() {
+                push_searchable_field(&mut searchable_fields, rule_name);
+                push_searchable_field(&mut searchable_fields, format!("rule-name={rule_name}"));
+            }
+
+            if let Some(clone_mode) = repo.clone {
+                push_searchable_field(&mut searchable_fields, clone_mode.to_string());
+                push_searchable_field(&mut searchable_fields, format!("clone={clone_mode}"));
+            }
+
+            if let Some(help) = repo.help.as_deref() {
+                push_searchable_field(&mut searchable_fields, help);
+                push_searchable_field(&mut searchable_fields, format!("help={help}"));
+            }
+
+            for env_entry in &env {
+                push_searchable_field(&mut searchable_fields, env_entry.as_ref());
+                push_searchable_field(&mut searchable_fields, format!("env={env_entry}"));
+            }
+
+            for (key, value) in &store {
+                push_searchable_field(&mut searchable_fields, key.as_str());
+                push_searchable_field(&mut searchable_fields, value.as_str());
+                push_searchable_field(&mut searchable_fields, format!("{key}={value}"));
+            }
+
+            for new_branch_entry in &new_branch {
+                push_searchable_field(&mut searchable_fields, new_branch_entry.as_ref());
+                push_searchable_field(
+                    &mut searchable_fields,
+                    format!("new-branch={new_branch_entry}"),
+                );
+            }
+
+            QueryCoEntry {
+                name: name.clone(),
+                kind: QueryCoEntryKind::Repo,
+                workflow: None,
+                script: vec![],
+                url: repo.url.clone(),
+                rev: repo.rev.clone(),
+                rule_name: repo.rule_name.clone(),
+                clone_mode: repo.clone.map(|clone_mode| clone_mode.to_string()),
+                help: repo.help.clone(),
+                env,
+                store,
+                new_branch,
+                searchable_fields,
+            }
+        }
     }
 }
 
@@ -1279,6 +1489,176 @@ rev = "main"
         let message = format!("{err:#}");
 
         assert!(message.contains("duplicate checkout entry `shared`"));
+    }
+
+    #[test]
+    fn checkout_repo_load_checkout_file_derive_from_inherits_and_overrides_fields() {
+        let temp_dir = tempdir().expect("failed to create tempdir");
+        let manifest_path = temp_dir.path().join("co.spaces.toml");
+
+        fs::write(
+            &manifest_path,
+            r#"
+[base.Repo]
+url = "https://example.com/base"
+rev = "main"
+rule-name = "spaces"
+new-branch = ["//spaces"]
+clone = "Blobless"
+env = ["BASE=yes"]
+store = { REGION = "us" }
+create-lock-file = true
+help = "base help"
+
+[demo.RepoDerived]
+derive-from = "base"
+rev = "feature"
+env = ["CHILD=yes"]
+"#,
+        )
+        .expect("failed to write checkout manifest");
+
+        let checkout_map = Checkout::load_checkout_file(&manifest_path)
+            .expect("failed to load checkout repo with derive-from");
+
+        let repo = match checkout_map.get("demo") {
+            Some(Checkout::Repo(repo)) => repo,
+            _ => panic!("expected demo checkout repo entry"),
+        };
+
+        assert_eq!(repo.url.as_ref(), "https://example.com/base");
+        assert_eq!(repo.rev.as_ref(), "feature");
+        assert_eq!(repo.rule_name.as_deref(), Some("spaces"));
+        assert_eq!(repo.clone, Some(crate::git::Clone::Blobless));
+        assert_eq!(repo.env.as_deref(), Some([arc("CHILD=yes")].as_slice()));
+        assert_eq!(
+            repo.new_branch.as_deref(),
+            Some([arc("//spaces")].as_slice())
+        );
+        assert_eq!(repo.create_lock_file, Some(true));
+        assert_eq!(repo.help.as_deref(), Some("base help"));
+        assert_eq!(
+            repo.store
+                .as_ref()
+                .and_then(|store| store.get("REGION"))
+                .and_then(|value| value.as_str()),
+            Some("us")
+        );
+    }
+
+    #[test]
+    fn checkout_repo_load_checkout_file_repo_with_derive_from_errors() {
+        let temp_dir = tempdir().expect("failed to create tempdir");
+        let manifest_path = temp_dir.path().join("co.spaces.toml");
+
+        fs::write(
+            &manifest_path,
+            r#"
+[base.Repo]
+url = "https://example.com/base"
+rev = "main"
+rule-name = "spaces"
+env = ["BASE=yes"]
+
+[demo.Repo]
+derive-from = "base"
+url = "https://example.com/demo"
+rev = "feature"
+"#,
+        )
+        .expect("failed to write checkout manifest");
+
+        let err = Checkout::load_checkout_file(&manifest_path)
+            .expect_err("expected Repo entry derive-from parse error");
+
+        let message = format!("{err:#}");
+        assert!(message.contains("unknown field `derive-from`"));
+    }
+
+    #[test]
+    fn checkout_repo_load_checkout_file_derive_from_supports_chains() {
+        let temp_dir = tempdir().expect("failed to create tempdir");
+        let manifest_path = temp_dir.path().join("co.spaces.toml");
+
+        fs::write(
+            &manifest_path,
+            r#"
+[base.Repo]
+url = "https://example.com/base"
+rev = "main"
+rule-name = "spaces"
+
+[middle.RepoDerived]
+derive-from = "base"
+url = "https://example.com/middle"
+
+[child.RepoDerived]
+derive-from = "middle"
+rev = "feature"
+"#,
+        )
+        .expect("failed to write checkout manifest");
+
+        let checkout_map =
+            Checkout::load_checkout_file(&manifest_path).expect("failed to load checkout repos");
+
+        let repo = match checkout_map.get("child") {
+            Some(Checkout::Repo(repo)) => repo,
+            _ => panic!("expected child checkout repo entry"),
+        };
+
+        assert_eq!(repo.url.as_ref(), "https://example.com/middle");
+        assert_eq!(repo.rev.as_ref(), "feature");
+        assert_eq!(repo.rule_name.as_deref(), Some("spaces"));
+    }
+
+    #[test]
+    fn checkout_repo_load_checkout_file_derive_from_missing_entry_errors() {
+        let temp_dir = tempdir().expect("failed to create tempdir");
+        let manifest_path = temp_dir.path().join("co.spaces.toml");
+
+        fs::write(
+            &manifest_path,
+            r#"
+[demo.RepoDerived]
+derive-from = "missing"
+"#,
+        )
+        .expect("failed to write checkout manifest");
+
+        let err = Checkout::load_checkout_file(&manifest_path)
+            .expect_err("expected derive-from missing entry error");
+        let message = format!("{err:#}");
+
+        assert!(message.contains("checkout entry `missing` was not found"));
+    }
+
+    #[test]
+    fn checkout_repo_load_checkout_file_derive_from_workflow_errors() {
+        let temp_dir = tempdir().expect("failed to create tempdir");
+        let manifest_path = temp_dir.path().join("co.spaces.toml");
+
+        fs::write(
+            &manifest_path,
+            r#"
+[wf.Workflow]
+script = ["echo workflow"]
+
+[demo.RepoDerived]
+derive-from = "wf"
+"#,
+        )
+        .expect("failed to write checkout manifest");
+
+        let err = Checkout::load_checkout_file(&manifest_path)
+            .expect_err("expected derive-from workflow type error");
+        let message = format!("{err:#}");
+
+        assert!(
+            message.contains(
+                "checkout entry `wf` is a Workflow and cannot be used with `derive-from`"
+            )
+        );
     }
 
     #[test]

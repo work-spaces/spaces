@@ -1020,6 +1020,16 @@ clone = "Default" # optionally clone type Default/Blobless
 env = ["SET_VALUE=VALUE", "ANOTHER_VALUE=ANOTHER_VALUE"] # optionally add environment variables
 create-lock-file = false # optionally create a lock file
 
+# Repo entries can derive from another checkout entry and override selected fields
+[spaces-dev-base.Repo]
+url = "https://github.com/work-spaces/spaces"
+rule-name = "spaces"
+rev = "main"
+
+[spaces-dev-fork.RepoDerived]
+derive-from = "spaces-dev-base"
+url = "https://github.com/my-org/spaces"
+rev = "feature-branch"
 
 [ninja-build.Workflow]
 # Loads the ninja-build-dev flow from workflows/workflows.spaces.toml

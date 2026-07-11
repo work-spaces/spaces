@@ -29,7 +29,7 @@ fn parse_value(format: AssetFormat, content: &str) -> anyhow::Result<serde_json:
         AssetFormat::Json => serde_json::from_str(content)
             .context(format_context!("Failed to parse asset file as JSON",)),
         AssetFormat::Toml => {
-            toml::from_str(content).context(format_context!("Failed to parse asset file as TOML",))
+            toml::from_str(content).context(format_context!("Failed to parse asset file as TOML"))
         }
         AssetFormat::Yaml => serde_yaml::from_str(content)
             .context(format_context!("Failed to parse asset file as YAML",)),
