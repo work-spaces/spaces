@@ -3,7 +3,12 @@ User friendly wrapper functions for the spaces run built-in functions.
 """
 
 load("visibility.star", "visibility_private")
-load("ws.star", "workspace_get_build_archive_info")
+load(
+    "ws.star",
+    "workspace_get_build_archive_info",
+    "workspace_get_env_var",
+    "workspace_is_env_var_set",
+)
 
 RUN_INPUTS_ONCE = []
 RUN_INPUTS_ALWAYS = None
@@ -256,12 +261,24 @@ def run_signal_user2():
     """
     return RUN_SIGNAL_USER2
 
+def _run_get_effective_env(env: dict, workspace_vars: list[str]) -> dict:
+    effective_env = {}
+
+    for workspace_var in workspace_vars:
+        if workspace_is_env_var_set(workspace_var):
+            effective_env[workspace_var] = workspace_get_env_var(workspace_var)
+
+    effective_env |= env
+
+    return effective_env
+
 def run_add_exec_setup(
         name: str,
         command: str,
         help: str | None = None,
         args: list[str] = [],
         env: dict = {},
+        workspace_vars: list[str] = [],
         deps: list[str] | list[dict] = [],
         apply_trailing_args_to: str | None = None,
         working_directory: str | None = None,
@@ -287,6 +304,7 @@ def run_add_exec_setup(
         args: The arguments to pass to the command
         deps: The rule dependencies
         env: key value pairs of environment variables
+        workspace_vars: Workspace environment variable names to copy into env.
         apply_trailing_args_to: The name of the rule that will receive command line trailing args when this rule is run directly.
         working_directory: The directory to run the command (default is workspace root).
         platforms: Platforms to run on (default is all).
@@ -296,6 +314,8 @@ def run_add_exec_setup(
         expect: The expected result of the command Success|Failure|Any. (default is Success)
         visibility: Rule visibility: `Public|Private|Rules[]`. See visibility.star for more info.
     """
+
+    EFFECTIVE_ENV = _run_get_effective_env(env, workspace_vars)
 
     run.add_exec(
         rule = {
@@ -312,7 +332,7 @@ def run_add_exec_setup(
             "command": command,
             "args": args,
             "working_directory": working_directory,
-            "env": env,
+            "env": EFFECTIVE_ENV,
             "expect": expect,
             "log_level": log_level,
             "redirect_stdout": redirect_stdout,
@@ -326,6 +346,7 @@ def run_add_exec_test(
         help: str | None = None,
         args: list[str] = [],
         env: dict = {},
+        workspace_vars: list[str] = [],
         deps: list[str] | list[dict] = [],
         inputs: list[str] | None = RUN_INPUTS_ALWAYS,
         apply_trailing_args_to: str | None = None,
@@ -353,6 +374,7 @@ def run_add_exec_test(
         deps: The rule dependencies
         inputs: List of globs to specify the inputs. If the inputs are unchanged, the command will not run.
         env: key value pairs of environment variables
+        workspace_vars: Workspace environment variable names to copy into env.
         apply_trailing_args_to: The name of the rule that will receive command line trailing args when this rule is run directly.
         working_directory: The directory to run the command (default is workspace root).
         platforms: Platforms to run on (default is all).
@@ -378,7 +400,7 @@ def run_add_exec_test(
             "command": command,
             "args": args,
             "working_directory": working_directory,
-            "env": env,
+            "env": _run_get_effective_env(env, workspace_vars),
             "expect": expect,
             "log_level": log_level,
             "redirect_stdout": redirect_stdout,
@@ -392,6 +414,7 @@ def run_add_exec_precommit(
         help: str | None = None,
         args: list[str] = [],
         env: dict = {},
+        workspace_vars: list[str] = [],
         deps: list[str] | list[dict] = [],
         inputs: list[str] | None = RUN_INPUTS_ALWAYS,
         apply_trailing_args_to: str | None = None,
@@ -419,6 +442,7 @@ def run_add_exec_precommit(
         deps: The rule dependencies
         inputs: List of globs to specify the inputs. If the inputs are unchanged, the command will not run.
         env: key value pairs of environment variables
+        workspace_vars: Workspace environment variable names to copy into env.
         apply_trailing_args_to: The name of the rule that will receive command line trailing args when this rule is run directly.
         working_directory: The directory to run the command (default is workspace root).
         platforms: Platforms to run on (default is all).
@@ -444,7 +468,7 @@ def run_add_exec_precommit(
             "command": command,
             "args": args,
             "working_directory": working_directory,
-            "env": env,
+            "env": _run_get_effective_env(env, workspace_vars),
             "expect": expect,
             "log_level": log_level,
             "redirect_stdout": redirect_stdout,
@@ -458,6 +482,7 @@ def run_add_exec_clean(
         help: str | None = None,
         args: list[str] = [],
         env: dict = {},
+        workspace_vars: list[str] = [],
         deps: list[str] | list[dict] = [],
         inputs: list[str] | None = RUN_INPUTS_ALWAYS,
         apply_trailing_args_to: str | None = None,
@@ -485,6 +510,7 @@ def run_add_exec_clean(
         deps: The rule dependencies
         inputs: List of globs to specify the inputs. If the inputs are unchanged, the command will not run.
         env: key value pairs of environment variables
+        workspace_vars: Workspace environment variable names to copy into env.
         apply_trailing_args_to: The name of the rule that will receive command line trailing args when this rule is run directly.
         working_directory: The directory to run the command (default is workspace root).
         platforms: Platforms to run on (default is all).
@@ -510,7 +536,7 @@ def run_add_exec_clean(
             "command": command,
             "args": args,
             "working_directory": working_directory,
-            "env": env,
+            "env": _run_get_effective_env(env, workspace_vars),
             "expect": expect,
             "log_level": log_level,
             "redirect_stdout": redirect_stdout,
@@ -524,6 +550,7 @@ def run_add_exec(
         help: str | None = None,
         args: list[str] = [],
         env: dict = {},
+        workspace_vars: list[str] = [],
         deps: list[str] | list[dict] = [],
         inputs: list[str] | None = RUN_INPUTS_ALWAYS,
         apply_trailing_args_to: str | None = None,
@@ -549,6 +576,7 @@ def run_add_exec(
         deps: The rule dependencies that must be run before this command
         inputs: List of globs to specify the inputs. If the inputs are unchanged, the command will not run.
         env: key value pairs of environment variables
+        workspace_vars: Workspace environment variable names to copy into env.
         apply_trailing_args_to: The name of the rule that will receive command line trailing args when this rule is run directly.
         working_directory: The directory to run the command (default is workspace root).
         platforms: Platforms to run on (default is all).
@@ -582,7 +610,7 @@ def run_add_exec(
             "command": command,
             "args": args,
             "working_directory": working_directory,
-            "env": env,
+            "env": _run_get_effective_env(env, workspace_vars),
             "expect": expect,
             "log_level": log_level,
             "redirect_stdout": redirect_stdout,
