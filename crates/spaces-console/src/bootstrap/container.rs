@@ -1,10 +1,11 @@
-use super::{components, span};
+use super::{components, span, typography};
 use crossterm::style::{Attribute, ContentStyle};
 use markdown::{ParseOptions, mdast};
 use superconsole::Line;
 
 pub struct Container<'a> {
     pub(crate) components: Vec<Box<dyn components::Component + 'a>>,
+    width: Option<components::Width>,
 }
 
 impl<'a> std::fmt::Debug for Container<'a> {
@@ -23,7 +24,13 @@ impl<'a> Container<'a> {
     pub fn new() -> Self {
         Self {
             components: Vec::new(),
+            width: None,
         }
+    }
+
+    pub fn width(mut self, width: impl Into<components::Width>) -> Self {
+        self.width = Some(width.into());
+        self
     }
 
     pub fn add<ComponentType>(&mut self, component: ComponentType)
@@ -48,15 +55,26 @@ impl<'a> Container<'a> {
     pub fn add_markdown(&mut self, markdown: &str) {
         match markdown::to_mdast(markdown, &ParseOptions::default()) {
             Ok(root) => self.add_markdown_node(&root),
-            Err(_) => self.add(components::Paragraph::new(markdown.to_string())),
+            Err(_) => self.add(md_paragraph_with_width(
+                components::Paragraph::new(markdown.to_string()),
+                self.width,
+            )),
         }
     }
 
     fn add_markdown_node(&mut self, node: &mdast::Node) {
         match node {
             mdast::Node::Root(root) => {
+                let mut previous_was_paragraph = false;
+
                 for child in &root.children {
+                    let current_is_paragraph = matches!(child, mdast::Node::Paragraph(_));
+                    if previous_was_paragraph && current_is_paragraph {
+                        self.add(components::VerticalSpacer::new(1));
+                    }
+
                     self.add_markdown_node(child);
+                    previous_was_paragraph = current_is_paragraph;
                 }
             }
             mdast::Node::Heading(heading) => {
@@ -69,15 +87,16 @@ impl<'a> Container<'a> {
                 self.add(header);
             }
             mdast::Node::Paragraph(paragraph) => {
-                self.add(components::Paragraph::from_line(md_inline_line(
-                    &paragraph.children,
-                )));
+                self.add(md_paragraph_with_width(
+                    components::Paragraph::from_line(md_inline_line(&paragraph.children)),
+                    self.width,
+                ));
             }
             mdast::Node::List(list) => {
                 self.add(md_list_component(list));
             }
             mdast::Node::Blockquote(quote) => {
-                self.add(md_blockquote_component(quote));
+                self.add(md_blockquote_component(quote, self.width));
             }
             mdast::Node::Code(code) => {
                 let mut quote =
@@ -96,10 +115,24 @@ impl<'a> Container<'a> {
             _ => {
                 let text = md_block_text(node);
                 if !text.trim().is_empty() {
-                    self.add(components::Paragraph::new(text));
+                    self.add(md_paragraph_with_width(
+                        components::Paragraph::new(text),
+                        self.width,
+                    ));
                 }
             }
         }
+    }
+}
+
+fn md_paragraph_with_width(
+    paragraph: components::Paragraph,
+    width: Option<components::Width>,
+) -> components::Paragraph {
+    if let Some(width) = width {
+        paragraph.width(width)
+    } else {
+        paragraph
     }
 }
 
@@ -163,11 +196,14 @@ fn md_code_lines(code: &mdast::Code) -> Vec<Line> {
         .collect()
 }
 
-fn md_blockquote_component(quote: &mdast::Blockquote) -> components::Blockquote {
+fn md_blockquote_component(
+    quote: &mdast::Blockquote,
+    width: Option<components::Width>,
+) -> components::Blockquote {
     let mut blockquote = components::Blockquote::new();
 
     for child in &quote.children {
-        for line in md_block_lines(child) {
+        for line in md_block_lines(child, width) {
             blockquote.push_line(line);
         }
     }
@@ -175,9 +211,13 @@ fn md_blockquote_component(quote: &mdast::Blockquote) -> components::Blockquote 
     blockquote
 }
 
-fn md_block_lines(node: &mdast::Node) -> Vec<Line> {
+fn md_block_lines(node: &mdast::Node, width: Option<components::Width>) -> Vec<Line> {
     match node {
-        mdast::Node::Paragraph(paragraph) => vec![md_inline_line(&paragraph.children)],
+        mdast::Node::Paragraph(paragraph) => md_paragraph_with_width(
+            components::Paragraph::from_line(md_inline_line(&paragraph.children)),
+            width,
+        )
+        .render_lines(),
         mdast::Node::Heading(heading) => vec![md_inline_line(&heading.children)],
         mdast::Node::Code(code) => md_code_lines(code),
         mdast::Node::List(list) => md_list_component(list).render(),
@@ -188,7 +228,7 @@ fn md_block_lines(node: &mdast::Node) -> Vec<Line> {
             if text.trim().is_empty() {
                 Vec::new()
             } else {
-                vec![components::Paragraph::new(text).render()]
+                md_paragraph_with_width(components::Paragraph::new(text), width).render_lines()
             }
         }
     }
@@ -262,9 +302,32 @@ fn md_list_component(list: &mdast::List) -> components::List {
     rendered
 }
 
+fn md_normalize_soft_breaks(value: &str) -> String {
+    let mut normalized = String::with_capacity(value.len());
+    let mut just_inserted_space = false;
+
+    for ch in value.chars() {
+        if matches!(ch, '\n' | '\r') {
+            if !just_inserted_space {
+                normalized.push(' ');
+                just_inserted_space = true;
+            }
+        } else {
+            normalized.push(ch);
+            just_inserted_space = false;
+        }
+    }
+
+    normalized
+}
+
+fn md_typography(value: &str) -> String {
+    typography::replace_ascii_with_typography(value)
+}
+
 fn md_block_text(node: &mdast::Node) -> String {
     match node {
-        mdast::Node::Text(text) => text.value.clone(),
+        mdast::Node::Text(text) => md_typography(&md_normalize_soft_breaks(&text.value)),
         mdast::Node::Paragraph(paragraph) => md_inline_text(&paragraph.children),
         mdast::Node::Heading(heading) => md_inline_text(&heading.children),
         mdast::Node::Strong(strong) => md_inline_text(&strong.children),
@@ -311,7 +374,10 @@ fn md_push_inline_nodes(line: &mut Line, nodes: &[mdast::Node], base_style: Cont
     for node in nodes {
         match node {
             mdast::Node::Text(text) => {
-                line.push(span::styled_span(base_style, text.value.clone()));
+                line.push(span::styled_span(
+                    base_style,
+                    md_typography(&md_normalize_soft_breaks(&text.value)),
+                ));
             }
             mdast::Node::InlineCode(code) => {
                 line.push(span::code(code.value.clone()));
@@ -401,5 +467,59 @@ mod tests {
         assert!(joined.contains("Name"));
         assert!(joined.contains("Age"));
         assert!(joined.contains("Ada"));
+    }
+
+    #[test]
+    fn add_markdown_wraps_paragraphs_to_container_width() {
+        let mut container = Container::new().width(components::Width::Custom(20));
+        container.add_markdown("This is a long paragraph that should wrap cleanly.");
+
+        let rendered = container.render();
+        assert!(rendered.len() > 1);
+        assert!(rendered.iter().all(|line| line.len() <= 20));
+
+        let joined = rendered
+            .iter()
+            .map(|line| line.to_unstyled())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(joined, "This is a long paragraph that should wrap cleanly.");
+    }
+
+    #[test]
+    fn add_markdown_soft_breaks_render_as_spaces() {
+        let mut container = Container::new();
+        container.add_markdown("Alpha line\nBeta line");
+
+        let rendered = container.render();
+        assert_eq!(rendered.len(), 1);
+        assert_eq!(rendered[0].to_unstyled(), "Alpha line Beta line");
+    }
+
+    #[test]
+    fn add_markdown_inserts_blank_line_between_paragraphs() {
+        let mut container = Container::new();
+        container.add_markdown("First paragraph.\n\nSecond paragraph.");
+
+        let rendered = container.render();
+        let lines = rendered
+            .iter()
+            .map(|line| line.to_unstyled())
+            .collect::<Vec<_>>();
+
+        assert_eq!(lines, vec!["First paragraph.", "", "Second paragraph."]);
+    }
+
+    #[test]
+    fn add_markdown_applies_typography_replacements() {
+        let mut container = Container::new();
+        container.add_markdown("a <= b >= c => d <=> e -> f <- g <-> h ... == i");
+
+        let rendered = container.render();
+        assert_eq!(rendered.len(), 1);
+        assert_eq!(
+            rendered[0].to_unstyled(),
+            "a ≤ b ≥ c ⇒ d ⇔ e → f ← g ↔ h … == i"
+        );
     }
 }

@@ -74,7 +74,24 @@ run_add_exec(
     ),
     target_files = ["//build/target/debug/spaces"],
     visibility = visibility_private(),
-    help = "Run cargo build on workspace",
+    help = """**Run cargo build on workspace**:
+            This rule runs the `cargo build` command on the workspace.
+
+            It uses **rule caching** to skip the build if no dependencies have changed. This makes builds faster by reusing cached results.
+            See [cargo build](https://doc.rust-lang.org/cargo/commands/cargo-build.html).
+
+            This creates several advantages:
+            - Faster builds by reusing cached results
+            - Automatic dependency tracking
+            - Easy building
+
+            The next thing to say is *this* <- is in italics:
+
+            See this blockquote.
+            > This is a blockquote with **bold**.
+            > And on the next line.
+
+    """,
     env = {
         "SCCACHE_DIR": workspace_get_env_var("SCCACHE_DIR"),
         "RUSTUP_HOME": workspace_get_env_var("RUSTUP_HOME"),

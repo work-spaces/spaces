@@ -888,6 +888,25 @@ fn make_primary_highlighted_line(
     line
 }
 
+fn normalize_help_text(help: &str) -> String {
+    let mut help_lines = help.lines();
+    if let Some(first) = help_lines.next() {
+        std::iter::once(first)
+            .chain(help_lines.map(str::trim_start))
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        String::new()
+    }
+}
+
+fn make_help_lines(help: &str, _highlight_terms: Option<&[Arc<str>]>) -> Vec<console::Line> {
+    let mut container =
+        console::bootstrap::Container::new().width(console::bootstrap::Width::Large);
+    container.add_markdown(help);
+    container.render()
+}
+
 fn emit_pretty_query_co_entry(
     console: &console::Console,
     entry: &QueryCoEntry,
@@ -974,7 +993,8 @@ fn emit_pretty_query_co_entry(
     }
 
     if let Some(help) = entry.help.as_deref() {
-        details = details.item("help", make_highlighted_line(help, highlight_terms));
+        let normalized_help = normalize_help_text(help);
+        details = details.item("help", make_help_lines(&normalized_help, highlight_terms));
     }
 
     container.add(details);

@@ -620,36 +620,11 @@ fn normalize_help_text(help: &str) -> String {
     }
 }
 
-fn make_help_lines(help: &str, highlight_terms: Option<&[Arc<str>]>) -> Vec<console::Line> {
-    help.lines()
-        .map(|line| {
-            let mut styled_line = console::Line::default();
-            for (segment_idx, segment) in line.split('`').enumerate() {
-                if segment.is_empty() {
-                    continue;
-                }
-
-                let is_code = segment_idx % 2 == 1;
-                for (chunk, highlighted) in search::highlight_chunks(segment, highlight_terms) {
-                    if chunk.is_empty() {
-                        continue;
-                    }
-
-                    if highlighted {
-                        styled_line.push(console::Span::new_styled_lossy(StyledContent::new(
-                            console::warning_style(),
-                            chunk,
-                        )));
-                    } else if is_code {
-                        styled_line.push(console::components::code(chunk));
-                    } else {
-                        styled_line.push(console::Span::new_unstyled_lossy(chunk));
-                    }
-                }
-            }
-            styled_line
-        })
-        .collect()
+fn make_help_lines(help: &str, _highlight_terms: Option<&[Arc<str>]>) -> Vec<console::Line> {
+    let mut container =
+        console::bootstrap::Container::new().width(console::bootstrap::Width::Large);
+    container.add_markdown(help);
+    container.render()
 }
 
 fn yaml_key_to_string(key: &serde_yaml::Value) -> anyhow::Result<String> {
