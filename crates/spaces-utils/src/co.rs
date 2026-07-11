@@ -292,6 +292,76 @@ pub enum Checkout {
 }
 
 impl Checkout {
+    fn load_checkout_file(file_path: &std::path::Path) -> anyhow::Result<HashMap<Arc<str>, Self>> {
+        let contents = std::fs::read_to_string(file_path).map_err(|err| {
+            format_error!(
+                "Failed to open {} while loading `co` shortcuts\n{err:?}",
+                file_path.display()
+            )
+        })?;
+
+        toml::from_str(&contents).map_err(|err| {
+            format_error!("Failed to parse toml file {}\n{err:?}", file_path.display())
+        })
+    }
+
+    fn load_checkout_directory(
+        directory_path: &std::path::Path,
+    ) -> anyhow::Result<HashMap<Arc<str>, Self>> {
+        let mut manifest_paths = std::fs::read_dir(directory_path)
+            .map_err(|err| {
+                format_error!(
+                    "Failed to read {CO_ENV_NAME} directory {}\n{err:?}",
+                    directory_path.display()
+                )
+            })?
+            .map(|entry| {
+                entry
+                    .map(|entry| entry.path())
+                    .map_err(|err| format_error!("Failed to inspect directory entry\n{err:?}"))
+            })
+            .collect::<anyhow::Result<Vec<std::path::PathBuf>>>()?;
+
+        manifest_paths.retain(|path| {
+            path.is_file()
+                && path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.ends_with(".co.spaces.toml"))
+        });
+        manifest_paths.sort();
+
+        if manifest_paths.is_empty() {
+            return Err(format_error!(
+                "No files ending in `.co.spaces.toml` were found in {}",
+                directory_path.display()
+            ));
+        }
+
+        let mut checkout_map = HashMap::new();
+        let mut checkout_source_map: HashMap<Arc<str>, std::path::PathBuf> = HashMap::new();
+
+        for manifest_path in manifest_paths {
+            let entries = Self::load_checkout_file(&manifest_path)?;
+            for (name, checkout) in entries {
+                if let Some(existing_source) =
+                    checkout_source_map.insert(name.clone(), manifest_path.clone())
+                {
+                    return Err(format_error!(
+                        "Found duplicate checkout entry `{name}` while aggregating {}\nFirst defined in {}\nDuplicate defined in {}",
+                        directory_path.display(),
+                        existing_source.display(),
+                        manifest_path.display(),
+                    ));
+                }
+
+                checkout_map.insert(name, checkout);
+            }
+        }
+
+        Ok(checkout_map)
+    }
+
     pub fn load() -> anyhow::Result<(HashMap<Arc<str>, Self>, std::path::PathBuf)> {
         let co_file_path = std::path::Path::new(CO_FILE_NAME);
         let effective_path = if co_file_path.exists() {
@@ -305,19 +375,12 @@ impl Checkout {
             env_path.into()
         };
 
-        let contents = std::fs::read_to_string(effective_path.clone()).map_err(|err| {
-            format_error!(
-                "Failed to open {} while loading `co` shortcuts\n{err:?}",
-                effective_path.display()
-            )
-        })?;
+        let checkout = if effective_path.is_dir() {
+            Self::load_checkout_directory(&effective_path)?
+        } else {
+            Self::load_checkout_file(&effective_path)?
+        };
 
-        let checkout = toml::from_str(&contents).map_err(|err| {
-            format_error!(
-                "Failed to parse toml file {}\n{err:?}",
-                effective_path.display()
-            )
-        })?;
         Ok((checkout, effective_path))
     }
 
@@ -1112,7 +1175,9 @@ mod tests {
     };
     use crate::search;
     use std::collections::HashMap;
+    use std::fs;
     use std::sync::Arc;
+    use tempfile::tempdir;
 
     fn arc(value: &str) -> Arc<str> {
         value.into()
@@ -1146,6 +1211,74 @@ mod tests {
                 help: Some(arc(help)),
             }),
         )
+    }
+
+    #[test]
+    fn load_checkout_directory_aggregates_matching_manifests() {
+        let temp_dir = tempdir().expect("failed to create tempdir");
+
+        fs::write(
+            temp_dir.path().join("alpha.co.spaces.toml"),
+            r#"
+[alpha.Repo]
+url = "https://example.com/alpha"
+rev = "main"
+"#,
+        )
+        .expect("failed to write alpha manifest");
+
+        fs::write(
+            temp_dir.path().join("beta.co.spaces.toml"),
+            r#"
+[beta.Workflow]
+script = ["echo beta"]
+"#,
+        )
+        .expect("failed to write beta manifest");
+
+        fs::write(
+            temp_dir.path().join("ignored.toml"),
+            "this is intentionally invalid and should be ignored",
+        )
+        .expect("failed to write ignored file");
+
+        let checkout_map =
+            Checkout::load_checkout_directory(temp_dir.path()).expect("failed to load manifests");
+
+        assert_eq!(checkout_map.len(), 2);
+        assert!(checkout_map.contains_key("alpha"));
+        assert!(checkout_map.contains_key("beta"));
+    }
+
+    #[test]
+    fn load_checkout_directory_errors_on_duplicate_entry_names() {
+        let temp_dir = tempdir().expect("failed to create tempdir");
+
+        fs::write(
+            temp_dir.path().join("one.co.spaces.toml"),
+            r#"
+[shared.Repo]
+url = "https://example.com/one"
+rev = "main"
+"#,
+        )
+        .expect("failed to write first manifest");
+
+        fs::write(
+            temp_dir.path().join("two.co.spaces.toml"),
+            r#"
+[shared.Repo]
+url = "https://example.com/two"
+rev = "main"
+"#,
+        )
+        .expect("failed to write second manifest");
+
+        let err = Checkout::load_checkout_directory(temp_dir.path())
+            .expect_err("expected duplicate checkout entry error");
+        let message = format!("{err:#}");
+
+        assert!(message.contains("duplicate checkout entry `shared`"));
     }
 
     #[test]
