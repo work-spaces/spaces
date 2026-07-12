@@ -1,3 +1,4 @@
+use crate::features::{Feature, Features};
 use crate::logger;
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
@@ -30,6 +31,19 @@ pub enum Clone {
     Worktree,
     Shallow,
     Blobless,
+}
+
+impl Clone {
+    pub fn validate_feature_flags(self, features: &Features) -> anyhow::Result<()> {
+        if self == Clone::Worktree && !features.is_enabled(Feature::EnableWorktreeClone) {
+            return Err(format_error!(
+                "Worktree clone is disabled. Enable feature '{}' to use clone='Worktree'.",
+                Feature::EnableWorktreeClone
+            ));
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Copy, Default, Display)]
@@ -83,6 +97,12 @@ impl Repo {
             &self.clone,
             None | Some(Clone::Default) | Some(Clone::Blobless)
         )
+    }
+
+    pub fn validate_clone_feature_flags(&self, features: &Features) -> anyhow::Result<()> {
+        self.clone
+            .unwrap_or(Clone::Default)
+            .validate_feature_flags(features)
     }
 }
 

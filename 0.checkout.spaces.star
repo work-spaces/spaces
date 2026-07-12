@@ -23,6 +23,7 @@ checkout_add_repo(
     "@star/sdk",
     url = "https://github.com/work-spaces/sdk",
     rev = "main",
+    clone = "Worktree",
 )
 
 checkout_add_repo(
