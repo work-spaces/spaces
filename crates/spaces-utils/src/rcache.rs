@@ -2,7 +2,7 @@
 /// Cache the outputs of the rule based on the input digest
 use crate::{age, ci, hash_streaming, lock, logger, targets};
 use anyhow::Context;
-use anyhow_source_location::format_context;
+use anyhow_source_location::{format_context, format_error};
 use bytesize::ByteSize;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -50,7 +50,7 @@ fn save_artifact_to_cache(
     // calculate the hash of the artifact
     let artifact_hash = hash_streaming::stream_blake3_hash(artifact_path).with_context(|| {
         format_context!(
-            "Failed to hash workspace artifact {}",
+            "while hashing workspace artifact {}",
             artifact_path.display()
         )
     })?;
@@ -70,19 +70,19 @@ fn save_artifact_to_cache(
     if !path_in_cache.exists() {
         if let Some(parent) = path_in_cache.parent() {
             std::fs::create_dir_all(parent).context(format_context!(
-                "Failed to create parent directory for cache entry"
+                "while creating parent directory for cache entry"
             ))?;
         }
 
         // save the artifact to a staged path first
         let stage_dir = cache_path.join(STAGE_CACHE_DIR);
         std::fs::create_dir_all(&stage_dir).context(format_context!(
-            "Failed to create stage directory for cache entry"
+            "while creating stage directory for cache entry"
         ))?;
         let staged_path = stage_dir.join(&artifact_hash);
         reflink_copy::reflink_or_copy(artifact_path, &staged_path).with_context(|| {
             format_context!(
-                "Failed to copy artifact to staged cache path {}",
+                "while copying artifact to staged cache path {}",
                 staged_path.display()
             )
         })?;
@@ -90,24 +90,24 @@ fn save_artifact_to_cache(
         // verify the staged file hash matches the expected hash
         let staged_hash = hash_streaming::stream_blake3_hash(&staged_path).with_context(|| {
             format_context!(
-                "Failed to hash staged cache artifact {}",
+                "while hashing staged cache artifact {}",
                 staged_path.display()
             )
         })?;
         if staged_hash != artifact_hash {
             let _ = std::fs::remove_file(&staged_path);
-            return Err(anyhow::anyhow!(format_context!(
-                "Hash mismatch for staged artifact {}: expected {} but got {}",
+            return Err(format_error!(
+                "while checking for hash mismatch for staged artifact {}: expected {} but got {}",
                 staged_path.display(),
                 artifact_hash,
                 staged_hash
-            )));
+            ));
         }
 
         // hash verified - rename staged file to final cache path
         std::fs::rename(&staged_path, &path_in_cache).with_context(|| {
             format_context!(
-                "Failed to rename staged cache file {} to {}",
+                "while renaming staged cache file {} to {}",
                 staged_path.display(),
                 path_in_cache.display()
             )
@@ -132,7 +132,7 @@ impl CachedTarget {
         path_in_workspace: &std::path::Path,
     ) -> anyhow::Result<Self> {
         let path_in_cache = save_artifact_to_cache(console, cache_path, path_in_workspace)
-            .with_context(|| format_context!("Failed to save artifact to cache"))?;
+            .with_context(|| format_context!("while saving artifact to cache"))?;
         let path_in_workspace = path_in_workspace.to_string_lossy().into();
         Ok(CachedTarget {
             path_in_cache,
@@ -145,14 +145,14 @@ impl CachedTarget {
         let path_in_workspace = std::path::Path::new(self.path_in_workspace.as_ref());
         if let Some(parent) = path_in_workspace.parent() {
             std::fs::create_dir_all(parent).context(format_context!(
-                "Failed to create parent directory for workspace entry {}",
+                "while creating parent directory for workspace entry {}",
                 path_in_workspace.display()
             ))?;
         }
 
         if path_in_workspace.exists() {
             std::fs::remove_file(path_in_workspace).context(format_context!(
-                "Failed to remove existing workspace entry {}",
+                "while removing existing workspace entry {}",
                 path_in_workspace.display()
             ))?;
         }
@@ -160,7 +160,7 @@ impl CachedTarget {
         let path_in_cache = get_artifact_cache_path(path_to_cache, &self.path_in_cache);
         reflink_copy::reflink_or_copy(&path_in_cache, path_in_workspace).with_context(|| {
             format_context!(
-                "Failed to restore artifact to workspace at {} from {}",
+                "while restoring artifact to workspace at {} from {}",
                 path_in_workspace.display(),
                 path_in_cache.display()
             )
@@ -189,22 +189,22 @@ impl RuleDigestCacheEntry {
         if path_in_cache.exists() {
             let contents = std::fs::read(&path_in_cache).with_context(|| {
                 format_context!(
-                    "While trying to open cache file for rule digest {}",
+                    "while trying to open cache file for rule digest {}",
                     rule_digest
                 )
             })?;
 
             let mut entry: Self = postcard::from_bytes(&contents).context(format_context!(
-                "Failed to decode cache entry for rule digest {}",
+                "while decoding cache entry for rule digest {}",
                 rule_digest
             ))?;
 
             // update last used and save the entry
             entry.last_used.update();
             let encoded = postcard::to_stdvec(&entry)
-                .context(format_context!("Failed to encode rcache entry"))?;
+                .context(format_context!("while encoding rcache entry"))?;
             std::fs::write(path_in_cache, encoded).context(format_context!(
-                "Failed to write cache entry for rule digest {}",
+                "while writing cache entry for rule digest {}",
                 rule_digest
             ))?;
 
@@ -246,18 +246,18 @@ impl RuleDigestCacheEntry {
             outputs,
         };
 
-        let encoded = postcard::to_stdvec(&entry)
-            .context(format_context!("Failed to encode rcache entry"))?;
+        let encoded =
+            postcard::to_stdvec(&entry).context(format_context!("while encoding rcache entry"))?;
 
         let path_in_cache = Self::get_path_in_cache(cache_path, rule_digest);
         if let Some(parent) = path_in_cache.parent() {
             std::fs::create_dir_all(parent).context(format_context!(
-                "Failed to create parent for rule digest cache {}",
+                "while creating parent for rule digest cache {}",
                 path_in_cache.display()
             ))?;
         }
         std::fs::write(path_in_cache, encoded).context(format_context!(
-            "Failed to write cache entry for rule digest {}",
+            "while writing cache entry for rule digest {}",
             rule_digest
         ))?;
 
@@ -408,7 +408,7 @@ pub fn prune(
                 match std::fs::remove_file(path) {
                     Ok(()) => total_size_removed += *size,
                     Err(e) => logger(console.clone())
-                        .error(format!("Failed to remove artifact {short_hash}: {e}").as_str()),
+                        .error(format!("while removing artifact {short_hash}: {e}").as_str()),
                 }
             }
         }
@@ -503,13 +503,13 @@ pub fn show_info(
         console::Format::Yaml => {
             console.write(
                 &serialise_rcache_info_yaml(artifacts_size, rule_digests_size, total_size)
-                    .context(format_context!("Failed to serialize rcache info as YAML"))?,
+                    .context(format_context!("while serializing rcache info as YAML"))?,
             )?;
         }
         console::Format::Json => {
             console.write(
                 &serialise_rcache_info_json(artifacts_size, rule_digests_size, total_size)
-                    .context(format_context!("Failed to serialize rcache info as JSON"))?,
+                    .context(format_context!("while serializing rcache info as JSON"))?,
             )?;
         }
     }
@@ -539,7 +539,7 @@ fn serialise_rcache_info_json(
         total_size_bytes: total_size,
     };
     serde_json::to_string_pretty(&output).context(format_context!(
-        "Internal Error: failed to serialize rcache info for JSON"
+        "Internal Error: while serializing rcache info for JSON"
     ))
 }
 
@@ -554,7 +554,7 @@ fn serialise_rcache_info_yaml(
         total_size_bytes: total_size,
     };
     serde_yaml::to_string(&output).context(format_context!(
-        "Internal Error: failed to serialize rcache info for YAML"
+        "Internal Error: while serializing rcache info for YAML"
     ))
 }
 
@@ -593,7 +593,7 @@ fn remove_targets(targets: &[targets::Target]) -> anyhow::Result<()> {
     for target in targets {
         target
             .remove()
-            .with_context(|| format_context!("Failed to remove target"))?;
+            .with_context(|| format_context!("while removing target {:?}", target))?;
     }
     Ok(())
 }
@@ -625,7 +625,7 @@ where
     }
 
     let new_from_cache_result = RuleDigestCacheEntry::new_from_cache(cache_path, &rule_digest)
-        .with_context(|| format_context!("Failed to check for cache entry for {rule_digest}"));
+        .with_context(|| format_context!("while checking for cache entry for {rule_digest}"));
 
     match new_from_cache_result {
         Err(e) => Some(Err(e)),
@@ -633,7 +633,7 @@ where
             // cache entry exists
             let result = entry
                 .restore_to_workspace(cache_path)
-                .with_context(|| format_context!("Failed to restore cached output to workspace"));
+                .with_context(|| format_context!("while restoring cached output to workspace"));
             if let Err(e) = result {
                 return Some(Err(e));
             }
@@ -651,7 +651,7 @@ where
                     &rule_digest,
                     get_target_paths().as_slice(),
                 )
-                .with_context(|| format_context!("Failed to create cache entry for {rule_digest}"));
+                .with_context(|| format_context!("while creating cache entry for {rule_digest}"));
 
                 if let Err(e) = result {
                     return Some(Err(e));

@@ -613,10 +613,205 @@ enum ParagraphText {
     Rich(Line),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WrapTokenKind {
+    Word,
+    Space,
+}
+
+#[derive(Clone)]
+struct WrapToken {
+    kind: WrapTokenKind,
+    content: Line,
+}
+
+fn tokenize_line_for_wrapping(line: &Line) -> Vec<WrapToken> {
+    let mut tokens = Vec::new();
+    let mut current = Line::default();
+    let mut current_kind: Option<WrapTokenKind> = None;
+
+    for span in line.iter() {
+        for grapheme in span.iter() {
+            let next_kind = if grapheme.content() == " " {
+                WrapTokenKind::Space
+            } else {
+                WrapTokenKind::Word
+            };
+
+            match current_kind {
+                Some(kind) if kind == next_kind => {
+                    current.push(grapheme);
+                }
+                Some(kind) => {
+                    if !current.is_empty() {
+                        tokens.push(WrapToken {
+                            kind,
+                            content: current,
+                        });
+                    }
+
+                    current = Line::default();
+                    current.push(grapheme);
+                    current_kind = Some(next_kind);
+                }
+                None => {
+                    current.push(grapheme);
+                    current_kind = Some(next_kind);
+                }
+            }
+        }
+    }
+
+    if let Some(kind) = current_kind
+        && !current.is_empty()
+    {
+        tokens.push(WrapToken {
+            kind,
+            content: current,
+        });
+    }
+
+    tokens
+}
+
+fn split_line_by_width(line: &Line, width: usize) -> Vec<Line> {
+    let width = width.max(1);
+    let mut wrapped = Vec::new();
+    let mut current = Line::default();
+    let mut current_width = 0;
+
+    for span in line.iter() {
+        for grapheme in span.iter() {
+            let grapheme_width = grapheme.len();
+
+            if grapheme_width > width {
+                if !current.is_empty() {
+                    wrapped.push(current);
+                    current = Line::default();
+                    current_width = 0;
+                }
+
+                let mut single = Line::default();
+                single.push(grapheme);
+                wrapped.push(single);
+                continue;
+            }
+
+            if current_width > 0 && current_width + grapheme_width > width {
+                wrapped.push(current);
+                current = Line::default();
+                current_width = 0;
+            }
+
+            current.push(grapheme);
+            current_width += grapheme_width;
+
+            if current_width == width {
+                wrapped.push(current);
+                current = Line::default();
+                current_width = 0;
+            }
+        }
+    }
+
+    if !current.is_empty() {
+        wrapped.push(current);
+    }
+
+    if wrapped.is_empty() {
+        wrapped.push(Line::default());
+    }
+
+    wrapped
+}
+
+fn wrap_line_to_width(line: &Line, width: usize) -> Vec<Line> {
+    let width = width.max(1);
+    let mut lines = Vec::new();
+    let mut current = Line::default();
+    let mut pending_space: Option<Line> = None;
+
+    for token in tokenize_line_for_wrapping(line) {
+        if token.kind == WrapTokenKind::Space {
+            if !current.is_empty() {
+                pending_space = Some(token.content);
+            }
+            continue;
+        }
+
+        let word = token.content;
+        let word_len = word.len();
+
+        if current.is_empty() {
+            if word_len <= width {
+                current.extend(word);
+            } else {
+                let mut chunks = split_line_by_width(&word, width);
+                if let Some(last_chunk) = chunks.pop() {
+                    lines.extend(chunks);
+                    current = last_chunk;
+                }
+            }
+            pending_space = None;
+            continue;
+        }
+
+        let separator_width = pending_space.as_ref().map_or(0, Line::len);
+
+        if current.len() + separator_width + word_len <= width {
+            if let Some(space) = pending_space.take() {
+                current.extend(space);
+            }
+            current.extend(word);
+        } else {
+            lines.push(current);
+            current = Line::default();
+
+            if word_len <= width {
+                current.extend(word);
+            } else {
+                let mut chunks = split_line_by_width(&word, width);
+                if let Some(last_chunk) = chunks.pop() {
+                    lines.extend(chunks);
+                    current = last_chunk;
+                }
+            }
+
+            pending_space = None;
+        }
+    }
+
+    if !current.is_empty() || lines.is_empty() {
+        lines.push(current);
+    }
+
+    lines
+}
+
+fn normalize_soft_newlines(text: &str) -> String {
+    let mut normalized = String::with_capacity(text.len());
+    let mut just_inserted_space = false;
+
+    for ch in text.chars() {
+        if matches!(ch, '\n' | '\r') {
+            if !just_inserted_space {
+                normalized.push(' ');
+                just_inserted_space = true;
+            }
+        } else {
+            normalized.push(ch);
+            just_inserted_space = false;
+        }
+    }
+
+    normalized
+}
+
 /// Paragraph component for body text
 pub struct Paragraph {
     text: ParagraphText,
     variant: Variant,
+    width: Option<Width>,
 }
 
 impl Paragraph {
@@ -626,6 +821,7 @@ impl Paragraph {
         Self {
             text: ParagraphText::Plain(text.into()),
             variant: Variant::Default,
+            width: None,
         }
     }
 
@@ -635,6 +831,7 @@ impl Paragraph {
         Self {
             text: ParagraphText::Rich(text.into_line()),
             variant: Variant::Default,
+            width: None,
         }
     }
 
@@ -643,26 +840,45 @@ impl Paragraph {
         self
     }
 
-    fn render_line(&self) -> Line {
+    pub fn width(mut self, width: impl Into<Width>) -> Self {
+        self.width = Some(width.into());
+        self
+    }
+
+    fn base_line(&self) -> Line {
         match &self.text {
             ParagraphText::Plain(text) => {
                 let style = self.variant.style();
                 let mut line = Line::default();
-                line.push(span::styled_span(style, text.clone()));
+                line.push(span::styled_span(style, normalize_soft_newlines(text)));
                 line
             }
             ParagraphText::Rich(line) => line.clone(),
         }
     }
 
+    fn render_impl(&self) -> Vec<Line> {
+        let line = self.base_line();
+
+        if let Some(width) = self.width {
+            wrap_line_to_width(&line, width.as_usize())
+        } else {
+            vec![line]
+        }
+    }
+
+    pub fn render_lines(&self) -> Vec<Line> {
+        self.render_impl()
+    }
+
     pub fn render(&self) -> Line {
-        self.render_line()
+        self.render_impl().into_iter().next().unwrap_or_default()
     }
 }
 
 impl Component for Paragraph {
     fn render(&self) -> Vec<Line> {
-        vec![self.render_line()]
+        self.render_impl()
     }
 }
 
@@ -2284,6 +2500,72 @@ mod tests {
 
         assert!(line.to_unstyled().contains("spaces sync --stash"));
         assert!(line.fmt_for_test().to_string().contains("fg=magenta"));
+    }
+
+    #[test]
+    fn test_paragraph_wraps_plain_text_to_width() {
+        let lines = Paragraph::new("alpha beta gamma delta")
+            .width(10)
+            .render_lines();
+
+        assert!(lines.len() > 1);
+        assert!(lines.iter().all(|line| line.len() <= 10));
+
+        let joined = lines
+            .iter()
+            .map(|line| line.to_unstyled())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(joined, "alpha beta gamma delta");
+    }
+
+    #[test]
+    fn test_paragraph_converts_soft_newlines_to_spaces() {
+        let lines = Paragraph::new("alpha\nbeta").width(20).render_lines();
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].to_unstyled(), "alpha beta");
+    }
+
+    #[test]
+    fn test_paragraph_wraps_long_words_to_width() {
+        let text = "supercalifragilistic";
+        let lines = Paragraph::new(text).width(5).render_lines();
+
+        assert!(lines.len() > 1);
+        assert!(lines.iter().all(|line| line.len() <= 5));
+
+        let joined = lines
+            .iter()
+            .map(|line| line.to_unstyled())
+            .collect::<Vec<_>>()
+            .join("");
+        assert_eq!(joined, text);
+    }
+
+    #[test]
+    fn test_paragraph_wraps_rich_lines_and_preserves_style() {
+        let mut rich_line = Line::default();
+        rich_line.push(code("spaces-sync-command"));
+        rich_line.push(span::unstyled_span(" completed".to_string()));
+
+        let lines = Paragraph::from_line(rich_line).width(12).render_lines();
+
+        assert!(lines.len() > 1);
+        assert!(lines.iter().all(|line| line.len() <= 12));
+
+        let joined = lines
+            .iter()
+            .map(|line| line.to_unstyled())
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(joined.contains("spaces-sync-command"));
+        assert!(joined.contains("completed"));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.fmt_for_test().to_string().contains("fg=magenta"))
+        );
     }
 
     #[test]
