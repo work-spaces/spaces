@@ -68,7 +68,7 @@ fn get_workspace(
         is_checkout_phase,
         is_create_log_folder,
     )
-    .context(format_context!("while running workspace"))
+    .map_err(|err| format_error!("while initializing workspace\n{err:?}"))
 }
 
 fn evaluate_environment(
