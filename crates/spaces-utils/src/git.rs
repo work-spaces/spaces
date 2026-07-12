@@ -37,8 +37,7 @@ impl Clone {
     pub fn validate_feature_flags(self, features: &Features) -> anyhow::Result<()> {
         if self == Clone::Worktree && !features.is_enabled(Feature::EnableWorktreeClone) {
             return Err(format_error!(
-                "Worktree clone is disabled. Enable feature '{}' to use clone='Worktree'.",
-                Feature::EnableWorktreeClone
+                "Worktree clone is disabled. Enable feature 'enable-worktree-clone' to use clone='Worktree'.",
             ));
         }
 
