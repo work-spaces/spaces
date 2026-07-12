@@ -608,6 +608,10 @@ impl Git {
             IsNewBranch::No
         };
 
+        self.clone
+            .validate_feature_flags(&workspace.read().features)
+            .context(format_context!("while validating clone feature flags"))?;
+
         match self.clone {
             git::Clone::Worktree => self.execute_worktree_clone(progress, workspace.clone()),
             git::Clone::Default | git::Clone::Blobless => {

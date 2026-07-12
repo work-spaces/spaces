@@ -34,6 +34,7 @@ pub enum Feature {
     CloneWithCommitGraph,
     AllowInternalLoad,
     SkipForceFetchTags,
+    EnableWorktreeClone,
 }
 
 impl Feature {
@@ -80,6 +81,10 @@ impl Feature {
             Feature::SkipForceFetchTags => {
                 r"Skip force-fetching tags on workspace repos when running spaces sync.
                 By default, tags are force-fetched to ensure local tags match remote tags."
+            }
+            Feature::EnableWorktreeClone => {
+                r"Enable cloning repositories using git worktrees. When disabled,
+                requesting clone = 'Worktree' returns an error. Worktrees are deprecated and should be phased out."
             }
         }
     }

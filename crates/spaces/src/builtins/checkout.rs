@@ -461,6 +461,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 ctx.workspace_absolute_path.clone()
             };
 
+            repo.validate_clone_feature_flags(&workspace_arc.read().features)
+                .context(format_context!("while validating clone feature flags"))?;
+
             if let Some(clone_type) = repo.clone.as_ref()
                 && *clone_type == git::Clone::Worktree
                 && repo.sparse_checkout.is_some()
