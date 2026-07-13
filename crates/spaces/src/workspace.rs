@@ -589,8 +589,25 @@ impl Workspace {
             settings.json.is_use_locks = Some(true);
         }
 
-        // Load command line locks
-        let locks = singleton::get_args_locks();
+        // Load command line locks and persist them in workspace settings.
+        let command_line_locks = singleton::get_args_locks();
+        if !command_line_locks.is_empty() {
+            settings.json.command_line_locks = command_line_locks;
+        }
+
+        if !settings.json.command_line_locks.is_empty() {
+            let lock_args: Vec<Arc<str>> = settings
+                .json
+                .command_line_locks
+                .iter()
+                .map(|(repo, rev)| format!("{repo}={rev}").into())
+                .collect();
+            singleton::set_args_locks(lock_args).context(format_context!(
+                "While loading command line locks from workspace settings"
+            ))?;
+        }
+
+        let locks = settings.json.command_line_locks.clone();
 
         if is_checkout_phase == IsCheckoutPhase::Yes {
             settings.json.scanned_modules = HashSet::default();

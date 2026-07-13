@@ -345,6 +345,8 @@ pub struct JsonSettings {
     pub order: Vec<Arc<str>>,
     pub is_scanned: Option<bool>,
     pub is_use_locks: Option<bool>,
+    #[serde(default = "HashMap::new")]
+    pub command_line_locks: HashMap<Arc<str>, Arc<str>>,
     pub minimum_version: Option<Arc<str>>,
     #[serde(default = "HashMap::new")]
     pub members: HashMap<Arc<str>, Vec<Member>>,
@@ -377,6 +379,7 @@ impl JsonSettings {
             spaces_version: env!("CARGO_PKG_VERSION").into(),
             is_scanned: None,
             is_use_locks: None,
+            command_line_locks: HashMap::new(),
             digest: None,
             scanned_modules: HashSet::new(),
             members: HashMap::new(),
