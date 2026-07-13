@@ -548,14 +548,38 @@ impl Git {
 
         let clone_options = console::ExecuteOptions {
             arguments: clone_arguments,
-            working_directory: Some(workspace_directory),
+            working_directory: Some(workspace_directory.clone()),
             ..Default::default()
         };
 
-        let clone_path = std::path::Path::new(self.spaces_key.as_ref());
-        if clone_path.exists() {
-            url_logger.warning(format!("{} already exists", self.spaces_key).as_str());
+        let clone_path =
+            std::path::Path::new(workspace_directory.as_ref()).join(self.spaces_key.as_ref());
+        let should_run_clone = if clone_path.exists() {
+            let entries = std::fs::read_dir(&clone_path).context(format_context!(
+                "while reading existing shallow clone directory {}",
+                clone_path.display()
+            ))?;
+
+            if entries.count() > 0 {
+                url_logger.warning(
+                    format!("{} already exists and is populated", clone_path.display()).as_str(),
+                );
+                false
+            } else {
+                url_logger.debug(
+                    format!(
+                        "{} already exists but is empty - cloning",
+                        clone_path.display()
+                    )
+                    .as_str(),
+                );
+                true
+            }
         } else {
+            true
+        };
+
+        if should_run_clone {
             url_logger.trace(format!("git clone {clone_options:?}").as_str());
 
             progress
