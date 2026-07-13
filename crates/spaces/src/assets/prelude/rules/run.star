@@ -268,7 +268,7 @@ def _run_get_effective_env(env: dict, workspace_vars: list[str]) -> dict:
         if workspace_is_env_var_set(workspace_var):
             effective_env[workspace_var] = workspace_get_env_var(workspace_var)
 
-    effective_env |= env
+    effective_env.update(env)
 
     return effective_env
 
