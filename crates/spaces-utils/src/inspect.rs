@@ -40,8 +40,8 @@ fn shell_quote(value: &str) -> std::borrow::Cow<'_, str> {
 #[derive(Debug)]
 pub struct GitTask {
     pub url: Arc<str>,
-    pub rule_name: Arc<str>,
     pub spaces_key: Arc<str>,
+    pub is_checkout_repo: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -66,14 +66,26 @@ impl Options {
         assign_from_arg_env: &[(Arc<str>, Arc<str>)],
         command_line_store: &[(Arc<str>, Arc<str>)],
     ) -> anyhow::Result<()> {
+        let workspace_dir_name: Arc<str> = std::env::current_dir()
+            .context(format_context!("Failed to get current directory"))?
+            .file_name()
+            .ok_or_else(|| format_error!("Failed to derive workspace directory name"))?
+            .to_string_lossy()
+            .to_string()
+            .into();
+
         let mut progress = console::Progress::new(console.clone(), "inspect-checkout", None, None);
         let mut locks = Vec::new();
-        let mut checkout_repo = None;
+        let mut checkout_url = None;
+        let mut checkout_rule_name = None;
+
         for git_task in checkout_rules {
-            let rule_name = git_task.rule_name.clone();
             let dir_name: Arc<str> = git_task.spaces_key.clone();
-            if rule_name.starts_with("//checkout:") {
-                checkout_repo = Some((dir_name.clone(), git_task.url.clone()));
+            let repo_name = format!("//{dir_name}");
+
+            if git_task.is_checkout_repo {
+                checkout_url = Some(git_task.url.clone());
+                checkout_rule_name = Some(git_task.spaces_key.clone());
             }
 
             let repo = git::Repository::new(git_task.url.clone(), dir_name.clone());
@@ -81,70 +93,70 @@ impl Options {
                 if self.force {
                     logger(progress.console.clone()).warning(&format!(
                         "[{}] {} is dirty - checkout command may not be reproducible.",
-                        git_task.url, rule_name
+                        git_task.url, repo_name
                     ));
                 } else {
                     return Err(format_error!(
                         "[{}] {} is dirty - cannot inspect checkout with dirty repo. Commit and push changes.",
                         git_task.url,
-                        rule_name
+                        repo_name
                     ));
                 }
             }
 
             let commit_hash = repo
                 .get_commit_hash(&mut progress)
-                .context(format_context!("Failed to get commit for {rule_name}"))?;
+                .context(format_context!("Failed to get commit for {repo_name}"))?;
 
             if let Some(commit_description) = repo.get_commit_tag(&mut progress).or(commit_hash) {
-                locks.push((dir_name, commit_description))
+                locks.push((dir_name, commit_description, git_task.is_checkout_repo))
             }
         }
 
-        if let Some((checkout_dir_name, url)) = checkout_repo {
-            let mut workspace_name: String = String::from(checkout_dir_name.as_ref());
-            let mut command = format!(
-                "spaces checkout-repo --url={url} \\\n  --rule-name={rule_name} \\\n",
-                url = shell_quote(&url),
-                rule_name = shell_quote(&checkout_dir_name),
-            );
-            for (dir_name, commit) in locks.iter() {
-                if dir_name == &checkout_dir_name {
-                    command.push_str(&format!("  --rev={} \\", shell_quote(commit)));
-                    workspace_name.push_str(&format!("-{commit}"));
-                } else {
-                    command.push_str(&format!(
-                        "  --lock={} \\",
-                        shell_quote(&format!("{dir_name}={commit}"))
-                    ));
-                }
-                command.push('\n');
-            }
+        let checkout_url = checkout_url
+            .ok_or_else(|| format_error!("Failed to find checkout repo from checkout rules"))?;
+        let checkout_rule_name = checkout_rule_name.ok_or_else(|| {
+            format_error!("Failed to find checkout rule name from checkout rules")
+        })?;
 
-            for (name, value) in assign_from_arg_env {
+        let mut workspace_name: String = workspace_dir_name.to_string();
+        let mut command = format!(
+            "spaces checkout-repo --url={url} \\\n  --rule-name={rule_name} \\\n",
+            url = shell_quote(checkout_url.as_ref()),
+            rule_name = shell_quote(checkout_rule_name.as_ref()),
+        );
+        for (dir_name, commit, is_checkout_repo) in locks.iter() {
+            if *is_checkout_repo {
+                command.push_str(&format!("  --rev={} \\", shell_quote(commit)));
+                workspace_name.push_str(&format!("-{commit}"));
+            } else {
                 command.push_str(&format!(
-                    "  --env={} \\\n",
-                    shell_quote(&format!("{name}={value}"))
+                    "  --lock={} \\",
+                    shell_quote(&format!("{dir_name}={commit}"))
                 ));
             }
-            for (key, value) in command_line_store {
-                command.push_str(&format!(
-                    "  --store={} \\\n",
-                    shell_quote(&format!("{key}={value}"))
-                ));
-            }
-
-            let workspace_name = workspace_name.replace("/", "-");
-            command.push_str(&format!("  --name={}\n", shell_quote(&workspace_name)));
-
-            console.raw("\n")?;
-            console.raw(&command)?;
-            console.raw("\n")?;
-            Ok(())
-        } else {
-            Err(format_error!(
-                "Workspace was not created using spaces checkout-repo"
-            ))
+            command.push('\n');
         }
+
+        for (name, value) in assign_from_arg_env {
+            command.push_str(&format!(
+                "  --env={} \\\n",
+                shell_quote(&format!("{name}={value}"))
+            ));
+        }
+        for (key, value) in command_line_store {
+            command.push_str(&format!(
+                "  --store={} \\\n",
+                shell_quote(&format!("{key}={value}"))
+            ));
+        }
+
+        let workspace_name = workspace_name.replace("/", "-");
+        command.push_str(&format!("  --name={}\n", shell_quote(&workspace_name)));
+
+        console.raw("\n")?;
+        console.raw(&command)?;
+        console.raw("\n")?;
+        Ok(())
     }
 }
