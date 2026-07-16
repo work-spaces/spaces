@@ -1374,21 +1374,13 @@ fn execute_tasks(
                     ));
                 }
             } else if inspect_options.checkout {
-                let checkout_rules = rules::get_checkout_rules();
-                let inspect_checkout_git_rules: Vec<_> = checkout_rules
-                    .into_iter()
-                    .filter_map(|e| {
-                        if let executor::Task::Git(git_task) = e.executor {
-                            Some(inspect::GitTask {
-                                url: git_task.url.clone(),
-                                rule_name: e.rule.name.clone(),
-                                spaces_key: git_task.spaces_key.clone(),
-                            })
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
+                let checkout_tasks = rules::get_checkout_rules();
+                let checkout_repo_path_hint =
+                    get_checkout_repo_path_from_checkout_rules(&checkout_tasks);
+                let inspect_checkout_git_rules = build_checkout_git_tasks_from_members(
+                    &workspace,
+                    checkout_repo_path_hint.as_deref(),
+                );
 
                 let (assign_from_arg_env, command_line_store) =
                     collect_checkout_repro_args(&workspace);
@@ -1629,6 +1621,70 @@ fn build_query_rule(
     })
 }
 
+fn get_checkout_repo_path_from_checkout_rules(checkout_tasks: &[task::Task]) -> Option<Arc<str>> {
+    for task in checkout_tasks {
+        if !task.rule.name.starts_with("//checkout:") {
+            continue;
+        }
+
+        if let executor::Task::Git(git_task) = &task.executor {
+            return Some(git_task.spaces_key.clone());
+        }
+    }
+
+    None
+}
+
+fn build_checkout_git_tasks_from_members(
+    workspace: &WorkspaceArc,
+    checkout_repo_path_hint: Option<&str>,
+) -> Vec<inspect::GitTask> {
+    let (workspace_absolute_path, members) = {
+        let ws_read = workspace.read();
+        (
+            ws_read.get_absolute_path(),
+            ws_read.settings.json.members.clone(),
+        )
+    };
+
+    let mut repo_entries: Vec<(Arc<str>, Arc<str>, bool)> = Vec::new();
+    let mut seen_paths: HashSet<Arc<str>> = HashSet::new();
+
+    for member_list in members.values() {
+        for member in member_list {
+            if !seen_paths.insert(member.path.clone()) {
+                continue;
+            }
+
+            let member_path = if std::path::Path::new(member.path.as_ref()).is_absolute() {
+                std::path::Path::new(member.path.as_ref()).to_path_buf()
+            } else {
+                std::path::Path::new(workspace_absolute_path.as_ref()).join(member.path.as_ref())
+            };
+
+            if !member_path.join(".git").exists() {
+                continue;
+            }
+
+            let is_checkout_repo = checkout_repo_path_hint
+                .map(|hint| member.path.as_ref() == hint)
+                .unwrap_or(false);
+
+            repo_entries.push((member.path.clone(), member.url.clone(), is_checkout_repo));
+        }
+    }
+
+    repo_entries.sort_by(|a, b| a.0.cmp(&b.0));
+    repo_entries
+        .into_iter()
+        .map(|(path, url, is_checkout_repo)| inspect::GitTask {
+            url,
+            spaces_key: path,
+            is_checkout_repo,
+        })
+        .collect()
+}
+
 fn build_query_context(
     console: console::Console,
     workspace: WorkspaceArc,
@@ -1638,7 +1694,6 @@ fn build_query_context(
     let run_tasks = rules::get_run_rules();
 
     let mut checkout_rules = Vec::new();
-    let mut checkout_git_tasks = Vec::new();
 
     for task in &checkout_tasks {
         checkout_rules.push(
@@ -1646,13 +1701,6 @@ fn build_query_context(
                 format_context!("Failed to build QueryRule for {}", task.rule.name),
             )?,
         );
-        if let executor::Task::Git(git_task) = &task.executor {
-            checkout_git_tasks.push(inspect::GitTask {
-                url: git_task.url.clone(),
-                rule_name: task.rule.name.clone(),
-                spaces_key: git_task.spaces_key.clone(),
-            });
-        }
     }
 
     let mut run_rules = Vec::new();
@@ -1663,6 +1711,10 @@ fn build_query_context(
             )?,
         );
     }
+
+    let checkout_repo_path_hint = get_checkout_repo_path_from_checkout_rules(&checkout_tasks);
+    let checkout_git_tasks =
+        build_checkout_git_tasks_from_members(&workspace, checkout_repo_path_hint.as_deref());
 
     let relative_invoked_path = workspace.read().relative_invoked_path.clone();
     let graph = if config.compute_graph {
