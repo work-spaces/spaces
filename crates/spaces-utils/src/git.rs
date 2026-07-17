@@ -521,6 +521,41 @@ pub fn is_dirty(
     }
 }
 
+pub fn has_local_commits_not_on_remotes(
+    progress_bar: &mut console::Progress,
+    url: &str,
+    directory: &str,
+) -> bool {
+    let output = execute_git_command(
+        progress_bar,
+        url,
+        console::ExecuteOptions {
+            working_directory: Some(directory.into()),
+            arguments: vec![
+                "rev-list".into(),
+                "--count".into(),
+                "HEAD".into(),
+                "--branches".into(),
+                "--not".into(),
+                "--remotes".into(),
+            ],
+            is_return_stdout: true,
+            ..Default::default()
+        },
+    )
+    .unwrap_or(None);
+
+    let Some(output) = output else {
+        return true;
+    };
+
+    output
+        .trim()
+        .parse::<usize>()
+        .map(|count| count > 0)
+        .unwrap_or(true)
+}
+
 pub fn get_latest_tag(
     progress_bar: &mut console::Progress,
     url: &str,
@@ -1407,6 +1442,10 @@ impl Repository {
         ignore_submodules: IgnoreSubmodules,
     ) -> bool {
         is_dirty(progress_bar, &self.url, &self.full_path, ignore_submodules)
+    }
+
+    pub fn has_local_commits_not_on_remotes(&self, progress_bar: &mut console::Progress) -> bool {
+        has_local_commits_not_on_remotes(progress_bar, &self.url, &self.full_path)
     }
 
     pub fn get_commit_tag(&self, progress_bar: &mut console::Progress) -> Option<Arc<str>> {
