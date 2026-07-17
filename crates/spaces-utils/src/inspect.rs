@@ -97,11 +97,19 @@ impl Options {
                     ));
                 } else {
                     return Err(format_error!(
-                        "[{}] {} is dirty - cannot inspect checkout with dirty repo. Commit and push changes.",
+                        "[{}] {} is dirty - cannot query checkout with dirty repo. Commit and push changes.",
                         git_task.url,
                         repo_name
                     ));
                 }
+            }
+
+            if repo.has_local_commits_not_on_remotes(&mut progress) {
+                return Err(format_error!(
+                    "[{}] {} has local commits that are not pushed to any remote. Push commits before running query checkout.",
+                    git_task.url,
+                    repo_name
+                ));
             }
 
             let commit_hash = repo
