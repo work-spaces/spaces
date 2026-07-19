@@ -74,7 +74,9 @@ impl Options {
             .to_string()
             .into();
 
-        let mut progress = console::Progress::new(console.clone(), "inspect-checkout", None, None);
+        let count = checkout_rules.iter().count();
+        let mut progress =
+            console::Progress::new(console.clone(), "query-checkout", Some(count as u64), None);
         let mut locks = Vec::new();
         let mut checkout_url = None;
         let mut checkout_rule_name = None;
@@ -82,6 +84,10 @@ impl Options {
         for git_task in checkout_rules {
             let dir_name: Arc<str> = git_task.spaces_key.clone();
             let repo_name = format!("//{dir_name}");
+            progress.set_message(format!("{repo_name} - checking").as_str());
+            let mut repo_progress =
+                console::Progress::new(console.clone(), repo_name.as_str(), None, None);
+            repo_progress.set_message("checking local/remote status");
 
             if git_task.is_checkout_repo {
                 checkout_url = Some(git_task.url.clone());
@@ -89,15 +95,15 @@ impl Options {
             }
 
             let repo = git::Repository::new(git_task.url.clone(), dir_name.clone());
-            if repo.is_dirty(&mut progress, git::IgnoreSubmodules::No) {
+            if repo.is_dirty(&mut repo_progress, git::IgnoreSubmodules::No) {
                 if self.force {
-                    logger(progress.console.clone()).warning(&format!(
-                        "[{}] {} is dirty - checkout command may not be reproducible.",
+                    logger(repo_progress.console.clone()).warning(&format!(
+                        "[{}] {} is dirty\n  Checkout command may not be reproducible.",
                         git_task.url, repo_name
                     ));
                 } else {
                     return Err(format_error!(
-                        "[{}] {} is dirty - cannot query checkout with dirty repo. Commit and push changes.",
+                        "[{}] {} is dirty\n  Cannot query checkout with dirty repo.\n  Commit and push changes.",
                         git_task.url,
                         repo_name
                     ));
@@ -107,7 +113,7 @@ impl Options {
             match repo.has_local_commits_not_on_remotes(&mut progress) {
                 Ok(true) => {
                     return Err(format_error!(
-                        "[{}] {} has local commits that are not pushed to any remote. Push commits before running query checkout.",
+                        "[{}] {} has local commits.\n  Fetch and push commits before running query checkout.",
                         git_task.url,
                         repo_name
                     ));
@@ -115,7 +121,7 @@ impl Options {
                 Ok(false) => {}
                 Err(error) => {
                     return Err(error).context(format_context!(
-                        "[{}] {} failed while checking for local commits not present on remotes",
+                        "[{}] {} failed while checking local commits.",
                         git_task.url,
                         repo_name
                     ));

@@ -1502,7 +1502,7 @@ impl QueryCommand {
                         ctx.assign_from_arg_env.as_slice(),
                         ctx.command_line_store.as_slice(),
                     )
-                    .context(format_context!("while printing checkout command"))
+                    .map_err(|err| format_error!("while querying checkout command\n{err:?}"))
             }
 
             // ------------------------------------------------------------------
