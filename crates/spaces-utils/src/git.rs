@@ -525,7 +525,7 @@ pub fn has_local_commits_not_on_remotes(
     progress_bar: &mut console::Progress,
     url: &str,
     directory: &str,
-) -> bool {
+) -> anyhow::Result<bool> {
     let output = execute_git_command(
         progress_bar,
         url,
@@ -543,17 +543,22 @@ pub fn has_local_commits_not_on_remotes(
             ..Default::default()
         },
     )
-    .unwrap_or(None);
+    .context(format_context!(
+        "Failed to check for local commits not present on remotes in {directory}"
+    ))?;
 
-    let Some(output) = output else {
-        return true;
-    };
+    let output = output.ok_or_else(|| {
+        format_error!(
+            "Git command returned no output while checking for local commits not present on remotes in {directory}"
+        )
+    })?;
 
-    output
-        .trim()
-        .parse::<usize>()
-        .map(|count| count > 0)
-        .unwrap_or(true)
+    let trimmed = output.trim();
+    let count = trimmed.parse::<usize>().context(format_context!(
+        "Failed to parse local commit count '{trimmed}' from git output in {directory}"
+    ))?;
+
+    Ok(count > 0)
 }
 
 pub fn get_latest_tag(
@@ -1444,7 +1449,10 @@ impl Repository {
         is_dirty(progress_bar, &self.url, &self.full_path, ignore_submodules)
     }
 
-    pub fn has_local_commits_not_on_remotes(&self, progress_bar: &mut console::Progress) -> bool {
+    pub fn has_local_commits_not_on_remotes(
+        &self,
+        progress_bar: &mut console::Progress,
+    ) -> anyhow::Result<bool> {
         has_local_commits_not_on_remotes(progress_bar, &self.url, &self.full_path)
     }
 

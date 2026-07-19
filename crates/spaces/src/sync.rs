@@ -1447,35 +1447,12 @@ fn is_git_repo_root_at_path(
 fn has_local_commits_not_on_remotes(
     progress: &mut console::Progress,
     repo: &git::Repository,
-) -> bool {
-    let output = git::execute_git_command(
-        progress,
-        repo.url.as_ref(),
-        console::ExecuteOptions {
-            working_directory: Some(repo.full_path.clone()),
-            arguments: vec![
-                "rev-list".into(),
-                "--count".into(),
-                "HEAD".into(),
-                "--branches".into(),
-                "--not".into(),
-                "--remotes".into(),
-            ],
-            is_return_stdout: true,
-            ..Default::default()
-        },
-    )
-    .unwrap_or(None);
-
-    let Some(output) = output else {
-        return true;
-    };
-
-    output
-        .trim()
-        .parse::<usize>()
-        .map(|count| count > 0)
-        .unwrap_or(true)
+) -> anyhow::Result<bool> {
+    repo.has_local_commits_not_on_remotes(progress)
+        .context(format_context!(
+            "Failed to check for local commits not present on remotes for {}",
+            repo.full_path
+        ))
 }
 
 pub fn execute_removed_repo_post_sync_actions(
@@ -1492,6 +1469,7 @@ pub fn execute_removed_repo_post_sync_actions(
     let mut deleted_repos = Vec::new();
     let mut dirty_repos = Vec::new();
     let mut repos_with_local_commits_not_on_remotes = Vec::new();
+    let mut repos_with_local_commit_check_errors: Vec<(Arc<str>, String)> = Vec::new();
     let mut non_rooted_git_repos = Vec::new();
     let mut non_directory_repo_paths = Vec::new();
     let mut unsafe_repo_paths = Vec::new();
@@ -1567,14 +1545,29 @@ pub fn execute_removed_repo_post_sync_actions(
         }
 
         repo_progress.set_message("checking for local commits not present on remotes");
-        if has_local_commits_not_on_remotes(&mut repo_progress, &repo) {
-            repos_with_local_commits_not_on_remotes.push(path.clone());
-            repo_progress.set_finalize_lines(console::make_finalize_line(
-                console::FinalType::NotRequired,
-                repo_progress.elapsed(),
-                &format!("//{} kept (has local commits not present on remotes)", path),
-            ));
-            continue;
+        match has_local_commits_not_on_remotes(&mut repo_progress, &repo) {
+            Ok(true) => {
+                repos_with_local_commits_not_on_remotes.push(path.clone());
+                repo_progress.set_finalize_lines(console::make_finalize_line(
+                    console::FinalType::NotRequired,
+                    repo_progress.elapsed(),
+                    &format!("//{} kept (has local commits not present on remotes)", path),
+                ));
+                continue;
+            }
+            Ok(false) => {}
+            Err(error) => {
+                repos_with_local_commit_check_errors.push((path.clone(), error.to_string()));
+                repo_progress.set_finalize_lines(console::make_finalize_line(
+                    console::FinalType::NotRequired,
+                    repo_progress.elapsed(),
+                    &format!(
+                        "//{} kept (failed to check if local commits are present on remotes)",
+                        path
+                    ),
+                ));
+                continue;
+            }
         }
 
         repo_progress.set_message("deleting removed repository");
@@ -1603,6 +1596,7 @@ pub fn execute_removed_repo_post_sync_actions(
     if deleted_repos.is_empty()
         && dirty_repos.is_empty()
         && repos_with_local_commits_not_on_remotes.is_empty()
+        && repos_with_local_commit_check_errors.is_empty()
         && non_rooted_git_repos.is_empty()
         && non_directory_repo_paths.is_empty()
         && unsafe_repo_paths.is_empty()
@@ -1642,6 +1636,13 @@ pub fn execute_removed_repo_post_sync_actions(
         status_list.add_item(
             format!("//{path}"),
             "kept (has local commits not present on remotes; manual cleanup required)",
+        );
+    }
+
+    for (path, error) in &repos_with_local_commit_check_errors {
+        status_list.add_item(
+            format!("//{path}"),
+            format!("kept (failed to check local commits not present on remotes: {error})"),
         );
     }
 

@@ -104,12 +104,22 @@ impl Options {
                 }
             }
 
-            if repo.has_local_commits_not_on_remotes(&mut progress) {
-                return Err(format_error!(
-                    "[{}] {} has local commits that are not pushed to any remote. Push commits before running query checkout.",
-                    git_task.url,
-                    repo_name
-                ));
+            match repo.has_local_commits_not_on_remotes(&mut progress) {
+                Ok(true) => {
+                    return Err(format_error!(
+                        "[{}] {} has local commits that are not pushed to any remote. Push commits before running query checkout.",
+                        git_task.url,
+                        repo_name
+                    ));
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    return Err(error).context(format_context!(
+                        "[{}] {} failed while checking for local commits not present on remotes",
+                        git_task.url,
+                        repo_name
+                    ));
+                }
             }
 
             let commit_hash = repo
