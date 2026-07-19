@@ -535,7 +535,6 @@ pub fn has_local_commits_not_on_remotes(
                 "rev-list".into(),
                 "--count".into(),
                 "HEAD".into(),
-                "--branches".into(),
                 "--not".into(),
                 "--remotes".into(),
             ],
