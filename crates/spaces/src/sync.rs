@@ -1119,10 +1119,28 @@ fn format_repo_label(plan: &RepoSyncPlan) -> String {
     format_repo_label_from_kind(plan.path.as_ref(), plan.is_dev_branch, plan.is_rev_branch)
 }
 
-fn short_commit(commit: Option<&Arc<str>>) -> Arc<str> {
-    commit
-        .map(|hash| hash.chars().take(8).collect::<String>().into())
-        .unwrap_or_else(|| "unknown".into())
+fn short_commit(commit: Option<&Arc<str>>) -> Option<Arc<str>> {
+    commit.map(|hash| hash.chars().take(8).collect::<String>().into())
+}
+
+fn describe_commit_update(
+    action: &str,
+    before_hash: Option<Arc<str>>,
+    after_hash: Option<Arc<str>>,
+) -> String {
+    let transition = replace_ascii_with_typography("->");
+
+    match (before_hash, after_hash) {
+        (Some(before_hash), Some(after_hash)) => {
+            if before_hash == after_hash {
+                format!("{action} {after_hash} (no change)")
+            } else {
+                format!("{action} {before_hash} {transition} {after_hash}")
+            }
+        }
+        (Some(hash), None) | (None, Some(hash)) => format!("{action} {hash}"),
+        (None, None) => action.to_string(),
+    }
 }
 
 fn describe_snapshot_ref(snapshot: &RepoSyncSnapshot) -> String {
@@ -1135,8 +1153,11 @@ fn describe_snapshot_ref(snapshot: &RepoSyncSnapshot) -> String {
     }
 
     if let Some(tag) = snapshot.current_tag.as_ref() {
-        let short_hash = short_commit(snapshot.current_commit_hash.as_ref());
-        return format!("{tag} {short_hash}");
+        if let Some(short_hash) = short_commit(snapshot.current_commit_hash.as_ref()) {
+            return format!("{tag} {short_hash}");
+        }
+
+        return tag.to_string();
     }
 
     if let Some(hash) = snapshot.current_commit_hash.as_ref() {
@@ -1175,15 +1196,11 @@ fn describe_ref_update_summary(
     before: &RepoSyncSnapshot,
     after: &RepoSyncSnapshot,
 ) -> String {
-    let transition = replace_ascii_with_typography("->");
-    let before_hash = short_commit(before.current_commit_hash.as_ref());
-    let after_hash = short_commit(after.current_commit_hash.as_ref());
-
-    if before_hash == after_hash {
-        format!("{action} {after_hash} (no change)")
-    } else {
-        format!("{action} {before_hash} {transition} {after_hash}")
-    }
+    describe_commit_update(
+        action,
+        short_commit(before.current_commit_hash.as_ref()),
+        short_commit(after.current_commit_hash.as_ref()),
+    )
 }
 
 fn pre_post_actions(plan: Option<&RepoSyncPlan>) -> Vec<String> {
@@ -1207,8 +1224,6 @@ fn describe_sync_complete_result(
     after: &RepoSyncSnapshot,
     plan: Option<&RepoSyncPlan>,
 ) -> String {
-    let transition = replace_ascii_with_typography("->");
-
     let mut summary = if let Some(plan) = plan {
         if let Some(base_ref) = plan.rebase_from.as_ref() {
             describe_ref_update_summary(&format!("rebased onto {base_ref}"), before, after)
@@ -1224,16 +1239,11 @@ fn describe_sync_complete_result(
                 format!("created dev branch `{branch_name}` from {}", plan.rev)
             }
         } else if plan.pull_from.is_some() {
-            let before_hash = short_commit(before.current_commit_hash.as_ref());
-            let after_hash = short_commit(after.current_commit_hash.as_ref());
-            if before_hash == after_hash {
-                format!("pulled {} {before_hash} (no change)", plan.rev)
-            } else {
-                format!(
-                    "pulled {} {before_hash} {transition} {after_hash}",
-                    plan.rev,
-                )
-            }
+            describe_commit_update(
+                &format!("pulled {}", plan.rev),
+                short_commit(before.current_commit_hash.as_ref()),
+                short_commit(after.current_commit_hash.as_ref()),
+            )
         } else {
             describe_snapshot_transition(before, after)
         }
@@ -2687,6 +2697,13 @@ mod tests {
     }
 
     #[test]
+    fn describe_snapshot_ref_reports_tag_without_commit_when_hash_is_unavailable() {
+        let snapshot = repo_sync_snapshot(false, false, "v0.4.0", None, Some("v0.4.0"), None);
+
+        assert_eq!(describe_snapshot_ref(&snapshot), "v0.4.0");
+    }
+
+    #[test]
     fn describe_sync_complete_result_reports_pull_with_short_hashes() {
         let plan = repo_sync_plan(
             false,
@@ -2718,6 +2735,27 @@ mod tests {
         assert_eq!(
             describe_sync_complete_result(&before, &after, Some(&plan)),
             "pulled main 01234567 → fedcba98"
+        );
+    }
+
+    #[test]
+    fn describe_sync_complete_result_omits_unknown_for_pull_when_hashes_are_unavailable() {
+        let plan = repo_sync_plan(
+            false,
+            true,
+            true,
+            Some("origin/main"),
+            None,
+            None,
+            false,
+            None,
+        );
+        let before = repo_sync_snapshot(false, true, "main", Some("main"), None, None);
+        let after = repo_sync_snapshot(false, true, "main", Some("main"), None, None);
+
+        assert_eq!(
+            describe_sync_complete_result(&before, &after, Some(&plan)),
+            "pulled main"
         );
     }
 
