@@ -1126,10 +1126,6 @@ fn short_commit(commit: Option<&Arc<str>>) -> Arc<str> {
 }
 
 fn describe_snapshot_ref(snapshot: &RepoSyncSnapshot) -> String {
-    if let Some(tag) = snapshot.current_tag.as_ref() {
-        return tag.to_string();
-    }
-
     if let Some(branch) = snapshot.current_branch.as_ref() {
         if let Some(hash) = snapshot.current_commit_hash.as_ref() {
             return format!("{} {}", branch, hash.chars().take(8).collect::<String>());
@@ -1138,11 +1134,28 @@ fn describe_snapshot_ref(snapshot: &RepoSyncSnapshot) -> String {
         return branch.to_string();
     }
 
+    if let Some(tag) = snapshot.current_tag.as_ref() {
+        let short_hash = short_commit(snapshot.current_commit_hash.as_ref());
+        return format!("{tag} {short_hash}");
+    }
+
     if let Some(hash) = snapshot.current_commit_hash.as_ref() {
         return hash.chars().take(8).collect::<String>();
     }
 
     snapshot.workspace_rev.to_string()
+}
+
+fn describe_snapshot_transition(before: &RepoSyncSnapshot, after: &RepoSyncSnapshot) -> String {
+    let transition = replace_ascii_with_typography("->");
+    let before_ref = describe_snapshot_ref(before);
+    let after_ref = describe_snapshot_ref(after);
+
+    if before_ref == after_ref {
+        return format!("{before_ref} (no change)");
+    }
+
+    format!("{before_ref} {transition} {after_ref}")
 }
 
 fn describe_pre_sync_action_for_complete_summary(plan: &RepoSyncPlan) -> Option<String> {
@@ -1155,6 +1168,22 @@ fn describe_pre_sync_action_for_complete_summary(plan: &RepoSyncPlan) -> Option<
     }
 
     describe_pre_sync_action(plan)
+}
+
+fn describe_ref_update_summary(
+    action: &str,
+    before: &RepoSyncSnapshot,
+    after: &RepoSyncSnapshot,
+) -> String {
+    let transition = replace_ascii_with_typography("->");
+    let before_hash = short_commit(before.current_commit_hash.as_ref());
+    let after_hash = short_commit(after.current_commit_hash.as_ref());
+
+    if before_hash == after_hash {
+        format!("{action} {after_hash} (no change)")
+    } else {
+        format!("{action} {before_hash} {transition} {after_hash}")
+    }
 }
 
 fn pre_post_actions(plan: Option<&RepoSyncPlan>) -> Vec<String> {
@@ -1182,9 +1211,9 @@ fn describe_sync_complete_result(
 
     let mut summary = if let Some(plan) = plan {
         if let Some(base_ref) = plan.rebase_from.as_ref() {
-            format!("rebased onto {base_ref}")
+            describe_ref_update_summary(&format!("rebased onto {base_ref}"), before, after)
         } else if let Some(base_ref) = plan.merge_from.as_ref() {
-            format!("merged {base_ref}")
+            describe_ref_update_summary(&format!("merged {base_ref}"), before, after)
         } else if let Some(branch_name) = plan.create_new_branch.as_ref() {
             if let Some(base_ref) = plan.new_branch_tracking_base.as_ref() {
                 format!(
@@ -1206,18 +1235,10 @@ fn describe_sync_complete_result(
                 )
             }
         } else {
-            format!(
-                "{} {transition} {}",
-                describe_snapshot_ref(before),
-                describe_snapshot_ref(after)
-            )
+            describe_snapshot_transition(before, after)
         }
     } else {
-        format!(
-            "{} {transition} {}",
-            describe_snapshot_ref(before),
-            describe_snapshot_ref(after)
-        )
+        describe_snapshot_transition(before, after)
     };
 
     let actions = pre_post_actions(plan);
@@ -2638,7 +2659,21 @@ mod tests {
     }
 
     #[test]
-    fn describe_snapshot_ref_prefers_tag() {
+    fn describe_snapshot_ref_prefers_branch_when_available() {
+        let snapshot = repo_sync_snapshot(
+            false,
+            true,
+            "main",
+            Some("main"),
+            Some("v0.4.0"),
+            Some("0123456789abcdef"),
+        );
+
+        assert_eq!(describe_snapshot_ref(&snapshot), "main 01234567");
+    }
+
+    #[test]
+    fn describe_snapshot_ref_reports_tag_with_short_commit_when_detached() {
         let snapshot = repo_sync_snapshot(
             false,
             false,
@@ -2648,7 +2683,7 @@ mod tests {
             Some("0123456789abcdef"),
         );
 
-        assert_eq!(describe_snapshot_ref(&snapshot), "v0.4.0");
+        assert_eq!(describe_snapshot_ref(&snapshot), "v0.4.0 01234567");
     }
 
     #[test]
@@ -2687,6 +2722,107 @@ mod tests {
     }
 
     #[test]
+    fn describe_sync_complete_result_reports_tag_no_changes_when_commit_matches() {
+        let before = repo_sync_snapshot(
+            false,
+            false,
+            "v0.4.0",
+            None,
+            Some("v0.4.0"),
+            Some("0123456789abcdef"),
+        );
+        let after = repo_sync_snapshot(
+            false,
+            false,
+            "v0.4.0",
+            None,
+            Some("v0.4.0"),
+            Some("0123456789abcdef"),
+        );
+
+        assert_eq!(
+            describe_sync_complete_result(&before, &after, None),
+            "v0.4.0 01234567 (no change)"
+        );
+    }
+
+    #[test]
+    fn describe_sync_complete_result_reports_tag_commit_change_even_when_tag_matches() {
+        let before = repo_sync_snapshot(
+            false,
+            false,
+            "v0.4.0",
+            None,
+            Some("v0.4.0"),
+            Some("0123456789abcdef"),
+        );
+        let after = repo_sync_snapshot(
+            false,
+            false,
+            "v0.4.0",
+            None,
+            Some("v0.4.0"),
+            Some("fedcba9876543210"),
+        );
+
+        assert_eq!(
+            describe_sync_complete_result(&before, &after, None),
+            "v0.4.0 01234567 → v0.4.0 fedcba98"
+        );
+    }
+
+    #[test]
+    fn describe_sync_complete_result_reports_branch_to_tag_transition() {
+        let before = repo_sync_snapshot(
+            false,
+            true,
+            "main",
+            Some("main"),
+            Some("v0.4.0"),
+            Some("0123456789abcdef"),
+        );
+        let after = repo_sync_snapshot(
+            false,
+            false,
+            "v0.4.0",
+            None,
+            Some("v0.4.0"),
+            Some("fedcba9876543210"),
+        );
+
+        assert_eq!(
+            describe_sync_complete_result(&before, &after, None),
+            "main 01234567 → v0.4.0 fedcba98"
+        );
+    }
+
+    #[test]
+    fn describe_sync_complete_result_reports_branch_no_changes_when_commit_matches() {
+        let plan = repo_sync_plan(true, true, true, None, None, None, false, None);
+        let before = repo_sync_snapshot(
+            true,
+            true,
+            "main",
+            Some("1090-sync-tag-no-changes"),
+            None,
+            Some("35c4bd9a12345678"),
+        );
+        let after = repo_sync_snapshot(
+            true,
+            true,
+            "main",
+            Some("1090-sync-tag-no-changes"),
+            None,
+            Some("35c4bd9a12345678"),
+        );
+
+        assert_eq!(
+            describe_sync_complete_result(&before, &after, Some(&plan)),
+            "1090-sync-tag-no-changes 35c4bd9a (no change)"
+        );
+    }
+
+    #[test]
     fn describe_sync_complete_result_includes_pre_and_post_actions() {
         let plan = repo_sync_plan(
             true,
@@ -2717,7 +2853,7 @@ mod tests {
 
         assert_eq!(
             describe_sync_complete_result(&before, &after, Some(&plan)),
-            "rebased onto origin/main\npre-eval: stash local changes\npost-eval: pop stashed changes"
+            "rebased onto origin/main 01234567 → fedcba98\npre-eval: stash local changes\npost-eval: pop stashed changes"
         );
     }
 
@@ -2808,7 +2944,42 @@ mod tests {
 
         assert_eq!(
             describe_sync_complete_result(&before, &after, Some(&plan)),
-            "rebased onto origin/main"
+            "rebased onto origin/main 01234567 → fedcba98"
+        );
+    }
+
+    #[test]
+    fn describe_sync_complete_result_reports_rebase_no_changes_when_head_unchanged() {
+        let plan = repo_sync_plan(
+            true,
+            true,
+            true,
+            None,
+            Some("origin/main"),
+            None,
+            false,
+            None,
+        );
+        let before = repo_sync_snapshot(
+            true,
+            true,
+            "main",
+            Some("feature"),
+            None,
+            Some("35c4bd9a12345678"),
+        );
+        let after = repo_sync_snapshot(
+            true,
+            true,
+            "main",
+            Some("feature"),
+            None,
+            Some("35c4bd9a12345678"),
+        );
+
+        assert_eq!(
+            describe_sync_complete_result(&before, &after, Some(&plan)),
+            "rebased onto origin/main 35c4bd9a (no change)"
         );
     }
 }
