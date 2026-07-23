@@ -1243,6 +1243,23 @@ fn update_secrets(
     Ok(())
 }
 
+fn remove_expired_checkout_entry(
+    path: &std::path::Path,
+    metadata: &std::fs::Metadata,
+) -> anyhow::Result<()> {
+    if metadata.file_type().is_symlink() {
+        symlink::remove_symlink_auto(path).context(format_context!(
+            "Failed to remove symlink {}",
+            path.display()
+        ))?;
+    } else {
+        std::fs::remove_file(path)
+            .context(format_context!("Failed to remove file {}", path.display()))?;
+    }
+
+    Ok(())
+}
+
 fn execute_tasks(
     console: console::Console,
     workspace: workspace::WorkspaceArc,
@@ -1491,17 +1508,20 @@ fn execute_tasks(
 
         for file in extraneous_files {
             let path = std::path::Path::new(file.as_ref());
-            if path.exists() {
-                logger.info(format!("Expired, removing: {file}").as_str());
-                match std::fs::remove_file(path).context(format_context!("Failed to remove {file}"))
-                {
-                    Ok(_) => {}
-                    Err(err) => {
-                        logger.warning(format!("Failed to remove: {file} because {err}").as_str())
+            match std::fs::symlink_metadata(path) {
+                Ok(metadata) => {
+                    logger.info(format!("Expired, removing: {file}").as_str());
+                    if let Err(err) = remove_expired_checkout_entry(path, &metadata) {
+                        logger.warning(format!("Failed to remove: {file} because {err}").as_str());
                     }
                 }
-            } else {
-                logger.warning(format!("Expired file already removed: {file}").as_str())
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                    logger.warning(format!("Expired file already removed: {file}").as_str())
+                }
+                Err(err) => logger.warning(
+                    format!("Failed to inspect expired file before removal: {file} because {err}")
+                        .as_str(),
+                ),
             }
         }
 
@@ -1890,4 +1910,42 @@ pub fn run_starlark_script(name: Arc<str>, script: Arc<str>) -> anyhow::Result<(
     .map_err(|e| format_error!("Failed to evaluate module {name}: {e}"))?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::remove_expired_checkout_entry;
+
+    #[test]
+    fn removes_regular_file() -> anyhow::Result<()> {
+        let tempdir = tempfile::tempdir()?;
+        let file_path = tempdir.path().join("regular-file.txt");
+        std::fs::write(&file_path, "content")?;
+
+        let metadata = std::fs::symlink_metadata(&file_path)?;
+        remove_expired_checkout_entry(&file_path, &metadata)?;
+
+        assert!(std::fs::symlink_metadata(&file_path).is_err());
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn removes_dangling_symlink() -> anyhow::Result<()> {
+        use std::os::unix::fs::symlink;
+
+        let tempdir = tempfile::tempdir()?;
+        let source_path = tempdir.path().join("source.txt");
+        let symlink_path = tempdir.path().join("symlink.txt");
+
+        std::fs::write(&source_path, "content")?;
+        symlink(&source_path, &symlink_path)?;
+        std::fs::remove_file(&source_path)?;
+
+        let metadata = std::fs::symlink_metadata(&symlink_path)?;
+        remove_expired_checkout_entry(&symlink_path, &metadata)?;
+
+        assert!(std::fs::symlink_metadata(&symlink_path).is_err());
+        Ok(())
+    }
 }

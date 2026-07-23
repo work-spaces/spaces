@@ -74,7 +74,7 @@ impl Options {
             .to_string()
             .into();
 
-        let count = checkout_rules.iter().count();
+        let count = checkout_rules.len();
         let mut progress =
             console::Progress::new(console.clone(), "query-checkout", Some(count as u64), None);
         let mut locks = Vec::new();
