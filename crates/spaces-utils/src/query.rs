@@ -111,6 +111,20 @@ pub enum QueryCommand {
         #[arg(long)]
         force: bool,
     },
+    #[command(
+        about = r"Generate a starlark lock file for the current workspace repos.
+  - `spaces query locks`: print lock file content to stdout (commit hashes only)
+  - `spaces query locks --tags`: allow tags in lock values
+  - `spaces query locks --output=./workspace-locks.star`: write lock file to disk"
+    )]
+    Locks {
+        /// Output file path. Must end in `.star` and must not end in `spaces.star`.
+        #[arg(long)]
+        output: Option<Arc<str>>,
+        /// Allow tags in lock values. When not set, all lock values are commit hashes.
+        #[arg(long)]
+        tags: bool,
+    },
     #[command(about = r"Export workspace documentation.
   - `spaces query export ./docs/rules.md`: export rules as a markdown file
   - `spaces query export ./docs/rules.md --checkout`: include checkout-phase rules in markdown
@@ -242,7 +256,7 @@ pub struct QueryContext {
     pub checkout_rules: Vec<QueryRule>,
     /// Rules in the Run phase.
     pub run_rules: Vec<QueryRule>,
-    /// Checkout-phase Git tasks, used by the `Checkout` subcommand.
+    /// Checkout-phase Git tasks, used by the `Checkout` and `Locks` subcommands.
     pub checkout_git_tasks: Vec<inspect::GitTask>,
     /// Environment variables set via `--env=KEY=VALUE` during the original
     /// checkout. Used by the `Checkout` subcommand to reproduce the workspace.
@@ -298,6 +312,10 @@ impl QueryCommand {
                 // Checkout only needs git tasks, no expensive rule data
                 QueryContextConfig::minimal()
             }
+            QueryCommand::Locks { .. } => {
+                // Locks only needs git tasks, no expensive rule data
+                QueryContextConfig::minimal()
+            }
             QueryCommand::Export { .. } => {
                 // Export needs executor_markdown (always computed) but not deps/serialization
                 QueryContextConfig::minimal()
@@ -314,8 +332,11 @@ impl QueryCommand {
 
 #[cfg(test)]
 mod tests {
-    use super::{DependencyNode, build_dependency_tree, dependency_node_to_tree};
-    use crate::{graph, search};
+    use super::{
+        DependencyNode, build_dependency_tree, dependency_node_to_tree, render_locks_starlark,
+        validate_locks_output_path,
+    };
+    use crate::{graph, inspect, search};
     use std::collections::HashSet;
     use std::sync::Arc;
 
@@ -408,6 +429,39 @@ mod tests {
 
         let json = serde_json::to_string(&node).unwrap();
         assert!(json.contains("//test:rule"));
+    }
+
+    #[test]
+    fn test_validate_locks_output_path() {
+        assert!(validate_locks_output_path("locks.star").is_ok());
+        assert!(validate_locks_output_path("nested/locks.star").is_ok());
+        assert!(validate_locks_output_path("locks.txt").is_err());
+        assert!(validate_locks_output_path("locks.spaces.star").is_err());
+        assert!(validate_locks_output_path("spaces.star").is_err());
+    }
+
+    #[test]
+    fn test_render_locks_starlark() {
+        let locks = vec![
+            inspect::RepoLock {
+                url: "https://example.com/checkout.git".into(),
+                repo_path: "checkout".into(),
+                commit: "abc123".into(),
+                is_checkout_repo: true,
+            },
+            inspect::RepoLock {
+                url: "https://example.com/lib.git".into(),
+                repo_path: "third_party/lib".into(),
+                commit: "v1.2.3".into(),
+                is_checkout_repo: false,
+            },
+        ];
+
+        let rendered = render_locks_starlark(&locks);
+        assert_eq!(
+            rendered,
+            "\"\"\"\nLock file\n\"\"\"\n\nLOCKS = {\n  \"checkout\": \"abc123\",\n  \"third_party/lib\": \"v1.2.3\",\n}\n"
+        );
     }
 }
 
@@ -591,6 +645,57 @@ fn serialise_rule_map_yaml(map: &HashMap<Arc<str>, RuleInfo>) -> anyhow::Result<
     serde_yaml::to_string(&sorted).context(format_context!(
         "Internal Error: failed to serialize rule map for YAML"
     ))
+}
+
+fn starlark_quote(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for ch in value.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            _ => out.push(ch),
+        }
+    }
+    out.push('"');
+    out
+}
+
+fn render_locks_starlark(locks: &[inspect::RepoLock]) -> String {
+    let mut out = String::from("\"\"\"\nLock file\n\"\"\"\n\nLOCKS = {\n");
+    for lock in locks {
+        out.push_str(&format!(
+            "  {}: {},\n",
+            starlark_quote(lock.repo_path.as_ref()),
+            starlark_quote(lock.commit.as_ref())
+        ));
+    }
+    out.push_str("}\n");
+    out
+}
+
+fn validate_locks_output_path(output: &str) -> anyhow::Result<()> {
+    let file_name = std::path::Path::new(output)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| format_error!("Invalid --output path: {output}"))?;
+
+    if !file_name.ends_with(".star") {
+        return Err(format_error!(
+            "Invalid --output path: {output}\n  Output filename must end with `.star`."
+        ));
+    }
+
+    if file_name.ends_with("spaces.star") {
+        return Err(format_error!(
+            "Invalid --output path: {output}\n  Output filename cannot end with `spaces.star`."
+        ));
+    }
+
+    Ok(())
 }
 
 fn make_name_line(name: &str, highlight_terms: Option<&[Arc<str>]>) -> console::Line {
@@ -1491,18 +1596,62 @@ impl QueryCommand {
 
             // ------------------------------------------------------------------
             QueryCommand::Checkout { force } => {
-                let options = inspect::Options {
-                    force: *force,
-                    ..Default::default()
-                };
-                options
-                    .execute_inspect_checkout(
-                        console,
-                        ctx.checkout_git_tasks.as_slice(),
-                        ctx.assign_from_arg_env.as_slice(),
-                        ctx.command_line_store.as_slice(),
-                    )
-                    .map_err(|err| format_error!("while querying checkout command\n{err:?}"))
+                let locks = inspect::collect_repo_locks(
+                    &console,
+                    ctx.checkout_git_tasks.as_slice(),
+                    *force,
+                    true,
+                    "query checkout",
+                )
+                .map_err(|err| format_error!("while querying checkout command\n{err:?}"))?;
+                let command = inspect::build_checkout_command(
+                    &locks,
+                    ctx.assign_from_arg_env.as_slice(),
+                    ctx.command_line_store.as_slice(),
+                )
+                .map_err(|err| format_error!("while querying checkout command\n{err:?}"))?;
+
+                console.raw("\n")?;
+                console.raw(&command)?;
+                console.raw("\n")?;
+                Ok(())
+            }
+
+            // ------------------------------------------------------------------
+            QueryCommand::Locks { output, tags } => {
+                let locks = inspect::collect_repo_locks(
+                    &console,
+                    ctx.checkout_git_tasks.as_slice(),
+                    false,
+                    *tags,
+                    "query locks",
+                )
+                .map_err(|err| format_error!("while querying locks\n{err:?}"))?;
+
+                let starlark = render_locks_starlark(&locks);
+
+                if let Some(path) = output {
+                    validate_locks_output_path(path.as_ref())
+                        .map_err(|err| format_error!("while querying locks\n{err:?}"))?;
+
+                    let output_path = std::path::Path::new(path.as_ref());
+                    if let Some(parent) = output_path.parent()
+                        && !parent.as_os_str().is_empty()
+                    {
+                        std::fs::create_dir_all(parent).context(format_context!(
+                            "while querying locks\nFailed to create output directory {}",
+                            parent.display()
+                        ))?;
+                    }
+
+                    std::fs::write(path.as_ref(), starlark).context(format_context!(
+                        "while querying locks\nFailed to write output file {path}"
+                    ))?;
+                } else {
+                    console.raw(&starlark)?;
+                }
+
+                Ok(())
             }
 
             // ------------------------------------------------------------------
