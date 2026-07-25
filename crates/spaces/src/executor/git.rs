@@ -323,7 +323,7 @@ impl Git {
 
                 let existing_repo = git::Repository::new(self.url.clone(), self.spaces_key.clone());
 
-                if existing_repo.is_dirty(progress, git::IgnoreSubmodules::No) {
+                if existing_repo.is_dirty(progress, git::IgnoreSubmodules::Yes) {
                     logger(progress.console.clone(), self.url.clone()).warning(
                         format!(
                             "{} already exists and is dirty - not updating",
@@ -359,9 +359,14 @@ impl Git {
                 if existing_repo.is_head_branch(progress)
                     && existing_repo.is_remote_branch_tracked(progress)
                 {
-                    existing_repo.pull(progress).context(format_context!(
-                        "while pulling latest changes in existing workspace"
-                    ))?;
+                    existing_repo
+                        .execute(
+                            progress,
+                            vec!["pull".into(), "--no-recurse-submodules".into()],
+                        )
+                        .context(format_context!(
+                            "while pulling latest changes in existing workspace"
+                        ))?;
                 }
 
                 return Ok(());
