@@ -350,6 +350,13 @@ results["copy_move"]["copy_file_creates_dst"] = fs_exists(p("dst.txt"))
 results["copy_move"]["copy_file_content"] = fs_read_text(p("dst.txt")) == "source content"
 results["copy_move"]["copy_preserves_src"] = fs_exists(p("src.txt"))
 
+# Hard-link copy
+fs_write_text(p("hard_src.txt"), "v1")
+fs_copy(p("hard_src.txt"), p("hard_dst.txt"), create_hard_links = True)
+results["copy_move"]["copy_hard_link_creates_dst"] = fs_exists(p("hard_dst.txt"))
+fs_write_text(p("hard_src.txt"), "v2")
+results["copy_move"]["copy_hard_link_content_shared"] = fs_read_text(p("hard_dst.txt")) == "v2"
+
 # Copy with overwrite
 fs_write_text(p("orig.txt"), "original")
 fs_write_text(p("new_version.txt"), "new")
