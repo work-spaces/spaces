@@ -1,11 +1,10 @@
-use crate::{changes::glob, git, graph, inspect, markdown, rule, search, suggest, targets};
+use crate::{changes::glob, graph, inspect, markdown, rule, search, suggest, targets};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::Subcommand;
 use console::style::StyledContent;
 use indexmap::IndexMap;
 use serde::Serialize;
-use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use termtree::Tree;
@@ -334,10 +333,10 @@ impl QueryCommand {
 #[cfg(test)]
 mod tests {
     use super::{
-        DependencyNode, QueryRepoLock, build_dependency_tree, dependency_node_to_tree,
-        render_locks_starlark, select_lock_value, validate_locks_output_path,
+        DependencyNode, build_dependency_tree, dependency_node_to_tree, render_locks_starlark,
+        validate_locks_output_path,
     };
-    use crate::{graph, search};
+    use crate::{graph, inspect, search};
     use std::collections::HashSet;
     use std::sync::Arc;
 
@@ -442,35 +441,15 @@ mod tests {
     }
 
     #[test]
-    fn test_select_lock_value() {
-        let tag: Arc<str> = "v1.2.3".into();
-        let hash: Arc<str> = "abc123".into();
-
-        assert_eq!(
-            select_lock_value(Some(tag.clone()), Some(hash.clone()), true),
-            Some(tag)
-        );
-        assert_eq!(
-            select_lock_value(Some("v1.2.3".into()), Some(hash.clone()), false),
-            Some(hash.clone())
-        );
-        assert_eq!(
-            select_lock_value(None, Some(hash.clone()), false),
-            Some(hash.clone())
-        );
-        assert_eq!(select_lock_value(None, None, false), None);
-    }
-
-    #[test]
     fn test_render_locks_starlark() {
         let locks = vec![
-            QueryRepoLock {
+            inspect::RepoLock {
                 url: "https://example.com/checkout.git".into(),
                 repo_path: "checkout".into(),
                 commit: "abc123".into(),
                 is_checkout_repo: true,
             },
-            QueryRepoLock {
+            inspect::RepoLock {
                 url: "https://example.com/lib.git".into(),
                 repo_path: "third_party/lib".into(),
                 commit: "v1.2.3".into(),
@@ -668,201 +647,6 @@ fn serialise_rule_map_yaml(map: &HashMap<Arc<str>, RuleInfo>) -> anyhow::Result<
     ))
 }
 
-#[derive(Debug, Clone)]
-struct QueryRepoLock {
-    url: Arc<str>,
-    repo_path: Arc<str>,
-    commit: Arc<str>,
-    is_checkout_repo: bool,
-}
-
-/// POSIX-shell quote a value so it can be safely interpolated into a generated
-/// command line.
-fn shell_quote(value: &str) -> Cow<'_, str> {
-    let is_safe = !value.is_empty()
-        && value.bytes().all(|b| {
-            matches!(b,
-                b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9'
-                | b'_' | b'-' | b'.' | b'/' | b':' | b'=' | b'@' | b'+' | b','
-            )
-        });
-    if is_safe {
-        Cow::Borrowed(value)
-    } else {
-        let mut quoted = String::with_capacity(value.len() + 2);
-        quoted.push('\'');
-        for ch in value.chars() {
-            if ch == '\'' {
-                quoted.push_str("'\\''");
-            } else {
-                quoted.push(ch);
-            }
-        }
-        quoted.push('\'');
-        Cow::Owned(quoted)
-    }
-}
-
-fn select_lock_value(
-    commit_tag: Option<Arc<str>>,
-    commit_hash: Option<Arc<str>>,
-    allow_tags: bool,
-) -> Option<Arc<str>> {
-    if allow_tags {
-        commit_tag.or(commit_hash)
-    } else {
-        commit_hash
-    }
-}
-
-fn collect_query_repo_locks(
-    console: &console::Console,
-    checkout_git_tasks: &[inspect::GitTask],
-    force_dirty: bool,
-    allow_tags: bool,
-    query_name: &str,
-) -> anyhow::Result<Vec<QueryRepoLock>> {
-    let count = checkout_git_tasks.len();
-    let progress_name = query_name.replace(' ', "-");
-    let mut progress = console::Progress::new(
-        console.clone(),
-        progress_name.as_str(),
-        Some(count as u64),
-        None,
-    );
-    let mut locks = Vec::new();
-
-    for git_task in checkout_git_tasks {
-        let dir_name = git_task.spaces_key.clone();
-        let repo_name = format!("//{dir_name}");
-        progress.set_message(format!("{repo_name} - checking").as_str());
-
-        let mut repo_progress =
-            console::Progress::new(console.clone(), repo_name.as_str(), None, None);
-        repo_progress.set_message("checking local/remote status");
-
-        let repo = git::Repository::new(git_task.url.clone(), dir_name.clone());
-        if repo.is_dirty(&mut repo_progress, git::IgnoreSubmodules::No) {
-            if force_dirty {
-                inspect::logger(repo_progress.console.clone()).warning(&format!(
-                    "[{}] {} is dirty\n  {query_name} may not be reproducible.",
-                    git_task.url, repo_name
-                ));
-            } else {
-                return Err(format_error!(
-                    "[{}] {} is dirty\n  Cannot run {query_name} with dirty repo.\n  Commit and push changes.",
-                    git_task.url,
-                    repo_name
-                ));
-            }
-        }
-
-        match repo.has_local_commits_not_on_remotes(&mut progress) {
-            Ok(true) => {
-                return Err(format_error!(
-                    "[{}] {} has local commits.\n  Fetch and push commits before running {query_name}.",
-                    git_task.url,
-                    repo_name
-                ));
-            }
-            Ok(false) => {}
-            Err(error) => {
-                return Err(error).context(format_context!(
-                    "[{}] {} failed while checking local commits.",
-                    git_task.url,
-                    repo_name
-                ));
-            }
-        }
-
-        let commit_hash = repo
-            .get_commit_hash(&mut progress)
-            .context(format_context!("Failed to get commit for {repo_name}"))?;
-
-        let commit_tag = if allow_tags {
-            repo.get_commit_tag(&mut progress)
-        } else {
-            None
-        };
-
-        let commit = select_lock_value(commit_tag, commit_hash, allow_tags).ok_or_else(|| {
-            format_error!(
-                "[{}] {} failed to resolve the current commit.",
-                git_task.url,
-                repo_name
-            )
-        })?;
-
-        locks.push(QueryRepoLock {
-            url: git_task.url.clone(),
-            repo_path: dir_name,
-            commit,
-            is_checkout_repo: git_task.is_checkout_repo,
-        });
-    }
-
-    locks.sort_by(|a, b| a.repo_path.cmp(&b.repo_path));
-
-    Ok(locks)
-}
-
-fn build_query_checkout_command(
-    locks: &[QueryRepoLock],
-    assign_from_arg_env: &[(Arc<str>, Arc<str>)],
-    command_line_store: &[(Arc<str>, Arc<str>)],
-) -> anyhow::Result<String> {
-    let workspace_dir_name: Arc<str> = std::env::current_dir()
-        .context(format_context!("Failed to get current directory"))?
-        .file_name()
-        .ok_or_else(|| format_error!("Failed to derive workspace directory name"))?
-        .to_string_lossy()
-        .to_string()
-        .into();
-
-    let checkout_repo = locks
-        .iter()
-        .find(|entry| entry.is_checkout_repo)
-        .ok_or_else(|| format_error!("Failed to find checkout repo from checkout rules"))?;
-
-    let mut workspace_name: String = workspace_dir_name.to_string();
-    let mut command = format!(
-        "spaces checkout-repo --url={url} \\\n  --rule-name={rule_name} \\\n",
-        url = shell_quote(checkout_repo.url.as_ref()),
-        rule_name = shell_quote(checkout_repo.repo_path.as_ref()),
-    );
-
-    for lock in locks {
-        if lock.is_checkout_repo {
-            command.push_str(&format!("  --rev={} \\", shell_quote(lock.commit.as_ref())));
-            workspace_name.push_str(&format!("-{}", lock.commit));
-        } else {
-            command.push_str(&format!(
-                "  --lock={} \\",
-                shell_quote(&format!("{}={}", lock.repo_path, lock.commit))
-            ));
-        }
-        command.push('\n');
-    }
-
-    for (name, value) in assign_from_arg_env {
-        command.push_str(&format!(
-            "  --env={} \\\n",
-            shell_quote(&format!("{name}={value}"))
-        ));
-    }
-    for (key, value) in command_line_store {
-        command.push_str(&format!(
-            "  --store={} \\\n",
-            shell_quote(&format!("{key}={value}"))
-        ));
-    }
-
-    let workspace_name = workspace_name.replace('/', "-");
-    command.push_str(&format!("  --name={}\n", shell_quote(&workspace_name)));
-
-    Ok(command)
-}
-
 fn starlark_quote(value: &str) -> String {
     let mut out = String::with_capacity(value.len() + 2);
     out.push('"');
@@ -880,7 +664,7 @@ fn starlark_quote(value: &str) -> String {
     out
 }
 
-fn render_locks_starlark(locks: &[QueryRepoLock]) -> String {
+fn render_locks_starlark(locks: &[inspect::RepoLock]) -> String {
     let mut out = String::from("\"\"\"\nLock file\n\"\"\"\n\nLOCKS = {\n");
     for lock in locks {
         out.push_str(&format!(
@@ -1812,7 +1596,7 @@ impl QueryCommand {
 
             // ------------------------------------------------------------------
             QueryCommand::Checkout { force } => {
-                let locks = collect_query_repo_locks(
+                let locks = inspect::collect_repo_locks(
                     &console,
                     ctx.checkout_git_tasks.as_slice(),
                     *force,
@@ -1820,7 +1604,7 @@ impl QueryCommand {
                     "query checkout",
                 )
                 .map_err(|err| format_error!("while querying checkout command\n{err:?}"))?;
-                let command = build_query_checkout_command(
+                let command = inspect::build_checkout_command(
                     &locks,
                     ctx.assign_from_arg_env.as_slice(),
                     ctx.command_line_store.as_slice(),
@@ -1835,7 +1619,7 @@ impl QueryCommand {
 
             // ------------------------------------------------------------------
             QueryCommand::Locks { output, tags } => {
-                let locks = collect_query_repo_locks(
+                let locks = inspect::collect_repo_locks(
                     &console,
                     ctx.checkout_git_tasks.as_slice(),
                     false,
@@ -1849,6 +1633,16 @@ impl QueryCommand {
                 if let Some(path) = output {
                     validate_locks_output_path(path.as_ref())
                         .map_err(|err| format_error!("while querying locks\n{err:?}"))?;
+
+                    let output_path = std::path::Path::new(path.as_ref());
+                    if let Some(parent) = output_path.parent()
+                        && !parent.as_os_str().is_empty()
+                    {
+                        std::fs::create_dir_all(parent).context(format_context!(
+                            "while querying locks\nFailed to create output directory {}",
+                            parent.display()
+                        ))?;
+                    }
 
                     std::fs::write(path.as_ref(), starlark).context(format_context!(
                         "while querying locks\nFailed to write output file {path}"
