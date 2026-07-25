@@ -20,7 +20,7 @@ load(
     "process_stderr_capture",
     "process_stdout_capture",
 )
-load("//@star/prelude/exec/sys.star", "sys_exit")
+load("//@star/prelude/exec/sys.star", "sys_arch", "sys_exit", "sys_os")
 
 parser = args_parser(
     name = "run-all",
@@ -34,19 +34,28 @@ parser = args_parser(
 )
 args = args_parse(parser)
 
-tests = fs_read_directory(
+tests = sorted(fs_read_directory(
     path_join([
         path_dirname(args_program()),
         "test",
     ]),
-)
+))
 
 # Try to get spaces from args, otherwise use env_which to find it
 spaces_program = args.get("spaces")
 assert_on(spaces_program != "", "spaces executable not specified")
 
 log_info("Using spaces executable: {}".format(spaces_program))
+log_info("Host platform: {}-{}".format(sys_os(), sys_arch()))
 log_info("Running {} tests...".format(len(tests)))
+
+def print_stream(label, value):
+    print("----- {} -----".format(label))
+    if type(value) == "string" and value != "":
+        print(value)
+    else:
+        print("<empty>")
+    print("----- end {} -----".format(label))
 
 for test in tests:
     log_info("Running {}".format(test))
@@ -61,6 +70,9 @@ for test in tests:
     if status != 0:
         log_error("{} => {}".format(test, status))
         print("=====================")
-        print(result.get("stderr"))
+        print("FAILED TEST: {}".format(test))
+        print("EXIT STATUS: {}".format(status))
+        print_stream("stdout", result.get("stdout"))
+        print_stream("stderr", result.get("stderr"))
         print("=====================")
         sys_exit(status)

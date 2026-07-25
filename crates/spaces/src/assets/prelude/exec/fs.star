@@ -721,7 +721,7 @@ def fs_mkdir(path: str, parents: bool = False, exist_ok: bool = False) -> None:
     """
     return fs.mkdir(path, parents = parents, exist_ok = exist_ok)
 
-def fs_copy(src: str, dst: str, recursive: bool = False, overwrite: bool = False, follow_symlinks: bool = True) -> None:
+def fs_copy(src: str, dst: str, recursive: bool = False, overwrite: bool = False, follow_symlinks: bool = True, create_hard_links: bool = False) -> None:
     """
     Copy a file or directory to a destination.
 
@@ -731,6 +731,7 @@ def fs_copy(src: str, dst: str, recursive: bool = False, overwrite: bool = False
         recursive: If True, recursively copy directories (required for directories)
         overwrite: If True, overwrite destination if it exists
         follow_symlinks: If True, follow symlinks; if False, copy the link itself
+        create_hard_links: If True, create hard links instead of copying file contents
 
     Returns:
         None
@@ -747,8 +748,11 @@ def fs_copy(src: str, dst: str, recursive: bool = False, overwrite: bool = False
 
         # Copy entire directory tree
         fs_copy("src", "backup/src", recursive=True, overwrite=True)
+
+        # Create a hard link instead of copying file bytes
+        fs_copy("artifact.bin", "artifact-link.bin", create_hard_links=True)
     """
-    return fs.copy(src, dst, recursive = recursive, overwrite = overwrite, follow_symlinks = follow_symlinks)
+    return fs.copy(src, dst, recursive = recursive, overwrite = overwrite, follow_symlinks = follow_symlinks, create_hard_links = create_hard_links)
 
 def fs_move(src: str, dst: str, overwrite: bool = False) -> None:
     """

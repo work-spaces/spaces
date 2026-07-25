@@ -654,6 +654,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[starlark(require = named, default = false)] recursive: bool,
         #[starlark(require = named, default = false)] overwrite: bool,
         #[starlark(require = named, default = true)] follow_symlinks: bool,
+        #[starlark(require = named, default = false)] create_hard_links: bool,
     ) -> anyhow::Result<NoneType> {
         if is_lsp_mode() {
             return Ok(NoneType);
@@ -663,6 +664,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             dst: &std::path::Path,
             overwrite: bool,
             follow_symlinks: bool,
+            create_hard_links: bool,
         ) -> anyhow::Result<()> {
             let md = if follow_symlinks {
                 std::fs::metadata(src)
@@ -730,7 +732,6 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                             link_target.display()
                         )
                     })?;
-                    return Ok(());
                 }
                 #[cfg(windows)]
                 {
@@ -751,19 +752,27 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                             )
                         })?;
                     }
-                    return Ok(());
                 }
-                #[allow(unreachable_code)]
                 return Ok(());
             }
 
-            std::fs::copy(src, dst).map_err(|err| {
-                format_error!(
-                    "while copying {} -> {} because {err:?}",
-                    src.display(),
-                    dst.display()
-                )
-            })?;
+            if create_hard_links {
+                std::fs::hard_link(src, dst).map_err(|err| {
+                    format_error!(
+                        "while creating hard link {} -> {} because {err:?}",
+                        src.display(),
+                        dst.display()
+                    )
+                })?;
+            } else {
+                std::fs::copy(src, dst).map_err(|err| {
+                    format_error!(
+                        "while copying {} -> {} because {err:?}",
+                        src.display(),
+                        dst.display()
+                    )
+                })?;
+            }
             Ok(())
         }
 
@@ -772,6 +781,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             dst: &std::path::Path,
             overwrite: bool,
             follow_symlinks: bool,
+            create_hard_links: bool,
         ) -> anyhow::Result<()> {
             if dst.exists() {
                 if !overwrite {
@@ -811,9 +821,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 })?;
 
                 if md.is_dir() {
-                    copy_dir_recursive(&from, &to, overwrite, follow_symlinks)?;
+                    copy_dir_recursive(&from, &to, overwrite, follow_symlinks, create_hard_links)?;
                 } else {
-                    copy_one(&from, &to, overwrite, follow_symlinks)?;
+                    copy_one(&from, &to, overwrite, follow_symlinks, create_hard_links)?;
                 }
             }
 
@@ -834,9 +844,21 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             if !recursive {
                 anyhow::bail!("Source is a directory; set recursive=True");
             }
-            copy_dir_recursive(src_path, dst_path, overwrite, follow_symlinks)?;
+            copy_dir_recursive(
+                src_path,
+                dst_path,
+                overwrite,
+                follow_symlinks,
+                create_hard_links,
+            )?;
         } else {
-            copy_one(src_path, dst_path, overwrite, follow_symlinks)?;
+            copy_one(
+                src_path,
+                dst_path,
+                overwrite,
+                follow_symlinks,
+                create_hard_links,
+            )?;
         }
 
         Ok(NoneType)

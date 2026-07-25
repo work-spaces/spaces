@@ -20,6 +20,7 @@ load(
 load(
     "//@star/prelude/exec/sys.star",
     "sys_executable",
+    "sys_os",
 )
 load(
     "//@star/prelude/exec/tmp.star",
@@ -28,10 +29,12 @@ load(
 )
 
 signal_results = {
+    "capabilities": {},
     "timeout_and_state": {},
     "trap_and_wait": {},
     "pending_and_dispatch": {},
     "multi_signal_wrappers": {},
+    "windows_reduced": {},
     "error_paths": {},
 }
 
@@ -66,6 +69,26 @@ def output_contains(result, needle):
 # Child scripts used for positive-path integration checks
 # ============================================================================
 
+CAPABILITIES_SCRIPT = """#!/usr/bin/env spaces
+load("//@star/prelude/exec/signal.star", "signal_supported", "signal_supported_names")
+
+def _all_strings(items):
+    for item in items:
+        if type(item) != "string":
+            return False
+    return True
+
+names = signal_supported_names()
+
+print("SUPPORTED_TYPE=" + type(signal_supported()))
+print("SUPPORTED=" + str(signal_supported()))
+print("SUPPORTED_NAMES_TYPE=" + type(names))
+print("SUPPORTED_NAMES_LEN=" + str(len(names)))
+print("SUPPORTED_NAMES_ALL_STRINGS=" + str(_all_strings(names)))
+print("SUPPORTED_NAMES_HAS_INT=" + str("INT" in names))
+print("SUPPORTED_CONSISTENT=" + str((signal_supported() and len(names) > 0) or (not signal_supported() and len(names) == 0)))
+"""
+
 TIMEOUT_STATE_SCRIPT = """#!/usr/bin/env spaces
 load("//@star/prelude/exec/signal.star", "signal_clear", "signal_dispatch", "signal_pending", "signal_wait")
 
@@ -75,6 +98,25 @@ signal_dispatch()
 print("PENDING_TYPE=" + type(signal_pending()))
 print("PENDING_LEN=" + str(len(signal_pending())))
 print("WAIT_TIMEOUT_IS_NONE=" + str(signal_wait(timeout_ms = 25) == None))
+"""
+
+WINDOWS_REDUCED_SCRIPT = """#!/usr/bin/env spaces
+load("//@star/prelude/exec/signal.star", "signal_clear", "signal_dispatch", "signal_pending", "signal_trap", "signal_untrap", "signal_wait")
+
+signal_clear()
+signal_dispatch()
+
+signal_trap("INT", print)
+signal_trap("SIGINT", print)
+signal_untrap("SIGINT")
+signal_trap("INT", print)
+
+print("PENDING_TYPE=" + type(signal_pending()))
+print("PENDING_LEN=" + str(len(signal_pending())))
+print("WAIT_TIMEOUT_IS_NONE=" + str(signal_wait(timeout_ms = 25) == None))
+
+signal_clear()
+print("PENDING_AFTER_CLEAR=" + str(len(signal_pending())))
 """
 
 TRAP_REPLACE_WAIT_SCRIPT = """#!/usr/bin/env spaces
@@ -179,36 +221,60 @@ signal_wait(timeout_ms = -1)
 # Execute and assert
 # ============================================================================
 
+capabilities = run_signal_child(CAPABILITIES_SCRIPT)
+record("capabilities", "script_exits_zero", capabilities.get("status") == 0)
+record("capabilities", "supported_is_bool", stdout_contains(capabilities, "SUPPORTED_TYPE=bool"))
+record("capabilities", "supported_names_is_list", stdout_contains(capabilities, "SUPPORTED_NAMES_TYPE=list"))
+record("capabilities", "supported_names_are_strings", stdout_contains(capabilities, "SUPPORTED_NAMES_ALL_STRINGS=True"))
+record("capabilities", "supported_names_include_int", stdout_contains(capabilities, "SUPPORTED_NAMES_HAS_INT=True"))
+record("capabilities", "supported_consistency", stdout_contains(capabilities, "SUPPORTED_CONSISTENT=True"))
+
 timeout_state = run_signal_child(TIMEOUT_STATE_SCRIPT)
 record("timeout_and_state", "script_exits_zero", timeout_state.get("status") == 0)
 record("timeout_and_state", "pending_returns_list", stdout_contains(timeout_state, "PENDING_TYPE=list"))
 record("timeout_and_state", "queue_empty_after_clear_dispatch", stdout_contains(timeout_state, "PENDING_LEN=0"))
 record("timeout_and_state", "wait_timeout_returns_none", stdout_contains(timeout_state, "WAIT_TIMEOUT_IS_NONE=True"))
 
-trap_replace_wait = run_signal_child(TRAP_REPLACE_WAIT_SCRIPT)
-record("trap_and_wait", "script_exits_zero", trap_replace_wait.get("status") == 0)
-record("trap_and_wait", "send_status_zero", stdout_contains(trap_replace_wait, "SEND_STATUS=0"))
-record("trap_and_wait", "wait_returns_usr1", stdout_contains(trap_replace_wait, "OBSERVED=USR1"))
-record("trap_and_wait", "handler_printed_usr1", stdout_contains(trap_replace_wait, "USR1"))
-record("trap_and_wait", "queue_empty_after_wait", stdout_contains(trap_replace_wait, "PENDING_AFTER=0"))
+is_windows = sys_os() == "windows"
 
-pending_dispatch = run_signal_child(PENDING_DISPATCH_SCRIPT)
-record("pending_and_dispatch", "script_exits_zero", pending_dispatch.get("status") == 0)
-record("pending_and_dispatch", "send_status_zero", stdout_contains(pending_dispatch, "SEND_STATUS=0"))
-record("pending_and_dispatch", "pending_includes_usr2", stdout_contains(pending_dispatch, "PENDING_HAS_USR2=True"))
-record("pending_and_dispatch", "pending_entries_are_strings", stdout_contains(pending_dispatch, "PENDING_ALL_STRINGS=True"))
-record("pending_and_dispatch", "dispatch_invokes_one_handler", stdout_contains(pending_dispatch, "DISPATCHED=1"))
-record("pending_and_dispatch", "queue_empty_after_dispatch", stdout_contains(pending_dispatch, "PENDING_AFTER=0"))
+if is_windows:
+    record("capabilities", "windows_reports_supported", stdout_contains(capabilities, "SUPPORTED=True"))
+    record("capabilities", "windows_supported_name_count", stdout_contains(capabilities, "SUPPORTED_NAMES_LEN=1"))
 
-multi_signal = run_signal_child(MULTI_SIGNAL_WRAPPERS_SCRIPT)
-record("multi_signal_wrappers", "script_exits_zero", multi_signal.get("status") == 0)
-record("multi_signal_wrappers", "send_usr1_status_zero", stdout_contains(multi_signal, "SEND1=0"))
-record("multi_signal_wrappers", "send_usr2_status_zero", stdout_contains(multi_signal, "SEND2=0"))
-record("multi_signal_wrappers", "wait_usr1", stdout_contains(multi_signal, "OBS1=USR1"))
-record("multi_signal_wrappers", "wait_usr2", stdout_contains(multi_signal, "OBS2=USR2"))
-record("multi_signal_wrappers", "handler_printed_usr1", stdout_contains(multi_signal, "USR1"))
-record("multi_signal_wrappers", "handler_printed_usr2", stdout_contains(multi_signal, "USR2"))
-record("multi_signal_wrappers", "queue_empty_after_waits", stdout_contains(multi_signal, "PENDING_AFTER=0"))
+if is_windows:
+    windows_reduced = run_signal_child(WINDOWS_REDUCED_SCRIPT)
+    record("windows_reduced", "script_exits_zero", windows_reduced.get("status") == 0)
+    record("windows_reduced", "pending_returns_list", stdout_contains(windows_reduced, "PENDING_TYPE=list"))
+    record("windows_reduced", "queue_empty_initially", stdout_contains(windows_reduced, "PENDING_LEN=0"))
+    record("windows_reduced", "wait_timeout_returns_none", stdout_contains(windows_reduced, "WAIT_TIMEOUT_IS_NONE=True"))
+    record("windows_reduced", "queue_empty_after_clear", stdout_contains(windows_reduced, "PENDING_AFTER_CLEAR=0"))
+else:
+    record("capabilities", "unix_supported_name_count", stdout_contains(capabilities, "SUPPORTED_NAMES_LEN=7"))
+
+    trap_replace_wait = run_signal_child(TRAP_REPLACE_WAIT_SCRIPT)
+    record("trap_and_wait", "script_exits_zero", trap_replace_wait.get("status") == 0)
+    record("trap_and_wait", "send_status_zero", stdout_contains(trap_replace_wait, "SEND_STATUS=0"))
+    record("trap_and_wait", "wait_returns_usr1", stdout_contains(trap_replace_wait, "OBSERVED=USR1"))
+    record("trap_and_wait", "handler_printed_usr1", stdout_contains(trap_replace_wait, "USR1"))
+    record("trap_and_wait", "queue_empty_after_wait", stdout_contains(trap_replace_wait, "PENDING_AFTER=0"))
+
+    pending_dispatch = run_signal_child(PENDING_DISPATCH_SCRIPT)
+    record("pending_and_dispatch", "script_exits_zero", pending_dispatch.get("status") == 0)
+    record("pending_and_dispatch", "send_status_zero", stdout_contains(pending_dispatch, "SEND_STATUS=0"))
+    record("pending_and_dispatch", "pending_includes_usr2", stdout_contains(pending_dispatch, "PENDING_HAS_USR2=True"))
+    record("pending_and_dispatch", "pending_entries_are_strings", stdout_contains(pending_dispatch, "PENDING_ALL_STRINGS=True"))
+    record("pending_and_dispatch", "dispatch_invokes_one_handler", stdout_contains(pending_dispatch, "DISPATCHED=1"))
+    record("pending_and_dispatch", "queue_empty_after_dispatch", stdout_contains(pending_dispatch, "PENDING_AFTER=0"))
+
+    multi_signal = run_signal_child(MULTI_SIGNAL_WRAPPERS_SCRIPT)
+    record("multi_signal_wrappers", "script_exits_zero", multi_signal.get("status") == 0)
+    record("multi_signal_wrappers", "send_usr1_status_zero", stdout_contains(multi_signal, "SEND1=0"))
+    record("multi_signal_wrappers", "send_usr2_status_zero", stdout_contains(multi_signal, "SEND2=0"))
+    record("multi_signal_wrappers", "wait_usr1", stdout_contains(multi_signal, "OBS1=USR1"))
+    record("multi_signal_wrappers", "wait_usr2", stdout_contains(multi_signal, "OBS2=USR2"))
+    record("multi_signal_wrappers", "handler_printed_usr1", stdout_contains(multi_signal, "USR1"))
+    record("multi_signal_wrappers", "handler_printed_usr2", stdout_contains(multi_signal, "USR2"))
+    record("multi_signal_wrappers", "queue_empty_after_waits", stdout_contains(multi_signal, "PENDING_AFTER=0"))
 
 invalid_type = run_signal_child(INVALID_TRAP_TYPE_SCRIPT)
 record("error_paths", "trap_rejects_non_string_or_list", invalid_type.get("status") != 0)
