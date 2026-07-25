@@ -360,10 +360,7 @@ impl Git {
                     && existing_repo.is_remote_branch_tracked(progress)
                 {
                     existing_repo
-                        .execute(
-                            progress,
-                            vec!["pull".into(), "--no-recurse-submodules".into()],
-                        )
+                        .pull(progress, git::IsRecurseSubmodules::No)
                         .context(format_context!(
                             "while pulling latest changes in existing workspace"
                         ))?;

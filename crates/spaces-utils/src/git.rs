@@ -13,6 +13,12 @@ pub enum IgnoreSubmodules {
     Yes,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum IsRecurseSubmodules {
+    No,
+    Yes,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CheckoutOption {
     Revision,
@@ -1383,8 +1389,17 @@ impl Repository {
         .is_ok()
     }
 
-    pub fn pull(&self, progress_bar: &mut console::Progress) -> anyhow::Result<()> {
-        self.execute(progress_bar, vec!["pull".into()])
+    pub fn pull(
+        &self,
+        progress_bar: &mut console::Progress,
+        is_recurse_submodules: IsRecurseSubmodules,
+    ) -> anyhow::Result<()> {
+        let recurse_submodules = match is_recurse_submodules {
+            IsRecurseSubmodules::No => "--recurse-submodules=no",
+            IsRecurseSubmodules::Yes => "--recurse-submodules=yes",
+        };
+
+        self.execute(progress_bar, vec!["pull".into(), recurse_submodules.into()])
             .context(format_context!("while pulling from {}", self.full_path))?;
         Ok(())
     }
