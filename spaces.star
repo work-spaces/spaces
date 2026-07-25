@@ -26,6 +26,7 @@ GLOB_DEPS = glob(includes = [
     "//spaces/Cargo.toml",
     "//spaces/Cargo.workspace.toml",
     "//spaces/**/*.rs",
+    "//spaces/crates/spaces/src/assets/**/*.star",
     "//spaces/rust-toolchain.toml",
 ], excludes = [
     "//spaces/target/**",
