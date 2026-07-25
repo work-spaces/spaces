@@ -43,6 +43,17 @@ load(
     "json_dumps",
 )
 load(
+    "//@star/prelude/exec/process.star",
+    "process_options",
+    "process_run",
+    "process_stderr_capture",
+    "process_stdout_capture",
+)
+load(
+    "//@star/prelude/exec/sys.star",
+    "sys_executable",
+)
+load(
     "//@star/prelude/exec/tmp.star",
     "tmp_cleanup_all",
     "tmp_dir",
@@ -63,6 +74,11 @@ def p(rel):
     """Join work_dir with a relative path."""
     return work_dir + "/" + rel
 
+def output_contains(result, needle):
+    stdout = result.get("stdout")
+    stderr = result.get("stderr")
+    return (type(stdout) == "string" and needle in stdout) or (type(stderr) == "string" and needle in stderr)
+
 results = {
     "text_io": {},
     "binary_io": {},
@@ -81,6 +97,7 @@ results = {
     "atomic_write": {},
     "locks": {},
     "touch": {},
+    "signal_error_paths": {},
 }
 
 # ============================================================================
@@ -548,6 +565,38 @@ results["permissions"]["chmod_multi_perm"] = (meta_p3.get("mode") & 0o500) == 0o
 fs_chmod(p("perms.txt"), "u-x")
 meta_p4 = fs_metadata(p("perms.txt"))
 results["permissions"]["chmod_remove_exec"] = (meta_p4.get("mode") & 0o100) == 0
+
+# ============================================================================
+# Signal wrapper error messages
+# ============================================================================
+
+invalid_signal_type_script = p("invalid_signal_type.exec.star")
+fs_write_text(invalid_signal_type_script, """#!/usr/bin/env spaces
+load(\"//@star/prelude/exec/signal.star\", \"signal_trap\")
+signal_trap(123, print)
+""")
+invalid_signal_type_result = process_run(process_options(
+    command = sys_executable(),
+    args = [invalid_signal_type_script],
+    stdout = process_stdout_capture(),
+    stderr = process_stderr_capture(),
+))
+results["signal_error_paths"]["trap_rejects_non_string_or_list"] = invalid_signal_type_result.get("status") != 0
+results["signal_error_paths"]["trap_type_error_mentions_signal_names"] = output_contains(invalid_signal_type_result, "signal_names")
+
+invalid_signal_list_item_script = p("invalid_signal_list_item.exec.star")
+fs_write_text(invalid_signal_list_item_script, """#!/usr/bin/env spaces
+load(\"//@star/prelude/exec/signal.star\", \"signal_trap\")
+signal_trap([\"USR1\", 2], print)
+""")
+invalid_signal_list_item_result = process_run(process_options(
+    command = sys_executable(),
+    args = [invalid_signal_list_item_script],
+    stdout = process_stdout_capture(),
+    stderr = process_stderr_capture(),
+))
+results["signal_error_paths"]["trap_rejects_non_string_list_item"] = invalid_signal_list_item_result.get("status") != 0
+results["signal_error_paths"]["trap_list_item_error_mentions_signal_names"] = output_contains(invalid_signal_list_item_result, "signal_names")
 
 # ============================================================================
 # Cleanup and output

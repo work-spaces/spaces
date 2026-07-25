@@ -28,10 +28,10 @@ def _signal_list(signal_names: str | list[str]) -> list[str]:
     if signal_type == "list":
         for item in signal_names:
             if type(item) != "string":
-                fail("signal must be a string or list of strings; got list item of type: " + type(item))
+                fail("signal_names must be a string or list of strings; got list item of type: " + type(item))
         return signal_names
 
-    fail("signal must be a string or list of strings; got: " + signal_type)
+    fail("signal_names must be a string or list of strings; got: " + signal_type)
 
 def signal_trap(signal_names: str | list[str], handler):
     """

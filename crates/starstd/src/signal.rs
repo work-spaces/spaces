@@ -1,6 +1,7 @@
 use crate::is_lsp_mode;
 use anyhow::{Context, bail};
 use anyhow_source_location::format_context;
+#[cfg(unix)]
 use signal_hook::SigId;
 use starlark::environment::GlobalsBuilder;
 use starlark::eval::Evaluator;
@@ -14,6 +15,7 @@ use std::os::fd::RawFd;
 
 const SIGNAL_RECORD_SIZE: usize = std::mem::size_of::<i32>();
 
+#[cfg(unix)]
 struct TrapEntry {
     registration_id: SigId,
     handler: FrozenStarlarkCallable,
@@ -235,10 +237,15 @@ fn normalized_name(name: &str) -> anyhow::Result<String> {
     }
 
     let upper = trimmed.to_ascii_uppercase();
-    Ok(upper
-        .strip_prefix("SIG")
-        .unwrap_or(upper.as_str())
-        .to_string())
+    let normalized = upper.strip_prefix("SIG").unwrap_or(upper.as_str());
+    if normalized.is_empty() {
+        bail!(
+            "Signal name cannot be empty. Supported signals: {}",
+            supported_signal_names().join(", ")
+        );
+    }
+
+    Ok(normalized.to_string())
 }
 
 #[cfg(unix)]
@@ -630,6 +637,12 @@ mod tests {
     #[test]
     fn rejects_empty_signal_name() {
         let error = normalized_name("  ").unwrap_err().to_string();
+        assert!(error.contains("Signal name cannot be empty"));
+
+        let error = normalized_name("SIG").unwrap_err().to_string();
+        assert!(error.contains("Signal name cannot be empty"));
+
+        let error = normalized_name("  sig  ").unwrap_err().to_string();
         assert!(error.contains("Signal name cannot be empty"));
     }
 
