@@ -52,6 +52,7 @@ load(
 load(
     "//@star/prelude/exec/sys.star",
     "sys_executable",
+    "sys_exit",
 )
 load(
     "//@star/prelude/exec/tmp.star",
@@ -623,3 +624,4 @@ if all_ok:
     print("All fs tests passed!")
 else:
     print("Some tests FAILED - see above")
+    sys_exit(1)
