@@ -12,7 +12,10 @@ use std::sync::{Mutex, OnceLock};
 
 #[cfg(unix)]
 use std::os::fd::RawFd;
+#[cfg(windows)]
+use std::sync::Condvar;
 
+#[cfg(unix)]
 const SIGNAL_RECORD_SIZE: usize = std::mem::size_of::<i32>();
 
 #[cfg(unix)]
@@ -59,6 +62,69 @@ fn runtime() -> anyhow::Result<&'static Mutex<SignalRuntime>> {
     SIGNAL_RUNTIME
         .get()
         .context(format_context!("Failed to initialize signal runtime"))
+}
+
+#[cfg(windows)]
+struct SignalState {
+    pending: VecDeque<i32>,
+    traps: HashMap<i32, FrozenStarlarkCallable>,
+    handler_installed: bool,
+}
+
+#[cfg(windows)]
+struct SignalRuntime {
+    state: Mutex<SignalState>,
+    condvar: Condvar,
+}
+
+#[cfg(windows)]
+impl SignalRuntime {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(SignalState {
+                pending: VecDeque::new(),
+                traps: HashMap::new(),
+                handler_installed: false,
+            }),
+            condvar: Condvar::new(),
+        }
+    }
+}
+
+#[cfg(windows)]
+static SIGNAL_RUNTIME: OnceLock<SignalRuntime> = OnceLock::new();
+
+#[cfg(windows)]
+fn runtime() -> anyhow::Result<&'static SignalRuntime> {
+    Ok(SIGNAL_RUNTIME.get_or_init(SignalRuntime::new))
+}
+
+#[cfg(windows)]
+fn ensure_windows_handler_installed() -> anyhow::Result<()> {
+    let runtime = runtime()?;
+    let mut guard = runtime
+        .state
+        .lock()
+        .map_err(|_| anyhow::anyhow!("signal runtime lock poisoned"))?;
+
+    if guard.handler_installed {
+        return Ok(());
+    }
+
+    ctrlc::try_set_handler(|| {
+        if let Some(runtime) = SIGNAL_RUNTIME.get()
+            && let Ok(mut guard) = runtime.state.lock()
+        {
+            guard.pending.push_back(libc::SIGINT);
+            runtime.condvar.notify_all();
+        }
+    })
+    .context(format_context!(
+        "Failed to register Ctrl-C signal handler for Windows"
+    ))?;
+
+    guard.handler_installed = true;
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -227,6 +293,45 @@ fn wait_for_signal_event(timeout_ms: Option<i64>) -> anyhow::Result<bool> {
     }
 }
 
+#[cfg(windows)]
+fn wait_for_signal_event(timeout_ms: Option<i64>) -> anyhow::Result<bool> {
+    let runtime = runtime()?;
+    let mut guard = runtime
+        .state
+        .lock()
+        .map_err(|_| anyhow::anyhow!("signal runtime lock poisoned"))?;
+
+    if !guard.pending.is_empty() {
+        return Ok(true);
+    }
+
+    match timeout_ms {
+        Some(limit) => {
+            if limit < 0 {
+                bail!("timeout_ms must be non-negative, got {}", limit);
+            }
+
+            let timeout =
+                std::time::Duration::from_millis(u64::try_from(limit).unwrap_or(u64::MAX));
+            let (guard_after_wait, _) = runtime
+                .condvar
+                .wait_timeout_while(guard, timeout, |state| state.pending.is_empty())
+                .map_err(|_| anyhow::anyhow!("signal runtime lock poisoned"))?;
+
+            guard = guard_after_wait;
+            Ok(!guard.pending.is_empty())
+        }
+        None => {
+            guard = runtime
+                .condvar
+                .wait_while(guard, |state| state.pending.is_empty())
+                .map_err(|_| anyhow::anyhow!("signal runtime lock poisoned"))?;
+
+            Ok(!guard.pending.is_empty())
+        }
+    }
+}
+
 fn normalized_name(name: &str) -> anyhow::Result<String> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
@@ -275,7 +380,7 @@ fn signal_from_name(name: &str) -> anyhow::Result<i32> {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
 fn signal_from_name(name: &str) -> anyhow::Result<i32> {
     let normalized = normalized_name(name)?;
 
@@ -288,7 +393,27 @@ fn signal_from_name(name: &str) -> anyhow::Result<i32> {
 
     match normalized.as_str() {
         "INT" => Ok(libc::SIGINT),
-        "TERM" => Ok(libc::SIGTERM),
+        _ => bail!(
+            "Unsupported signal `{}` on this platform. Supported signals: {}",
+            name,
+            supported_signal_names().join(", ")
+        ),
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn signal_from_name(name: &str) -> anyhow::Result<i32> {
+    let normalized = normalized_name(name)?;
+
+    if normalized == "KILL" || normalized == "STOP" {
+        bail!(
+            "Signal `{}` cannot be trapped (KILL and STOP are not trappable)",
+            name
+        );
+    }
+
+    match normalized.as_str() {
+        "INT" => Ok(libc::SIGINT),
         _ => bail!(
             "Unsupported signal `{}` on this platform. Supported signals: {}",
             name,
@@ -311,11 +436,18 @@ fn signal_name(signal: i32) -> &'static str {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
 fn signal_name(signal: i32) -> &'static str {
     match signal {
         x if x == libc::SIGINT => "INT",
-        x if x == libc::SIGTERM => "TERM",
+        _ => "UNKNOWN",
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn signal_name(signal: i32) -> &'static str {
+    match signal {
+        x if x == libc::SIGINT => "INT",
         _ => "UNKNOWN",
     }
 }
@@ -346,9 +478,26 @@ fn supported_signal_names() -> &'static [&'static str] {
         &["INT", "TERM", "HUP", "QUIT", "USR1", "USR2", "ALRM"]
     }
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
     {
-        &["INT", "TERM"]
+        &["INT"]
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        &[]
+    }
+}
+
+fn signal_api_supported() -> bool {
+    #[cfg(any(unix, windows))]
+    {
+        true
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        false
     }
 }
 
@@ -403,7 +552,54 @@ fn dispatch_pending<'v>(eval: &mut Evaluator<'v, '_, '_>) -> anyhow::Result<i32>
         }
     }
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        loop {
+            let next = {
+                let runtime = runtime()?;
+                let mut guard = runtime
+                    .state
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("signal runtime lock poisoned"))?;
+
+                let signal = match guard.pending.pop_front() {
+                    Some(signal) => signal,
+                    None => break,
+                };
+
+                let handler = guard.traps.get(&signal).copied();
+                Some((signal, handler))
+            };
+
+            let Some((signal, maybe_handler)) = next else {
+                break;
+            };
+
+            let Some(handler) = maybe_handler else {
+                continue;
+            };
+
+            let signal_name = signal_name(signal).to_string();
+            let heap = eval.heap();
+
+            eval.eval_function(
+                handler.0.to_value(),
+                &[heap.alloc(signal_name.clone())],
+                &[],
+            )
+            .map_err(|error| {
+                anyhow::anyhow!(format_context!(
+                    "signal handler failed for {}: {}",
+                    signal_name,
+                    error
+                ))
+            })?;
+
+            dispatched += 1;
+        }
+    }
+
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = eval;
     }
@@ -414,6 +610,19 @@ fn dispatch_pending<'v>(eval: &mut Evaluator<'v, '_, '_>) -> anyhow::Result<i32>
 // This defines the functions that are visible to Starlark.
 #[starlark_module]
 pub fn globals(builder: &mut GlobalsBuilder) {
+    /// Return whether signal trapping APIs are supported on this platform.
+    fn supported() -> anyhow::Result<bool> {
+        Ok(signal_api_supported())
+    }
+
+    /// Return the canonical signal names supported by this platform.
+    fn supported_names() -> anyhow::Result<Vec<String>> {
+        Ok(supported_signal_names()
+            .iter()
+            .map(|name| name.to_string())
+            .collect())
+    }
+
     /// Register or replace a trap handler for a signal.
     ///
     /// `name` accepts canonical names (for example `"INT"`) and `SIG*`
@@ -452,7 +661,20 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             );
         }
 
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            ensure_windows_handler_installed()?;
+
+            let runtime = runtime()?;
+            let mut guard = runtime
+                .state
+                .lock()
+                .map_err(|_| anyhow::anyhow!("signal runtime lock poisoned"))?;
+
+            guard.traps.insert(signal, frozen_handler);
+        }
+
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = signal;
             let _ = frozen_handler;
@@ -482,7 +704,18 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             }
         }
 
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            let runtime = runtime()?;
+            let mut guard = runtime
+                .state
+                .lock()
+                .map_err(|_| anyhow::anyhow!("signal runtime lock poisoned"))?;
+
+            guard.traps.remove(&signal);
+        }
+
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = signal;
             bail!("signal.untrap is not supported on this platform");
@@ -515,7 +748,18 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             }
         }
 
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            let runtime = runtime()?;
+            let mut guard = runtime
+                .state
+                .lock()
+                .map_err(|_| anyhow::anyhow!("signal runtime lock poisoned"))?;
+
+            guard.traps.clear();
+        }
+
+        #[cfg(not(any(unix, windows)))]
         {
             bail!("signal.clear is not supported on this platform");
         }
@@ -544,7 +788,22 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 .collect());
         }
 
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            let runtime = runtime()?;
+            let guard = runtime
+                .state
+                .lock()
+                .map_err(|_| anyhow::anyhow!("signal runtime lock poisoned"))?;
+
+            return Ok(guard
+                .pending
+                .iter()
+                .map(|signal| signal_name(*signal).to_string())
+                .collect());
+        }
+
+        #[cfg(not(any(unix, windows)))]
         {
             Ok(Vec::new())
         }
@@ -615,7 +874,43 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             return Ok(NoneOr::Other(first_signal_name));
         }
 
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            let has_pending = {
+                let runtime = runtime()?;
+                let guard = runtime
+                    .state
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("signal runtime lock poisoned"))?;
+                !guard.pending.is_empty()
+            };
+
+            if !has_pending {
+                let arrived = wait_for_signal_event(timeout_ms)?;
+                if !arrived {
+                    return Ok(NoneOr::None);
+                }
+            }
+
+            let first_signal = {
+                let runtime = runtime()?;
+                let guard = runtime
+                    .state
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("signal runtime lock poisoned"))?;
+                guard.pending.front().copied()
+            };
+
+            let Some(first_signal) = first_signal else {
+                return Ok(NoneOr::None);
+            };
+
+            let first_signal_name = signal_name(first_signal).to_string();
+            let _ = dispatch_pending(eval)?;
+            return Ok(NoneOr::Other(first_signal_name));
+        }
+
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = timeout_ms;
             let _ = eval;
@@ -653,5 +948,35 @@ mod tests {
 
         let error = signal_from_name("STOP").unwrap_err().to_string();
         assert!(error.contains("cannot be trapped"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_supported_names_are_expected() {
+        assert_eq!(
+            supported_signal_names(),
+            &["INT", "TERM", "HUP", "QUIT", "USR1", "USR2", "ALRM"]
+        );
+        assert!(signal_api_supported());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_supports_only_int() {
+        assert_eq!(signal_from_name("INT").unwrap(), libc::SIGINT);
+        assert_eq!(signal_from_name("SIGINT").unwrap(), libc::SIGINT);
+
+        let error = signal_from_name("TERM").unwrap_err().to_string();
+        assert!(error.contains("Unsupported signal"));
+
+        assert_eq!(supported_signal_names(), &["INT"]);
+        assert!(signal_api_supported());
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    #[test]
+    fn unsupported_platform_reports_no_supported_signals() {
+        assert_eq!(supported_signal_names(), &[]);
+        assert!(!signal_api_supported());
     }
 }
