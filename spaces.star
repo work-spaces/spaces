@@ -305,7 +305,8 @@ run_add_exec(
         files = [
             "scripts/test/**/*.exec.star",
             "scripts/run-all.exec.star",
-            "//@star/sdk/star/std/**/*.star",
+            "//@star/prelude/exec/**/*.star",
+            "//@star/prelude/*.star",
         ],
     ),
 )

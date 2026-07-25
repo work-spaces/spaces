@@ -13,6 +13,7 @@ pub mod process;
 pub mod process_error;
 pub mod script;
 pub mod sh;
+pub mod signal;
 pub mod string;
 pub mod sys;
 pub mod text;
