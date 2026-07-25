@@ -81,16 +81,14 @@ pub fn checkout_repo(
 
     let script: Arc<str> = format!(
         r#"{command_docstring}
-checkout.add_repo(
-    rule = {{
-        "name": "{repo_name}"
-    }},
-    repo = {{
-        "url": "{url}",
-        "rev": "{rev}",
-        "checkout": "Revision",
-        "clone": "{clone}"
-    }})
+load("//@star/prelude/rules/checkout.star", "checkout_add_repo")
+
+checkout_add_repo(
+    "{repo_name}",
+    url = "{url}",
+    rev = "{rev}",
+    clone = "{clone}",
+)
 "#
     )
     .into();
