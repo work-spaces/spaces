@@ -455,7 +455,10 @@ def process_spawn(options: dict, allow_orphans: bool | None = None) -> int:
         opts["allow_orphans"] = allow_orphans
     return process.spawn(opts)
 
-def process_read_lines(handle: int, drain: bool = True) -> dict:
+def process_read_lines(
+        handle: int,
+        drain: bool = True,
+        max_lines: int | None = None) -> dict:
     """
     Read currently available captured output lines from a spawned background process.
 
@@ -468,6 +471,9 @@ def process_read_lines(handle: int, drain: bool = True) -> dict:
             (default: True).
             - True: Return and remove currently available complete lines.
             - False: Return a snapshot without consuming.
+        max_lines: Optional per-stream cap on returned lines (default: None).
+            - None: Return all currently available complete lines.
+            - N: Return at most N complete lines from stdout and at most N from stderr.
 
     Returns:
         dict: A dictionary with keys:
@@ -492,13 +498,15 @@ def process_read_lines(handle: int, drain: bool = True) -> dict:
         })
 
         while process_is_running(handle):
-            chunk = process_read_lines(handle)
+            chunk = process_read_lines(handle, max_lines = 50)
             for line in chunk["stdout"]:
                 print(line)
 
         # Non-destructive snapshot
         snapshot = process_read_lines(handle, drain = False)
     """
+    if max_lines != None:
+        return process.read_lines(handle, drain, max_lines)
     if drain == True:
         return process.read_lines(handle)
     return process.read_lines(handle, drain)

@@ -216,10 +216,18 @@ fn read_output_buffer(buffer: &Arc<Mutex<Vec<u8>>>, drain: bool) -> anyhow::Resu
     }
 }
 
-fn read_output_lines(buffer: &Arc<Mutex<Vec<u8>>>, drain: bool) -> anyhow::Result<Vec<String>> {
+fn read_output_lines(
+    buffer: &Arc<Mutex<Vec<u8>>>,
+    drain: bool,
+    max_lines: Option<usize>,
+) -> anyhow::Result<Vec<String>> {
     let mut guard = buffer
         .lock()
         .map_err(|_| anyhow::anyhow!("process output buffer lock poisoned"))?;
+
+    if max_lines == Some(0) {
+        return Ok(Vec::new());
+    }
 
     let mut lines = Vec::new();
     let mut start = 0usize;
@@ -234,6 +242,12 @@ fn read_output_lines(buffer: &Arc<Mutex<Vec<u8>>>, drain: bool) -> anyhow::Resul
             lines.push(String::from_utf8_lossy(line).to_string());
             start = idx + 1;
             consumed = start;
+
+            if let Some(limit) = max_lines
+                && lines.len() >= limit
+            {
+                break;
+            }
         }
     }
 
@@ -247,9 +261,10 @@ fn read_output_lines(buffer: &Arc<Mutex<Vec<u8>>>, drain: bool) -> anyhow::Resul
 fn read_captured_lines(
     entry: &ChildHandle,
     drain: bool,
+    max_lines: Option<usize>,
 ) -> anyhow::Result<(Vec<String>, Vec<String>)> {
-    let mut stdout_lines = read_output_lines(&entry.stdout_buf, drain)?;
-    let stderr_lines = read_output_lines(&entry.stderr_buf, drain)?;
+    let mut stdout_lines = read_output_lines(&entry.stdout_buf, drain, max_lines)?;
+    let stderr_lines = read_output_lines(&entry.stderr_buf, drain, max_lines)?;
 
     if entry.merge_stderr {
         stdout_lines.extend(stderr_lines);
@@ -939,9 +954,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     ///
     /// By default (`drain` omitted/true), returned complete lines are consumed from the
     /// internal buffers. Set `drain` to false to snapshot complete lines without consuming.
+    ///
+    /// Set `max_lines` to limit each stream to at most that many complete lines.
+    /// If omitted, all currently available complete lines are returned.
     fn read_lines<'v>(
         handle: u64,
         drain: Option<bool>,
+        max_lines: Option<u64>,
         eval: &mut Evaluator<'v, '_, '_>,
     ) -> anyhow::Result<Value<'v>> {
         if is_lsp_mode() {
@@ -955,6 +974,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let heap = eval.heap();
         let drain = drain.unwrap_or(true);
+        let max_lines = max_lines
+            .map(usize::try_from)
+            .transpose()
+            .map_err(|_| anyhow::anyhow!("max_lines is too large for this platform's usize"))?;
 
         let mut registry = process_registry()
             .lock()
@@ -964,7 +987,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             bail!("unknown process handle: {handle}");
         };
 
-        let (stdout, stderr) = read_captured_lines(entry, drain)?;
+        let (stdout, stderr) = read_captured_lines(entry, drain, max_lines)?;
 
         let result = serde_json::json!({
             "stdout": stdout,
