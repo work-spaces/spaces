@@ -1890,7 +1890,20 @@ pub fn run_starlark_modules(
     Ok(())
 }
 
+fn resolve_exec_script_module_name(name: Arc<str>) -> Arc<str> {
+    let path = std::path::Path::new(name.as_ref());
+    if path.exists()
+        && let Ok(canonical_path) = path.canonicalize()
+    {
+        return canonical_path.to_string_lossy().into();
+    }
+
+    name
+}
+
 pub fn run_starlark_script(name: Arc<str>, script: Arc<str>) -> anyhow::Result<()> {
+    let resolved_name = resolve_exec_script_module_name(name);
+
     // load SPACES_WORKSPACE from env
     let workspace = std::env::var(ws::SPACES_WORKSPACE_ENV_VAR)
         .unwrap_or(".".to_string())
@@ -1901,7 +1914,7 @@ pub fn run_starlark_script(name: Arc<str>, script: Arc<str>) -> anyhow::Result<(
         workspace,
         ModuleEvalParams {
             globals_config: GlobalsConfig::StarStd,
-            name: name.clone(),
+            name: resolved_name.clone(),
             content: script,
             checkout_state_digest: Arc::from(""),
         },
@@ -1909,14 +1922,30 @@ pub fn run_starlark_script(name: Arc<str>, script: Arc<str>) -> anyhow::Result<(
         None,
         Arc::new(mtarget::LoadResultCache::new()),
     )
-    .map_err(|e| format_error!("Failed to evaluate module {name}: {e}"))?;
+    .map_err(|e| format_error!("Failed to evaluate module {resolved_name}: {e}"))?;
 
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::remove_expired_checkout_entry;
+    use super::{remove_expired_checkout_entry, resolve_exec_script_module_name};
+
+    #[test]
+    fn resolves_existing_relative_script_path_to_absolute_path() -> anyhow::Result<()> {
+        let tempdir = tempfile::tempdir_in(std::env::current_dir()?)?;
+        let script_path = tempdir.path().join("script.star");
+        std::fs::write(&script_path, "x = 1\n")?;
+
+        let cwd = std::env::current_dir()?;
+        let relative_script_path = script_path.strip_prefix(&cwd).unwrap().to_string_lossy();
+        let resolved_name =
+            resolve_exec_script_module_name(relative_script_path.to_string().into());
+        let expected = script_path.canonicalize()?.to_string_lossy().to_string();
+
+        assert_eq!(resolved_name.as_ref(), expected);
+        Ok(())
+    }
 
     #[test]
     fn removes_regular_file() -> anyhow::Result<()> {
