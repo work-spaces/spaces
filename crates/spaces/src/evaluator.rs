@@ -260,7 +260,7 @@ pub fn evaluate_loads(
         }
 
         let module_load_path =
-            workspace::get_workspace_path(workspace_path.as_ref(), name.as_ref(), load.module_id);
+            workspace::resolve_load_path(workspace_path.as_ref(), name.as_ref(), load.module_id);
         if module_load_path.ends_with(workspace::SPACES_MODULE_NAME) {
             singleton::set_is_show_latest_error();
             use starlark::{Error, ErrorKind};
