@@ -5,7 +5,7 @@ This module provides ergonomic wrappers around process execution and management.
 It supports:
 - Simple command execution with output capture (exec, capture)
 - Advanced process control (run with redirections and timeouts)
-- Background process management (spawn, read_output, is_running, kill, wait)
+- Background process management (spawn, read_lines, is_running, kill, wait)
 - Command pipelines (execute commands in series, piping output)
 
 All functions handle errors gracefully and provide clear feedback when something
@@ -35,7 +35,7 @@ Examples:
         "stderr": process_stderr_capture(),
     }, allow_orphans = False)
     if process_is_running(handle):
-        chunk = process_read_output(handle)  # drain=True by default
+        chunk = process_read_lines(handle)  # drain=True by default
         print(chunk["stdout"])
     result = process_wait(handle, timeout_ms = 5000)
 
@@ -389,7 +389,7 @@ def process_spawn(options: dict, allow_orphans: bool | None = None) -> int:
     Spawn a background process and return an opaque handle for later management.
 
     This function starts a process in the background and returns a handle that can
-    be used with process_read_output, process_is_running, process_kill, and
+    be used with process_read_lines, process_is_running, process_kill, and
     process_wait to manage the process. By default, stdout and stderr are
     inherited (shown to the user).
 
@@ -442,33 +442,33 @@ def process_spawn(options: dict, allow_orphans: bool | None = None) -> int:
         opts["allow_orphans"] = allow_orphans
     return process.spawn(opts)
 
-def process_read_output(handle: int, drain: bool = True) -> dict:
+def process_read_lines(handle: int, drain: bool = True) -> dict:
     """
-    Read currently available captured output from a spawned background process.
+    Read currently available captured output lines from a spawned background process.
 
-    This only returns bytes for streams configured as capture/piped in
-    process_spawn(). For inherited/null/file streams, no in-memory bytes are
-    available and returned fields are empty.
+    Only complete newline-terminated lines are returned. Any trailing partial
+    line remains buffered for the next call.
 
     Args:
         handle: The process handle returned by process_spawn.
-        drain: Whether to consume bytes from internal buffers (default: True).
-            - True: Return and remove currently buffered bytes.
+        drain: Whether to consume returned lines from internal buffers
+            (default: True).
+            - True: Return and remove currently available complete lines.
             - False: Return a snapshot without consuming.
 
     Returns:
         dict: A dictionary with keys:
-            - stdout (str): Available stdout bytes decoded as UTF-8 lossy text
-            - stderr (str): Available stderr bytes (or empty when merged)
+            - stdout (list[str]): Complete stdout lines
+            - stderr (list[str]): Complete stderr lines (or empty when merged)
 
     Raises:
         Error: If the handle is invalid or output buffers cannot be accessed
 
     Notes:
-        - When stderr mode is "merge" (non-file), stderr bytes are appended to
+        - When stderr mode is "merge" (non-file), stderr lines are appended to
           stdout and the returned stderr field is empty.
         - Since drain defaults to True, repeated calls typically return only new
-          output since the previous read.
+          complete lines since the previous read.
 
     Examples:
         handle = process_spawn({
@@ -479,16 +479,16 @@ def process_read_output(handle: int, drain: bool = True) -> dict:
         })
 
         while process_is_running(handle):
-            chunk = process_read_output(handle)
-            if chunk["stdout"] != "":
-                print(chunk["stdout"])
+            chunk = process_read_lines(handle)
+            for line in chunk["stdout"]:
+                print(line)
 
         # Non-destructive snapshot
-        snapshot = process_read_output(handle, drain = False)
+        snapshot = process_read_lines(handle, drain = False)
     """
     if drain == True:
-        return process.read_output(handle)
-    return process.read_output(handle, drain)
+        return process.read_lines(handle)
+    return process.read_lines(handle, drain)
 
 def process_is_running(handle: int) -> bool:
     """
@@ -551,7 +551,7 @@ def process_wait(handle: int, timeout_ms = None) -> dict:
     be used again. The returned dictionary includes exit status, output (if
     captured), and execution duration.
 
-    If process_read_output() was called earlier with drain=True (the default),
+    If process_read_lines() was called earlier with drain=True (the default),
     already-consumed bytes will not appear again in this final wait result.
 
     Args:

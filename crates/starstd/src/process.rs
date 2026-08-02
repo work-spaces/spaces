@@ -187,6 +187,49 @@ fn read_output_buffer(buffer: &Arc<Mutex<Vec<u8>>>, drain: bool) -> anyhow::Resu
     }
 }
 
+fn read_output_lines(buffer: &Arc<Mutex<Vec<u8>>>, drain: bool) -> anyhow::Result<Vec<String>> {
+    let mut guard = buffer
+        .lock()
+        .map_err(|_| anyhow::anyhow!("process output buffer lock poisoned"))?;
+
+    let mut lines = Vec::new();
+    let mut start = 0usize;
+    let mut consumed = 0usize;
+
+    for (idx, byte) in guard.iter().enumerate() {
+        if *byte == b'\n' {
+            let mut line = &guard[start..idx];
+            if line.last() == Some(&b'\r') {
+                line = &line[..line.len() - 1];
+            }
+            lines.push(String::from_utf8_lossy(line).to_string());
+            start = idx + 1;
+            consumed = start;
+        }
+    }
+
+    if drain && consumed > 0 {
+        guard.drain(..consumed);
+    }
+
+    Ok(lines)
+}
+
+fn read_captured_lines(
+    entry: &ChildHandle,
+    drain: bool,
+) -> anyhow::Result<(Vec<String>, Vec<String>)> {
+    let mut stdout_lines = read_output_lines(&entry.stdout_buf, drain)?;
+    let stderr_lines = read_output_lines(&entry.stderr_buf, drain)?;
+
+    if entry.merge_stderr {
+        stdout_lines.extend(stderr_lines);
+        Ok((stdout_lines, Vec::new()))
+    } else {
+        Ok((stdout_lines, stderr_lines))
+    }
+}
+
 /// Build a `Command` and run it, capturing/streaming output per `opts`.
 fn execute_run(opts: RunOptions) -> anyhow::Result<RunOutcome> {
     let started = Instant::now();
@@ -753,7 +796,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                         // stdout is a file: send stderr to the same file (2>&1).
                         cmd.stderr(Stdio::from(file));
                     } else {
-                        // Pipe stderr so wait()/read_output() can consume and append it to stdout.
+                        // Pipe stderr so wait()/read_lines() can consume and append it to stdout.
                         cmd.stderr(Stdio::piped());
                         merge_stderr = true;
                         pipe_stderr = true;
@@ -845,11 +888,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         Ok(handle)
     }
 
-    /// Read currently available captured output for a running background process.
+    /// Read currently available captured output lines for a running background process.
     ///
-    /// By default (`drain` omitted/true), consumed bytes are removed from the
-    /// internal buffers. Set `drain` to false to snapshot without consuming.
-    fn read_output<'v>(
+    /// Returns only complete lines (newline-terminated). Any trailing partial line
+    /// remains buffered for the next call.
+    ///
+    /// By default (`drain` omitted/true), returned complete lines are consumed from the
+    /// internal buffers. Set `drain` to false to snapshot complete lines without consuming.
+    fn read_lines<'v>(
         handle: u64,
         drain: Option<bool>,
         eval: &mut Evaluator<'v, '_, '_>,
@@ -857,8 +903,8 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         if is_lsp_mode() {
             let heap = eval.heap();
             let result = serde_json::json!({
-                "stdout": "",
-                "stderr": "",
+                "stdout": [],
+                "stderr": [],
             });
             return Ok(heap.alloc(result));
         }
@@ -874,25 +920,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             bail!("unknown process handle: {handle}");
         };
 
-        let mut stdout_bytes = read_output_buffer(&entry.stdout_buf, drain)?;
-        let stderr_bytes = read_output_buffer(&entry.stderr_buf, drain)?;
-
-        let (stdout_text, stderr_text) = if entry.merge_stderr {
-            stdout_bytes.extend_from_slice(&stderr_bytes);
-            (
-                String::from_utf8_lossy(&stdout_bytes).to_string(),
-                String::new(),
-            )
-        } else {
-            (
-                String::from_utf8_lossy(&stdout_bytes).to_string(),
-                String::from_utf8_lossy(&stderr_bytes).to_string(),
-            )
-        };
+        let (stdout, stderr) = read_captured_lines(entry, drain)?;
 
         let result = serde_json::json!({
-            "stdout": stdout_text,
-            "stderr": stderr_text,
+            "stdout": stdout,
+            "stderr": stderr,
         });
         Ok(heap.alloc(result))
     }
@@ -918,7 +950,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             None => Ok(true),
             Some(status) => {
                 // Cache completion so subsequent is_running() calls stay false,
-                // and finish output pumps so trailing bytes are readable via read_output().
+                // and finish output pumps so trailing bytes are readable via read_lines().
                 entry.exit_status = Some(status);
                 join_output_pump(entry.stdout_reader.take(), "stdout")?;
                 join_output_pump(entry.stderr_reader.take(), "stderr")?;

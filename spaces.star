@@ -301,6 +301,10 @@ run_add_exec(
         "--spaces={}".format(DEBUG_BINARY),
     ],
     visibility = visibility_private(),
+    env = {
+        # ensure //@star/prelude is not loaded from workspace
+        "SPACES_WORKSPACE": "/tmp",
+    },
     deps = deps(
         rules = [":build"],
         files = [

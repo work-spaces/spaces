@@ -11,7 +11,7 @@ load(
     "process_kill",
     "process_options",
     "process_pipeline",
-    "process_read_output",
+    "process_read_lines",
     "process_run",
     "process_spawn",
     "process_stderr_capture",
@@ -249,11 +249,11 @@ process_results["background_processes"]["spawn_allow_orphans_arg_true_wait_nonze
 )
 
 # ============================================================================
-# Streaming Output Tests (process_read_output)
+# Streaming Output Tests (process_read_lines)
 # ============================================================================
 
 # Spawn a long-running process that writes to both stdout and stderr immediately.
-# Use tee=True to ensure spawn accepts tee while still buffering for read_output().
+# Use tee=True to ensure spawn accepts tee while still buffering for read_lines().
 streaming_handle = process_spawn(process_options(
     "sh",
     args = ["-c", "echo live_stdout_line; echo live_stderr_line >&2; sleep 30"],
@@ -269,7 +269,7 @@ seen_stderr = False
 for _ in range(800):
     if not process_is_running(streaming_handle):
         break
-    snapshot = process_read_output(streaming_handle, drain = False)
+    snapshot = process_read_lines(streaming_handle, drain = False)
     if "live_stdout_line" in snapshot.get("stdout"):
         seen_stdout = True
     if "live_stderr_line" in snapshot.get("stderr"):
@@ -282,7 +282,7 @@ process_results["streaming_output"]["read_output_visible_before_wait"] = (
 )
 
 # Default drain=True should consume buffered bytes.
-drained_chunk = process_read_output(streaming_handle)
+drained_chunk = process_read_lines(streaming_handle)
 process_results["streaming_output"]["read_output_default_drain_stdout"] = (
     "live_stdout_line" in drained_chunk.get("stdout")
 )
@@ -291,12 +291,12 @@ process_results["streaming_output"]["read_output_default_drain_stderr"] = (
 )
 
 # After draining, non-destructive snapshot should now be empty.
-post_drain_snapshot = process_read_output(streaming_handle, drain = False)
+post_drain_snapshot = process_read_lines(streaming_handle, drain = False)
 process_results["streaming_output"]["read_output_drain_clears_stdout"] = (
-    post_drain_snapshot.get("stdout") == ""
+    post_drain_snapshot.get("stdout") == []
 )
 process_results["streaming_output"]["read_output_drain_clears_stderr"] = (
-    post_drain_snapshot.get("stderr") == ""
+    post_drain_snapshot.get("stderr") == []
 )
 
 # Cleanup process handle.
