@@ -171,7 +171,8 @@ def process_options(
         stdout: str | dict | None = None,
         stderr: str | dict | None = None,
         timeout_ms: int | None = None,
-        check: bool = False) -> dict:
+        check: bool = False,
+        allow_orphans: bool | None = None) -> dict:
     """
     Build a typed options dictionary for process execution.
 
@@ -192,6 +193,9 @@ def process_options(
             or process_stderr_file(path).
         timeout_ms: Maximum time in milliseconds (default: None).
         check: Raise error on non-zero exit (default: False).
+        allow_orphans: For process_spawn only. If True, allow child process to
+            outlive the parent program. If omitted/False, spawned processes are
+            terminated when the parent exits.
 
     Returns:
         dict: A complete options dictionary for process execution
@@ -253,6 +257,9 @@ def process_options(
 
     if check != False:
         options["check"] = check
+
+    if allow_orphans != None:
+        options["allow_orphans"] = allow_orphans
 
     return options
 
@@ -364,6 +371,9 @@ def process_spawn(options: dict) -> int:
     This function starts a process in the background and returns a handle that can
     be used with process_is_running, process_kill, and process_wait to manage the
     process. By default, stdout and stderr are inherited (shown to the user).
+
+    Unless `allow_orphans=True` is provided in options, spawned processes are
+    automatically terminated when the parent Spaces process exits.
 
     Args:
         options: Use the return value of process_options().

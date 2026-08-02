@@ -177,6 +177,42 @@ process_results["background_processes"]["wait_stdout_content"] = (
     "spawned process" in wait_result.get("stdout")
 )
 
+# Test: spawn accepts allow_orphans=False explicitly and process can be managed.
+allow_orphans_false_handle = process_spawn(process_options(
+    "sleep",
+    args = ["30"],
+    allow_orphans = False,
+))
+process_results["background_processes"]["spawn_allow_orphans_false_handle"] = (
+    allow_orphans_false_handle > 0
+)
+process_results["background_processes"]["spawn_allow_orphans_false_running"] = (
+    process_is_running(allow_orphans_false_handle)
+)
+process_kill(allow_orphans_false_handle, "SIGKILL")
+allow_orphans_false_wait = process_wait(allow_orphans_false_handle)
+process_results["background_processes"]["spawn_allow_orphans_false_wait_nonzero"] = (
+    allow_orphans_false_wait.get("status") != 0
+)
+
+# Test: spawn accepts allow_orphans=True explicitly and process can be managed.
+allow_orphans_true_handle = process_spawn(process_options(
+    "sleep",
+    args = ["30"],
+    allow_orphans = True,
+))
+process_results["background_processes"]["spawn_allow_orphans_true_handle"] = (
+    allow_orphans_true_handle > 0
+)
+process_results["background_processes"]["spawn_allow_orphans_true_running"] = (
+    process_is_running(allow_orphans_true_handle)
+)
+process_kill(allow_orphans_true_handle, "SIGKILL")
+allow_orphans_true_wait = process_wait(allow_orphans_true_handle)
+process_results["background_processes"]["spawn_allow_orphans_true_wait_nonzero"] = (
+    allow_orphans_true_wait.get("status") != 0
+)
+
 # ============================================================================
 # Process Management Tests (is_running, kill)
 # ============================================================================
@@ -336,6 +372,7 @@ opts_full = process_options(
     stderr = process_stderr_capture(),
     timeout_ms = 5000,
     check = True,
+    allow_orphans = True,
 )
 process_results["options_builder"]["full_options"] = (
     opts_full.get("command") == "echo" and
@@ -346,7 +383,8 @@ process_results["options_builder"]["full_options"] = (
     opts_full.get("stdout") == "capture" and
     opts_full.get("stderr") == "capture" and
     opts_full.get("timeout_ms") == 5000 and
-    opts_full.get("check") == True
+    opts_full.get("check") == True and
+    opts_full.get("allow_orphans") == True
 )
 
 # Test process_options builder — default values are NOT included in the dict
@@ -359,7 +397,19 @@ process_results["options_builder"]["defaults_omitted"] = (
     "stdout" not in opts_defaults and
     "stderr" not in opts_defaults and
     "timeout_ms" not in opts_defaults and
-    "check" not in opts_defaults
+    "check" not in opts_defaults and
+    "allow_orphans" not in opts_defaults
+)
+
+# Test process_options builder — with allow_orphans True/False
+opts_allow_orphans_true = process_options("echo", allow_orphans = True)
+process_results["options_builder"]["options_with_allow_orphans_true"] = (
+    opts_allow_orphans_true.get("allow_orphans") == True
+)
+
+opts_allow_orphans_false = process_options("echo", allow_orphans = False)
+process_results["options_builder"]["options_with_allow_orphans_false"] = (
+    opts_allow_orphans_false.get("allow_orphans") == False
 )
 
 # Test process_run using a process_options-built dict

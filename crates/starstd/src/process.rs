@@ -38,6 +38,7 @@ pub struct RunOptions {
     pub stdout_path: Option<String>,
     pub stderr_path: Option<String>,
     pub tee: Option<bool>,
+    pub allow_orphans: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,13 +70,47 @@ struct ChildHandle {
     child: Child,
     started: Instant,
     merge_stderr: bool,
+    allow_orphans: bool,
 }
 
 static PROCESS_REGISTRY: OnceLock<Mutex<HashMap<u64, ChildHandle>>> = OnceLock::new();
 static NEXT_HANDLE_ID: AtomicU64 = AtomicU64::new(1);
+static EXIT_CLEANUP_REGISTERED: OnceLock<bool> = OnceLock::new();
 
 fn process_registry() -> &'static Mutex<HashMap<u64, ChildHandle>> {
     PROCESS_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+extern "C" fn cleanup_spawned_processes_on_exit() {
+    let Ok(mut registry) = process_registry().lock() else {
+        return;
+    };
+
+    for (_, mut entry) in registry.drain() {
+        if entry.allow_orphans {
+            continue;
+        }
+
+        if let Ok(Some(_)) = entry.child.try_wait() {
+            continue;
+        }
+
+        let _ = entry.child.kill();
+        let _ = entry.child.wait();
+    }
+}
+
+fn ensure_exit_cleanup_registered() -> anyhow::Result<()> {
+    let registered = EXIT_CLEANUP_REGISTERED.get_or_init(|| {
+        // SAFETY: `cleanup_spawned_processes_on_exit` has C ABI and no captured state.
+        unsafe { libc::atexit(cleanup_spawned_processes_on_exit) == 0 }
+    });
+
+    if *registered {
+        Ok(())
+    } else {
+        bail!("failed to register process exit cleanup hook")
+    }
 }
 
 /// Build a `Command` and run it, capturing/streaming output per `opts`.
@@ -548,12 +583,17 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             stdout_path: None,
             stderr_path: None,
             tee: None,
+            allow_orphans: None,
         })?;
 
         Ok(outcome.stdout.trim().to_string())
     }
 
     /// Spawn a background process and return an opaque numeric handle.
+    ///
+    /// By default (`allow_orphans` omitted/false), spawned processes are
+    /// terminated automatically when the parent program exits. Set
+    /// `allow_orphans` to true to opt out.
     ///
     /// Example:
     /// handle = process.spawn({"command": "server", "args": ["--port", "8080"]})
@@ -566,6 +606,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         }
         let opts: RunOptions = serde_json::from_value(options.to_json_value()?)
             .map_err(|err| format_error!("while parsing options for spawn because {err:?}"))?;
+
+        ensure_exit_cleanup_registered()?;
+        let allow_orphans = opts.allow_orphans.unwrap_or(false);
 
         let (mut cmd, stdin_payload) = build_command(
             &opts.command,
@@ -674,6 +717,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 child,
                 started: Instant::now(),
                 merge_stderr,
+                allow_orphans,
             },
         );
 
