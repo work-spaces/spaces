@@ -35,8 +35,8 @@ Examples:
         "stderr": process_stderr_capture(),
     }, allow_orphans = False)
     if process_is_running(handle):
-        chunk = process_read_lines(handle)  # drain=True by default
-        print(chunk["stdout"])
+        stdout_lines = process_read_lines(handle, "stdout")  # drain=True by default
+        print(stdout_lines)
     result = process_wait(handle, timeout_ms = 5000)
 
     # Command pipelines
@@ -85,6 +85,15 @@ def process_stdout_null() -> str:
         str: The string "null" for use in process options
     """
     return "null"
+
+def process_stream_stdout() -> str:
+    """
+    Stream identifier for standard output.
+
+    Returns:
+        str: The string "stdout" for use with process stream APIs
+    """
+    return "stdout"
 
 def process_stdout_file(path: str) -> dict:
     """
@@ -136,6 +145,15 @@ def process_stderr_null() -> str:
         str: The string "null" for use in process options
     """
     return "null"
+
+def process_stream_stderr() -> str:
+    """
+    Stream identifier for standard error.
+
+    Returns:
+        str: The string "stderr" for use with process stream APIs
+    """
+    return "stderr"
 
 def process_stderr_merge() -> str:
     """
@@ -455,7 +473,11 @@ def process_spawn(options: dict, allow_orphans: bool | None = None) -> int:
         opts["allow_orphans"] = allow_orphans
     return process.spawn(opts)
 
-def process_read_lines(handle: int, drain: bool = True) -> dict:
+def process_read_lines(
+        handle: int,
+        stream: str,
+        drain: bool = True,
+        max_lines: int | None = None) -> list[str]:
     """
     Read currently available captured output lines from a spawned background process.
 
@@ -464,22 +486,24 @@ def process_read_lines(handle: int, drain: bool = True) -> dict:
 
     Args:
         handle: The process handle returned by process_spawn.
-        drain: Whether to consume returned lines from internal buffers
+        stream: Which stream to read. Must be "stdout" or "stderr".
+        drain: Whether to consume returned lines from internal buffer
             (default: True).
             - True: Return and remove currently available complete lines.
             - False: Return a snapshot without consuming.
+        max_lines: Optional cap on returned lines (default: None).
+            - None: Return all currently available complete lines.
+            - N: Return at most N complete lines.
 
     Returns:
-        dict: A dictionary with keys:
-            - stdout (list[str]): Complete stdout lines
-            - stderr (list[str]): Complete stderr lines (or empty when merged)
+        list[str]: Complete lines from the selected stream.
 
     Raises:
         Error: If the handle is invalid or output buffers cannot be accessed
 
     Notes:
-        - When stderr mode is "merge" (non-file), stderr lines are appended to
-          stdout and the returned stderr field is empty.
+        - When stderr mode is "merge" (non-file), merged stderr output is read
+          through the "stdout" stream.
         - Since drain defaults to True, repeated calls typically return only new
           complete lines since the previous read.
 
@@ -492,16 +516,18 @@ def process_read_lines(handle: int, drain: bool = True) -> dict:
         })
 
         while process_is_running(handle):
-            chunk = process_read_lines(handle)
-            for line in chunk["stdout"]:
+            stdout_chunk = process_read_lines(handle, "stdout", max_lines = 50)
+            for line in stdout_chunk:
                 print(line)
 
         # Non-destructive snapshot
-        snapshot = process_read_lines(handle, drain = False)
+        snapshot = process_read_lines(handle, "stdout", drain = False)
     """
+    if max_lines != None:
+        return process.read_lines(handle, stream, drain, max_lines)
     if drain == True:
-        return process.read_lines(handle)
-    return process.read_lines(handle, drain)
+        return process.read_lines(handle, stream)
+    return process.read_lines(handle, stream, drain)
 
 def process_is_running(handle: int) -> bool:
     """
