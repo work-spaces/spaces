@@ -225,51 +225,69 @@ pub fn is_star_file(path: &str) -> bool {
     path.ends_with(STAR_FILE_SUFFIX)
 }
 
-pub fn get_workspace_path(workspace_path: &str, current_path: &str, target_path: &str) -> Arc<str> {
+fn normalize_path(path: &std::path::Path) -> std::path::PathBuf {
+    path.components()
+        .fold(std::path::PathBuf::new(), |mut acc, c| {
+            match c {
+                std::path::Component::ParentDir => {
+                    acc.pop();
+                }
+                std::path::Component::CurDir => {}
+                _ => acc.push(c),
+            }
+            acc
+        })
+}
+
+pub fn resolve_load_path(workspace_path: &str, current_path: &str, target_path: &str) -> Arc<str> {
     if let Some(target_path) = target_path.strip_prefix("//") {
-        // Strip the "//" prefix from workspace-absolute paths and concatenate with workspace_path
-        format!("{}/{}", workspace_path, target_path).into()
-    } else {
-        // Helper closure to normalize a path by resolving `.` and `..` components
-        let normalize_path = |path: &std::path::Path| -> std::path::PathBuf {
-            path.components()
-                .fold(std::path::PathBuf::new(), |mut acc, c| {
-                    match c {
-                        std::path::Component::ParentDir => {
-                            acc.pop();
-                        }
-                        std::path::Component::CurDir => {}
-                        _ => acc.push(c),
-                    }
-                    acc
-                })
-        };
-
-        let is_current_path_absolute = std::path::Path::new(current_path).is_absolute();
-
-        // First normalize current_path to remove any .. and . components
-        let normalized_current = normalize_path(std::path::Path::new(current_path));
-
-        // Get the parent of the normalized current path
-        let normalized = if let Some(parent) = normalized_current.parent() {
-            let joined = parent.join(target_path);
-            // Normalize the joined path
-            normalize_path(&joined).to_string_lossy().to_string()
+        let workspace_root = std::path::Path::new(workspace_path);
+        let resolved_workspace_root = if workspace_root.is_absolute() {
+            workspace_root.to_path_buf()
         } else {
-            // If there's no parent, just normalize the target_path
-            normalize_path(std::path::Path::new(target_path))
-                .to_string_lossy()
-                .to_string()
+            std::env::current_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                .join(workspace_root)
         };
-
-        // Script mode can pass absolute file paths (e.g. shebang execution).
-        // Preserve leading '/' in that case so sibling loads resolve on disk.
-        if is_current_path_absolute {
-            normalized.into()
-        } else {
-            normalized.trim_start_matches('/').into()
-        }
+        return normalize_path(&resolved_workspace_root.join(target_path))
+            .to_string_lossy()
+            .into();
     }
+
+    let target_path = std::path::Path::new(target_path);
+    if target_path.is_absolute() {
+        return normalize_path(target_path).to_string_lossy().into();
+    }
+
+    let current_path = std::path::Path::new(current_path);
+    let base_path = if current_path.is_absolute() {
+        current_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("/"))
+            .to_path_buf()
+    } else {
+        let workspace_root = std::path::Path::new(workspace_path);
+        let resolved_workspace_root = if workspace_root.is_absolute() {
+            workspace_root.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                .join(workspace_root)
+        };
+
+        let current_parent = current_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."));
+        if current_parent == std::path::Path::new(".") {
+            resolved_workspace_root
+        } else {
+            resolved_workspace_root.join(current_parent)
+        }
+    };
+
+    normalize_path(&base_path.join(target_path))
+        .to_string_lossy()
+        .into()
 }
 
 fn get_unique() -> anyhow::Result<String> {
@@ -1451,22 +1469,12 @@ mod tests {
     }
 
     #[test]
-    fn get_workspace_path_preserves_absolute_current_path_for_relative_loads() {
-        let path = get_workspace_path(
+    fn resolve_load_path_uses_current_module_directory_for_relative_loads() {
+        let path = resolve_load_path(
             "/workspace",
-            "/tmp/scripts/tool.exec.star",
-            "./helpers.star",
+            "/workspace/simaf/internal/afas.star",
+            "spawner.star",
         );
-        assert_eq!(path.as_ref(), "/tmp/scripts/helpers.star");
-    }
-
-    #[test]
-    fn get_workspace_path_keeps_workspace_relative_behavior_for_relative_current_path() {
-        let path = get_workspace_path(
-            "/workspace",
-            "spaces/tools/tool.exec.star",
-            "./helpers.star",
-        );
-        assert_eq!(path.as_ref(), "spaces/tools/helpers.star");
+        assert_eq!(path.as_ref(), "/workspace/simaf/internal/spawner.star");
     }
 }

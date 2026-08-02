@@ -343,7 +343,7 @@ impl Git {
                     .is_enabled(features::Feature::SkipForceFetchTags);
 
                 existing_repo
-                    .fetch_with_tags(progress, force_fetch_tags)
+                    .fetch_with_tags(progress, force_fetch_tags, git::IgnoreSubmodules::Yes)
                     .context(format_context!(
                         "while fetching updates in existing workspace"
                     ))?;
