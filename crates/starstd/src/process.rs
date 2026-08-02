@@ -258,22 +258,6 @@ fn read_output_lines(
     Ok(lines)
 }
 
-fn read_captured_lines(
-    entry: &ChildHandle,
-    drain: bool,
-    max_lines: Option<usize>,
-) -> anyhow::Result<(Vec<String>, Vec<String>)> {
-    let mut stdout_lines = read_output_lines(&entry.stdout_buf, drain, max_lines)?;
-    let stderr_lines = read_output_lines(&entry.stderr_buf, drain, max_lines)?;
-
-    if entry.merge_stderr {
-        stdout_lines.extend(stderr_lines);
-        Ok((stdout_lines, Vec::new()))
-    } else {
-        Ok((stdout_lines, stderr_lines))
-    }
-}
-
 /// Build a `Command` and run it, capturing/streaming output per `opts`.
 fn execute_run(opts: RunOptions) -> anyhow::Result<RunOutcome> {
     let started = Instant::now();
@@ -949,30 +933,28 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
     /// Read currently available captured output lines for a running background process.
     ///
+    /// `stream` must be either "stdout" or "stderr" and determines which captured
+    /// stream is read.
+    ///
     /// Returns only complete lines (newline-terminated). Any trailing partial line
     /// remains buffered for the next call.
     ///
     /// By default (`drain` omitted/true), returned complete lines are consumed from the
-    /// internal buffers. Set `drain` to false to snapshot complete lines without consuming.
+    /// selected stream's internal buffer. Set `drain` to false to snapshot complete
+    /// lines without consuming.
     ///
-    /// Set `max_lines` to limit each stream to at most that many complete lines.
+    /// Set `max_lines` to limit returned complete lines from the selected stream.
     /// If omitted, all currently available complete lines are returned.
-    fn read_lines<'v>(
+    fn read_lines(
         handle: u64,
+        stream: &str,
         drain: Option<bool>,
         max_lines: Option<u64>,
-        eval: &mut Evaluator<'v, '_, '_>,
-    ) -> anyhow::Result<Value<'v>> {
+    ) -> anyhow::Result<Vec<String>> {
         if is_lsp_mode() {
-            let heap = eval.heap();
-            let result = serde_json::json!({
-                "stdout": [],
-                "stderr": [],
-            });
-            return Ok(heap.alloc(result));
+            return Ok(Vec::new());
         }
 
-        let heap = eval.heap();
         let drain = drain.unwrap_or(true);
         let max_lines = max_lines
             .map(usize::try_from)
@@ -987,13 +969,24 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             bail!("unknown process handle: {handle}");
         };
 
-        let (stdout, stderr) = read_captured_lines(entry, drain, max_lines)?;
-
-        let result = serde_json::json!({
-            "stdout": stdout,
-            "stderr": stderr,
-        });
-        Ok(heap.alloc(result))
+        match stream {
+            "stdout" => {
+                let mut stdout_lines = read_output_lines(&entry.stdout_buf, drain, max_lines)?;
+                if entry.merge_stderr {
+                    let stderr_lines = read_output_lines(&entry.stderr_buf, drain, max_lines)?;
+                    stdout_lines.extend(stderr_lines);
+                }
+                Ok(stdout_lines)
+            }
+            "stderr" => {
+                if entry.merge_stderr {
+                    Ok(Vec::new())
+                } else {
+                    read_output_lines(&entry.stderr_buf, drain, max_lines)
+                }
+            }
+            _ => bail!("invalid stream: {stream}; expected \"stdout\" or \"stderr\""),
+        }
     }
 
     /// Returns true if the process associated with the handle is still running.

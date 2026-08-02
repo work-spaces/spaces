@@ -269,10 +269,11 @@ seen_stderr = False
 for _ in range(800):
     if not process_is_running(streaming_handle):
         break
-    snapshot = process_read_lines(streaming_handle, drain = False)
-    if "live_stdout_line" in snapshot.get("stdout"):
+    snapshot_stdout = process_read_lines(streaming_handle, "stdout", drain = False)
+    snapshot_stderr = process_read_lines(streaming_handle, "stderr", drain = False)
+    if "live_stdout_line" in snapshot_stdout:
         seen_stdout = True
-    if "live_stderr_line" in snapshot.get("stderr"):
+    if "live_stderr_line" in snapshot_stderr:
         seen_stderr = True
     if seen_stdout and seen_stderr:
         break
@@ -282,21 +283,23 @@ process_results["streaming_output"]["read_output_visible_before_wait"] = (
 )
 
 # Default drain=True should consume buffered bytes.
-drained_chunk = process_read_lines(streaming_handle)
+drained_stdout = process_read_lines(streaming_handle, "stdout")
+drained_stderr = process_read_lines(streaming_handle, "stderr")
 process_results["streaming_output"]["read_output_default_drain_stdout"] = (
-    "live_stdout_line" in drained_chunk.get("stdout")
+    "live_stdout_line" in drained_stdout
 )
 process_results["streaming_output"]["read_output_default_drain_stderr"] = (
-    "live_stderr_line" in drained_chunk.get("stderr")
+    "live_stderr_line" in drained_stderr
 )
 
 # After draining, non-destructive snapshot should now be empty.
-post_drain_snapshot = process_read_lines(streaming_handle, drain = False)
+post_drain_stdout = process_read_lines(streaming_handle, "stdout", drain = False)
+post_drain_stderr = process_read_lines(streaming_handle, "stderr", drain = False)
 process_results["streaming_output"]["read_output_drain_clears_stdout"] = (
-    post_drain_snapshot.get("stdout") == []
+    post_drain_stdout == []
 )
 process_results["streaming_output"]["read_output_drain_clears_stderr"] = (
-    post_drain_snapshot.get("stderr") == []
+    post_drain_stderr == []
 )
 
 # Test: max_lines limits how many complete lines are returned and drained per call.
@@ -313,22 +316,25 @@ process_results["streaming_output"]["read_output_max_lines_handle_created"] = (
 # Give the spawned process a moment to emit lines before reading.
 process_run(process_options("sleep", args = ["1"]))
 
-max_lines_first = process_read_lines(max_lines_handle, max_lines = 2)
+max_lines_first = process_read_lines(max_lines_handle, "stdout", max_lines = 2)
+max_lines_first_stderr = process_read_lines(max_lines_handle, "stderr", max_lines = 2)
 process_results["streaming_output"]["read_output_max_lines_first_chunk"] = (
-    max_lines_first.get("stdout") == ["max_lines_1", "max_lines_2"] and
-    max_lines_first.get("stderr") == []
+    max_lines_first == ["max_lines_1", "max_lines_2"] and
+    max_lines_first_stderr == []
 )
 
-max_lines_second = process_read_lines(max_lines_handle, max_lines = 2)
+max_lines_second = process_read_lines(max_lines_handle, "stdout", max_lines = 2)
+max_lines_second_stderr = process_read_lines(max_lines_handle, "stderr", max_lines = 2)
 process_results["streaming_output"]["read_output_max_lines_second_chunk"] = (
-    max_lines_second.get("stdout") == ["max_lines_3"] and
-    max_lines_second.get("stderr") == []
+    max_lines_second == ["max_lines_3"] and
+    max_lines_second_stderr == []
 )
 
-max_lines_after = process_read_lines(max_lines_handle, drain = False)
+max_lines_after_stdout = process_read_lines(max_lines_handle, "stdout", drain = False)
+max_lines_after_stderr = process_read_lines(max_lines_handle, "stderr", drain = False)
 process_results["streaming_output"]["read_output_max_lines_drain_preserves_remainder"] = (
-    max_lines_after.get("stdout") == [] and
-    max_lines_after.get("stderr") == []
+    max_lines_after_stdout == [] and
+    max_lines_after_stderr == []
 )
 
 # Test: max_lines with drain=False does not consume data.
@@ -347,22 +353,24 @@ process_run(process_options("sleep", args = ["1"]))
 
 max_lines_nondrain_first = process_read_lines(
     max_lines_nondrain_handle,
+    "stdout",
     drain = False,
     max_lines = 1,
 )
 max_lines_nondrain_second = process_read_lines(
     max_lines_nondrain_handle,
+    "stdout",
     drain = False,
     max_lines = 1,
 )
-max_lines_nondrain_final = process_read_lines(max_lines_nondrain_handle)
+max_lines_nondrain_final = process_read_lines(max_lines_nondrain_handle, "stdout")
 
 process_results["streaming_output"]["read_output_max_lines_nondrain_snapshot"] = (
-    max_lines_nondrain_first.get("stdout") == ["max_lines_snapshot_1"] and
-    max_lines_nondrain_second.get("stdout") == ["max_lines_snapshot_1"]
+    max_lines_nondrain_first == ["max_lines_snapshot_1"] and
+    max_lines_nondrain_second == ["max_lines_snapshot_1"]
 )
 process_results["streaming_output"]["read_output_max_lines_nondrain_not_consumed"] = (
-    max_lines_nondrain_final.get("stdout") == ["max_lines_snapshot_1", "max_lines_snapshot_2"]
+    max_lines_nondrain_final == ["max_lines_snapshot_1", "max_lines_snapshot_2"]
 )
 
 # Cleanup process handles.
