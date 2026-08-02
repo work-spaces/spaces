@@ -40,6 +40,7 @@ pub struct RunOptions {
     pub stderr_path: Option<String>,
     pub tee: Option<bool>,
     pub allow_orphans: Option<bool>,
+    pub output_buffer_limit_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -83,6 +84,8 @@ static PROCESS_REGISTRY: OnceLock<Mutex<HashMap<u64, ChildHandle>>> = OnceLock::
 static NEXT_HANDLE_ID: AtomicU64 = AtomicU64::new(1);
 static EXIT_CLEANUP_REGISTERED: OnceLock<bool> = OnceLock::new();
 
+const DEFAULT_SPAWN_OUTPUT_BUFFER_LIMIT_BYTES: usize = 1024 * 1024;
+
 fn process_registry() -> &'static Mutex<HashMap<u64, ChildHandle>> {
     PROCESS_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
 }
@@ -121,9 +124,35 @@ fn ensure_exit_cleanup_registered() -> anyhow::Result<()> {
     }
 }
 
+fn append_bounded(buffer: &mut Vec<u8>, chunk: &[u8], max_bytes: usize) {
+    if max_bytes == 0 {
+        buffer.clear();
+        return;
+    }
+
+    if chunk.len() >= max_bytes {
+        buffer.clear();
+        buffer.extend_from_slice(&chunk[chunk.len() - max_bytes..]);
+        return;
+    }
+
+    let required_len = buffer.len().saturating_add(chunk.len());
+    if required_len > max_bytes {
+        let overflow = required_len - max_bytes;
+        if overflow >= buffer.len() {
+            buffer.clear();
+        } else {
+            buffer.drain(..overflow);
+        }
+    }
+
+    buffer.extend_from_slice(chunk);
+}
+
 fn spawn_output_pump<R: Read + Send + 'static>(
     mut reader: R,
     buffer: Arc<Mutex<Vec<u8>>>,
+    max_bytes: usize,
     tee: bool,
     tee_to_stdout: bool,
 ) -> JoinHandle<anyhow::Result<()>> {
@@ -142,7 +171,7 @@ fn spawn_output_pump<R: Read + Send + 'static>(
                 let mut guard = buffer
                     .lock()
                     .map_err(|_| anyhow::anyhow!("process output buffer lock poisoned"))?;
-                guard.extend_from_slice(&chunk[..n]);
+                append_bounded(&mut guard, &chunk[..n], max_bytes);
             }
 
             if tee {
@@ -701,6 +730,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             stderr_path: None,
             tee: None,
             allow_orphans: None,
+            output_buffer_limit_bytes: None,
         })?;
 
         Ok(outcome.stdout.trim().to_string())
@@ -711,6 +741,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// By default (`allow_orphans` omitted/false), spawned processes are
     /// terminated automatically when the parent program exits. Set
     /// `allow_orphans` to true to opt out.
+    ///
+    /// Captured output for spawned processes is buffered in-memory per stream
+    /// and is bounded to 1 MiB by default. Override with
+    /// `output_buffer_limit_bytes` in options (`0` disables in-memory buffering).
     ///
     /// Example:
     /// handle = process.spawn({"command": "server", "args": ["--port", "8080"]})
@@ -727,6 +761,14 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         ensure_exit_cleanup_registered()?;
         let allow_orphans = opts.allow_orphans.unwrap_or(false);
         let tee = opts.tee.unwrap_or(false);
+        let output_buffer_limit_bytes = opts
+            .output_buffer_limit_bytes
+            .map(usize::try_from)
+            .transpose()
+            .map_err(|_| {
+                anyhow::anyhow!("output_buffer_limit_bytes is too large for this platform's usize")
+            })?
+            .unwrap_or(DEFAULT_SPAWN_OUTPUT_BUFFER_LIMIT_BYTES);
 
         let (mut cmd, stdin_payload) = build_command(
             &opts.command,
@@ -842,6 +884,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             Some(spawn_output_pump(
                 stdout,
                 Arc::clone(&stdout_buf),
+                output_buffer_limit_bytes,
                 tee,
                 true,
             ))
@@ -859,6 +902,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             Some(spawn_output_pump(
                 stderr,
                 Arc::clone(&stderr_buf),
+                output_buffer_limit_bytes,
                 tee,
                 tee_to_stdout,
             ))

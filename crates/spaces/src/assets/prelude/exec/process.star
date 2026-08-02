@@ -176,7 +176,8 @@ def process_options(
         timeout_ms: int | None = None,
         check: bool = False,
         tee: bool | None = None,
-        allow_orphans: bool | None = None) -> dict:
+        allow_orphans: bool | None = None,
+        output_buffer_limit_bytes: int | None = None) -> dict:
     """
     Build a typed options dictionary for process execution.
 
@@ -203,6 +204,9 @@ def process_options(
         allow_orphans: For process_spawn only. If True, allow child process to
             outlive the parent program. If omitted/False, spawned processes are
             terminated when the parent exits.
+        output_buffer_limit_bytes: For process_spawn only. Per-stream cap for
+            in-memory captured output buffers when using capture/merge piping.
+            Default is 1048576 (1 MiB). Set to 0 to disable in-memory buffering.
 
     Returns:
         dict: A complete options dictionary for process execution
@@ -239,13 +243,14 @@ def process_options(
         )
         result = process_run(opts)
 
-        # Spawn with live tee and orphan policy
+        # Spawn with live tee, bounded output buffer, and orphan policy
         opts = process_options(
             "dev_server",
             stdout=process_stdout_capture(),
             stderr=process_stderr_capture(),
             tee=True,
             allow_orphans=False,
+            output_buffer_limit_bytes=4 * 1024 * 1024,
         )
         handle = process_spawn(opts)
     """
@@ -280,6 +285,9 @@ def process_options(
 
     if allow_orphans != None:
         options["allow_orphans"] = allow_orphans
+
+    if output_buffer_limit_bytes != None:
+        options["output_buffer_limit_bytes"] = output_buffer_limit_bytes
 
     return options
 
@@ -396,6 +404,11 @@ def process_spawn(options: dict, allow_orphans: bool | None = None) -> int:
     Unless `allow_orphans=True` is provided (either in options or via the named
     function argument), spawned processes are automatically terminated when the
     parent Spaces process exits.
+
+    Captured output buffers for spawned processes are bounded in-memory to 1 MiB
+    per stream by default. Override with `output_buffer_limit_bytes` in options,
+    or set it to 0 to disable in-memory buffering while still allowing tee/file
+    output modes.
 
     Args:
         options: Use the return value of process_options().
