@@ -245,6 +245,8 @@ pub fn get_workspace_path(workspace_path: &str, current_path: &str, target_path:
                 })
         };
 
+        let is_current_path_absolute = std::path::Path::new(current_path).is_absolute();
+
         // First normalize current_path to remove any .. and . components
         let normalized_current = normalize_path(std::path::Path::new(current_path));
 
@@ -260,7 +262,13 @@ pub fn get_workspace_path(workspace_path: &str, current_path: &str, target_path:
                 .to_string()
         };
 
-        normalized.trim_start_matches("/").into()
+        // Script mode can pass absolute file paths (e.g. shebang execution).
+        // Preserve leading '/' in that case so sibling loads resolve on disk.
+        if is_current_path_absolute {
+            normalized.into()
+        } else {
+            normalized.trim_start_matches('/').into()
+        }
     }
 }
 
@@ -1440,5 +1448,25 @@ mod tests {
             "//spaces/1.checkout:install-spaces",
             "//spaces"
         ));
+    }
+
+    #[test]
+    fn get_workspace_path_preserves_absolute_current_path_for_relative_loads() {
+        let path = get_workspace_path(
+            "/workspace",
+            "/tmp/scripts/tool.exec.star",
+            "./helpers.star",
+        );
+        assert_eq!(path.as_ref(), "/tmp/scripts/helpers.star");
+    }
+
+    #[test]
+    fn get_workspace_path_keeps_workspace_relative_behavior_for_relative_current_path() {
+        let path = get_workspace_path(
+            "/workspace",
+            "spaces/tools/tool.exec.star",
+            "./helpers.star",
+        );
+        assert_eq!(path.as_ref(), "spaces/tools/helpers.star");
     }
 }
