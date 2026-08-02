@@ -11,6 +11,7 @@ load(
     "process_kill",
     "process_options",
     "process_pipeline",
+    "process_read_output",
     "process_run",
     "process_spawn",
     "process_stderr_capture",
@@ -34,6 +35,7 @@ process_results = {
     "working_directory": {},
     "background_processes": {},
     "process_management": {},
+    "streaming_output": {},
     "pipelines": {},
     "options_builder": {},
     "stdout_helpers": {},
@@ -177,7 +179,7 @@ process_results["background_processes"]["wait_stdout_content"] = (
     "spawned process" in wait_result.get("stdout")
 )
 
-# Test: spawn accepts allow_orphans=False explicitly and process can be managed.
+# Test: spawn accepts allow_orphans=False in options and process can be managed.
 allow_orphans_false_handle = process_spawn(process_options(
     "sleep",
     args = ["30"],
@@ -195,7 +197,7 @@ process_results["background_processes"]["spawn_allow_orphans_false_wait_nonzero"
     allow_orphans_false_wait.get("status") != 0
 )
 
-# Test: spawn accepts allow_orphans=True explicitly and process can be managed.
+# Test: spawn accepts allow_orphans=True in options and process can be managed.
 allow_orphans_true_handle = process_spawn(process_options(
     "sleep",
     args = ["30"],
@@ -211,6 +213,97 @@ process_kill(allow_orphans_true_handle, "SIGKILL")
 allow_orphans_true_wait = process_wait(allow_orphans_true_handle)
 process_results["background_processes"]["spawn_allow_orphans_true_wait_nonzero"] = (
     allow_orphans_true_wait.get("status") != 0
+)
+
+# Test: spawn named argument API for allow_orphans is accepted.
+spawn_allow_orphans_arg_false = process_spawn(
+    process_options("sleep", args = ["30"]),
+    allow_orphans = False,
+)
+process_results["background_processes"]["spawn_allow_orphans_arg_false_handle"] = (
+    spawn_allow_orphans_arg_false > 0
+)
+process_results["background_processes"]["spawn_allow_orphans_arg_false_running"] = (
+    process_is_running(spawn_allow_orphans_arg_false)
+)
+process_kill(spawn_allow_orphans_arg_false, "SIGKILL")
+spawn_allow_orphans_arg_false_wait = process_wait(spawn_allow_orphans_arg_false)
+process_results["background_processes"]["spawn_allow_orphans_arg_false_wait_nonzero"] = (
+    spawn_allow_orphans_arg_false_wait.get("status") != 0
+)
+
+spawn_allow_orphans_arg_true = process_spawn(
+    process_options("sleep", args = ["30"]),
+    allow_orphans = True,
+)
+process_results["background_processes"]["spawn_allow_orphans_arg_true_handle"] = (
+    spawn_allow_orphans_arg_true > 0
+)
+process_results["background_processes"]["spawn_allow_orphans_arg_true_running"] = (
+    process_is_running(spawn_allow_orphans_arg_true)
+)
+process_kill(spawn_allow_orphans_arg_true, "SIGKILL")
+spawn_allow_orphans_arg_true_wait = process_wait(spawn_allow_orphans_arg_true)
+process_results["background_processes"]["spawn_allow_orphans_arg_true_wait_nonzero"] = (
+    spawn_allow_orphans_arg_true_wait.get("status") != 0
+)
+
+# ============================================================================
+# Streaming Output Tests (process_read_output)
+# ============================================================================
+
+# Spawn a long-running process that writes to both stdout and stderr immediately.
+# Use tee=True to ensure spawn accepts tee while still buffering for read_output().
+streaming_handle = process_spawn(process_options(
+    "sh",
+    args = ["-c", "echo live_stdout_line; echo live_stderr_line >&2; sleep 30"],
+    stdout = process_stdout_capture(),
+    stderr = process_stderr_capture(),
+    tee = True,
+))
+process_results["streaming_output"]["streaming_handle_created"] = streaming_handle > 0
+
+# Poll non-destructively for output visibility while process is still running.
+seen_stdout = False
+seen_stderr = False
+for _ in range(800):
+    if not process_is_running(streaming_handle):
+        break
+    snapshot = process_read_output(streaming_handle, drain = False)
+    if "live_stdout_line" in snapshot.get("stdout"):
+        seen_stdout = True
+    if "live_stderr_line" in snapshot.get("stderr"):
+        seen_stderr = True
+    if seen_stdout and seen_stderr:
+        break
+
+process_results["streaming_output"]["read_output_visible_before_wait"] = (
+    seen_stdout and seen_stderr
+)
+
+# Default drain=True should consume buffered bytes.
+drained_chunk = process_read_output(streaming_handle)
+process_results["streaming_output"]["read_output_default_drain_stdout"] = (
+    "live_stdout_line" in drained_chunk.get("stdout")
+)
+process_results["streaming_output"]["read_output_default_drain_stderr"] = (
+    "live_stderr_line" in drained_chunk.get("stderr")
+)
+
+# After draining, non-destructive snapshot should now be empty.
+post_drain_snapshot = process_read_output(streaming_handle, drain = False)
+process_results["streaming_output"]["read_output_drain_clears_stdout"] = (
+    post_drain_snapshot.get("stdout") == ""
+)
+process_results["streaming_output"]["read_output_drain_clears_stderr"] = (
+    post_drain_snapshot.get("stderr") == ""
+)
+
+# Cleanup process handle.
+process_kill(streaming_handle, "SIGKILL")
+streaming_wait = process_wait(streaming_handle)
+process_results["streaming_output"]["streaming_wait_nonzero_after_kill"] = (
+    streaming_wait.get("status") != 0
 )
 
 # ============================================================================
@@ -361,6 +454,10 @@ process_results["options_builder"]["options_with_stdout"] = opts_capture.get("st
 opts_stderr = process_options("echo", args = ["test"], stderr = process_stderr_merge())
 process_results["options_builder"]["options_with_stderr"] = opts_stderr.get("stderr") == "merge"
 
+# Test process_options builder — with tee
+opts_tee = process_options("echo", args = ["test"], tee = True)
+process_results["options_builder"]["options_with_tee"] = opts_tee.get("tee") == True
+
 # Test process_options builder — full options with all fields set
 opts_full = process_options(
     "echo",
@@ -372,6 +469,7 @@ opts_full = process_options(
     stderr = process_stderr_capture(),
     timeout_ms = 5000,
     check = True,
+    tee = True,
     allow_orphans = True,
 )
 process_results["options_builder"]["full_options"] = (
@@ -384,6 +482,7 @@ process_results["options_builder"]["full_options"] = (
     opts_full.get("stderr") == "capture" and
     opts_full.get("timeout_ms") == 5000 and
     opts_full.get("check") == True and
+    opts_full.get("tee") == True and
     opts_full.get("allow_orphans") == True
 )
 
@@ -398,6 +497,7 @@ process_results["options_builder"]["defaults_omitted"] = (
     "stderr" not in opts_defaults and
     "timeout_ms" not in opts_defaults and
     "check" not in opts_defaults and
+    "tee" not in opts_defaults and
     "allow_orphans" not in opts_defaults
 )
 

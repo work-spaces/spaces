@@ -5,7 +5,7 @@ This module provides ergonomic wrappers around process execution and management.
 It supports:
 - Simple command execution with output capture (exec, capture)
 - Advanced process control (run with redirections and timeouts)
-- Background process management (spawn, is_running, kill, wait)
+- Background process management (spawn, read_output, is_running, kill, wait)
 - Command pipelines (execute commands in series, piping output)
 
 All functions handle errors gracefully and provide clear feedback when something
@@ -27,13 +27,16 @@ Examples:
     # Capture output directly as a string (raises on error)
     output = process_capture(["ls", "-la"])
 
-    # Background process management
+    # Background process management with live output draining
     handle = process_spawn({
         "command": "long_running_task",
         "args": ["--timeout", "300"],
-    })
+        "stdout": process_stdout_capture(),
+        "stderr": process_stderr_capture(),
+    }, allow_orphans = False)
     if process_is_running(handle):
-        print("Process is still running...")
+        chunk = process_read_output(handle)  # drain=True by default
+        print(chunk["stdout"])
     result = process_wait(handle, timeout_ms = 5000)
 
     # Command pipelines
@@ -172,6 +175,7 @@ def process_options(
         stderr: str | dict | None = None,
         timeout_ms: int | None = None,
         check: bool = False,
+        tee: bool | None = None,
         allow_orphans: bool | None = None) -> dict:
     """
     Build a typed options dictionary for process execution.
@@ -193,6 +197,9 @@ def process_options(
             or process_stderr_file(path).
         timeout_ms: Maximum time in milliseconds (default: None).
         check: Raise error on non-zero exit (default: False).
+        tee: Mirror captured output to the parent process streams. For run(),
+            output is mirrored after capture. For spawn() with capture/piped
+            streams, output is mirrored live while still being buffered.
         allow_orphans: For process_spawn only. If True, allow child process to
             outlive the parent program. If omitted/False, spawned processes are
             terminated when the parent exits.
@@ -231,6 +238,16 @@ def process_options(
             stderr=process_stderr_merge(),
         )
         result = process_run(opts)
+
+        # Spawn with live tee and orphan policy
+        opts = process_options(
+            "dev_server",
+            stdout=process_stdout_capture(),
+            stderr=process_stderr_capture(),
+            tee=True,
+            allow_orphans=False,
+        )
+        handle = process_spawn(opts)
     """
     options = {"command": command}
 
@@ -257,6 +274,9 @@ def process_options(
 
     if check != False:
         options["check"] = check
+
+    if tee != None:
+        options["tee"] = tee
 
     if allow_orphans != None:
         options["allow_orphans"] = allow_orphans
@@ -364,19 +384,22 @@ def process_capture(argv: list) -> str:
 # Background Process Management
 # ============================================================================
 
-def process_spawn(options: dict) -> int:
+def process_spawn(options: dict, allow_orphans: bool | None = None) -> int:
     """
     Spawn a background process and return an opaque handle for later management.
 
     This function starts a process in the background and returns a handle that can
-    be used with process_is_running, process_kill, and process_wait to manage the
-    process. By default, stdout and stderr are inherited (shown to the user).
+    be used with process_read_output, process_is_running, process_kill, and
+    process_wait to manage the process. By default, stdout and stderr are
+    inherited (shown to the user).
 
-    Unless `allow_orphans=True` is provided in options, spawned processes are
-    automatically terminated when the parent Spaces process exits.
+    Unless `allow_orphans=True` is provided (either in options or via the named
+    function argument), spawned processes are automatically terminated when the
+    parent Spaces process exits.
 
     Args:
         options: Use the return value of process_options().
+        allow_orphans: Optional override for `options["allow_orphans"]`.
 
     Returns:
         int: An opaque process handle for use with other process functions
@@ -398,13 +421,74 @@ def process_spawn(options: dict) -> int:
             "stderr": {"file": "build.err"},
         })
 
+        # Explicit orphan policy via function argument
+        handle = process_spawn(
+            {
+                "command": "daemon",
+                "stdout": process_stdout_capture(),
+                "stderr": process_stderr_capture(),
+            },
+            allow_orphans = True,
+        )
+
         # Later in your script, manage the process
         if process_is_running(handle):
             print("Build is still running")
         result = process_wait(handle, timeout_ms = 60000)
         print("Build completed with status:", result["status"])
     """
-    return process.spawn(options)
+    opts = dict(options)
+    if allow_orphans != None:
+        opts["allow_orphans"] = allow_orphans
+    return process.spawn(opts)
+
+def process_read_output(handle: int, drain: bool = True) -> dict:
+    """
+    Read currently available captured output from a spawned background process.
+
+    This only returns bytes for streams configured as capture/piped in
+    process_spawn(). For inherited/null/file streams, no in-memory bytes are
+    available and returned fields are empty.
+
+    Args:
+        handle: The process handle returned by process_spawn.
+        drain: Whether to consume bytes from internal buffers (default: True).
+            - True: Return and remove currently buffered bytes.
+            - False: Return a snapshot without consuming.
+
+    Returns:
+        dict: A dictionary with keys:
+            - stdout (str): Available stdout bytes decoded as UTF-8 lossy text
+            - stderr (str): Available stderr bytes (or empty when merged)
+
+    Raises:
+        Error: If the handle is invalid or output buffers cannot be accessed
+
+    Notes:
+        - When stderr mode is "merge" (non-file), stderr bytes are appended to
+          stdout and the returned stderr field is empty.
+        - Since drain defaults to True, repeated calls typically return only new
+          output since the previous read.
+
+    Examples:
+        handle = process_spawn({
+            "command": "long_task",
+            "stdout": process_stdout_capture(),
+            "stderr": process_stderr_capture(),
+            "tee": True,
+        })
+
+        while process_is_running(handle):
+            chunk = process_read_output(handle)
+            if chunk["stdout"] != "":
+                print(chunk["stdout"])
+
+        # Non-destructive snapshot
+        snapshot = process_read_output(handle, drain = False)
+    """
+    if drain == True:
+        return process.read_output(handle)
+    return process.read_output(handle, drain)
 
 def process_is_running(handle: int) -> bool:
     """
@@ -467,6 +551,9 @@ def process_wait(handle: int, timeout_ms = None) -> dict:
     be used again. The returned dictionary includes exit status, output (if
     captured), and execution duration.
 
+    If process_read_output() was called earlier with drain=True (the default),
+    already-consumed bytes will not appear again in this final wait result.
+
     Args:
         handle: The process handle returned by process_spawn
         timeout_ms: Maximum time to wait in milliseconds (optional):
@@ -476,8 +563,8 @@ def process_wait(handle: int, timeout_ms = None) -> dict:
     Returns:
         dict: A result dictionary with the following keys:
             - status (int): Exit code of the process (0 = success)
-            - stdout (str): Captured standard output (empty if not captured)
-            - stderr (str): Captured standard error (empty if not captured)
+            - stdout (str): Remaining captured stdout at wait time
+            - stderr (str): Remaining captured stderr at wait time
             - duration_ms (int): Time from spawn to completion in milliseconds
 
     Raises:
