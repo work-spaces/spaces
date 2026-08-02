@@ -7,10 +7,11 @@ use starlark::environment::GlobalsBuilder;
 use starlark::eval::Evaluator;
 use starlark::values::Value;
 use std::collections::HashMap;
-use std::io::Write;
-use std::process::{Child, Command, Stdio};
+use std::io::{Read, Write};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +39,8 @@ pub struct RunOptions {
     pub stdout_path: Option<String>,
     pub stderr_path: Option<String>,
     pub tee: Option<bool>,
+    pub allow_orphans: Option<bool>,
+    pub output_buffer_limit_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,13 +72,191 @@ struct ChildHandle {
     child: Child,
     started: Instant,
     merge_stderr: bool,
+    allow_orphans: bool,
+    exit_status: Option<ExitStatus>,
+    stdout_buf: Arc<Mutex<Vec<u8>>>,
+    stderr_buf: Arc<Mutex<Vec<u8>>>,
+    stdout_reader: Option<JoinHandle<anyhow::Result<()>>>,
+    stderr_reader: Option<JoinHandle<anyhow::Result<()>>>,
 }
 
 static PROCESS_REGISTRY: OnceLock<Mutex<HashMap<u64, ChildHandle>>> = OnceLock::new();
 static NEXT_HANDLE_ID: AtomicU64 = AtomicU64::new(1);
+static EXIT_CLEANUP_REGISTERED: OnceLock<bool> = OnceLock::new();
+
+const DEFAULT_SPAWN_OUTPUT_BUFFER_LIMIT_BYTES: usize = 1024 * 1024;
 
 fn process_registry() -> &'static Mutex<HashMap<u64, ChildHandle>> {
     PROCESS_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+extern "C" fn cleanup_spawned_processes_on_exit() {
+    let Ok(mut registry) = process_registry().lock() else {
+        return;
+    };
+
+    for (_, mut entry) in registry.drain() {
+        if entry.allow_orphans {
+            continue;
+        }
+
+        if let Ok(Some(_)) = entry.child.try_wait() {
+            continue;
+        }
+
+        let _ = entry.child.kill();
+        let _ = entry.child.wait();
+        let _ = join_output_pump(entry.stdout_reader.take(), "stdout");
+        let _ = join_output_pump(entry.stderr_reader.take(), "stderr");
+    }
+}
+
+fn ensure_exit_cleanup_registered() -> anyhow::Result<()> {
+    let registered = EXIT_CLEANUP_REGISTERED.get_or_init(|| {
+        // SAFETY: `cleanup_spawned_processes_on_exit` has C ABI and no captured state.
+        unsafe { libc::atexit(cleanup_spawned_processes_on_exit) == 0 }
+    });
+
+    if *registered {
+        Ok(())
+    } else {
+        bail!("failed to register process exit cleanup hook")
+    }
+}
+
+fn append_bounded(buffer: &mut Vec<u8>, chunk: &[u8], max_bytes: usize) {
+    if max_bytes == 0 {
+        buffer.clear();
+        return;
+    }
+
+    if chunk.len() >= max_bytes {
+        buffer.clear();
+        buffer.extend_from_slice(&chunk[chunk.len() - max_bytes..]);
+        return;
+    }
+
+    let required_len = buffer.len().saturating_add(chunk.len());
+    if required_len > max_bytes {
+        let overflow = required_len - max_bytes;
+        if overflow >= buffer.len() {
+            buffer.clear();
+        } else {
+            buffer.drain(..overflow);
+        }
+    }
+
+    buffer.extend_from_slice(chunk);
+}
+
+fn spawn_output_pump<R: Read + Send + 'static>(
+    mut reader: R,
+    buffer: Arc<Mutex<Vec<u8>>>,
+    max_bytes: usize,
+    tee: bool,
+    tee_to_stdout: bool,
+) -> JoinHandle<anyhow::Result<()>> {
+    std::thread::spawn(move || {
+        let mut chunk = [0_u8; 8192];
+
+        loop {
+            let n = match reader.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(n) => n,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(anyhow::anyhow!("failed reading child output: {e}")),
+            };
+
+            {
+                let mut guard = buffer
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("process output buffer lock poisoned"))?;
+                append_bounded(&mut guard, &chunk[..n], max_bytes);
+            }
+
+            if tee {
+                if tee_to_stdout {
+                    let _ = std::io::stdout().write_all(&chunk[..n]);
+                    let _ = std::io::stdout().flush();
+                } else {
+                    let _ = std::io::stderr().write_all(&chunk[..n]);
+                    let _ = std::io::stderr().flush();
+                }
+            }
+        }
+
+        Ok(())
+    })
+}
+
+fn join_output_pump(
+    join: Option<JoinHandle<anyhow::Result<()>>>,
+    stream: &str,
+) -> anyhow::Result<()> {
+    let Some(join) = join else {
+        return Ok(());
+    };
+
+    match join.join() {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(err)) => Err(anyhow::anyhow!("{stream} pump failed: {err}")),
+        Err(_) => Err(anyhow::anyhow!("{stream} pump panicked")),
+    }
+}
+
+fn read_output_buffer(buffer: &Arc<Mutex<Vec<u8>>>, drain: bool) -> anyhow::Result<Vec<u8>> {
+    let mut guard = buffer
+        .lock()
+        .map_err(|_| anyhow::anyhow!("process output buffer lock poisoned"))?;
+
+    if drain {
+        Ok(guard.drain(..).collect())
+    } else {
+        Ok(guard.clone())
+    }
+}
+
+fn read_output_lines(buffer: &Arc<Mutex<Vec<u8>>>, drain: bool) -> anyhow::Result<Vec<String>> {
+    let mut guard = buffer
+        .lock()
+        .map_err(|_| anyhow::anyhow!("process output buffer lock poisoned"))?;
+
+    let mut lines = Vec::new();
+    let mut start = 0usize;
+    let mut consumed = 0usize;
+
+    for (idx, byte) in guard.iter().enumerate() {
+        if *byte == b'\n' {
+            let mut line = &guard[start..idx];
+            if line.last() == Some(&b'\r') {
+                line = &line[..line.len() - 1];
+            }
+            lines.push(String::from_utf8_lossy(line).to_string());
+            start = idx + 1;
+            consumed = start;
+        }
+    }
+
+    if drain && consumed > 0 {
+        guard.drain(..consumed);
+    }
+
+    Ok(lines)
+}
+
+fn read_captured_lines(
+    entry: &ChildHandle,
+    drain: bool,
+) -> anyhow::Result<(Vec<String>, Vec<String>)> {
+    let mut stdout_lines = read_output_lines(&entry.stdout_buf, drain)?;
+    let stderr_lines = read_output_lines(&entry.stderr_buf, drain)?;
+
+    if entry.merge_stderr {
+        stdout_lines.extend(stderr_lines);
+        Ok((stdout_lines, Vec::new()))
+    } else {
+        Ok((stdout_lines, stderr_lines))
+    }
 }
 
 /// Build a `Command` and run it, capturing/streaming output per `opts`.
@@ -548,12 +729,22 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             stdout_path: None,
             stderr_path: None,
             tee: None,
+            allow_orphans: None,
+            output_buffer_limit_bytes: None,
         })?;
 
         Ok(outcome.stdout.trim().to_string())
     }
 
     /// Spawn a background process and return an opaque numeric handle.
+    ///
+    /// By default (`allow_orphans` omitted/false), spawned processes are
+    /// terminated automatically when the parent program exits. Set
+    /// `allow_orphans` to true to opt out.
+    ///
+    /// Captured output for spawned processes is buffered in-memory per stream
+    /// and is bounded to 1 MiB by default. Override with
+    /// `output_buffer_limit_bytes` in options (`0` disables in-memory buffering).
     ///
     /// Example:
     /// handle = process.spawn({"command": "server", "args": ["--port", "8080"]})
@@ -567,6 +758,18 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let opts: RunOptions = serde_json::from_value(options.to_json_value()?)
             .map_err(|err| format_error!("while parsing options for spawn because {err:?}"))?;
 
+        ensure_exit_cleanup_registered()?;
+        let allow_orphans = opts.allow_orphans.unwrap_or(false);
+        let tee = opts.tee.unwrap_or(false);
+        let output_buffer_limit_bytes = opts
+            .output_buffer_limit_bytes
+            .map(usize::try_from)
+            .transpose()
+            .map_err(|_| {
+                anyhow::anyhow!("output_buffer_limit_bytes is too large for this platform's usize")
+            })?
+            .unwrap_or(DEFAULT_SPAWN_OUTPUT_BUFFER_LIMIT_BYTES);
+
         let (mut cmd, stdin_payload) = build_command(
             &opts.command,
             opts.args,
@@ -577,6 +780,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         // For background jobs: default to inheriting stdout/stderr unless explicitly configured.
         let mut stdout_file: Option<std::fs::File> = None;
+        let mut pipe_stdout = false;
         match opts
             .stdout
             .unwrap_or_else(|| StdoutSpec::Mode("inherit".to_string()))
@@ -587,6 +791,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 }
                 "capture" => {
                     cmd.stdout(Stdio::piped());
+                    pipe_stdout = true;
                 }
                 "null" => {
                     cmd.stdout(Stdio::null());
@@ -612,6 +817,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         // can be appended to stdout in wait(). Previously it used Stdio::inherit() which
         // sent stderr to the terminal instead of into the capture buffer.
         let mut merge_stderr = false;
+        let mut pipe_stderr = false;
         match opts
             .stderr
             .unwrap_or_else(|| StderrSpec::Mode("inherit".to_string()))
@@ -622,6 +828,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 }
                 "capture" => {
                     cmd.stderr(Stdio::piped());
+                    pipe_stderr = true;
                 }
                 "null" => {
                     cmd.stderr(Stdio::null());
@@ -631,9 +838,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                         // stdout is a file: send stderr to the same file (2>&1).
                         cmd.stderr(Stdio::from(file));
                     } else {
-                        // Pipe stderr so wait() can read and append it to stdout.
+                        // Pipe stderr so wait()/read_lines() can consume and append it to stdout.
                         cmd.stderr(Stdio::piped());
                         merge_stderr = true;
+                        pipe_stderr = true;
                     }
                 }
                 other => bail!("invalid stderr mode: {other}"),
@@ -664,6 +872,44 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             // child_stdin dropped here → EOF sent to child
         }
 
+        let stdout_buf = Arc::new(Mutex::new(Vec::new()));
+        let stderr_buf = Arc::new(Mutex::new(Vec::new()));
+
+        let stdout_reader = if pipe_stdout {
+            let Some(stdout) = child.stdout.take() else {
+                let _ = child.kill();
+                let _ = child.wait();
+                bail!("stdout pipe was not available for spawn capture")
+            };
+            Some(spawn_output_pump(
+                stdout,
+                Arc::clone(&stdout_buf),
+                output_buffer_limit_bytes,
+                tee,
+                true,
+            ))
+        } else {
+            None
+        };
+
+        let stderr_reader = if pipe_stderr {
+            let Some(stderr) = child.stderr.take() else {
+                let _ = child.kill();
+                let _ = child.wait();
+                bail!("stderr pipe was not available for spawn capture")
+            };
+            let tee_to_stdout = merge_stderr;
+            Some(spawn_output_pump(
+                stderr,
+                Arc::clone(&stderr_buf),
+                output_buffer_limit_bytes,
+                tee,
+                tee_to_stdout,
+            ))
+        } else {
+            None
+        };
+
         let handle = NEXT_HANDLE_ID.fetch_add(1, Ordering::Relaxed);
         let mut registry = process_registry()
             .lock()
@@ -674,10 +920,57 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 child,
                 started: Instant::now(),
                 merge_stderr,
+                allow_orphans,
+                exit_status: None,
+                stdout_buf,
+                stderr_buf,
+                stdout_reader,
+                stderr_reader,
             },
         );
 
         Ok(handle)
+    }
+
+    /// Read currently available captured output lines for a running background process.
+    ///
+    /// Returns only complete lines (newline-terminated). Any trailing partial line
+    /// remains buffered for the next call.
+    ///
+    /// By default (`drain` omitted/true), returned complete lines are consumed from the
+    /// internal buffers. Set `drain` to false to snapshot complete lines without consuming.
+    fn read_lines<'v>(
+        handle: u64,
+        drain: Option<bool>,
+        eval: &mut Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<Value<'v>> {
+        if is_lsp_mode() {
+            let heap = eval.heap();
+            let result = serde_json::json!({
+                "stdout": [],
+                "stderr": [],
+            });
+            return Ok(heap.alloc(result));
+        }
+
+        let heap = eval.heap();
+        let drain = drain.unwrap_or(true);
+
+        let mut registry = process_registry()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("process registry lock poisoned"))?;
+
+        let Some(entry) = registry.get_mut(&handle) else {
+            bail!("unknown process handle: {handle}");
+        };
+
+        let (stdout, stderr) = read_captured_lines(entry, drain)?;
+
+        let result = serde_json::json!({
+            "stdout": stdout,
+            "stderr": stderr,
+        });
+        Ok(heap.alloc(result))
     }
 
     /// Returns true if the process associated with the handle is still running.
@@ -693,7 +986,21 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             bail!("unknown process handle: {handle}");
         };
 
-        Ok(entry.child.try_wait()?.is_none())
+        if entry.exit_status.is_some() {
+            return Ok(false);
+        }
+
+        match entry.child.try_wait()? {
+            None => Ok(true),
+            Some(status) => {
+                // Cache completion so subsequent is_running() calls stay false,
+                // and finish output pumps so trailing bytes are readable via read_lines().
+                entry.exit_status = Some(status);
+                join_output_pump(entry.stdout_reader.take(), "stdout")?;
+                join_output_pump(entry.stderr_reader.take(), "stderr")?;
+                Ok(false)
+            }
+        }
     }
 
     /// Send a signal to a background process.
@@ -771,12 +1078,15 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let Some(mut entry) = registry.remove(&handle) else {
             bail!("unknown process handle: {handle}");
         };
+        drop(registry);
 
         let started_poll = Instant::now();
-        if let Some(limit_ms) = timeout_ms {
+        let exit_status = if let Some(status) = entry.exit_status.take() {
+            status
+        } else if let Some(limit_ms) = timeout_ms {
             loop {
-                if entry.child.try_wait()?.is_some() {
-                    break;
+                if let Some(status) = entry.child.try_wait()? {
+                    break status;
                 }
 
                 // DEFECT 6 FIX: Kill the child before bailing instead of putting it back
@@ -785,33 +1095,46 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 if started_poll.elapsed().as_millis() as u64 >= limit_ms {
                     let _ = entry.child.kill();
                     let _ = entry.child.wait();
+                    let _ = join_output_pump(entry.stdout_reader.take(), "stdout");
+                    let _ = join_output_pump(entry.stderr_reader.take(), "stderr");
                     bail!("wait timed out after {limit_ms}ms");
                 }
 
                 std::thread::sleep(Duration::from_millis(10));
             }
-        }
+        } else {
+            entry.child.wait()?
+        };
 
-        // Capture duration and merge flag before child is consumed by wait_with_output().
+        // Capture duration and merge flag before reading final buffers.
         let merge_stderr = entry.merge_stderr;
         let duration_ms = entry.started.elapsed().as_millis() as i64;
 
-        let output = entry.child.wait_with_output()?;
-        let status = output.status.code().unwrap_or(1);
+        join_output_pump(entry.stdout_reader.take(), "stdout")?;
+        join_output_pump(entry.stderr_reader.take(), "stderr")?;
 
-        let mut stdout_text = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr_text = String::from_utf8_lossy(&output.stderr).to_string();
+        let mut stdout_bytes = read_output_buffer(&entry.stdout_buf, true)?;
+        let stderr_bytes = read_output_buffer(&entry.stderr_buf, true)?;
 
-        // DEFECT 5 FIX: If spawn was called with stderr="merge", append the captured
-        // stderr bytes onto stdout so the caller sees the interleaved stream in stdout.
-        if merge_stderr {
-            stdout_text.push_str(&stderr_text);
-        }
+        let (stdout_text, stderr_text) = if merge_stderr {
+            stdout_bytes.extend_from_slice(&stderr_bytes);
+            (
+                String::from_utf8_lossy(&stdout_bytes).to_string(),
+                String::new(),
+            )
+        } else {
+            (
+                String::from_utf8_lossy(&stdout_bytes).to_string(),
+                String::from_utf8_lossy(&stderr_bytes).to_string(),
+            )
+        };
+
+        let status = exit_status.code().unwrap_or(1);
 
         let result = serde_json::json!({
             "status": status,
             "stdout": stdout_text,
-            "stderr": if merge_stderr { String::new() } else { stderr_text },
+            "stderr": stderr_text,
             "duration_ms": duration_ms,
         });
 
