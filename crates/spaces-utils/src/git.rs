@@ -1425,18 +1425,22 @@ impl Repository {
     }
 
     pub fn fetch(&self, progress_bar: &mut console::Progress) -> anyhow::Result<()> {
-        self.fetch_with_tags(progress_bar, false)
+        self.fetch_with_tags(progress_bar, false, IgnoreSubmodules::Yes)
     }
 
     pub fn fetch_with_tags(
         &self,
         progress_bar: &mut console::Progress,
         force_tags: bool,
+        ignore_submodules: IgnoreSubmodules,
     ) -> anyhow::Result<()> {
         let mut args = vec!["fetch".into()];
         if force_tags {
             args.push("--tags".into());
             args.push("--force".into());
+        }
+        if ignore_submodules == IgnoreSubmodules::Yes {
+            args.push("--recurse-submodules=no".into());
         }
         self.execute(progress_bar, args)
             .context(format_context!("while fetching from {}", self.full_path))?;
