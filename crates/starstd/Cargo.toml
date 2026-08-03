@@ -30,6 +30,8 @@ clap = { version = "4", features = ["string", "wrap_help"] }
 tempfile = "3"
 fd-lock = "4"
 signal-hook = "0.3"
+portable-pty = "0.9"
+
 
 glob-match.workspace = true
 starlark.workspace = true
