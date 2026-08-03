@@ -237,6 +237,7 @@ fn spawn_pty_output_pump<R: Read + Send + 'static>(
     mut reader: R,
     buffer: Arc<Mutex<Vec<u8>>>,
     max_bytes: usize,
+    buffer_output: bool,
     tee: bool,
     tee_to_stdout: bool,
     output_file: Option<std::fs::File>,
@@ -254,7 +255,7 @@ fn spawn_pty_output_pump<R: Read + Send + 'static>(
             };
 
             let bytes = &chunk[..n];
-            {
+            if buffer_output {
                 let mut guard = buffer
                     .lock()
                     .map_err(|_| anyhow::anyhow!("process output buffer lock poisoned"))?;
@@ -717,6 +718,11 @@ fn execute_run_with_pty(
             other => bail!("invalid stderr mode: {other}"),
         },
         StderrSpec::File { file } => {
+            if output_file.is_some() {
+                bail!(
+                    "PTY mode merges stdout and stderr into a single stream; cannot write stdout and stderr to different files"
+                );
+            }
             let file_handle = std::fs::File::create(&file)
                 .context(format_context!("failed to open stderr file: {file}"))?;
             output_file = Some(file_handle);
@@ -745,6 +751,7 @@ fn execute_run_with_pty(
         reader,
         Arc::clone(&stdout_buf),
         output_buffer_limit_bytes,
+        capture_output,
         tee || tee_to_stdout || tee_to_stderr,
         tee_to_stdout || (tee && !tee_to_stderr),
         output_file,
@@ -789,7 +796,10 @@ fn execute_run_with_pty(
     }
 
     if let Some(path) = opts.stderr_path {
-        std::fs::write(&path, &stderr_text)
+        // In PTY mode stdout and stderr are a single merged stream; write the
+        // same bytes that stdout_path would receive so the caller gets real
+        // output instead of an always-empty file.
+        std::fs::write(&path, &stdout_bytes)
             .context(format_context!("Failed to write stderr to file: {path}"))?;
     }
 
@@ -923,6 +933,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 reader,
                 Arc::clone(&stdout_buf),
                 DEFAULT_SPAWN_OUTPUT_BUFFER_LIMIT_BYTES,
+                true,
                 false,
                 true,
                 None,
@@ -1216,6 +1227,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                     other => bail!("invalid stderr mode: {other}"),
                 },
                 StderrSpec::File { file } => {
+                    if output_file.is_some() {
+                        bail!(
+                            "PTY mode merges stdout and stderr into a single stream; cannot write stdout and stderr to different files"
+                        );
+                    }
                     let file_handle = std::fs::File::create(&file).map_err(|err| {
                         format_error!("while opening stderr file {file} for spawn because {err:?}")
                     })?;
@@ -1245,6 +1261,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 reader,
                 Arc::clone(&stdout_buf),
                 output_buffer_limit_bytes,
+                _capture_output,
                 tee || tee_to_stdout || tee_to_stderr,
                 tee_to_stdout || (tee && !tee_to_stderr),
                 output_file,
