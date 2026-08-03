@@ -2,6 +2,9 @@ use crate::is_lsp_mode;
 use crate::process_error::{format_command_line, format_failure, format_timeout};
 use anyhow::{Context, bail};
 use anyhow_source_location::{format_context, format_error};
+use portable_pty::{
+    Child as PtyChild, CommandBuilder, ExitStatus as PtyExitStatus, PtySize, native_pty_system,
+};
 use serde::{Deserialize, Serialize};
 use starlark::environment::GlobalsBuilder;
 use starlark::eval::Evaluator;
@@ -22,6 +25,8 @@ pub struct Exec {
     pub env: Option<HashMap<String, String>>,
     pub working_directory: Option<String>,
     pub stdin: Option<String>,
+    #[serde(default, alias = "use_pty", alias = "pseudo_terminal")]
+    pub pty: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,6 +46,8 @@ pub struct RunOptions {
     pub tee: Option<bool>,
     pub allow_orphans: Option<bool>,
     pub output_buffer_limit_bytes: Option<u64>,
+    #[serde(default, alias = "use_pty", alias = "pseudo_terminal")]
+    pub pty: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,12 +75,89 @@ pub struct RunOutcome {
 
 // DEFECT 5 FIX: Added merge_stderr field so wait() can append stderr to stdout when requested.
 #[derive(Debug)]
+struct ManagedExitStatus {
+    code: Option<i32>,
+}
+
+impl ManagedExitStatus {
+    fn from_std(status: ExitStatus) -> Self {
+        Self {
+            code: status.code(),
+        }
+    }
+
+    fn from_pty(status: PtyExitStatus) -> Self {
+        Self {
+            code: i32::try_from(status.exit_code()).ok(),
+        }
+    }
+
+    fn code(&self) -> Option<i32> {
+        self.code
+    }
+}
+
+#[derive(Debug)]
+enum ManagedChild {
+    Std(Child),
+    Pty(Box<dyn PtyChild + Send>),
+}
+
+type SpawnedPtyProcess = (
+    ManagedChild,
+    Box<dyn Read + Send>,
+    Option<Box<dyn Write + Send>>,
+);
+
+impl ManagedChild {
+    fn try_wait(&mut self) -> anyhow::Result<Option<ManagedExitStatus>> {
+        match self {
+            ManagedChild::Std(child) => child
+                .try_wait()
+                .map(|status| status.map(ManagedExitStatus::from_std))
+                .map_err(Into::into),
+            ManagedChild::Pty(child) => child
+                .try_wait()
+                .map(|status| status.map(ManagedExitStatus::from_pty))
+                .map_err(Into::into),
+        }
+    }
+
+    fn wait(&mut self) -> anyhow::Result<ManagedExitStatus> {
+        match self {
+            ManagedChild::Std(child) => child
+                .wait()
+                .map(ManagedExitStatus::from_std)
+                .map_err(Into::into),
+            ManagedChild::Pty(child) => child
+                .wait()
+                .map(ManagedExitStatus::from_pty)
+                .map_err(Into::into),
+        }
+    }
+
+    fn kill(&mut self) -> anyhow::Result<()> {
+        match self {
+            ManagedChild::Std(child) => child.kill().map_err(Into::into),
+            ManagedChild::Pty(child) => child.kill().map_err(Into::into),
+        }
+    }
+
+    fn id(&self) -> Option<u32> {
+        match self {
+            ManagedChild::Std(child) => Some(child.id()),
+            ManagedChild::Pty(child) => child.process_id(),
+        }
+    }
+}
+
+#[derive(Debug)]
 struct ChildHandle {
-    child: Child,
+    child: ManagedChild,
     started: Instant,
     merge_stderr: bool,
     allow_orphans: bool,
-    exit_status: Option<ExitStatus>,
+    exit_status: Option<ManagedExitStatus>,
     stdout_buf: Arc<Mutex<Vec<u8>>>,
     stderr_buf: Arc<Mutex<Vec<u8>>>,
     stdout_reader: Option<JoinHandle<anyhow::Result<()>>>,
@@ -147,6 +231,55 @@ fn append_bounded(buffer: &mut Vec<u8>, chunk: &[u8], max_bytes: usize) {
     }
 
     buffer.extend_from_slice(chunk);
+}
+
+fn spawn_pty_output_pump<R: Read + Send + 'static>(
+    mut reader: R,
+    buffer: Arc<Mutex<Vec<u8>>>,
+    max_bytes: usize,
+    buffer_output: bool,
+    tee: bool,
+    tee_to_stdout: bool,
+    output_file: Option<std::fs::File>,
+) -> JoinHandle<anyhow::Result<()>> {
+    std::thread::spawn(move || {
+        let mut chunk = [0_u8; 8192];
+        let mut output_file = output_file;
+
+        loop {
+            let n = match reader.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(n) => n,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(anyhow::anyhow!("failed reading child output: {e}")),
+            };
+
+            let bytes = &chunk[..n];
+            if buffer_output {
+                let mut guard = buffer
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("process output buffer lock poisoned"))?;
+                append_bounded(&mut guard, bytes, max_bytes);
+            }
+
+            if let Some(file) = output_file.as_mut() {
+                let _ = file.write_all(bytes);
+                let _ = file.flush();
+            }
+
+            if tee {
+                if tee_to_stdout {
+                    let _ = std::io::stdout().write_all(bytes);
+                    let _ = std::io::stdout().flush();
+                } else {
+                    let _ = std::io::stderr().write_all(bytes);
+                    let _ = std::io::stderr().flush();
+                }
+            }
+        }
+
+        Ok(())
+    })
 }
 
 fn spawn_output_pump<R: Read + Send + 'static>(
@@ -258,6 +391,56 @@ fn read_output_lines(
     Ok(lines)
 }
 
+fn build_pty_command(
+    command: &str,
+    args: Option<Vec<String>>,
+    env: Option<HashMap<String, String>>,
+    cwd: Option<String>,
+) -> anyhow::Result<CommandBuilder> {
+    let mut cmd = CommandBuilder::new(command);
+    for a in args.unwrap_or_default() {
+        cmd.arg(a);
+    }
+    for (k, v) in env.unwrap_or_default() {
+        cmd.env(k, v);
+    }
+    if let Some(dir) = cwd {
+        cmd.cwd(dir);
+    }
+    cmd.env("TERM", "xterm-256color");
+    Ok(cmd)
+}
+
+fn spawn_pty_process(
+    command: &str,
+    args: Option<Vec<String>>,
+    env: Option<HashMap<String, String>>,
+    cwd: Option<String>,
+    stdin_payload: Option<String>,
+) -> anyhow::Result<SpawnedPtyProcess> {
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(PtySize::default())
+        .context(format_context!(
+            "failed to open pty for child process {command}"
+        ))?;
+    let cmd = build_pty_command(command, args, env, cwd)?;
+    let child = pair.slave.spawn_command(cmd).context(format_context!(
+        "failed to spawn child process {command} into pty"
+    ))?;
+    let reader = pair.master.try_clone_reader().context(format_context!(
+        "failed to read from pty master for child process {command}"
+    ))?;
+    let writer = if stdin_payload.is_some() {
+        Some(pair.master.take_writer().context(format_context!(
+            "failed to acquire pty stdin writer for child process {command}"
+        ))?)
+    } else {
+        None
+    };
+    Ok((ManagedChild::Pty(child), reader, writer))
+}
+
 /// Build a `Command` and run it, capturing/streaming output per `opts`.
 fn execute_run(opts: RunOptions) -> anyhow::Result<RunOutcome> {
     let started = Instant::now();
@@ -266,6 +449,10 @@ fn execute_run(opts: RunOptions) -> anyhow::Result<RunOutcome> {
     // since `opts` will be partially consumed below.
     let command_line = format_command_line(&opts.command, opts.args.as_deref());
     let cwd_display = opts.cwd.clone();
+
+    if opts.pty.unwrap_or(false) {
+        return execute_run_with_pty(opts, started, command_line, cwd_display);
+    }
 
     let mut cmd = Command::new(&opts.command);
 
@@ -467,6 +654,176 @@ fn execute_run(opts: RunOptions) -> anyhow::Result<RunOutcome> {
     })
 }
 
+fn execute_run_with_pty(
+    opts: RunOptions,
+    started: Instant,
+    command_line: String,
+    cwd_display: Option<String>,
+) -> anyhow::Result<RunOutcome> {
+    let stdout_spec = opts
+        .stdout
+        .clone()
+        .unwrap_or_else(|| StdoutSpec::Mode("capture".to_string()));
+    let stderr_spec = opts
+        .stderr
+        .clone()
+        .unwrap_or_else(|| StderrSpec::Mode("capture".to_string()));
+    let tee = opts.tee.unwrap_or(false);
+
+    let output_buffer_limit_bytes = opts
+        .output_buffer_limit_bytes
+        .map(usize::try_from)
+        .transpose()
+        .map_err(|_| {
+            anyhow::anyhow!("output_buffer_limit_bytes is too large for this platform's usize")
+        })?
+        .unwrap_or(DEFAULT_SPAWN_OUTPUT_BUFFER_LIMIT_BYTES);
+
+    let mut capture_output;
+    let mut tee_to_stdout = tee;
+    let mut tee_to_stderr = false;
+    let mut output_file = None;
+
+    match stdout_spec {
+        StdoutSpec::Mode(mode) => match mode.as_str() {
+            "inherit" => {
+                tee_to_stdout = true;
+                capture_output = true;
+            }
+            "capture" => {
+                capture_output = true;
+            }
+            "null" => {
+                capture_output = false;
+            }
+            other => bail!("invalid stdout mode: {other}"),
+        },
+        StdoutSpec::File { file } => {
+            let file_handle = std::fs::File::create(&file)
+                .context(format_context!("failed to open stdout file: {file}"))?;
+            output_file = Some(file_handle);
+            capture_output = true;
+        }
+    }
+
+    match stderr_spec {
+        StderrSpec::Mode(mode) => match mode.as_str() {
+            "inherit" => {
+                tee_to_stderr = true;
+            }
+            "capture" | "merge" => {
+                capture_output = true;
+            }
+            "null" => {}
+            other => bail!("invalid stderr mode: {other}"),
+        },
+        StderrSpec::File { file } => {
+            if output_file.is_some() {
+                bail!(
+                    "PTY mode merges stdout and stderr into a single stream; cannot write stdout and stderr to different files"
+                );
+            }
+            let file_handle = std::fs::File::create(&file)
+                .context(format_context!("failed to open stderr file: {file}"))?;
+            output_file = Some(file_handle);
+            capture_output = true;
+        }
+    }
+
+    let stdout_buf = Arc::new(Mutex::new(Vec::new()));
+    let (mut child, reader, mut stdin_writer) = spawn_pty_process(
+        &opts.command,
+        opts.args,
+        opts.env,
+        opts.cwd,
+        opts.stdin.clone(),
+    )?;
+
+    if let Some(input) = opts.stdin
+        && let Some(mut writer) = stdin_writer.take()
+    {
+        writer
+            .write_all(input.as_bytes())
+            .context(format_context!("Failed to write to stdin"))?;
+    }
+
+    let output_reader = spawn_pty_output_pump(
+        reader,
+        Arc::clone(&stdout_buf),
+        output_buffer_limit_bytes,
+        capture_output,
+        tee || tee_to_stdout || tee_to_stderr,
+        tee_to_stdout || (tee && !tee_to_stderr),
+        output_file,
+    );
+
+    let exit_status = if let Some(limit_ms) = opts.timeout_ms {
+        loop {
+            if let Some(status) = child.try_wait()? {
+                break status;
+            }
+
+            if started.elapsed().as_millis() as u64 >= limit_ms {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = join_output_pump(Some(output_reader), "stdout");
+                bail!(
+                    "{}",
+                    format_timeout("process", &command_line, cwd_display.as_deref(), limit_ms)
+                );
+            }
+
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    } else {
+        child.wait()?
+    };
+
+    join_output_pump(Some(output_reader), "stdout")?;
+
+    let stdout_bytes = read_output_buffer(&stdout_buf, true)?;
+    let stdout_text = if capture_output {
+        String::from_utf8_lossy(&stdout_bytes).to_string()
+    } else {
+        String::new()
+    };
+    let stderr_text = String::new();
+    let status = exit_status.code().unwrap_or(1);
+
+    if let Some(path) = opts.stdout_path {
+        std::fs::write(&path, &stdout_bytes)
+            .context(format_context!("Failed to write stdout to file: {path}"))?;
+    }
+
+    if let Some(path) = opts.stderr_path {
+        // In PTY mode stdout and stderr are a single merged stream; write the
+        // same bytes that stdout_path would receive so the caller gets real
+        // output instead of an always-empty file.
+        std::fs::write(&path, &stdout_bytes)
+            .context(format_context!("Failed to write stderr to file: {path}"))?;
+    }
+
+    if opts.check.unwrap_or(false) && status != 0 {
+        bail!(
+            "{}",
+            format_failure(
+                "process",
+                &command_line,
+                cwd_display.as_deref(),
+                status,
+                &stderr_text,
+            )
+        );
+    }
+
+    Ok(RunOutcome {
+        status,
+        stdout: stdout_text,
+        stderr: stderr_text,
+        duration_ms: started.elapsed().as_millis() as i64,
+    })
+}
+
 fn build_command(
     command: &str,
     args: Option<Vec<String>>,
@@ -552,6 +909,54 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
         let exec: Exec = serde_json::from_value(exec.to_json_value()?)
             .map_err(|err| format_error!("while parsing options for exec because {err:?}"))?;
+
+        if exec.pty.unwrap_or(false) {
+            let _started = Instant::now();
+            let stdout_buf = Arc::new(Mutex::new(Vec::new()));
+            let (mut child, reader, mut stdin_writer) = spawn_pty_process(
+                &exec.command,
+                exec.args.clone(),
+                exec.env.clone(),
+                exec.working_directory.clone(),
+                exec.stdin.clone(),
+            )?;
+
+            if let Some(input) = exec.stdin
+                && let Some(mut writer) = stdin_writer.take()
+            {
+                writer
+                    .write_all(input.as_bytes())
+                    .context(format_context!("Failed to write to stdin"))?;
+            }
+
+            let output_reader = spawn_pty_output_pump(
+                reader,
+                Arc::clone(&stdout_buf),
+                DEFAULT_SPAWN_OUTPUT_BUFFER_LIMIT_BYTES,
+                true,
+                false,
+                true,
+                None,
+            );
+
+            let exit_status = child.wait()?;
+            join_output_pump(Some(output_reader), "stdout")?;
+            let stdout_bytes = read_output_buffer(&stdout_buf, true)?;
+            let stdout = String::from_utf8_lossy(&stdout_bytes).to_string();
+            let status = exit_status.code().unwrap_or(1);
+
+            let mut result_map = serde_json::Map::new();
+            result_map.insert(
+                "status".to_string(),
+                serde_json::Value::Number(status.into()),
+            );
+            result_map.insert("stdout".to_string(), serde_json::Value::String(stdout));
+            result_map.insert(
+                "stderr".to_string(),
+                serde_json::Value::String(String::new()),
+            );
+            return Ok(heap.alloc(serde_json::Value::Object(result_map)));
+        }
 
         let exec_stdin = exec.stdin;
         let invoke_command = exec.command.clone();
@@ -730,6 +1135,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             tee: None,
             allow_orphans: None,
             output_buffer_limit_bytes: None,
+            pty: None,
         })?;
 
         Ok(outcome.stdout.trim().to_string())
@@ -768,6 +1174,120 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 anyhow::anyhow!("output_buffer_limit_bytes is too large for this platform's usize")
             })?
             .unwrap_or(DEFAULT_SPAWN_OUTPUT_BUFFER_LIMIT_BYTES);
+
+        if opts.pty.unwrap_or(false) {
+            let stdout_spec = opts
+                .stdout
+                .clone()
+                .unwrap_or_else(|| StdoutSpec::Mode("inherit".to_string()));
+            let stderr_spec = opts
+                .stderr
+                .clone()
+                .unwrap_or_else(|| StderrSpec::Mode("inherit".to_string()));
+            let mut _capture_output = matches!(
+                stdout_spec,
+                StdoutSpec::Mode(ref mode) if mode == "capture"
+            );
+            let mut output_file = None;
+            let mut tee_to_stdout = tee;
+            let mut tee_to_stderr = false;
+
+            match stdout_spec {
+                StdoutSpec::Mode(mode) => match mode.as_str() {
+                    "inherit" => {
+                        tee_to_stdout = true;
+                        _capture_output = true;
+                    }
+                    "capture" => {
+                        _capture_output = true;
+                    }
+                    "null" => {
+                        _capture_output = false;
+                    }
+                    other => bail!("invalid stdout mode: {other}"),
+                },
+                StdoutSpec::File { file } => {
+                    let file_handle = std::fs::File::create(&file).map_err(|err| {
+                        format_error!("while opening stdout file {file} for spawn because {err:?}")
+                    })?;
+                    output_file = Some(file_handle);
+                    _capture_output = true;
+                }
+            }
+
+            match stderr_spec {
+                StderrSpec::Mode(mode) => match mode.as_str() {
+                    "inherit" => {
+                        tee_to_stderr = true;
+                    }
+                    "capture" | "merge" => {
+                        _capture_output = true;
+                    }
+                    "null" => {}
+                    other => bail!("invalid stderr mode: {other}"),
+                },
+                StderrSpec::File { file } => {
+                    if output_file.is_some() {
+                        bail!(
+                            "PTY mode merges stdout and stderr into a single stream; cannot write stdout and stderr to different files"
+                        );
+                    }
+                    let file_handle = std::fs::File::create(&file).map_err(|err| {
+                        format_error!("while opening stderr file {file} for spawn because {err:?}")
+                    })?;
+                    output_file = Some(file_handle);
+                    _capture_output = true;
+                }
+            }
+
+            let stdout_buf = Arc::new(Mutex::new(Vec::new()));
+            let (child, reader, mut stdin_writer) = spawn_pty_process(
+                &opts.command,
+                opts.args,
+                opts.env,
+                opts.cwd,
+                opts.stdin.clone(),
+            )?;
+
+            if let Some(input) = opts.stdin
+                && let Some(mut writer) = stdin_writer.take()
+            {
+                writer.write_all(input.as_bytes()).map_err(|err| {
+                    format_error!("while writing to stdin for spawn because {err:?}")
+                })?;
+            }
+
+            let stdout_reader = Some(spawn_pty_output_pump(
+                reader,
+                Arc::clone(&stdout_buf),
+                output_buffer_limit_bytes,
+                _capture_output,
+                tee || tee_to_stdout || tee_to_stderr,
+                tee_to_stdout || (tee && !tee_to_stderr),
+                output_file,
+            ));
+
+            let handle = NEXT_HANDLE_ID.fetch_add(1, Ordering::Relaxed);
+            let mut registry = process_registry()
+                .lock()
+                .map_err(|_| anyhow::anyhow!("process registry lock poisoned"))?;
+            registry.insert(
+                handle,
+                ChildHandle {
+                    child,
+                    started: Instant::now(),
+                    merge_stderr: false,
+                    allow_orphans,
+                    exit_status: None,
+                    stdout_buf,
+                    stderr_buf: Arc::new(Mutex::new(Vec::new())),
+                    stdout_reader,
+                    stderr_reader: None,
+                },
+            );
+
+            return Ok(handle);
+        }
 
         let (mut cmd, stdin_payload) = build_command(
             &opts.command,
@@ -916,7 +1436,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         registry.insert(
             handle,
             ChildHandle {
-                child,
+                child: ManagedChild::Std(child),
                 started: Instant::now(),
                 merge_stderr,
                 allow_orphans,
@@ -1045,7 +1565,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             "SIGTERM" => {
                 #[cfg(unix)]
                 {
-                    let pid = entry.child.id() as libc::pid_t;
+                    let Some(pid) = entry.child.id() else {
+                        bail!("process id unavailable for child")
+                    };
+                    let pid = pid as libc::pid_t;
                     let ret = unsafe { libc::kill(pid, libc::SIGTERM) };
                     if ret != 0 {
                         bail!("kill(SIGTERM) failed: {}", std::io::Error::last_os_error());

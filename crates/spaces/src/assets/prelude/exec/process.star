@@ -189,6 +189,7 @@ def process_options(
         env: dict | None = None,
         cwd: str | None = None,
         stdin: str | None = None,
+        pseudo_terminal: bool | None = None,
         stdout: str | dict | None = None,
         stderr: str | dict | None = None,
         timeout_ms: int | None = None,
@@ -209,6 +210,9 @@ def process_options(
         env: Environment variables to set (default: None).
         cwd: Working directory for the command (default: None).
         stdin: Text to write to the process's stdin (default: None).
+        pseudo_terminal: Request a pseudo terminal for the child process (default: None).
+            When True, the child process runs in a PTY so interactive programs can
+            use terminal semantics.
         stdout: Output handling option (default: None). Use process_stdout_inherit(),
             process_stdout_capture(), process_stdout_null(), or process_stdout_file(path).
         stderr: Error handling option (default: None). Use process_stderr_inherit(),
@@ -285,6 +289,9 @@ def process_options(
 
     if stdin != None:
         options["stdin"] = stdin
+
+    if pseudo_terminal != None:
+        options["pseudo_terminal"] = pseudo_terminal
 
     if stdout != None:
         options["stdout"] = stdout
