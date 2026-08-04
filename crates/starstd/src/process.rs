@@ -804,6 +804,9 @@ fn execute_run_with_pty(
     }
 
     if opts.check.unwrap_or(false) && status != 0 {
+        // In PTY mode stdout and stderr are a single merged stream captured in
+        // stdout_text; stderr_text is always empty.  Pass the merged output so
+        // the error message actually shows what the child printed.
         bail!(
             "{}",
             format_failure(
@@ -811,7 +814,7 @@ fn execute_run_with_pty(
                 &command_line,
                 cwd_display.as_deref(),
                 status,
-                &stderr_text,
+                &stdout_text,
             )
         );
     }
@@ -1500,7 +1503,17 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             }
             "stderr" => {
                 if entry.merge_stderr {
+                    // Non-PTY merge mode: stderr was piped into stderr_buf and
+                    // is conceptually part of stdout; callers should read
+                    // "stdout" to get the merged stream.
                     Ok(Vec::new())
+                } else if matches!(entry.child, ManagedChild::Pty(_)) {
+                    // PTY mode: the OS-level PTY merges stdout and stderr into a
+                    // single stream buffered in stdout_buf.  stderr_buf is never
+                    // written to, so reading it would always return nothing.
+                    // Redirect to stdout_buf so callers that read "stderr" still
+                    // see the child's output.
+                    read_output_lines(&entry.stdout_buf, drain, max_lines)
                 } else {
                     read_output_lines(&entry.stderr_buf, drain, max_lines)
                 }

@@ -25,6 +25,10 @@ load(
     "process_stdout_null",
     "process_wait",
 )
+load(
+    "//@star/prelude/exec/time.star",
+    "time_sleep_milliseconds",
+)
 
 # Process module test results
 process_results = {
@@ -264,9 +268,11 @@ streaming_handle = process_spawn(process_options(
 process_results["streaming_output"]["streaming_handle_created"] = streaming_handle > 0
 
 # Poll non-destructively for output visibility while process is still running.
+# Sleep 10 ms between iterations so the output-pump threads have time to
+# buffer data and we avoid spinning on a busy CI runner.
 seen_stdout = False
 seen_stderr = False
-for _ in range(800):
+for _ in range(200):
     if not process_is_running(streaming_handle):
         break
     snapshot_stdout = process_read_lines(streaming_handle, "stdout", drain = False)
@@ -277,6 +283,7 @@ for _ in range(800):
         seen_stderr = True
     if seen_stdout and seen_stderr:
         break
+    time_sleep_milliseconds(10)
 
 process_results["streaming_output"]["read_output_visible_before_wait"] = (
     seen_stdout and seen_stderr
