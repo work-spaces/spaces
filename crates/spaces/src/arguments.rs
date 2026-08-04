@@ -978,10 +978,10 @@ This can be used if the repository defines all of its own dependencies."#)]
         /// The method to use for cloning the repository (default is a standard clone).
         #[arg(long)]
         clone: Option<git::Clone>,
-        /// Enable sparse checkout and set the mode: cone (default) or no-cone.
+        /// Enable sparse checkout with the given mode (cone or no-cone). Required to activate sparse checkout.
         #[arg(long, value_name = "MODE")]
         sparse_mode: Option<git::SparseCheckoutMode>,
-        /// Add a path to the sparse checkout list. Can be used multiple times.
+        /// Path pattern to include in the sparse checkout. Can be used multiple times. Only used when --sparse-mode is set.
         #[arg(long, value_name = "PATH")]
         sparse_list: Vec<Arc<str>>,
         #[arg(

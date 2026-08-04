@@ -225,7 +225,11 @@ pub fn build_checkout_command_docstring(
     command_parts.push(format!("  --clone={clone}"));
 
     if let Some(sparse) = repo_args.sparse_checkout.as_ref() {
-        command_parts.push(format!("  --sparse-mode={}", sparse.mode));
+        let mode_str = match sparse.mode {
+            git::SparseCheckoutMode::Cone => "cone",
+            git::SparseCheckoutMode::NoCone => "no-cone",
+        };
+        command_parts.push(format!("  --sparse-mode={mode_str}"));
         for item in &sparse.list {
             command_parts.push(format!("  --sparse-list={item}"));
         }
