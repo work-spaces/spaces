@@ -79,6 +79,32 @@ pub fn checkout_repo(
     let url = &repo_args.url;
     let rev = &repo_args.rev;
 
+    let sparse_args = if let Some(sparse) = repo_args.sparse_checkout.as_ref() {
+        if sparse.list.is_empty() {
+            return Err(format_error!(
+                "--sparse-list must contain at least one entry when --sparse-mode is set"
+            ));
+        }
+        let mode = &sparse.mode;
+        let list_items = sparse
+            .list
+            .iter()
+            .map(|item| {
+                // Escape for Starlark string literal (backslash must be first)
+                let escaped = item
+                    .replace('\\', "\\\\")
+                    .replace('"', "\\\"")
+                    .replace('\n', "\\n")
+                    .replace('\r', "\\r");
+                format!("\"{escaped}\"")
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("\n    sparse_mode = \"{mode}\",\n    sparse_list = [{list_items}],")
+    } else {
+        String::new()
+    };
+
     let script: Arc<str> = format!(
         r#"{command_docstring}
 load("//@star/prelude/rules/checkout.star", "checkout_add_repo")
@@ -87,7 +113,7 @@ checkout_add_repo(
     "{repo_name}",
     url = "{url}",
     rev = "{rev}",
-    clone = "{clone}",
+    clone = "{clone}",{sparse_args}
 )
 "#
     )
@@ -290,6 +316,7 @@ fn checkout_co_repo(
             url: co.url,
             rev: co.rev,
             clone: co.clone,
+            sparse_checkout: co.sparse_checkout,
         },
         utils::co::CheckoutArgs {
             env: co.env.unwrap_or_default(),

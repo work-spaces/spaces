@@ -51,7 +51,7 @@ impl Clone {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Copy, Default, Display)]
+#[derive(Debug, Clone, Serialize, Deserialize, Copy, Default, Display, clap::ValueEnum)]
 pub enum SparseCheckoutMode {
     #[default]
     Cone,
