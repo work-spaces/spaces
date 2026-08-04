@@ -186,6 +186,7 @@ pub struct CheckoutRepoArgs {
     pub url: Arc<str>,
     pub rev: Arc<str>,
     pub clone: Option<git::Clone>,
+    pub sparse_checkout: Option<git::SparseCheckout>,
 }
 
 pub struct CheckoutWorkflowArgs {
@@ -222,6 +223,13 @@ pub fn build_checkout_command_docstring(
     }
 
     command_parts.push(format!("  --clone={clone}"));
+
+    if let Some(sparse) = repo_args.sparse_checkout.as_ref() {
+        command_parts.push(format!("  --sparse-mode={}", sparse.mode));
+        for item in &sparse.list {
+            command_parts.push(format!("  --sparse-list={item}"));
+        }
+    }
 
     for env_val in &checkout_args.env {
         command_parts.push(format!("  --env={env_val}"));
@@ -277,6 +285,8 @@ pub struct CheckoutRepo {
     #[serde(alias = "new-branch")]
     pub new_branch: Option<Vec<Arc<str>>>,
     pub clone: Option<git::Clone>,
+    #[serde(alias = "sparse-checkout")]
+    pub sparse_checkout: Option<git::SparseCheckout>,
     pub env: Option<Vec<Arc<str>>>,
     pub store: Option<HashMap<Arc<str>, toml::Value>>,
     #[serde(alias = "create-lock-file")]
@@ -296,6 +306,8 @@ pub struct CheckoutDerivedRepo {
     #[serde(alias = "new-branch")]
     pub new_branch: Option<Vec<Arc<str>>>,
     pub clone: Option<git::Clone>,
+    #[serde(alias = "sparse-checkout")]
+    pub sparse_checkout: Option<git::SparseCheckout>,
     pub env: Option<Vec<Arc<str>>>,
     pub store: Option<HashMap<Arc<str>, toml::Value>>,
     #[serde(alias = "create-lock-file")]
@@ -311,6 +323,7 @@ impl CheckoutDerivedRepo {
             rev: self.rev.unwrap_or(base.rev),
             new_branch: self.new_branch.or(base.new_branch),
             clone: self.clone.or(base.clone),
+            sparse_checkout: self.sparse_checkout.or(base.sparse_checkout),
             env: self.env.or(base.env),
             store: self.store.or(base.store),
             create_lock_file: self.create_lock_file.or(base.create_lock_file),
@@ -1443,6 +1456,7 @@ mod tests {
                 rev: arc("main"),
                 new_branch: Some(new_branch.iter().map(|entry| arc(entry)).collect()),
                 clone: None,
+                sparse_checkout: None,
                 env: Some(env.iter().map(|entry| arc(entry)).collect()),
                 store: Some(store_map),
                 create_lock_file: None,
@@ -1906,6 +1920,7 @@ derive-from = "wf"
                 url: arc("https://example.com/repo.git"),
                 rev: arc("main"),
                 clone: None,
+                sparse_checkout: None,
             },
             &CheckoutArgs {
                 env: vec![],

@@ -79,6 +79,19 @@ pub fn checkout_repo(
     let url = &repo_args.url;
     let rev = &repo_args.rev;
 
+    let sparse_args = if let Some(sparse) = repo_args.sparse_checkout.as_ref() {
+        let mode = &sparse.mode;
+        let list_items = sparse
+            .list
+            .iter()
+            .map(|item| format!("\"{item}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("\n    sparse_mode = \"{mode}\",\n    sparse_list = [{list_items}],")
+    } else {
+        String::new()
+    };
+
     let script: Arc<str> = format!(
         r#"{command_docstring}
 load("//@star/prelude/rules/checkout.star", "checkout_add_repo")
@@ -87,7 +100,7 @@ checkout_add_repo(
     "{repo_name}",
     url = "{url}",
     rev = "{rev}",
-    clone = "{clone}",
+    clone = "{clone}",{sparse_args}
 )
 "#
     )
@@ -290,6 +303,7 @@ fn checkout_co_repo(
             url: co.url,
             rev: co.rev,
             clone: co.clone,
+            sparse_checkout: co.sparse_checkout,
         },
         utils::co::CheckoutArgs {
             env: co.env.unwrap_or_default(),

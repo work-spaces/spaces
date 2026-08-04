@@ -300,6 +300,8 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             keep_workspace_on_failure,
             lock,
             locked,
+            sparse_mode,
+            sparse_list,
         } => {
             singleton::set_execution_phase(task::Phase::Checkout);
             singleton::set_is_checkout();
@@ -314,6 +316,11 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                 format!("Spaces Checkout Repo {url}").as_str(),
             )?;
 
+            let sparse_checkout = sparse_mode.map(|mode| git::SparseCheckout {
+                mode,
+                list: sparse_list,
+            });
+
             let result = co::checkout_repo(
                 effective_console.clone(),
                 name,
@@ -322,6 +329,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                     url,
                     rev,
                     clone,
+                    sparse_checkout,
                 },
                 utils::co::CheckoutArgs {
                     env,
@@ -970,6 +978,12 @@ This can be used if the repository defines all of its own dependencies."#)]
         /// The method to use for cloning the repository (default is a standard clone).
         #[arg(long)]
         clone: Option<git::Clone>,
+        /// Enable sparse checkout and set the mode: cone (default) or no-cone.
+        #[arg(long, value_name = "MODE")]
+        sparse_mode: Option<git::SparseCheckoutMode>,
+        /// Add a path to the sparse checkout list. Can be used multiple times.
+        #[arg(long, value_name = "PATH")]
+        sparse_list: Vec<Arc<str>>,
         #[arg(
             long,
             help = r#"Environment variables to add to the checked out workspace.
