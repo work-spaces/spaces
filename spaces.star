@@ -7,6 +7,7 @@ load("//@star/prelude/rules/deps.star", "deps")
 load("//@star/prelude/rules/glob.star", "glob")
 load(
     "//@star/prelude/rules/run.star",
+    "run_add_archive",
     "run_add_exec",
     "run_add_exec_test",
 )
@@ -18,6 +19,7 @@ load(
 load(
     "//@star/sdk/star/ws.star",
     "workspace_get_env_var",
+    "workspace_get_env_var_or",
     "workspace_is_env_var_set",
 )
 
@@ -361,4 +363,70 @@ run_add_exec(
         ":check_starlark",
         ":script_tests",
     ],
+)
+
+RELEASE_INSTALL_DIR = "build/install"
+SPACES_RELEASE_TAG_ENV = "SPACES_RELEASE_TAG"
+GITHUB_REPOSITORY_ENV = "GITHUB_REPOSITORY"
+
+release_tag = workspace_get_env_var_or(SPACES_RELEASE_TAG_ENV, "dev")
+github_repo = workspace_get_env_var_or(GITHUB_REPOSITORY_ENV, "work-spaces/spaces")
+
+run_add_exec(
+    "build_release_install",
+    command = "cargo",
+    args = [
+        "install",
+        "--target-dir=build/target",
+        "--force",
+        "--path=spaces/crates/spaces",
+        "--profile=release",
+        "--root={}".format(RELEASE_INSTALL_DIR),
+    ],
+    deps = deps(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
+    target_files = ["//build/install/bin/spaces"],
+    help = "Build and install the release binary to build/install",
+    visibility = visibility_private(),
+)
+
+(RELEASE_ARCHIVE_PATH, _RELEASE_ARCHIVE_SHA256) = run_add_archive(
+    "archive_release",
+    archive_name = "spaces",
+    deps = [":build_release_install"],
+    version = release_tag,
+    source_directory = "//build/install/bin",
+    suffix = "zip",
+    includes = ["spaces*"],
+    visibility = visibility_private(),
+)
+
+run_add_exec(
+    "check_release",
+    command = "gh",
+    args = [
+        "release",
+        "view",
+        release_tag,
+        "--repo={}".format(github_repo),
+    ],
+    workspace_vars = ["GITHUB_TOKEN"],
+    help = "Verify the release {} exists on GitHub before publishing".format(release_tag),
+    visibility = visibility_private(),
+)
+
+run_add_exec(
+    "publish_release",
+    command = "gh",
+    args = [
+        "release",
+        "upload",
+        release_tag,
+        RELEASE_ARCHIVE_PATH,
+        "--repo={}".format(github_repo),
+        "--clobber",
+    ],
+    deps = [":check_release", ":archive_release"],
+    workspace_vars = ["GITHUB_TOKEN"],
+    help = "Upload the release archive to the GitHub release {}".format(release_tag),
+    visibility = visibility_private(),
 )

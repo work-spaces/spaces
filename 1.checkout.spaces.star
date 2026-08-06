@@ -3,6 +3,7 @@ Spaces starlark checkout/run script to make changes to spaces, printer, and arch
 With VSCode/Zed integration
 """
 
+load("//@star/packages/star/package.star", "package_add")
 load("//@star/packages/star/rust.star", "rust_add")
 load("//@star/packages/star/sccache.star", "sccache_add")
 load("//@star/packages/star/spaces-cli.star", "spaces_add_devutils", "spaces_add_star_formatter")
@@ -81,6 +82,8 @@ sccache_add(
     "sccache",
     version = "0.14",
 )
+
+package_add("github.com", "cli", "cli", "v2.97.0")
 
 cargo_vscode_task = {
     "type": "cargo",
