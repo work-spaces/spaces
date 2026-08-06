@@ -165,3 +165,45 @@ def env_script(
             },
         },
     }
+
+def env_aws_config(
+        profile: str,
+        region: str | None = None,
+        help: str = "AWS credentials from aws_config profile",
+        is_required: bool = True) -> dict:
+    """
+    Resolves AWS credentials from a named AWS profile at checkout time.
+
+    The user must have already authenticated with the aws CLI before running
+    spaces checkout (e.g. `aws sso login --profile <profile>`).
+
+    The following environment variables are injected into the workspace:
+
+    - `AWS_ACCESS_KEY_ID`
+    - `AWS_SECRET_ACCESS_KEY`  (secret -- redacted in logs)
+    - `AWS_SESSION_TOKEN`      (secret -- redacted in logs, only when present)
+    - `AWS_REGION`             (when a region is available)
+    - `AWS_DEFAULT_REGION`     (same as AWS_REGION)
+
+    Credentials are never included in the workspace digest.
+
+    Args:
+        profile: The AWS named profile to read (must exist in ~/.aws/config).
+        region: Optional region override. The profile region is used when omitted.
+        help: Help text shown in the workspace environment docs.
+        is_required: When True (default), checkout fails if credentials cannot be resolved.
+
+    Returns:
+        A dictionary for use with checkout_add_env_vars().
+    """
+    return {
+        "name": profile,
+        "help": help,
+        "value": {
+            "AwsConfig": {
+                "profile": profile,
+                "region": region,
+                "is_required": _env_bool(is_required),
+            },
+        },
+    }
