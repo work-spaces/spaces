@@ -3,28 +3,42 @@ Spaces starlark checkout/run script to make changes to spaces, printer, and arch
 With VSCode/Zed integration
 """
 
+load("//@star/packages/star/cmake.star", "cmake_add")
+load("//@star/packages/star/musl-gcc.star", "musl_gcc_add", "musl_gcc_add_toolchain_file")
+load("//@star/packages/star/package.star", "package_add")
 load("//@star/packages/star/rust.star", "rust_add")
 load("//@star/packages/star/sccache.star", "sccache_add")
 load("//@star/packages/star/spaces-cli.star", "spaces_add_devutils", "spaces_add_star_formatter")
 load("//@star/packages/star/starship.star", "starship_add_bash")
-load(
-    "//@star/prelude/info.star",
-    "info_get_path_to_store",
-    "info_is_ci",
-)
 load("//@star/prelude/rules/asset.star", "asset_hard_link")
 load(
     "//@star/prelude/rules/checkout.star",
     "checkout_add_any_assets",
     "checkout_add_env_vars",
+    "checkout_add_home_assets",
+    "checkout_add_home_store_env",
     "checkout_add_repo",
+    "checkout_clone_default",
+    "checkout_store_value",
 )
 load("//@star/prelude/rules/env.star", "env_assign")
 load(
     "//@star/prelude/rules/ws.star",
     "workspace_get_absolute_path",
     "workspace_get_path_to_checkout",
+    "workspace_load_value",
 )
+load(
+    "//@star/sdk/star/info.star",
+    "info_get_path_to_store",
+    "info_is_ci",
+    "info_is_platform_linux",
+)
+#load(
+#     "//@star/sdk/star/sandbox.star",
+#     "sandbox_configure_for_os",
+#     "sandbox_new",
+#)
 
 # Configure the top level workspace
 
@@ -63,24 +77,38 @@ rust_add(
     rust_toolchain_toml_dir = "//spaces",
 )
 
+RUST_TOOLCHAIN_SOURCE = "{}/musl.rust-toolchain.toml".format(SPACES_CHECKOUT_PATH) if info_is_ci() and info_is_platform_linux() else "{}/default.rust-toolchain.toml".format(SPACES_CHECKOUT_PATH)
+
 checkout_add_any_assets(
     "cargo_workspace_assets",
     assets = [
         asset_hard_link(
-            source = "{}/rust-toolchain.toml".format(SPACES_CHECKOUT_PATH),
-            destination = "rust-toolchain.toml",
+            source = "//" + RUST_TOOLCHAIN_SOURCE,
+            destination = "//rust-toolchain.toml",
         ),
         asset_hard_link(
-            source = "{}/Cargo.workspace.toml".format(SPACES_CHECKOUT_PATH),
-            destination = "Cargo.toml",
+            source = "//{}/Cargo.workspace.toml".format(SPACES_CHECKOUT_PATH),
+            destination = "//Cargo.toml",
         ),
     ],
 )
 
-sccache_add(
-    "sccache",
-    version = "0.14",
-)
+if not info_is_ci():
+    sccache_add(
+        "sccache",
+        version = "0.14",
+    )
+else:
+    checkout_add_env_vars(
+        "sscache_env",
+        vars = [
+            env_assign(
+                "SCCACHE_DIR",
+                value = "",
+                help = "populate SCCACHE_DIR to avoid errors in CI",
+            ),
+        ],
+    )
 
 cargo_vscode_task = {
     "type": "cargo",
@@ -111,6 +139,11 @@ checkout_add_env_vars(
             "TRUE",
             help = "Skip SDK checkout for archiver",
         ),
+        env_assign(
+            "GIT_CONFIG_GLOBAL",
+            workspace_get_absolute_path() + "/.spaces/.gitconfig",
+            help = "Assign git config to workspace home folder",
+        ),
     ],
 )
 
@@ -121,3 +154,70 @@ if workspace.load_value("CHECKOUT_INSTALL_SPACES") == "ON":
         url = "https://github.com/work-spaces/install-spaces",
         rev = "main",
     )
+
+package_add("github.com", "cli", "cli", "v2.88.1")
+
+# Required for dbus and nono (linux only)
+
+if info_is_platform_linux() or workspace_load_value("SPACES_ENABLE_SANDBOX") == "ON":
+    checkout_store_value("SPACES_DBUS_ENABLED", True)
+    cmake_add("cmake4", "v4.3.1")
+    package_add("github.com", "ninja-build", "ninja", "v1.13.2")
+    package_add("github.com", "xpack-dev-tools", "pkg-config-xpack", "v0.29.2-3")
+
+    if info_is_platform_linux():
+        musl_gcc_add("musl_gcc")
+        musl_gcc_add_toolchain_file(
+            "musl_gcc_toolchain",
+            "sysroot/share/cmake/musl-toolchain.cmake",
+        )
+
+        pkg_config_vars = [
+            env_assign(
+                "PKG_CONFIG_PATH",
+                workspace_get_absolute_path() + "/build/install/lib/pkgconfig",
+                help = "pkg-config path for building dbus with cargo",
+            ),
+            env_assign(
+                "PKG_CONFIG_ALLOW_CROSS",
+                "1",
+                help = "Allow pkg-config to work for cross-compilation without sysroot",
+            ),
+        ]
+
+        checkout_add_env_vars(
+            "pkg_config_env",
+            vars = pkg_config_vars,
+        )
+
+    checkout_add_repo(
+        "deps/libexpat",
+        url = "https://github.com/libexpat/libexpat",
+        rev = "R_2_7_5",
+        clone = checkout_clone_default(),
+    )
+
+    checkout_add_repo(
+        "deps/dbus",
+        url = "https://github.com/work-spaces/dbus.git",
+        rev = "ff0666ad9ad4d996d2de6a257ade5244b623510c",
+        clone = checkout_clone_default(),
+    )
+
+    checkout_add_home_store_env("home_store_env")
+    checkout_add_home_assets(
+        "home_assets",
+        assets = [
+            ".gitconfig",
+            ".config/gh",
+            ".ssh",
+            ".gnupg",
+            ".config/git",
+            ".netrc",
+        ],
+    )
+
+    #if not info_is_ci():
+    # sandbox = sandbox_new("workspace-sandbox")
+    # sandbox_configure_for_os(sandbox)
+    # checkout_set_sandbox(sandbox)
