@@ -384,7 +384,7 @@ run_add_exec(
         "--root={}".format(RELEASE_INSTALL_DIR),
     ],
     deps = deps(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
-    target_files = ["//build/install/bin/spaces"],
+    target_dirs = ["//build/install/bin"],
     help = "Build and install the release binary to build/install",
     visibility = visibility_private(),
 )
