@@ -7,7 +7,7 @@ load("//@star/prelude/rules/env.star", "env_append")
 
 workspace.set_locks(locks = {
     "@star/sdk": "v0.4.0",
-    "@star/packages": "v0.2.61",
+    "@star/packages": "v0.2.66",
 })
 
 # Ensure tools checked out to sysroot/bin are available
@@ -22,7 +22,7 @@ checkout_add_env_vars(
 checkout_add_repo(
     "@star/sdk",
     url = "https://github.com/work-spaces/sdk",
-    rev = "v0.4.0",
+    rev = "main",
 )
 
 checkout_add_repo(
