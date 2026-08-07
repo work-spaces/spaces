@@ -42,7 +42,7 @@ def deps_run_once(rules: list[str] = []) -> list[dict]:
     """
     return [{"Rule": rule} for rule in rules] + [{"Glob": {"Includes": []}}]
 
-def deps(
+def deps_new(
         rules: list[str] = [],
         globs: list[dict] = [],
         files: list[str] = []) -> list[dict]:
@@ -62,3 +62,20 @@ def deps(
     GLOBS_EXCLUDES = [{"Glob": {"Excludes": glob["Excludes"]}} for glob in globs]
     FILES = [{"Glob": {"Includes": [file]}} for file in files]
     return RULES + GLOBS_INCLUDES + GLOBS_EXCLUDES + FILES
+
+def deps(
+        rules: list[str] = [],
+        globs: list[dict] = [],
+        files: list[str] = []) -> list[dict]:
+    """
+    Deprecated: use `deps_new()` instead.
+
+    Args:
+        rules: See deps_new()
+        globs: See deps_new()
+        files: See deps_new()
+
+    Returns:
+        See deps_new()
+    """
+    return deps_new(rules, globs, files)
