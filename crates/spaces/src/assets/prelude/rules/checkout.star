@@ -668,3 +668,16 @@ def checkout_add_home_assets(name: str, assets: list[str]):
         name,
         assets = [asset_home(source) for source in assets],
     )
+
+def checkout_set_sandbox(sandbox: dict):
+    """
+    Sets the sandbox configuration for the workspace.
+
+    This configuration defines the base sandbox for the workspace.
+
+    Use sandbox.star to define the sandbox configuration.
+
+    Args:
+        sandbox: The sandbox configuration to set (use sandbox.star)
+    """
+    checkout.set_sandbox(sandbox = sandbox)
