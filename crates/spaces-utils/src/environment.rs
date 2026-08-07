@@ -32,9 +32,17 @@ const ASSIGN_FROM_COMMAND_LINE_DESCRIPTION: &str = r#"Values set via `--env=NAME
 
 At checkout: included in the workspace digest and persisted. At run: NOT included in the digest; triggers re-evaluation of all modules. Always overrides existing workspace values."#;
 
-const AWS_CONFIG_VARIABLES_DESCRIPTION: &str = r#"Credentials resolved from an AWS named profile at checkout. \
-All four variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_REGION`) \
-are injected as secrets. Credentials are never part of the workspace digest.
+const AWS_CONFIG_VARIABLES_DESCRIPTION: &str = r#"Credentials resolved from an AWS named profile at checkout.
+The following variables are injected when available:
+
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY` (secret)
+- `AWS_SESSION_TOKEN` (secret, when present)
+- `AWS_REGION`
+- `AWS_DEFAULT_REGION`
+
+The config entry (profile, region, is_required) is part of the workspace digest;
+resolved credential values are not.
 
 - `profile`: The AWS profile name (must exist in `~/.aws/config`).
 - `region`: Optional region override; the profile region is used if omitted.
@@ -323,7 +331,8 @@ pub enum Value {
     /// Credentials resolved from an AWS named profile at checkout.
     /// Expands into multiple variables: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
     /// AWS_SESSION_TOKEN (when present), AWS_REGION and AWS_DEFAULT_REGION (when available).
-    /// Never included in the workspace digest.
+    /// The config entry (profile, region, is_required) is included in the workspace digest;
+    /// the resolved credential values are not.
     AwsConfig(AwsConfigValue),
 }
 

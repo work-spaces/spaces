@@ -185,7 +185,8 @@ def env_aws_config(
     - `AWS_REGION`             (when a region is available)
     - `AWS_DEFAULT_REGION`     (same as AWS_REGION)
 
-    Credentials are never included in the workspace digest.
+    The config entry (profile, region, is_required) is part of the workspace digest;
+    resolved credential values are not.
 
     Args:
         profile: The AWS named profile to read (must exist in ~/.aws/config).
