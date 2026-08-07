@@ -13,10 +13,20 @@ load(
     "run_add_archive",
     "run_add_exec",
     "run_add_exec_test",
+    "run_log_level_passthrough",
+)
+load("//@star/sdk/star/deps.star", deps_new = "deps")
+load("//@star/sdk/star/glob.star", "glob")
+load(
+    "//@star/sdk/star/info.star",
+    "info_is_platform_aarch64",
+    "info_is_platform_linux",
+    "info_is_platform_x86_64",
 )
 load(
     "//@star/sdk/star/visibility.star",
     "visibility_private",
+    "visibility_public",
     "visibility_rules",
 )
 load(
@@ -44,7 +54,7 @@ run_add_exec(
     "rustup_update",
     command = "rustup",
     args = ["update"],
-    deps = deps(files = rustup_files),
+    deps = deps_new(files = rustup_files),
     help = "Update the Rust toolchain via rustup",
     visibility = visibility_private(),
 )
@@ -53,9 +63,17 @@ run_add_exec(
     "cargo_tree",
     command = "cargo",
     args = ["tree"],
-    deps = deps(rules = [":rustup_update"], files = rustup_files),
+    deps = deps_new(rules = [":rustup_update"], files = rustup_files),
     help = "Run cargo tree. This is used to clean up the result of rustup update without any race conditions.",
     visibility = visibility_private(),
+)
+DBUS_DEPS = ["//spaces/deps:dbus"] if workspace_load_value("SPACES_DBUS_ENABLED") else []
+
+run_add(
+    "base_deps",
+    deps = [
+        ":rustup_update",
+    ] + DBUS_DEPS,
 )
 
 run_add_exec(
@@ -63,7 +81,7 @@ run_add_exec(
     command = "cargo",
     args = ["check"],
     help = "Run cargo check on workspace",
-    deps = deps(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
+    deps = deps_new(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
     visibility = visibility_private(),
 )
 
@@ -71,7 +89,7 @@ run_add_exec(
     "build",
     command = "cargo",
     args = ["build", "--target-dir=build/target"],
-    deps = deps(
+    deps = deps_new(
         rules = [":check"],
         globs = [GLOB_DEPS],
         files = [
@@ -107,7 +125,7 @@ run_add_exec(
     command = "cargo",
     args = ["run", "--target-dir=build/target"],
     help = "Run spaces from the build/debug target",
-    deps = deps(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
+    deps = deps_new(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
     visibility = visibility_private(),
 )
 
@@ -115,7 +133,7 @@ run_add_exec(
     "post_build",
     command = "bash",
     args = ["-c", "echo $(build/target/debug/spaces --version) > build/changed.txt"],
-    deps = deps(rules = [":build"]),
+    deps = deps_new(rules = [":build"]),
     target_files = ["//build/changed.txt"],
     help = "Run a quick post build for tests",
     visibility = visibility_private(),
@@ -134,7 +152,7 @@ run_add_exec(
     command = "cargo",
     args = ["clippy"],
     log_level = "Passthrough",
-    deps = deps(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
+    deps = deps_new(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
     help = "Run cargo clippy on workspace",
     visibility = visibility_private(),
 )
@@ -144,7 +162,7 @@ run_add_exec(
     command = "cargo",
     args = ["fmt"],
     log_level = "Passthrough",
-    deps = deps(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
+    deps = deps_new(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
     help = "Run cargo fmt on workspace",
     visibility = visibility_private(),
 )
@@ -161,7 +179,7 @@ run_add_exec_test(
         "RUST_BACKTRACE": "1",
         "RUST_LOG": "trace",
     },
-    deps = deps(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
+    deps = deps_new(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
     visibility = visibility_rules(["//:test", "//spaces"]),
 )
 
@@ -190,7 +208,7 @@ run_add_exec(
         "--profile=dev",
         "--root={}".format(root),
     ],
-    deps = deps(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
+    deps = deps_new(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
     visibility = visibility_private(),
     help = "Install dev build on local system",
 )
@@ -226,7 +244,7 @@ run_add_exec(
         "--profile=dev",
         "--root={}".format(root),
     ],
-    deps = deps(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
+    deps = deps_new(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
     visibility = visibility_private(),
 )
 
@@ -243,7 +261,7 @@ run_add_exec(
         "-lint=warn",
         "-mode=check",
     ] + STARLARK_FILES,
-    deps = deps(files = STARLARK_FILES),
+    deps = deps_new(files = STARLARK_FILES),
     visibility = visibility_private(),
     working_directory = ".",
 )
@@ -269,7 +287,7 @@ run_add_exec(
     env = {
         "CO_SPACES_TOML": CO_SPACES_TOML_DOCS_DIR,
     },
-    deps = deps(
+    deps = deps_new(
         rules = [":build"],
         files = [
             "docs/co-spaces-toml/*.co.spaces.toml",
@@ -290,7 +308,7 @@ run_add_exec(
     env = {
         "CO_SPACES_TOML": CO_SPACES_TOML_DOCS_DIR,
     },
-    deps = deps(
+    deps = deps_new(
         rules = [":build"],
         files = [
             "docs/co-spaces-toml/*.co.spaces.toml",
@@ -312,7 +330,7 @@ run_add_exec(
         # ensure //@star/prelude is not loaded from workspace
         "SPACES_WORKSPACE": "/tmp",
     },
-    deps = deps(
+    deps = deps_new(
         rules = [":build"],
         files = [
             "scripts/test/**/*.exec.star",
@@ -329,7 +347,7 @@ run_add_exec(
     args = [
         "./spaces/scripts/show-all-errors.exec.star",
     ],
-    deps = deps(
+    deps = deps_new(
         rules = [":build"],
         files = [
             "scripts/errors/**",
@@ -347,7 +365,7 @@ run_add_exec(
     args = [
         "./spaces/scripts/errors/error-toml-null-value.exec.star",
     ],
-    deps = deps(
+    deps = deps_new(
         rules = [":build"],
         files = [
             "scripts/errors/**",

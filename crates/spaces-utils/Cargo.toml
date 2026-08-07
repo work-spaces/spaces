@@ -1,6 +1,6 @@
 [package]
 name = "spaces-utils"
-version = "0.20.8"
+version = "0.21.0"
 edition = "2024"
 
 [dependencies]
@@ -35,6 +35,8 @@ homedir = "0.3"
 arboard = "3"
 serde_with = "3"
 enum-map = { version = "2", features = ["serde"] }
+nono = { version = "0.71"}
+
 
 indexmap.workspace = true
 
