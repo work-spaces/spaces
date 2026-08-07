@@ -32,6 +32,22 @@ const ASSIGN_FROM_COMMAND_LINE_DESCRIPTION: &str = r#"Values set via `--env=NAME
 
 At checkout: included in the workspace digest and persisted. At run: NOT included in the digest; triggers re-evaluation of all modules. Always overrides existing workspace values."#;
 
+const AWS_CONFIG_VARIABLES_DESCRIPTION: &str = r#"Credentials resolved from an AWS named profile at checkout.
+The following variables are injected when available:
+
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY` (secret)
+- `AWS_SESSION_TOKEN` (secret, when present)
+- `AWS_REGION`
+- `AWS_DEFAULT_REGION`
+
+The config entry (profile, region, is_required) is part of the workspace digest;
+resolved credential values are not.
+
+- `profile`: The AWS profile name (must exist in `~/.aws/config`).
+- `region`: Optional region override; the profile region is used if omitted.
+- `is_required`: Fail checkout if credentials cannot be resolved."#;
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 pub enum EnvBool {
     #[default]
@@ -204,6 +220,90 @@ impl ScriptValue {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
+pub struct AwsConfigValue {
+    /// The AWS named profile to resolve credentials from.
+    pub profile: Arc<str>,
+    /// Optional region override. When absent the profile's region is used.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region: Option<Arc<str>>,
+    /// If Yes, checkout fails when credentials cannot be resolved.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_required: Option<EnvBool>,
+}
+
+struct AwsCredentials {
+    pub access_key_id: Arc<str>,
+    pub secret_access_key: Arc<str>,
+    pub session_token: Option<Arc<str>>,
+    pub region: Option<Arc<str>>,
+}
+
+impl AwsConfigValue {
+    fn get_credentials(&self) -> anyhow::Result<Option<AwsCredentials>> {
+        use aws_config::BehaviorVersion;
+        use aws_sdk_s3::config::ProvideCredentials;
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .context(format_context!(
+                "Failed to build tokio runtime for AWS credential resolution"
+            ))?;
+
+        let profile = self.profile.clone();
+        let region_override = self.region.clone();
+
+        let result = rt.block_on(async move {
+            let mut loader =
+                aws_config::defaults(BehaviorVersion::latest()).profile_name(profile.as_ref());
+
+            if let Some(ref region) = region_override {
+                loader = loader.region(aws_config::meta::region::RegionProviderChain::first_try(
+                    aws_sdk_s3::config::Region::new(region.to_string()),
+                ));
+            }
+
+            let sdk_config = loader.load().await;
+
+            let credentials_provider = match sdk_config.credentials_provider() {
+                Some(p) => p,
+                None => return Ok(None),
+            };
+
+            let credentials =
+                credentials_provider
+                    .provide_credentials()
+                    .await
+                    .context(format_context!(
+                        "Failed to provide AWS credentials for profile '{profile}'"
+                    ))?;
+
+            let region =
+                region_override.or_else(|| sdk_config.region().map(|r| Arc::from(r.as_ref())));
+
+            Ok(Some(AwsCredentials {
+                access_key_id: Arc::from(credentials.access_key_id()),
+                secret_access_key: Arc::from(credentials.secret_access_key()),
+                session_token: credentials.session_token().map(Arc::from),
+                region,
+            }))
+        });
+
+        match result {
+            Ok(creds) => Ok(creds),
+            Err(e) => {
+                if matches!(self.is_required, Some(EnvBool::Yes)) {
+                    Err(e)
+                } else {
+                    Ok(None)
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub enum Value {
     #[default]
     None,
@@ -228,6 +328,12 @@ pub enum Value {
     /// They have no user-supplied value; the value is populated
     /// automatically during workspace operations.
     Automatic,
+    /// Credentials resolved from an AWS named profile at checkout.
+    /// Expands into multiple variables: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
+    /// AWS_SESSION_TOKEN (when present), AWS_REGION and AWS_DEFAULT_REGION (when available).
+    /// The config entry (profile, region, is_required) is included in the workspace digest;
+    /// the resolved credential values are not.
+    AwsConfig(AwsConfigValue),
 }
 
 const AUTOMATIC_PLACEHOLDER_PREFIX: &str = "$AUTO";
@@ -433,7 +539,11 @@ impl AnyEnvironment {
                 Value::AssignFromArg(value) => {
                     *value = Value::replace_with_automatic_placeholders(value, auto_vars).into();
                 }
-                Value::None | Value::Automatic | Value::Inherit(_) | Value::Script(_) => {}
+                Value::None
+                | Value::Automatic
+                | Value::Inherit(_)
+                | Value::Script(_)
+                | Value::AwsConfig(_) => {}
             }
         }
     }
@@ -505,6 +615,15 @@ impl AnyEnvironment {
                         secret_map.insert(any.name.clone(), value.clone());
                     }
                 }
+                Value::AwsConfig(aws_config_value) => {
+                    if let Some(creds) = aws_config_value.get_credentials().ok().flatten() {
+                        secret_map
+                            .insert(Arc::from("AWS_SECRET_ACCESS_KEY"), creds.secret_access_key);
+                        if let Some(token) = creds.session_token {
+                            secret_map.insert(Arc::from("AWS_SESSION_TOKEN"), token);
+                        }
+                    }
+                }
                 _ => (),
             }
         }
@@ -571,6 +690,22 @@ impl AnyEnvironment {
                 Value::AssignFromArg(value) => {
                     assign_from_args.insert(name, value.clone());
                 }
+                Value::AwsConfig(aws_config_value) => {
+                    if let Some(creds) = aws_config_value
+                        .get_credentials()
+                        .context(format_context!("Failed to resolve AWS credentials"))?
+                    {
+                        result.insert(Arc::from("AWS_ACCESS_KEY_ID"), creds.access_key_id);
+                        result.insert(Arc::from("AWS_SECRET_ACCESS_KEY"), creds.secret_access_key);
+                        if let Some(token) = creds.session_token {
+                            result.insert(Arc::from("AWS_SESSION_TOKEN"), token);
+                        }
+                        if let Some(region) = creds.region {
+                            result.insert(Arc::from("AWS_REGION"), region.clone());
+                            result.insert(Arc::from("AWS_DEFAULT_REGION"), region);
+                        }
+                    }
+                }
             }
         }
 
@@ -632,6 +767,17 @@ impl AnyEnvironment {
         let any_yaml = self
             .to_yaml(|any| matches!(any.value, Value::Script(_)))
             .context(format_context!("failed to create yaml for script value"))?;
+        result.push_str(markdown::code_block("yaml", &any_yaml).as_str());
+
+        result.push('\n');
+        result.push_str(markdown::heading(2, "AWS Config Variables").as_str());
+        result.push_str(markdown::paragraph(AWS_CONFIG_VARIABLES_DESCRIPTION).as_str());
+
+        let any_yaml = self
+            .to_yaml(|any| matches!(any.value, Value::AwsConfig(_)))
+            .context(format_context!(
+                "failed to create yaml for AWS config value"
+            ))?;
         result.push_str(markdown::code_block("yaml", &any_yaml).as_str());
 
         result.push('\n');
