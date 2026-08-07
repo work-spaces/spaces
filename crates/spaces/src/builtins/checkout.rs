@@ -1231,30 +1231,34 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
     /// Creates or updates the environment in the workspace during checkout.
     ///
+    /// Supports all value types from `env.star`: `env_assign`, `env_append`,
+    /// `env_prepend`, `env_inherit`, `env_script`, and `env_aws_config`.
+    ///
     /// ```python
-    /// checkout.update_env(
-    ///     rule = {"name": "update_env"},
-    ///     env = {
-    ///         "paths": [],
-    ///         "system_paths": ["/usr/bin", "/bin"],
-    ///         "vars": {
-    ///             "PS1": '"(spaces) $PS1"',
-    ///         },
-    ///         "inherited_vars": ["HOME", "SHELL", "USER"],
-    ///         "optional_inherited_vars": ["TERM"],
-    ///         "secret_inherited_vars": ["SSH_AUTH_SOCK"],
+    /// # Inject AWS credentials from a named profile
+    /// checkout.add_env_vars(
+    ///     rule = {"name": "aws_creds"},
+    ///     any_env = {
+    ///         "vars": [
+    ///             {
+    ///                 "name": "my-corp-profile",
+    ///                 "help": "AWS credentials for my-corp-profile",
+    ///                 "value": {
+    ///                     "AwsConfig": {
+    ///                         "profile": "my-corp-profile",
+    ///                         "region": "us-east-1",
+    ///                         "is_required": "Yes",
+    ///                     },
+    ///                 },
+    ///             },
+    ///         ],
     ///     },
     /// )
     /// ```
     ///
     /// # Arguments
-    /// * `rule`: A `dict` rule definition containing `name` (`str`), `deps` (`list`), `platforms` (`list`), `type` (`str`), and `help` (`str`).
-    /// * `env`: A `dict` containing environment details. Variables are execution-phase dependent; they are available in subsequent modules during checkout and fully available during `spaces run`.
-    ///     * `vars` (`dict`): Environment variables to set.
-    ///     * `paths` (`list`): Paths to prepend to `PATH`.
-    ///     * `system_paths` (`list`): Paths appended to the end of `PATH`.
-    ///     * `inherited_vars` (`list`): Variables fixed from the calling environment at checkout.
-    ///     * `secret_inherited_vars` (`list`): Variables inherited on demand with masked log values.
+    /// * `rule`: Rule definition dict (`name`, `deps`, `platforms`, `type`, `visibility`).
+    /// * `any_env`: Dict with a `vars` list. Each entry is produced by a helper in `env.star`.
     fn add_env_vars(
         #[starlark(require = named)] rule: starlark::values::Value,
         #[starlark(require = named)] any_env: starlark::values::Value,
