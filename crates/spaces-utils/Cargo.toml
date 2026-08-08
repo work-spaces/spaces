@@ -17,7 +17,12 @@ reqwest = { version = "0.12", default-features = false, features = [
     "rustls-tls",
 ] }
 aws-config = "1"
-aws-sdk-s3 = "1"
+aws-sdk-s3 = { version = "1", default-features = false, features = [
+    "sigv4a",
+    "http-1x",
+    "default-https-client",
+    "rt-tokio",
+] }
 tokio = { version = "1", features = ["rt-multi-thread", "time", "fs", "io-util"] }
 which = "7"
 sha2 = "0.10"
