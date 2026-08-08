@@ -329,7 +329,7 @@ pub(crate) fn create_log_file(
         let arguments_escaped: Vec<_> =
             arguments.chars().flat_map(|c| c.escape_default()).collect();
         let args = arguments_escaped.into_iter().collect::<String>();
-        let shell = format!("{command} {args}").into();
+        let shell = secrets.redact(format!("{command} {args}").into());
 
         let redacted_arguments = options
             .arguments
