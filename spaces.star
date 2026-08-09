@@ -99,11 +99,7 @@ run_add_exec(
             > And on the next line.
 
     """,
-    env = {
-        "SCCACHE_DIR": workspace_get_env_var("SCCACHE_DIR"),
-        "RUSTUP_HOME": workspace_get_env_var("RUSTUP_HOME"),
-        "CARGO_HOME": workspace_get_env_var("CARGO_HOME"),
-    },
+    workspace_vars = ["SCCACHE_DIR", "RUSTUP_HOME", "CARGO_HOME"],
 )
 
 run_add_exec(
@@ -214,6 +210,7 @@ run_add_exec(
         "--profile=release",
         "--root={}".format(root),
     ] + linux_args,
+    env = linux_env,
     deps = deps(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
 )
 
@@ -390,8 +387,10 @@ run_add_exec(
         "--path=spaces/crates/spaces",
         "--profile=release",
         "--root={}".format(RELEASE_INSTALL_DIR),
-    ],
+    ] + linux_args,
     deps = deps(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
+    workspace_vars = ["SCCACHE_DIR", "RUSTUP_HOME", "CARGO_HOME"],
+    env = linux_env,
     target_dirs = ["//build/install/bin"],
     help = "Build and install the release binary to build/install",
     visibility = visibility_private(),

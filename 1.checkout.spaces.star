@@ -81,10 +81,11 @@ rust_add(
     deps = [":spaces0", ":cargo_workspace_assets"],
 )
 
-sccache_add(
-    "sccache",
-    version = "0.14",
-)
+if not info_is_ci():
+    sccache_add(
+        "sccache",
+        version = "0.14",
+    )
 
 package_add("github.com", "cli", "cli", "v2.97.0")
 
