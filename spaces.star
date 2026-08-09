@@ -393,7 +393,7 @@ run_add_exec(
     "archive_release",
     archive_name = "spaces",
     deps = [":build_release_install"],
-    version = release_tag,
+    version = release_tag.lstrip("v"),
     source_directory = "//build/install/bin",
     suffix = "zip",
     includes = ["spaces*"],
