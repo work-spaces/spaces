@@ -19,9 +19,6 @@ jobs:
         with:
           checkout: --locked --url=https://github.com/work-spaces/spaces --rev=${{ inputs.tag }}
           run: //spaces:publish_release
-        env:
-          SPACES_RELEASE_TAG: ${{ inputs.tag }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-linux-aarch64:
     name: Build and Publish Linux aarch64
@@ -31,11 +28,13 @@ jobs:
     steps:
       - uses: work-spaces/spaces-checkout-run@v0.20.3
         with:
-          checkout: --locked --url=https://github.com/work-spaces/spaces --rev=${{ inputs.tag }}
+          checkout: >-
+            --locked
+            --url=https://github.com/work-spaces/spaces
+            --rev=${{ inputs.tag }}
+            --env=SPACES_RELEASE_TAG=${{ inputs.tag }}
+            --env=GH_TOKEN=${{ secrets.GITHUB_TOKEN }}
           run: //spaces:publish_release
-        env:
-          SPACES_RELEASE_TAG: ${{ inputs.tag }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-macos-aarch64:
     name: Build and Publish macOS aarch64
@@ -45,11 +44,14 @@ jobs:
     steps:
       - uses: work-spaces/spaces-checkout-run@v0.20.3
         with:
-          checkout: --locked --url=https://github.com/work-spaces/spaces --rev=${{ inputs.tag }}
+          checkout: >-
+            --locked
+            --url=https://github.com/work-spaces/spaces
+            --rev=${{ inputs.tag }}
+            --env=SPACES_RELEASE_TAG=${{ inputs.tag }}
+            --env=GH_TOKEN=${{ secrets.GITHUB_TOKEN }}
           run: //spaces:publish_release
-        env:
-          SPACES_RELEASE_TAG: ${{ inputs.tag }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
 
   build-macos-x86_64:
     name: Build and Publish macOS x86_64
@@ -59,11 +61,13 @@ jobs:
     steps:
       - uses: work-spaces/spaces-checkout-run@v0.20.3
         with:
-          checkout: --locked --url=https://github.com/work-spaces/spaces --rev=${{ inputs.tag }}
+          checkout: >-
+            --locked
+            --url=https://github.com/work-spaces/spaces
+            --rev=${{ inputs.tag }}
+            --env=SPACES_RELEASE_TAG=${{ inputs.tag }}
+            --env=GH_TOKEN=${{ secrets.GITHUB_TOKEN }}
           run: //spaces:publish_release
-        env:
-          SPACES_RELEASE_TAG: ${{ inputs.tag }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-windows-x86_64:
     name: Build and Publish Windows x86_64
@@ -73,8 +77,10 @@ jobs:
     steps:
       - uses: work-spaces/spaces-checkout-run@v0.20.3
         with:
-          checkout: --locked --url=https://github.com/work-spaces/spaces --rev=${{ inputs.tag }}
+          checkout: >-
+            --locked
+            --url=https://github.com/work-spaces/spaces
+            --rev=${{ inputs.tag }}
+            --env=SPACES_RELEASE_TAG=${{ inputs.tag }}
+            --env=GH_TOKEN=${{ secrets.GITHUB_TOKEN }}
           run: //spaces:publish_release
-        env:
-          SPACES_RELEASE_TAG: ${{ inputs.tag }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
