@@ -22,7 +22,7 @@ jobs:
             --url=https://github.com/work-spaces/spaces
             --rev=${{ inputs.tag }}
             --env=SPACES_RELEASE_TAG=${{ inputs.tag }}
-            --env=GH_TOKEN=${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           run: //spaces:publish_release
 
   build-linux-aarch64:
@@ -38,7 +38,7 @@ jobs:
             --url=https://github.com/work-spaces/spaces
             --rev=${{ inputs.tag }}
             --env=SPACES_RELEASE_TAG=${{ inputs.tag }}
-            --env=GH_TOKEN=${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           run: //spaces:publish_release
 
   build-macos-aarch64:
@@ -54,7 +54,7 @@ jobs:
             --url=https://github.com/work-spaces/spaces
             --rev=${{ inputs.tag }}
             --env=SPACES_RELEASE_TAG=${{ inputs.tag }}
-            --env=GH_TOKEN=${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           run: //spaces:publish_release
 
   build-windows-x86_64:
@@ -70,5 +70,5 @@ jobs:
             --url=https://github.com/work-spaces/spaces
             --rev=${{ inputs.tag }}
             --env=SPACES_RELEASE_TAG=${{ inputs.tag }}
-            --env=GH_TOKEN=${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           run: //spaces:publish_release
