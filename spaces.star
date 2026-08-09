@@ -3,6 +3,8 @@ Spaces starlark checkout/run script to make changes to spaces, printer, and arch
 With VSCode/Zed integration
 """
 
+load("//@star/packages/star/musl-gcc.star", "musl_gcc_get_env")
+load("//@star/prelude/info.star", "info_is_platform_aarch64", "info_is_platform_linux")
 load("//@star/prelude/rules/deps.star", "deps")
 load("//@star/prelude/rules/glob.star", "glob")
 load(
@@ -29,12 +31,12 @@ GLOB_DEPS = glob(includes = [
     "//spaces/Cargo.workspace.toml",
     "//spaces/**/*.rs",
     "//spaces/crates/spaces/src/assets/**/*.star",
-    "//spaces/rust-toolchain.toml",
+    "//rust-toolchain.toml",
 ], excludes = [
     "//spaces/target/**",
 ])
 
-rustup_files = ["//spaces/rust-toolchain.toml"]
+rustup_files = ["//rust-toolchain.toml"]
 
 run_add_exec(
     "rustup_update",
@@ -195,6 +197,10 @@ run_add_exec(
     help = "Install dev build on local system",
 )
 
+linux_env = musl_gcc_get_env() if info_is_platform_linux() else {}
+linux_musl_target = "--target={}-unknown-linux-musl".format("aarch64" if info_is_platform_aarch64() else "x86_64")
+linux_args = [linux_musl_target] if info_is_platform_linux() else []
+
 run_add_exec(
     "install_release",
     command = "cargo",
@@ -205,7 +211,7 @@ run_add_exec(
         "--path=spaces/crates/spaces",
         "--profile=release",
         "--root={}".format(root),
-    ],
+    ] + linux_args,
     deps = deps(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
 )
 

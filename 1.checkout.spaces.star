@@ -3,6 +3,7 @@ Spaces starlark checkout/run script to make changes to spaces, printer, and arch
 With VSCode/Zed integration
 """
 
+load("//@star/packages/star/musl-gcc.star", "musl_gcc_add")
 load("//@star/packages/star/package.star", "package_add")
 load("//@star/packages/star/rust.star", "rust_add")
 load("//@star/packages/star/sccache.star", "sccache_add")
@@ -58,13 +59,6 @@ if not info_is_ci():
         deps = [":spaces0"],
     )
 
-rust_add(
-    "rust_toolchain",
-    version = "1.93",
-    deps = [":spaces0"],
-    rust_toolchain_toml_dir = "//spaces",
-)
-
 toolchain = "linux" if info_is_platform_linux() else "default"
 
 checkout_add_any_assets(
@@ -72,13 +66,19 @@ checkout_add_any_assets(
     assets = [
         asset_hard_link(
             source = "{}/rust-{}-toolchain.toml".format(SPACES_CHECKOUT_PATH, toolchain),
-            destination = "rust-toolchain.toml",
+            destination = "//rust-toolchain.toml",
         ),
         asset_hard_link(
             source = "{}/Cargo.workspace.toml".format(SPACES_CHECKOUT_PATH),
-            destination = "Cargo.toml",
+            destination = "//Cargo.toml",
         ),
     ],
+)
+
+rust_add(
+    "rust_toolchain",
+    version = "1.94",
+    deps = [":spaces0", ":cargo_workspace_assets"],
 )
 
 sccache_add(
@@ -125,6 +125,9 @@ checkout_add_env_vars(
         ),
     ],
 )
+
+if info_is_platform_linux():
+    musl_gcc_add("musl_gcc")
 
 # This can be used for testing spaces sync
 if workspace.load_value("CHECKOUT_INSTALL_SPACES") == "ON":
