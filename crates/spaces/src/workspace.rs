@@ -1477,4 +1477,17 @@ mod tests {
         );
         assert_eq!(path.as_ref(), "/workspace/simaf/internal/spawner.star");
     }
+
+    #[test]
+    fn resolve_load_path_handles_backslash_prefixed_module_name() {
+        // On Windows, strip_prefix may leave a leading backslash on the
+        // normalized module name (e.g. "\@star\sdk\star\checkout.star").
+        // resolve_load_path must still resolve sibling loads correctly.
+        let path = resolve_load_path("/workspace", "\\@star/sdk/star/checkout.star", "info.star");
+        assert!(
+            path.ends_with("@star/sdk/star/info.star")
+                || path.ends_with("@star\\sdk\\star\\info.star"),
+            "unexpected path: {path}"
+        );
+    }
 }

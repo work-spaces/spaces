@@ -332,7 +332,7 @@ pub fn evaluate_loads(
         } else {
             module_load_path
                 .strip_prefix(workspace_path.as_ref())
-                .map(|p| p.trim_start_matches('/'))
+                .map(|p| p.trim_start_matches(['/', '\\']))
                 .map(|p| p.into())
                 .unwrap_or_else(|| module_load_path.clone())
         };
