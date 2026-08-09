@@ -9,6 +9,7 @@ load("//@star/prelude/rules/deps.star", "deps")
 load("//@star/prelude/rules/glob.star", "glob")
 load(
     "//@star/prelude/rules/run.star",
+    "run_add",
     "run_add_archive",
     "run_add_exec",
     "run_add_exec_test",
@@ -23,6 +24,7 @@ load(
     "workspace_get_env_var",
     "workspace_get_env_var_or",
     "workspace_is_env_var_set",
+    "workspace_load_value",
 )
 
 GLOB_DEPS = glob(includes = [
@@ -375,7 +377,7 @@ RELEASE_INSTALL_DIR = "build/install"
 SPACES_RELEASE_TAG_ENV = "SPACES_RELEASE_TAG"
 GITHUB_REPOSITORY_ENV = "GITHUB_REPOSITORY"
 
-release_tag = workspace_get_env_var_or(SPACES_RELEASE_TAG_ENV, "dev")
+release_tag = workspace_load_value(SPACES_RELEASE_TAG_ENV) or "dev"
 github_repo = workspace_get_env_var_or(GITHUB_REPOSITORY_ENV, "work-spaces/spaces")
 
 run_add_exec(
@@ -420,19 +422,26 @@ run_add_exec(
     visibility = visibility_private(),
 )
 
-run_add_exec(
-    "publish_release",
-    command = "gh",
-    args = [
-        "release",
-        "upload",
-        release_tag,
-        RELEASE_ARCHIVE_PATH,
-        "--repo={}".format(github_repo),
-        "--clobber",
-    ],
-    deps = [":check_release", ":archive_release"],
-    workspace_vars = ["GH_TOKEN"],
-    help = "Upload the release archive to the GitHub release {}".format(release_tag),
-    visibility = visibility_private(),
-)
+if workspace_load_value("SPACES_PUBLISH_DRY_RUN") == "ON":
+    run_add(
+        "publish_release",
+        deps = [":archive_release"],
+        help = "Build and archive the release but do not publish the artifacts",
+    )
+else:
+    run_add_exec(
+        "publish_release",
+        command = "gh",
+        args = [
+            "release",
+            "upload",
+            release_tag,
+            RELEASE_ARCHIVE_PATH,
+            "--repo={}".format(github_repo),
+            "--clobber",
+        ],
+        deps = [":check_release", ":archive_release"],
+        workspace_vars = ["GH_TOKEN"],
+        help = "Upload the release archive to the GitHub release {}".format(release_tag),
+        visibility = visibility_private(),
+    )
