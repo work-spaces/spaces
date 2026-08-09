@@ -12,6 +12,7 @@ load(
     "//@star/prelude/info.star",
     "info_get_path_to_store",
     "info_is_ci",
+    "info_is_platform_linux",
 )
 load("//@star/prelude/rules/asset.star", "asset_hard_link")
 load(
@@ -64,11 +65,13 @@ rust_add(
     rust_toolchain_toml_dir = "//spaces",
 )
 
+toolchain = "linux" if info_is_platform_linux() else "default"
+
 checkout_add_any_assets(
     "cargo_workspace_assets",
     assets = [
         asset_hard_link(
-            source = "{}/rust-toolchain.toml".format(SPACES_CHECKOUT_PATH),
+            source = "{}/rust-{}-toolchain.toml".format(SPACES_CHECKOUT_PATH, toolchain),
             destination = "rust-toolchain.toml",
         ),
         asset_hard_link(
