@@ -409,7 +409,7 @@ run_add_exec(
         release_tag,
         "--repo={}".format(github_repo),
     ],
-    workspace_vars = ["GITHUB_TOKEN"],
+    workspace_vars = ["GH_TOKEN"],
     help = "Verify the release {} exists on GitHub before publishing".format(release_tag),
     visibility = visibility_private(),
 )
@@ -426,7 +426,7 @@ run_add_exec(
         "--clobber",
     ],
     deps = [":check_release", ":archive_release"],
-    workspace_vars = ["GITHUB_TOKEN"],
+    workspace_vars = ["GH_TOKEN"],
     help = "Upload the release archive to the GitHub release {}".format(release_tag),
     visibility = visibility_private(),
 )

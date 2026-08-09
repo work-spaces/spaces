@@ -20,7 +20,7 @@ load(
     "checkout_add_env_vars",
     "checkout_add_repo",
 )
-load("//@star/prelude/rules/env.star", "env_assign")
+load("//@star/prelude/rules/env.star", "env_assign", "env_inherit")
 load(
     "//@star/prelude/rules/ws.star",
     "workspace_get_absolute_path",
@@ -113,6 +113,12 @@ checkout_add_env_vars(
             "SPACES_ARCHIVER_SKIP_SDK_CHECKOUT",
             "TRUE",
             help = "Skip SDK checkout for archiver",
+        ),
+        env_inherit(
+            "GH_TOKEN",
+            is_secret = True,
+            is_required = info_is_ci(),
+            help = "Allows access to gh in Spaces rules",
         ),
     ],
 )
