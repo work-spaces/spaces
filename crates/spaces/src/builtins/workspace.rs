@@ -495,8 +495,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                     .context(format_context!("bad options for archive"))?;
 
             let create_archive_output = create_archive.get_output_file();
-            let output_path = std::path::Path::new(create_archive_output.as_str());
-            let output_sha_suffix = output_path.with_extension("").with_extension("sha256.txt");
+            let output_sha_suffix = create_archive.get_output_sha256_file();
 
             let sanitized_rule_name =
                 rules::get_sanitized_rule_name_for_module(rule_name.into(), &ctx.module_name);
@@ -512,7 +511,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             );
             output.insert(
                 "sha256_path".to_string(),
-                format!("{rule_output_path}/{}", output_sha_suffix.to_string_lossy()),
+                format!("{rule_output_path}/{output_sha_suffix}"),
             );
 
             let json_value = serde_json::to_value(&output)

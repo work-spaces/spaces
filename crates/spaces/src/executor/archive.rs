@@ -38,7 +38,7 @@ impl Archive {
             None,
         );
 
-        let (output_file_path, digest) = self
+        let (_, digest) = self
             .create_archive
             .create(output_directory.as_str(), archive_progress)
             .map_err(|err| {
@@ -48,15 +48,16 @@ impl Archive {
                 )
             })?;
 
-        let output_file_as_path = std::path::Path::new(output_file_path.as_str());
-        let output_sha_suffix_as_path = output_file_as_path
-            .with_extension("")
-            .with_extension("sha256.txt");
+        let output_sha_path = format!(
+            "{}/{}",
+            output_directory,
+            self.create_archive.get_output_sha256_file()
+        );
 
-        std::fs::write(output_sha_suffix_as_path.clone(), digest).map_err(|err| {
+        std::fs::write(output_sha_path.as_str(), digest).map_err(|err| {
             ecode::anyhow(
                 ecode::Ecode::ArchiveExecutorOperationFailed,
-                &format!("failed to write sha256 file {output_sha_suffix_as_path:?}\n{err:?}"),
+                &format!("failed to write sha256 file {output_sha_path}\n{err:?}"),
             )
         })?;
 
