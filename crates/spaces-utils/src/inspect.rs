@@ -37,7 +37,7 @@ fn shell_quote(value: &str) -> std::borrow::Cow<'_, str> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GitTask {
     pub url: Arc<str>,
     pub spaces_key: Arc<str>,

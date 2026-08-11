@@ -115,7 +115,8 @@ pub enum QueryCommand {
         about = r"Generate a starlark lock file for the current workspace repos.
   - `spaces query locks`: print lock file content to stdout (commit hashes only)
   - `spaces query locks --tags`: allow tags in lock values
-  - `spaces query locks --output=./workspace-locks.star`: write lock file to disk"
+  - `spaces query locks --output=./workspace-locks.star`: write lock file to disk
+  - `spaces query locks --skip=some/repo`: omit a repo from the output (repeatable, `//some/repo` also accepted)"
     )]
     Locks {
         /// Output file path. Must end in `.star` and must not end in `spaces.star`.
@@ -124,6 +125,10 @@ pub enum QueryCommand {
         /// Allow tags in lock values. When not set, all lock values are commit hashes.
         #[arg(long)]
         tags: bool,
+        /// Skip one or more repos from the output. Pass the repo path (e.g. `third_party/lib` or
+        /// `//third_party/lib`). This option can be passed multiple times.
+        #[arg(long)]
+        skip: Vec<Arc<str>>,
     },
     #[command(about = r"Export workspace documentation.
   - `spaces query export ./docs/rules.md`: export rules as a markdown file
@@ -438,6 +443,98 @@ mod tests {
         assert!(validate_locks_output_path("locks.txt").is_err());
         assert!(validate_locks_output_path("locks.spaces.star").is_err());
         assert!(validate_locks_output_path("spaces.star").is_err());
+    }
+
+    fn skip_git_tasks<'a>(
+        tasks: &'a [inspect::GitTask],
+        skip: &[Arc<str>],
+    ) -> Vec<&'a inspect::GitTask> {
+        tasks
+            .iter()
+            .filter(|t| {
+                !skip.iter().any(|s| {
+                    let key = s.strip_prefix("//").unwrap_or(s.as_ref());
+                    key == t.spaces_key.as_ref()
+                })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_skip_bare_path() {
+        let tasks = vec![
+            inspect::GitTask {
+                url: "https://example.com/checkout.git".into(),
+                spaces_key: "checkout".into(),
+                is_checkout_repo: true,
+            },
+            inspect::GitTask {
+                url: "https://example.com/lib.git".into(),
+                spaces_key: "third_party/lib".into(),
+                is_checkout_repo: false,
+            },
+        ];
+        let skip: Vec<Arc<str>> = vec![Arc::from("third_party/lib")];
+        let remaining = skip_git_tasks(&tasks, &skip);
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].spaces_key.as_ref(), "checkout");
+    }
+
+    #[test]
+    fn test_skip_with_double_slash_prefix() {
+        let tasks = vec![
+            inspect::GitTask {
+                url: "https://example.com/checkout.git".into(),
+                spaces_key: "checkout".into(),
+                is_checkout_repo: true,
+            },
+            inspect::GitTask {
+                url: "https://example.com/lib.git".into(),
+                spaces_key: "third_party/lib".into(),
+                is_checkout_repo: false,
+            },
+        ];
+        let skip: Vec<Arc<str>> = vec![Arc::from("//third_party/lib")];
+        let remaining = skip_git_tasks(&tasks, &skip);
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].spaces_key.as_ref(), "checkout");
+    }
+
+    #[test]
+    fn test_render_locks_starlark_skip() {
+        let locks = vec![
+            inspect::RepoLock {
+                url: "https://example.com/checkout.git".into(),
+                repo_path: "checkout".into(),
+                commit: "abc123".into(),
+                is_checkout_repo: true,
+            },
+            inspect::RepoLock {
+                url: "https://example.com/lib.git".into(),
+                repo_path: "third_party/lib".into(),
+                commit: "v1.2.3".into(),
+                is_checkout_repo: false,
+            },
+        ];
+
+        let skip: Vec<Arc<str>> = vec![Arc::from("third_party/lib")];
+        let filtered: Vec<inspect::RepoLock> = locks
+            .into_iter()
+            .filter(|lock| !skip.iter().any(|s| s.as_ref() == lock.repo_path.as_ref()))
+            .collect();
+
+        let rendered = render_locks_starlark(&filtered);
+        assert_eq!(
+            rendered,
+            r#""""
+Lock file
+"""
+
+LOCKS = {
+  "checkout": "abc123",
+}
+"#
+        );
     }
 
     #[test]
@@ -1618,10 +1715,22 @@ impl QueryCommand {
             }
 
             // ------------------------------------------------------------------
-            QueryCommand::Locks { output, tags } => {
+            QueryCommand::Locks { output, tags, skip } => {
+                let git_tasks: Vec<inspect::GitTask> = ctx
+                    .checkout_git_tasks
+                    .iter()
+                    .filter(|t| {
+                        !skip.iter().any(|s| {
+                            let key = s.strip_prefix("//").unwrap_or(s.as_ref());
+                            key == t.spaces_key.as_ref()
+                        })
+                    })
+                    .cloned()
+                    .collect();
+
                 let locks = inspect::collect_repo_locks(
                     &console,
-                    ctx.checkout_git_tasks.as_slice(),
+                    git_tasks.as_slice(),
                     false,
                     *tags,
                     "query locks",
