@@ -76,15 +76,13 @@ if not info_is_ci():
         deps = [":spaces0"],
     )
 
-toolchain = "linux" if info_is_platform_linux() else "default"
-
 RUST_TOOLCHAIN_SOURCE = "{}/musl.rust-toolchain.toml".format(SPACES_CHECKOUT_PATH) if info_is_ci() and info_is_platform_linux() else "{}/default.rust-toolchain.toml".format(SPACES_CHECKOUT_PATH)
 
 checkout_add_any_assets(
     "cargo_workspace_assets",
     assets = [
         asset_hard_link(
-            source = "{}/rust-{}-toolchain.toml".format(SPACES_CHECKOUT_PATH, toolchain),
+            source = RUST_TOOLCHAIN_SOURCE,
             destination = "//rust-toolchain.toml",
         ),
         asset_hard_link(
