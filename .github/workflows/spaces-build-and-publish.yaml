@@ -1,4 +1,4 @@
-name: Build and Publish Binaries
+name: Spaces Build and Publish Binaries
 
 on:
   workflow_dispatch:
@@ -68,10 +68,26 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run: //spaces:publish_release
 
+  build-macos-x86_64:
+    name: Build and Publish macOS x86_64
+    runs-on: macos-13
+    permissions:
+      contents: write
+    steps:
+      - uses: work-spaces/spaces-checkout-run@v0.20.7
+        with:
+          checkout: >-
+            --locked
+            --url=https://github.com/work-spaces/spaces
+            --rev=${{ inputs.tag }}
+            --store=SPACES_RELEASE_TAG=${{ inputs.tag }}
+            --store=SPACES_PUBLISH_DRY_RUN=${{ inputs.publish-dry-run }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run: //spaces:publish_release
+
   build-windows-x86_64:
     name: Build and Publish Windows x86_64
     runs-on: windows-2022
-    continue-on-error: true # expected to fail
     permissions:
       contents: write
     steps:

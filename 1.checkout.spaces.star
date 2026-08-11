@@ -35,8 +35,8 @@ SPACES_CHECKOUT_PATH = workspace_get_path_to_checkout()
 
 spaces_add_devutils(
     "spaces0",
-    "v0.20.3",
-    devutils_version = "devutils-v0.1.14",
+    "v0.20.7",
+    devutils_version = "devutils-v0.1.15",
     system_paths = ["/usr/bin", "/bin"],
 )
 
@@ -84,7 +84,7 @@ rust_add(
 if not info_is_ci():
     sccache_add(
         "sccache",
-        version = "0.14",
+        version = "0.17",
     )
 
 package_add("github.com", "cli", "cli", "v2.97.0")
