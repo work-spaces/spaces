@@ -1,0 +1,87 @@
+name: Build and Publish Binaries
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to build and upload binaries for (e.g. v1.2.3)"
+        required: true
+        type: string
+      publish-dry-run:
+        description: "Run the build without publishing"
+        required: false
+        type: choice
+        options:
+          - "ON"
+          - "OFF"
+
+
+jobs:
+  build-linux-x86_64:
+    name: Build and Publish Linux x86_64
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: work-spaces/spaces-checkout-run@v0.20.7
+        with:
+          checkout: >-
+            --locked
+            --url=https://github.com/work-spaces/spaces
+            --rev=${{ inputs.tag }}
+            --store=SPACES_RELEASE_TAG=${{ inputs.tag }}
+            --store=SPACES_PUBLISH_DRY_RUN=${{ inputs.publish-dry-run }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run: //spaces:publish_release
+
+  build-linux-aarch64:
+    name: Build and Publish Linux aarch64
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: write
+    steps:
+      - uses: work-spaces/spaces-checkout-run@v0.20.7
+        with:
+          checkout: >-
+            --locked
+            --url=https://github.com/work-spaces/spaces
+            --rev=${{ inputs.tag }}
+            --store=SPACES_RELEASE_TAG=${{ inputs.tag }}
+            --store=SPACES_PUBLISH_DRY_RUN=${{ inputs.publish-dry-run }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run: //spaces:publish_release
+
+  build-macos-aarch64:
+    name: Build and Publish macOS aarch64
+    runs-on: macos-15
+    permissions:
+      contents: write
+    steps:
+      - uses: work-spaces/spaces-checkout-run@v0.20.7
+        with:
+          checkout: >-
+            --locked
+            --url=https://github.com/work-spaces/spaces
+            --rev=${{ inputs.tag }}
+            --store=SPACES_RELEASE_TAG=${{ inputs.tag }}
+            --store=SPACES_PUBLISH_DRY_RUN=${{ inputs.publish-dry-run }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run: //spaces:publish_release
+
+  build-windows-x86_64:
+    name: Build and Publish Windows x86_64
+    runs-on: windows-2022
+    continue-on-error: true # expected to fail
+    permissions:
+      contents: write
+    steps:
+      - uses: work-spaces/spaces-checkout-run@v0.20.7
+        with:
+          checkout: >-
+            --locked
+            --url=https://github.com/work-spaces/spaces
+            --rev=${{ inputs.tag }}
+            --store=SPACES_RELEASE_TAG=${{ inputs.tag }}
+            --store=SPACES_PUBLISH_DRY_RUN=${{ inputs.publish-dry-run }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run: //spaces:publish_release
