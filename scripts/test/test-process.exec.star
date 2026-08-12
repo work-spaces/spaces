@@ -7,12 +7,19 @@ load(
 load(
     "//@star/prelude/exec/process.star",
     "process_capture",
+    "process_get_spawned_pgid",
+    "process_get_spawned_pid",
+    "process_getpgid",
+    "process_getpid",
+    "process_getppid",
     "process_is_running",
     "process_kill",
     "process_options",
     "process_pipeline",
     "process_read_lines",
     "process_run",
+    "process_send_signal",
+    "process_signal_process_group",
     "process_spawn",
     "process_stderr_capture",
     "process_stderr_file",
@@ -44,6 +51,9 @@ process_results = {
     "options_builder": {},
     "stdout_helpers": {},
     "stderr_helpers": {},
+    "process_identity": {},
+    "process_group": {},
+    "signals": {},
 }
 
 # ============================================================================
@@ -564,6 +574,8 @@ opts_full = process_options(
     check = True,
     tee = True,
     allow_orphans = True,
+    setsid = True,
+    setpgid = 0,
 )
 process_results["options_builder"]["full_options"] = (
     opts_full.get("command") == "echo" and
@@ -576,7 +588,9 @@ process_results["options_builder"]["full_options"] = (
     opts_full.get("timeout_ms") == 5000 and
     opts_full.get("check") == True and
     opts_full.get("tee") == True and
-    opts_full.get("allow_orphans") == True
+    opts_full.get("allow_orphans") == True and
+    opts_full.get("setsid") == True and
+    opts_full.get("setpgid") == 0
 )
 
 # Test process_options builder — default values are NOT included in the dict
@@ -591,7 +605,21 @@ process_results["options_builder"]["defaults_omitted"] = (
     "timeout_ms" not in opts_defaults and
     "check" not in opts_defaults and
     "tee" not in opts_defaults and
-    "allow_orphans" not in opts_defaults
+    "allow_orphans" not in opts_defaults and
+    "setsid" not in opts_defaults and
+    "setpgid" not in opts_defaults
+)
+
+# Test process_options — setsid=True is stored in the dict
+opts_setsid = process_options("echo", setsid = True)
+process_results["options_builder"]["options_setsid_stored"] = (
+    opts_setsid.get("setsid") == True
+)
+
+# Test process_options — setpgid=0 is stored in the dict
+opts_setpgid = process_options("echo", setpgid = 0)
+process_results["options_builder"]["options_setpgid_stored"] = (
+    opts_setpgid.get("setpgid") == 0
 )
 
 # Test process_options builder — with allow_orphans True/False
@@ -616,6 +644,138 @@ run_with_builder = process_run(opts_for_run)
 process_results["options_builder"]["run_with_built_options"] = (
     "output from builder" in run_with_builder.get("stdout") and
     run_with_builder.get("status") == 0
+)
+
+# ============================================================================
+# Process Identity Tests (getpid, getppid, getpgid, handle_pid, handle_pgid)
+# ============================================================================
+
+# process_getpid() must return a positive integer
+current_pid = process_getpid()
+process_results["process_identity"]["getpid_positive"] = current_pid > 0
+
+# process_getppid() must return a non-negative integer (0 on non-Unix)
+parent_pid = process_getppid()
+process_results["process_identity"]["getppid_nonnegative"] = parent_pid >= 0
+
+# process_getpgid() must return a positive integer
+current_pgid = process_getpgid()
+process_results["process_identity"]["getpgid_positive"] = current_pgid > 0
+
+# process_get_spawned_pid() returns the OS PID of a spawned process
+handle_pid_test = process_spawn(process_options("sleep", args = ["30"]))
+spawned_pid = process_get_spawned_pid(handle_pid_test)
+process_results["process_identity"]["handle_pid_positive"] = spawned_pid > 0
+process_results["process_identity"]["handle_pid_differs_from_parent"] = (
+    spawned_pid != current_pid
+)
+process_kill(handle_pid_test, "SIGKILL")
+process_wait(handle_pid_test)
+
+# process_get_spawned_pgid() returns a non-negative PGID for a spawned process
+handle_pgid_test = process_spawn(process_options("sleep", args = ["30"]))
+spawned_default_pgid = process_get_spawned_pgid(handle_pgid_test)
+process_results["process_identity"]["handle_pgid_nonnegative"] = (
+    spawned_default_pgid >= 0
+)
+process_kill(handle_pgid_test, "SIGKILL")
+process_wait(handle_pgid_test)
+
+# ============================================================================
+# Process Group / Session Tests (setpgid, setsid)
+# ============================================================================
+
+# Test setpgid=0: child calls setpgid(0,0) so its PGID equals its own PID.
+# We verify: handle_pgid == handle_pid and handle_pgid != parent PGID.
+setpgid_handle = process_spawn(
+    process_options("sleep", args = ["30"], setpgid = 0),
+)
+setpgid_pid = process_get_spawned_pid(setpgid_handle)
+setpgid_pgid = process_get_spawned_pgid(setpgid_handle)
+process_results["process_group"]["setpgid_zero_pgid_equals_pid"] = (
+    setpgid_pgid == setpgid_pid
+)
+process_results["process_group"]["setpgid_zero_differs_from_parent_pgid"] = (
+    setpgid_pgid != current_pgid
+)
+process_kill(setpgid_handle, "SIGKILL")
+process_wait(setpgid_handle)
+
+# Test setsid: child calls setsid() before exec, becoming a session leader
+# with SID == its own PID. We compare the child SID (via `ps -p $$ -o sid=`)
+# against the parent SID (via `ps -p $PPID -o sid=`). They must differ.
+setsid_check = process_run(process_options(
+    "sh",
+    args = ["-c", 'mysid=$(ps -p $$ -o sid= | tr -d " "); parentsid=$(ps -p $PPID -o sid= | tr -d " "); [ "$mysid" != "$parentsid" ] && echo new_session || echo same_session'],
+    setsid = True,
+    stdout = process_stdout_capture(),
+    stderr = process_stderr_capture(),
+))
+process_results["process_group"]["setsid_run_succeeds"] = (
+    setsid_check.get("status") == 0
+)
+process_results["process_group"]["setsid_creates_new_session"] = (
+    setsid_check.get("status") == 0 and
+    "new_session" in setsid_check.get("stdout")
+)
+
+# ============================================================================
+# Signal Tests (extended kill signals, process_send_signal)
+# ============================================================================
+
+# Test process_kill with SIGHUP — sleep responds to SIGHUP and exits non-zero
+sighup_handle = process_spawn(process_options("sleep", args = ["30"]))
+process_kill(sighup_handle, "SIGHUP")
+sighup_wait = process_wait(sighup_handle)
+process_results["signals"]["kill_sighup_terminates"] = sighup_wait.get("status") != 0
+
+# Test process_kill with SIGINT — sleep exits non-zero on SIGINT
+sigint_handle = process_spawn(process_options("sleep", args = ["30"]))
+process_kill(sigint_handle, "SIGINT")
+sigint_wait = process_wait(sigint_handle)
+process_results["signals"]["kill_sigint_terminates"] = sigint_wait.get("status") != 0
+
+# Test process_send_signal with SIGTERM — terminates a process by raw PID
+sigterm_handle = process_spawn(process_options("sleep", args = ["30"]))
+sigterm_pid = process_get_spawned_pid(sigterm_handle)
+sigterm_ok = process_send_signal(sigterm_pid, "SIGTERM")
+process_results["signals"]["send_signal_sigterm_returns_true"] = sigterm_ok == True
+sigterm_wait = process_wait(sigterm_handle)
+process_results["signals"]["send_signal_sigterm_terminates_process"] = (
+    sigterm_wait.get("status") != 0
+)
+
+# Test process_send_signal with SIGSTOP and SIGCONT — stop then resume a process
+sigstop_handle = process_spawn(process_options("sleep", args = ["30"]))
+sigstop_pid = process_get_spawned_pid(sigstop_handle)
+stop_ok = process_send_signal(sigstop_pid, "SIGSTOP")
+process_results["signals"]["send_signal_sigstop_returns_true"] = stop_ok == True
+cont_ok = process_send_signal(sigstop_pid, "SIGCONT")
+process_results["signals"]["send_signal_sigcont_returns_true"] = cont_ok == True
+process_kill(sigstop_handle, "SIGKILL")
+process_wait(sigstop_handle)
+
+# Test process_send_signal with SIGUSR1 — process terminates on unhandled SIGUSR1
+sigusr1_handle = process_spawn(process_options("sleep", args = ["30"]))
+sigusr1_pid = process_get_spawned_pid(sigusr1_handle)
+sigusr1_ok = process_send_signal(sigusr1_pid, "SIGUSR1")
+process_results["signals"]["send_signal_sigusr1_returns_true"] = sigusr1_ok == True
+sigusr1_wait = process_wait(sigusr1_handle)
+process_results["signals"]["send_signal_sigusr1_terminates_process"] = (
+    sigusr1_wait.get("status") != 0
+)
+
+# Test process_signal_process_group: spawn sleep in its own process group
+# (setpgid=0), get the PGID, signal the entire group with SIGKILL, then wait.
+sig_pg_handle = process_spawn(
+    process_options("sleep", args = ["30"], setpgid = 0),
+)
+sig_pg_pgid = process_get_spawned_pgid(sig_pg_handle)
+sig_pg_ok = process_signal_process_group(sig_pg_pgid, "SIGKILL")
+process_results["signals"]["signal_process_group_returns_true"] = sig_pg_ok == True
+sig_pg_wait = process_wait(sig_pg_handle)
+process_results["signals"]["signal_process_group_terminates_process"] = (
+    sig_pg_wait.get("status") != 0
 )
 
 # ============================================================================
