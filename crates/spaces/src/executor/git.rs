@@ -150,29 +150,36 @@ impl Git {
             logger(progress.console.clone(), self.url.clone())
                 .debug(format!("Bare repository exists at {bare_repo_path}").as_str());
 
-            logger(progress.console.clone(), self.url.clone())
-                .debug("Fetching updates in bare repository");
+            // During sync the workspace copy is updated directly via fetch_with_tags(),
+            // so fetching the bare repo here is redundant. Only fetch on initial checkout.
+            if singleton::get_is_sync() {
+                logger(progress.console.clone(), self.url.clone())
+                    .debug("Skipping bare repository fetch during sync");
+            } else {
+                logger(progress.console.clone(), self.url.clone())
+                    .debug("Fetching updates in bare repository");
 
-            // Fetch updates in bare repo (safe - no working tree to corrupt)
-            git::execute_git_command(
-                progress,
-                &self.url,
-                console::ExecuteOptions {
-                    arguments: vec![
-                        "--git-dir".into(),
-                        bare_repo_path.clone(),
-                        "fetch".into(),
-                        "--all".into(),
-                        "--tags".into(),
-                        "--force".into(),
-                        "--prune".into(),
-                    ],
-                    ..Default::default()
-                },
-            )
-            .context(format_context!(
-                "Failed to fetch in bare repository {bare_repo_path}"
-            ))?;
+                // Fetch updates in bare repo (safe - no working tree to corrupt)
+                git::execute_git_command(
+                    progress,
+                    &self.url,
+                    console::ExecuteOptions {
+                        arguments: vec![
+                            "--git-dir".into(),
+                            bare_repo_path.clone(),
+                            "fetch".into(),
+                            "--all".into(),
+                            "--tags".into(),
+                            "--force".into(),
+                            "--prune".into(),
+                        ],
+                        ..Default::default()
+                    },
+                )
+                .context(format_context!(
+                    "Failed to fetch in bare repository {bare_repo_path}"
+                ))?;
+            }
         }
 
         let bare_repo = git::BareRepository {
