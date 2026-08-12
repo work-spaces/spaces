@@ -25,26 +25,24 @@ load(
     "checkout_add_home_store_env",
     "checkout_add_repo",
     "checkout_clone_default",
+    #"checkout_set_sandbox",
     "checkout_store_value",
 )
 load("//@star/prelude/rules/env.star", "env_assign", "env_inherit")
+
+# Sandbox needs support in CI before this will work
+#load(
+#    "//@star/prelude/rules/sandbox.star",
+#    "sandbox_configure_for_os",
+#    "sandbox_new",
+#)
+
 load(
     "//@star/prelude/rules/ws.star",
     "workspace_get_absolute_path",
     "workspace_get_path_to_checkout",
     "workspace_load_value",
 )
-load(
-    "//@star/sdk/star/info.star",
-    "info_get_path_to_store",
-    "info_is_ci",
-    "info_is_platform_linux",
-)
-#load(
-#     "//@star/sdk/star/sandbox.star",
-#     "sandbox_configure_for_os",
-#     "sandbox_new",
-#)
 
 # Configure the top level workspace
 
@@ -146,32 +144,12 @@ checkout_add_env_vars(
 
 if info_is_platform_linux():
     musl_gcc_add("musl_gcc")
-
-# This can be used for testing spaces sync
-if workspace.load_value("CHECKOUT_INSTALL_SPACES") == "ON":
-    checkout_add_repo(
-        "install-spaces",
-        url = "https://github.com/work-spaces/install-spaces",
-        rev = "main",
+    musl_gcc_add_toolchain_file(
+        "musl_gcc_toolchain",
+        "sysroot/share/cmake/musl-toolchain.cmake",
     )
 
-package_add("github.com", "cli", "cli", "v2.88.1")
-
-# Required for dbus and nono (linux only)
-
-if info_is_platform_linux() or workspace_load_value("SPACES_ENABLE_SANDBOX") == "ON":
-    checkout_store_value("SPACES_DBUS_ENABLED", True)
-    cmake_add("cmake4", "v4.3.1")
-    package_add("github.com", "ninja-build", "ninja", "v1.13.2")
-    package_add("github.com", "xpack-dev-tools", "pkg-config-xpack", "v0.29.2-3")
-
     if info_is_platform_linux():
-        musl_gcc_add("musl_gcc")
-        musl_gcc_add_toolchain_file(
-            "musl_gcc_toolchain",
-            "sysroot/share/cmake/musl-toolchain.cmake",
-        )
-
         pkg_config_vars = [
             env_assign(
                 "PKG_CONFIG_PATH",
@@ -189,6 +167,22 @@ if info_is_platform_linux() or workspace_load_value("SPACES_ENABLE_SANDBOX") == 
             "pkg_config_env",
             vars = pkg_config_vars,
         )
+
+# This can be used for testing spaces sync
+if workspace.load_value("CHECKOUT_INSTALL_SPACES") == "ON":
+    checkout_add_repo(
+        "install-spaces",
+        url = "https://github.com/work-spaces/install-spaces",
+        rev = "main",
+    )
+
+# Required for dbus and nono (linux only)
+
+if info_is_platform_linux() or workspace_load_value("SPACES_ENABLE_SANDBOX") == "ON":
+    checkout_store_value("SPACES_DBUS_ENABLED", True)
+    cmake_add("cmake4", "v4.3.1")
+    package_add("github.com", "ninja-build", "ninja", "v1.13.2")
+    package_add("github.com", "xpack-dev-tools", "pkg-config-xpack", "v0.29.2-3")
 
     checkout_add_repo(
         "deps/libexpat",
@@ -218,6 +212,6 @@ if info_is_platform_linux() or workspace_load_value("SPACES_ENABLE_SANDBOX") == 
     )
 
     #if not info_is_ci():
-    # sandbox = sandbox_new("workspace-sandbox")
-    # sandbox_configure_for_os(sandbox)
-    # checkout_set_sandbox(sandbox)
+    #    sandbox = sandbox_new("workspace-sandbox")
+    #    sandbox_configure_for_os(sandbox)
+    #    checkout_set_sandbox(sandbox)
