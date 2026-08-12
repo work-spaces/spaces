@@ -234,9 +234,11 @@ def process_options(
             Default is 1048576 (1 MiB). Set to 0 to disable in-memory buffering.
         setsid: If True, call setsid() in the child before exec, creating a new
             session and detaching from the controlling terminal (Unix only).
+            Mutually exclusive with pseudo_terminal=True.
         setpgid: If set, call setpgid(0, value) in the child before exec.
             Use 0 to create a new process group using the child's own PID.
             Any positive value joins that existing process group (Unix only).
+            Mutually exclusive with pseudo_terminal=True.
 
     Returns:
         dict: A complete options dictionary for process execution
@@ -734,8 +736,8 @@ def process_get_spawned_pgid(handle: int) -> int:
     Return the process group ID (PGID) of a spawned background process.
 
     When the process was started with setpgid=0 in its options it will have
-    its own process group; this function retrieves that PGID so you can
-    send signals to the whole group via process_send_signal().
+    its own process group. Pass the returned PGID to
+    process_signal_process_group() to deliver a signal to the entire group.
 
     On non-Unix platforms this returns 0.
 
@@ -750,24 +752,27 @@ def process_get_spawned_pgid(handle: int) -> int:
 
     Examples:
         handle = process_spawn(
-            process_options("make", args=["-j4"], setpgid=0)
+            process_options("make", args = ["-j4"], setpgid = 0)
         )
         pgid = process_get_spawned_pgid(handle)
-        # Kill the entire process group (make + all sub-processes)
-        process_send_signal(pgid, "SIGKILL")
+        # Kill make and every subprocess it spawned
+        process_signal_process_group(pgid, "SIGKILL")
+        process_wait(handle)
     """
     return process.get_spawned_pgid(handle)
 
 def process_send_signal(pid: int, signal: str = "SIGTERM") -> bool:
     """
-    Send a signal to an arbitrary process by PID.
+    Send a signal to a single process by PID.
 
-    This function sends a POSIX signal to any process the caller has
-    permission to signal. Use process_kill() to signal a process that was
-    started with process_spawn().
+    This function targets exactly one process. To signal every process in a
+    process group at once, use process_signal_process_group() instead.
+
+    The caller must have permission to signal the target process.
+    Use process_kill() to signal a process started with process_spawn().
 
     Args:
-        pid: The target process ID.
+        pid: The target process ID. Must be > 0.
         signal: The signal name (default: "SIGTERM"):
             - "SIGHUP": Hang-up (reload / terminal close)
             - "SIGINT": Interrupt (equivalent to Ctrl-C)
@@ -782,7 +787,7 @@ def process_send_signal(pid: int, signal: str = "SIGTERM") -> bool:
         bool: True if the signal was delivered, False on non-Unix platforms.
 
     Raises:
-        Error: If the signal name is unsupported or the kill(2) system call fails.
+        Error: If pid is 0, the signal name is unsupported, or kill(2) fails.
 
     Examples:
         # Reload a daemon by PID
@@ -795,6 +800,47 @@ def process_send_signal(pid: int, signal: str = "SIGTERM") -> bool:
         process_send_signal(pid, "SIGCONT")
     """
     return process.send_signal(pid, signal)
+
+def process_signal_process_group(pgid: int, signal: str = "SIGTERM") -> bool:
+    """
+    Send a signal to every process in a process group.
+
+    Equivalent to kill(-pgid, signal) in C: the kernel delivers the signal
+    to every process whose process group ID equals pgid.
+
+    Use process_get_spawned_pgid() to obtain a spawned process's PGID,
+    typically after spawning with setpgid=0 so the child forms its own group.
+
+    On non-Unix platforms this returns False.
+
+    Args:
+        pgid: The target process group ID. Must be > 0.
+        signal: The signal name (default: "SIGTERM"):
+            - "SIGHUP": Hang-up (reload / terminal close)
+            - "SIGINT": Interrupt (equivalent to Ctrl-C)
+            - "SIGTERM": Graceful termination (allows cleanup)
+            - "SIGKILL": Hard kill (immediate termination, no cleanup)
+            - "SIGUSR1": User-defined signal 1
+            - "SIGUSR2": User-defined signal 2
+            - "SIGSTOP": Suspend process execution
+            - "SIGCONT": Resume a stopped process
+
+    Returns:
+        bool: True if the signal was delivered, False on non-Unix platforms.
+
+    Raises:
+        Error: If pgid is 0, the signal name is unsupported, or kill(2) fails.
+
+    Examples:
+        # Spawn make in its own process group, then kill the entire tree
+        handle = process_spawn(
+            process_options("make", args = ["-j4"], setpgid = 0)
+        )
+        pgid = process_get_spawned_pgid(handle)
+        process_signal_process_group(pgid, "SIGKILL")
+        process_wait(handle)
+    """
+    return process.signal_process_group(pgid, signal)
 
 # ============================================================================
 # Command Pipelines

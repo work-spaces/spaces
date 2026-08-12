@@ -458,6 +458,12 @@ fn execute_run(opts: RunOptions) -> anyhow::Result<RunOutcome> {
     let command_line = format_command_line(&opts.command, opts.args.as_deref());
     let cwd_display = opts.cwd.clone();
 
+    if opts.pty.unwrap_or(false) && (opts.setsid.unwrap_or(false) || opts.setpgid.is_some()) {
+        bail!(
+            "setsid and setpgid are not supported in PTY mode; \
+             the PTY subsystem manages process groups and sessions internally"
+        );
+    }
     if opts.pty.unwrap_or(false) {
         return execute_run_with_pty(opts, started, command_line, cwd_display);
     }
@@ -948,6 +954,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         let exec: Exec = serde_json::from_value(exec.to_json_value()?)
             .map_err(|err| format_error!("while parsing options for exec because {err:?}"))?;
 
+        if exec.pty.unwrap_or(false) && (exec.setsid.unwrap_or(false) || exec.setpgid.is_some()) {
+            bail!(
+                "setsid and setpgid are not supported in PTY mode; \
+                 the PTY subsystem manages process groups and sessions internally"
+            );
+        }
+
         if exec.pty.unwrap_or(false) {
             let _started = Instant::now();
             let stdout_buf = Arc::new(Mutex::new(Vec::new()));
@@ -1217,6 +1230,13 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 anyhow::anyhow!("output_buffer_limit_bytes is too large for this platform's usize")
             })?
             .unwrap_or(DEFAULT_SPAWN_OUTPUT_BUFFER_LIMIT_BYTES);
+
+        if opts.pty.unwrap_or(false) && (opts.setsid.unwrap_or(false) || opts.setpgid.is_some()) {
+            bail!(
+                "setsid and setpgid are not supported in PTY mode; \
+                 the PTY subsystem manages process groups and sessions internally"
+            );
+        }
 
         if opts.pty.unwrap_or(false) {
             let stdout_spec = opts
@@ -1601,7 +1621,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         };
         #[cfg(unix)]
         {
-            let pgid = unsafe { libc::getpgid(pid as libc::pid_t) };
+            let pid = libc::pid_t::try_from(pid).map_err(|_| {
+                anyhow::anyhow!("handle_pgid: pid {pid} exceeds the maximum valid pid_t value")
+            })?;
+            let pgid = unsafe { libc::getpgid(pid) };
             if pgid < 0 {
                 bail!(
                     "getpgid failed for handle {handle}: {}",
@@ -1840,6 +1863,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
     /// Send a signal to an arbitrary process by PID.
     ///
+    /// Targets exactly one process. To signal every process in a process
+    /// group, use `signal_process_group()` instead.
+    ///
     /// Supported signal names:
     /// - "SIGHUP": hang-up (terminal close / reload)
     /// - "SIGINT": interrupt (Ctrl-C equivalent)
@@ -1854,6 +1880,12 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     fn send_signal(pid: u64, signal: &str) -> anyhow::Result<bool> {
         #[cfg(unix)]
         {
+            if pid == 0 {
+                bail!("send_signal: pid must be > 0 (pid=0 signals the caller's process group)");
+            }
+            let pid = libc::pid_t::try_from(pid).map_err(|_| {
+                anyhow::anyhow!("send_signal: pid {pid} exceeds the maximum valid pid_t value")
+            })?;
             let sig = match signal {
                 "SIGHUP" => libc::SIGHUP,
                 "SIGINT" => libc::SIGINT,
@@ -1865,7 +1897,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 "SIGCONT" => libc::SIGCONT,
                 other => bail!("unsupported signal: {other}"),
             };
-            let ret = unsafe { libc::kill(pid as libc::pid_t, sig) };
+            let ret = unsafe { libc::kill(pid, sig) };
             if ret != 0 {
                 bail!(
                     "send_signal({signal}, pid={pid}) failed: {}",
@@ -1877,6 +1909,58 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         #[cfg(not(unix))]
         {
             let _ = (pid, signal);
+            Ok(false)
+        }
+    }
+
+    /// Send a signal to every process in a process group.
+    ///
+    /// Equivalent to `kill(-pgid, sig)` in C: the kernel delivers the signal
+    /// to every process whose process group ID equals `pgid`.
+    ///
+    /// `pgid` must be > 0. Use `get_spawned_pgid()` to obtain a spawned
+    /// process's group ID, typically after spawning with `setpgid = 0` so
+    /// the child forms its own group.
+    ///
+    /// Supported signal names: same as `send_signal()`.
+    ///
+    /// On non-Unix platforms this always returns false.
+    fn signal_process_group(pgid: u64, signal: &str) -> anyhow::Result<bool> {
+        #[cfg(unix)]
+        {
+            if pgid == 0 {
+                bail!(
+                    "signal_process_group: pgid must be > 0 (pgid=0 targets the caller's process group)"
+                );
+            }
+            let pgid = libc::pid_t::try_from(pgid).map_err(|_| {
+                anyhow::anyhow!(
+                    "signal_process_group: pgid {pgid} exceeds the maximum valid pid_t value"
+                )
+            })?;
+            let sig = match signal {
+                "SIGHUP" => libc::SIGHUP,
+                "SIGINT" => libc::SIGINT,
+                "SIGTERM" => libc::SIGTERM,
+                "SIGKILL" => libc::SIGKILL,
+                "SIGUSR1" => libc::SIGUSR1,
+                "SIGUSR2" => libc::SIGUSR2,
+                "SIGSTOP" => libc::SIGSTOP,
+                "SIGCONT" => libc::SIGCONT,
+                other => bail!("unsupported signal: {other}"),
+            };
+            let ret = unsafe { libc::kill(-pgid, sig) };
+            if ret != 0 {
+                bail!(
+                    "signal_process_group({signal}, pgid={pgid}) failed: {}",
+                    std::io::Error::last_os_error()
+                );
+            }
+            Ok(true)
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (pgid, signal);
             Ok(false)
         }
     }

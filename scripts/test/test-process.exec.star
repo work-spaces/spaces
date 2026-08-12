@@ -19,6 +19,7 @@ load(
     "process_read_lines",
     "process_run",
     "process_send_signal",
+    "process_signal_process_group",
     "process_spawn",
     "process_stderr_capture",
     "process_stderr_file",
@@ -762,6 +763,19 @@ process_results["signals"]["send_signal_sigusr1_returns_true"] = sigusr1_ok == T
 sigusr1_wait = process_wait(sigusr1_handle)
 process_results["signals"]["send_signal_sigusr1_terminates_process"] = (
     sigusr1_wait.get("status") != 0
+)
+
+# Test process_signal_process_group: spawn sleep in its own process group
+# (setpgid=0), get the PGID, signal the entire group with SIGKILL, then wait.
+sig_pg_handle = process_spawn(
+    process_options("sleep", args = ["30"], setpgid = 0),
+)
+sig_pg_pgid = process_get_spawned_pgid(sig_pg_handle)
+sig_pg_ok = process_signal_process_group(sig_pg_pgid, "SIGKILL")
+process_results["signals"]["signal_process_group_returns_true"] = sig_pg_ok == True
+sig_pg_wait = process_wait(sig_pg_handle)
+process_results["signals"]["signal_process_group_terminates_process"] = (
+    sig_pg_wait.get("status") != 0
 )
 
 # ============================================================================
