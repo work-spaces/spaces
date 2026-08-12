@@ -5,7 +5,7 @@ With VSCode/Zed integration
 
 load("//@star/packages/star/musl-gcc.star", "musl_gcc_get_env")
 load("//@star/prelude/info.star", "info_is_platform_aarch64", "info_is_platform_linux")
-load("//@star/prelude/rules/deps.star", "deps")
+load("//@star/prelude/rules/deps.star", deps_new = "deps")
 load("//@star/prelude/rules/glob.star", "glob")
 load(
     "//@star/prelude/rules/run.star",
@@ -13,24 +13,10 @@ load(
     "run_add_archive",
     "run_add_exec",
     "run_add_exec_test",
-    "run_log_level_passthrough",
 )
-load("//@star/sdk/star/deps.star", deps_new = "deps")
-load("//@star/sdk/star/glob.star", "glob")
+load("//@star/prelude/rules/visibility.star", "visibility_private", "visibility_rules")
 load(
-    "//@star/sdk/star/info.star",
-    "info_is_platform_aarch64",
-    "info_is_platform_linux",
-    "info_is_platform_x86_64",
-)
-load(
-    "//@star/sdk/star/visibility.star",
-    "visibility_private",
-    "visibility_public",
-    "visibility_rules",
-)
-load(
-    "//@star/sdk/star/ws.star",
+    "//@star/prelude/rules/ws.star",
     "workspace_get_env_var",
     "workspace_get_env_var_or",
     "workspace_is_env_var_set",
@@ -229,7 +215,7 @@ run_add_exec(
         "--root={}".format(root),
     ] + linux_args,
     env = linux_env,
-    deps = deps(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
+    deps = deps_new(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
 )
 
 run_add_exec(
@@ -407,7 +393,7 @@ run_add_exec(
         "--profile=release",
         "--root={}".format(RELEASE_INSTALL_DIR),
     ] + linux_args,
-    deps = deps(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
+    deps = deps_new(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
     workspace_vars = ["SCCACHE_DIR", "RUSTUP_HOME", "CARGO_HOME"],
     env = linux_env,
     target_dirs = ["//build/install/bin"],
