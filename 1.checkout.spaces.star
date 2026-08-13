@@ -7,7 +7,6 @@ load("//@star/packages/star/cmake.star", "cmake_add")
 load("//@star/packages/star/musl-gcc.star", "musl_gcc_add", "musl_gcc_add_toolchain_file")
 load("//@star/packages/star/package.star", "package_add")
 load("//@star/packages/star/rust.star", "rust_add")
-load("//@star/packages/star/sccache.star", "sccache_add")
 load("//@star/packages/star/spaces-cli.star", "spaces_add_devutils", "spaces_add_star_formatter")
 load("//@star/packages/star/starship.star", "starship_add_bash")
 load(
@@ -53,6 +52,7 @@ spaces_add_devutils(
     "v0.20.7",
     devutils_version = "devutils-v0.1.15",
     system_paths = ["/usr/bin", "/bin"],
+    is_activate_sccache = True,
 )
 
 spaces_add_star_formatter("star_formatter", configure_zed = True, deps = [":spaces0"])
@@ -95,12 +95,6 @@ rust_add(
     version = "1.94",
     deps = [":spaces0", ":cargo_workspace_assets"],
 )
-
-if not info_is_ci():
-    sccache_add(
-        "sccache",
-        version = "0.17",
-    )
 
 package_add("github.com", "cli", "cli", "v2.97.0")
 
