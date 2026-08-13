@@ -150,10 +150,7 @@ impl Git {
             logger(progress.console.clone(), self.url.clone())
                 .debug(format!("Bare repository exists at {bare_repo_path}").as_str());
 
-            // During sync the workspace copy is updated directly via fetch_with_tags(),
-            // so fetching the bare repo here is redundant. Only fetch on initial checkout.
-            if singleton::get_is_sync() {
-                logger(progress.console.clone(), self.url.clone())
+            if singleton::get_is_sync() && !matches!(self.clone, git::Clone::Worktree) {
                     .debug("Skipping bare repository fetch during sync");
             } else {
                 logger(progress.console.clone(), self.url.clone())
