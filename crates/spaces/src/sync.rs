@@ -414,6 +414,11 @@ pub fn build_repo_sync_plan(
                 .iter()
                 .map(move |member| (url.clone(), member.path.clone(), member.rev.clone()))
         })
+        .filter(|(_, member_path, _)| {
+            std::path::Path::new(member_path.as_ref())
+                .join(".git")
+                .exists()
+        })
         .collect::<Vec<_>>();
 
     top_progress
@@ -429,11 +434,6 @@ pub fn build_repo_sync_plan(
             .par_iter()
             .map(
             |(url, member_path, member_rev)| -> anyhow::Result<Option<RepoPlanEvaluation>> {
-                let member_git_path = std::path::Path::new(member_path.as_ref()).join(".git");
-                if !member_git_path.exists() {
-                    return Ok(None);
-                }
-
                 let mut repo_progress = console::Progress::new(
                     console.clone(),
                     format!("//{}", member_path),
