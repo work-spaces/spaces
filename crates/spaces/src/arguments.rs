@@ -203,6 +203,8 @@ pub fn execute() -> anyhow::Result<()> {
         }
     }
 
+    utils::logger::show_deferred_errors(effective_console.clone());
+
     let result = if let Err(error) = result {
         let verbosity_level = effective_console.get_level();
         let args = std::env::args().collect::<Vec<String>>();
@@ -310,41 +312,41 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             }
 
             let is_ci = singleton::get_is_ci().into();
-            let _group = ci::GithubLogGroup::new_group(
+            let group_name = format!("Spaces Checkout Repo {url}");
+            ci::in_github_group(
                 effective_console.clone(),
                 is_ci,
-                format!("Spaces Checkout Repo {url}").as_str(),
+                group_name.as_str(),
+                move || {
+                    let sparse_checkout = sparse_mode.map(|mode| git::SparseCheckout {
+                        mode,
+                        list: sparse_list,
+                    });
+
+                    co::checkout_repo(
+                        effective_console.clone(),
+                        name,
+                        utils::co::CheckoutRepoArgs {
+                            rule_name,
+                            url,
+                            rev,
+                            clone,
+                            sparse_checkout,
+                        },
+                        utils::co::CheckoutArgs {
+                            env,
+                            store,
+                            store_for_docstring: None,
+                            new_branch,
+                            create_lock_file,
+                            force_install_tools,
+                            keep_workspace_on_failure,
+                            lock,
+                        },
+                    )
+                    .context(format_context!("while checking out repo"))
+                },
             )?;
-
-            let sparse_checkout = sparse_mode.map(|mode| git::SparseCheckout {
-                mode,
-                list: sparse_list,
-            });
-
-            let result = co::checkout_repo(
-                effective_console.clone(),
-                name,
-                utils::co::CheckoutRepoArgs {
-                    rule_name,
-                    url,
-                    rev,
-                    clone,
-                    sparse_checkout,
-                },
-                utils::co::CheckoutArgs {
-                    env,
-                    store,
-                    store_for_docstring: None,
-                    new_branch,
-                    create_lock_file,
-                    force_install_tools,
-                    keep_workspace_on_failure,
-                    lock,
-                },
-            )
-            .context(format_context!("while checking out repo"));
-
-            result?;
         }
         Commands::Co { args } => {
             singleton::set_is_checkout();
@@ -590,21 +592,24 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                 .as_ref()
                 .map(|target| format!(" {target}"))
                 .unwrap_or_default();
-            let _group = ci::GithubLogGroup::new_group(
+            let group_name = format!("Spaces Run{target_message}");
+            ci::in_github_group(
                 effective_console.clone(),
                 is_ci,
-                format!("Spaces Run{target_message}").as_str(),
+                group_name.as_str(),
+                move || {
+                    runner::run_starlark_modules_in_workspace(
+                        effective_console.clone(),
+                        task::Phase::Run,
+                        None,
+                        forget_inputs.into(),
+                        runner::RunWorkspace::Target(target, extra_rule_args),
+                        runner::IsCreateLockFile::No,
+                        runner::IsExecuteTasks::Yes,
+                    )
+                    .context(format_context!("while executing run rules"))
+                },
             )?;
-            let result = runner::run_starlark_modules_in_workspace(
-                effective_console.clone(),
-                task::Phase::Run,
-                None,
-                forget_inputs.into(),
-                runner::RunWorkspace::Target(target, extra_rule_args),
-                runner::IsCreateLockFile::No,
-                runner::IsExecuteTasks::Yes,
-            );
-            result.context(format_context!("while executing run rules"))?;
         }
 
         Commands::Inspect {
