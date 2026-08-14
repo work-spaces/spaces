@@ -54,3 +54,18 @@ impl Drop for GithubLogGroup {
         let _ = self.end_group();
     }
 }
+
+pub fn in_github_group<T, Func>(
+    console: console::Console,
+    is_ci: IsCi,
+    group_name: &str,
+    f: Func,
+) -> anyhow::Result<T>
+where
+    Func: FnOnce() -> anyhow::Result<T>,
+{
+    let group = GithubLogGroup::new_group(console, is_ci, group_name)?;
+    let result = f();
+    drop(group);
+    result
+}

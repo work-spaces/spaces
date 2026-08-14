@@ -8,31 +8,95 @@ pub struct Logger {
     label: Arc<str>,
 }
 
-#[derive(Default, Debug)]
-struct DeprecationWarnings {
-    deprecation_warnings_enabled: bool,
-    warnings: Vec<Arc<str>>,
+enum DeferredError {
+    Message(Arc<str>),
+    Lines(Vec<console::Line>),
 }
 
-static DEFERRED_WARNINGS: state::InitCell<lock::StateLock<DeprecationWarnings>> =
+impl std::fmt::Debug for DeferredError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DeferredError::Message(message) => f
+                .debug_struct("Message")
+                .field("len", &message.len())
+                .finish(),
+            DeferredError::Lines(lines) => f
+                .debug_struct("Lines")
+                .field("count", &lines.len())
+                .finish(),
+        }
+    }
+}
+
+#[derive(Default, Debug)]
+struct DeferredMessages {
+    deprecation_warnings_enabled: bool,
+    warnings: Vec<Arc<str>>,
+    errors: Vec<DeferredError>,
+}
+
+static DEFERRED_MESSAGES: state::InitCell<lock::StateLock<DeferredMessages>> =
     state::InitCell::new();
 
-fn get_deferred_warnings_state() -> &'static lock::StateLock<DeprecationWarnings> {
-    if let Some(state) = DEFERRED_WARNINGS.try_get() {
+fn get_deferred_messages_state() -> &'static lock::StateLock<DeferredMessages> {
+    if let Some(state) = DEFERRED_MESSAGES.try_get() {
         return state;
     }
 
-    DEFERRED_WARNINGS.set(lock::StateLock::new(DeprecationWarnings::default()));
-    DEFERRED_WARNINGS.get()
+    DEFERRED_MESSAGES.set(lock::StateLock::new(DeferredMessages::default()));
+    DEFERRED_MESSAGES.get()
 }
 
 fn push_deferred_warning(warning: Arc<str>) {
-    let mut state = get_deferred_warnings_state().write();
+    let mut state = get_deferred_messages_state().write();
     state.warnings.push(warning);
 }
 
+pub fn push_deferred_error<Message: std::fmt::Display>(error: Message) {
+    let mut state = get_deferred_messages_state().write();
+    state
+        .errors
+        .push(DeferredError::Message(error.to_string().into()));
+}
+
+pub fn push_deferred_error_lines(lines: Vec<console::Line>) {
+    let mut state = get_deferred_messages_state().write();
+    state.errors.push(DeferredError::Lines(lines));
+}
+
+fn take_deferred_errors() -> Vec<DeferredError> {
+    let mut state = get_deferred_messages_state().write();
+    std::mem::take(&mut state.errors)
+}
+
+pub fn show_deferred_errors(console: console::Console) {
+    let deferred_errors = take_deferred_errors();
+    if deferred_errors.is_empty() {
+        return;
+    }
+
+    for deferred_error in deferred_errors {
+        match deferred_error {
+            DeferredError::Lines(lines) => {
+                console.emit_lines(lines);
+            }
+            DeferredError::Message(message) => {
+                let mut container = console::bootstrap::Container::new();
+                container.add(console::bootstrap::VerticalSpacer::new(1));
+                let mut quote = console::bootstrap::Blockquote::new()
+                    .variant(console::bootstrap::Variant::Danger);
+                for line in message.lines().filter(|line| !line.trim().is_empty()) {
+                    quote.push_line(line.to_string());
+                }
+                container.add(quote);
+                console.emit_container(&container);
+            }
+        }
+    }
+}
+
 pub fn enable_deprecation_warnings() {
-    let mut state = get_deferred_warnings_state().write();
+    let mut state = get_deferred_messages_state().write();
     state.deprecation_warnings_enabled = true;
 }
 
@@ -41,7 +105,7 @@ pub fn push_deprecation_warning<Message: std::fmt::Display>(
     warning: Message,
 ) {
     let is_deprecation_warning_enabled = {
-        let state = get_deferred_warnings_state().read();
+        let state = get_deferred_messages_state().read();
         state.deprecation_warnings_enabled
     };
     if is_deprecation_warning_enabled {
@@ -51,7 +115,7 @@ pub fn push_deprecation_warning<Message: std::fmt::Display>(
 }
 
 pub fn get_deferred_warnings() -> Vec<Arc<str>> {
-    let state = get_deferred_warnings_state().read();
+    let state = get_deferred_messages_state().read();
     state.warnings.clone()
 }
 

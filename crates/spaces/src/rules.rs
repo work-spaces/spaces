@@ -274,6 +274,9 @@ pub fn execute_rule(
                         None,
                         displayed_rule.as_ref(),
                     );
+                    if singleton::get_is_ci() {
+                        logger.info("No changes; skipped");
+                    }
 
                     None
                 }
@@ -371,6 +374,9 @@ pub fn execute_rule(
                             progress.elapsed(),
                             displayed_rule.as_ref(),
                         ));
+                        if singleton::get_is_ci() {
+                            logger.info("Restored from cache");
+                        }
                         cache_status =
                             workspace::CacheStatus::Restored(effective_rule_digest.clone());
                         (false, Ok(executor::TaskResult::new()))
