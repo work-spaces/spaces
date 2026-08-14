@@ -128,6 +128,55 @@ fn add_exit_value_rule_deps(
     Ok(())
 }
 
+fn is_absolute_filesystem_path(path: &str) -> bool {
+    // Workspace paths ("//...") are handled separately; never treat them as
+    // filesystem paths here.
+    if path.starts_with("//") {
+        return false;
+    }
+    // Unix absolute path (also catches plain "/").
+    if std::path::Path::new(path).is_absolute() {
+        return true;
+    }
+    // Windows-style paths that std::path::Path::is_absolute() does not flag on
+    // non-Windows hosts:
+    //   \foo or \\server\share  (backslash root / UNC)
+    //   C:\foo or C:/foo        (drive letter)
+    if path.starts_with('\\') {
+        return true;
+    }
+    if path.len() >= 2 && path.as_bytes()[1] == b':' && path.as_bytes()[0].is_ascii_alphabetic() {
+        return true;
+    }
+    false
+}
+
+fn validate_targets(rule: &rule::Rule) -> anyhow::Result<()> {
+    if let Some(targets) = rule.targets.as_ref() {
+        for target in targets {
+            let path = match target {
+                targets::Target::File(p) => p.as_ref(),
+                targets::Target::Directory(p) => p.as_ref(),
+            };
+            // A workspace path starts with "//", but its remainder must not
+            // itself start with a separator — "///etc/passwd" would strip to
+            // "/etc/passwd" inside get_path_from_path_label().
+            let is_invalid = if let Some(remainder) = path.strip_prefix("//") {
+                remainder.starts_with('/') || remainder.starts_with('\\')
+            } else {
+                is_absolute_filesystem_path(path)
+            };
+            if is_invalid {
+                return Err(format_error!(
+                    "Target {path:?} in rule {:?} must be a relative path or workspace path (starting with //), not an absolute path",
+                    rule.name
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn add_rule_to_all(
     rule: &rule::Rule,
     workspace_arc: &crate::workspace::WorkspaceArc,
@@ -304,6 +353,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                     }
                 }
             }
+
+            validate_targets(&rule)
+                .context(format_context!("Invalid targets in rule {}", rule.name))?;
 
             if let Some(workspace_arc) = ctx.workspace.clone() {
                 add_rule_to_all(&rule, &workspace_arc, &ctx.module_name)
