@@ -244,36 +244,33 @@ fn checkout_co_workflow(
     lock: Vec<Arc<str>>,
 ) -> anyhow::Result<()> {
     let is_ci: ci::IsCi = singleton::get_is_ci().into();
-    let _group = ci::GithubLogGroup::new_group(
-        console.clone(),
-        is_ci,
-        format!("Spaces Checkout Workflow {name}").as_str(),
-    )?;
-    if let Some(toml_store) = co.store {
-        singleton::set_args_store_from_toml(toml_store)
-            .context(format_context!("while setting toml store values"))?;
-    }
-    let result = checkout_workflow(
-        console.clone(),
-        name,
-        utils::co::CheckoutWorkflowArgs {
-            script: co.script.unwrap_or_default(),
-            workflow: co.workflow,
-            wf: None,
-        },
-        utils::co::CheckoutArgs {
-            env: co.env.unwrap_or_default(),
-            store: vec![],
-            store_for_docstring: None,
-            new_branch: co.new_branch.unwrap_or_default(),
-            create_lock_file: co.create_lock_file.unwrap_or_default(),
-            force_install_tools: false,
-            keep_workspace_on_failure,
-            lock,
-        },
-    );
-    result.context(format_context!("in CheckoutWorkflow"))?;
-    Ok(())
+    let group_name = format!("Spaces Checkout Workflow {name}");
+    ci::in_github_group(console.clone(), is_ci, group_name.as_str(), move || {
+        if let Some(toml_store) = co.store {
+            singleton::set_args_store_from_toml(toml_store)
+                .context(format_context!("while setting toml store values"))?;
+        }
+        checkout_workflow(
+            console.clone(),
+            name,
+            utils::co::CheckoutWorkflowArgs {
+                script: co.script.unwrap_or_default(),
+                workflow: co.workflow,
+                wf: None,
+            },
+            utils::co::CheckoutArgs {
+                env: co.env.unwrap_or_default(),
+                store: vec![],
+                store_for_docstring: None,
+                new_branch: co.new_branch.unwrap_or_default(),
+                create_lock_file: co.create_lock_file.unwrap_or_default(),
+                force_install_tools: false,
+                keep_workspace_on_failure,
+                lock,
+            },
+        )
+        .context(format_context!("in CheckoutWorkflow"))
+    })
 }
 
 fn render_store_for_docstring(
@@ -298,39 +295,36 @@ fn checkout_co_repo(
     lock: Vec<Arc<str>>,
 ) -> anyhow::Result<()> {
     let is_ci: ci::IsCi = singleton::get_is_ci().into();
-    let _group = ci::GithubLogGroup::new_group(
-        console.clone(),
-        is_ci,
-        format!("Spaces Checkout Repo {}", co.url).as_str(),
-    )?;
-    let store_for_docstring = co.store.as_ref().map(render_store_for_docstring);
-    if let Some(toml_store) = co.store {
-        singleton::set_args_store_from_toml(toml_store)
-            .context(format_context!("while setting toml store values"))?;
-    }
-    let result = checkout_repo(
-        console.clone(),
-        name,
-        utils::co::CheckoutRepoArgs {
-            rule_name: co.rule_name,
-            url: co.url,
-            rev: co.rev,
-            clone: co.clone,
-            sparse_checkout: co.sparse_checkout,
-        },
-        utils::co::CheckoutArgs {
-            env: co.env.unwrap_or_default(),
-            store: vec![],
-            store_for_docstring,
-            new_branch: co.new_branch.unwrap_or_default(),
-            create_lock_file: co.create_lock_file.unwrap_or_default(),
-            force_install_tools: false,
-            keep_workspace_on_failure,
-            lock,
-        },
-    );
-    result.context(format_context!("in CheckoutRepo"))?;
-    Ok(())
+    let group_name = format!("Spaces Checkout Repo {}", co.url);
+    ci::in_github_group(console.clone(), is_ci, group_name.as_str(), move || {
+        let store_for_docstring = co.store.as_ref().map(render_store_for_docstring);
+        if let Some(toml_store) = co.store {
+            singleton::set_args_store_from_toml(toml_store)
+                .context(format_context!("while setting toml store values"))?;
+        }
+        checkout_repo(
+            console.clone(),
+            name,
+            utils::co::CheckoutRepoArgs {
+                rule_name: co.rule_name,
+                url: co.url,
+                rev: co.rev,
+                clone: co.clone,
+                sparse_checkout: co.sparse_checkout,
+            },
+            utils::co::CheckoutArgs {
+                env: co.env.unwrap_or_default(),
+                store: vec![],
+                store_for_docstring,
+                new_branch: co.new_branch.unwrap_or_default(),
+                create_lock_file: co.create_lock_file.unwrap_or_default(),
+                force_install_tools: false,
+                keep_workspace_on_failure,
+                lock,
+            },
+        )
+        .context(format_context!("in CheckoutRepo"))
+    })
 }
 
 pub fn checkout_co(

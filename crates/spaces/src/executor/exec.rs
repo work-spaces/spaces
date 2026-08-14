@@ -161,7 +161,7 @@ pub struct Exec {
 }
 
 impl Exec {
-    fn log_failed_execution(&self, console: console::Console, name: &str, err: &anyhow::Error) {
+    fn log_failed_execution(&self, _console: console::Console, name: &str, err: &anyhow::Error) {
         singleton::set_is_error_already_reported();
         let mut container = console::bootstrap::Container::new();
         container.add(console::bootstrap::VerticalSpacer::new(1));
@@ -207,7 +207,7 @@ impl Exec {
                 .width(console::components::Width::Large),
         );
 
-        console.emit_container(&container);
+        logger::push_deferred_error_lines(container.render());
     }
 
     pub fn execute(
@@ -417,7 +417,7 @@ impl Exec {
                         );
                         log_container.add(console::bootstrap::VerticalSpacer::new(1));
                         log_container.extend(summary_container);
-                        progress.console.emit_container(&log_container);
+                        logger::push_deferred_error_lines(log_container.render());
                     }
                 } else {
                     logger(progress.console.clone(), name).error(
