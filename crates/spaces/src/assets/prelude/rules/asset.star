@@ -82,13 +82,12 @@ def asset_which(which: str, destination: str) -> dict:
 
 def asset_home(source: str) -> dict:
     """
-    Creates an asset by copying a file from $HOME into the spaces store and hard-linking it into the workspace.
+    Creates an asset by copying a file or directory from $HOME into the workspace home.
 
-    The file is stored under .spaces/store/home/$USER/<source> and linked into the workspace at the same
-    relative path as source.
+    The source is resolved relative to $HOME and copied to `.spaces/home/<source>`.
 
     Args:
-        source: path relative to $HOME of the file to copy (e.g. ".ssh/config")
+        source: path relative to $HOME of the file or directory to copy (e.g. ".ssh/config")
 
     Returns:
         dict that can be passed to checkout_add_any_assets()

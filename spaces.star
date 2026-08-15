@@ -169,12 +169,7 @@ run_add_exec_test(
     visibility = visibility_rules(["//:test", "//spaces"]),
 )
 
-SPACES_INSTALL_ROOT = "SPACES_INSTALL_ROOT"
-
-if workspace_is_env_var_set(SPACES_INSTALL_ROOT):
-    root = workspace_get_env_var(SPACES_INSTALL_ROOT)
-else:
-    root = "{}/.local".format(workspace_get_env_var("HOME"))
+root = workspace_load_value("SPACES_INSTALL_ROOT") or "{}/.local".format(workspace_get_env_var("HOME"))
 
 run_add_exec(
     "wait",

@@ -634,9 +634,9 @@ def checkout_modify_value(name: str, modifier, path: str | None = None):
     else:
         checkout.modify_value(name, modifier)
 
-def checkout_add_home_store_env(name: str):
+def checkout_add_home_workspace_env(name: str):
     """
-    Assigns HOME to a user specific location in the spaces store.
+    Assigns HOME to a user specific location in the workspace.
 
     Args:
         name: Name of the checkout rule
@@ -653,12 +653,22 @@ def checkout_add_home_store_env(name: str):
         ],
     )
 
+def checkout_add_home_store_env(name: str):
+    """
+    Deprecated: Use checkout_add_home_workspace_env
+
+    Args:
+        name: Name of the checkout rule
+    """
+
+    checkout_add_home_workspace_env(name)
+
 def checkout_add_home_assets(name: str, assets: list[str]):
     """
-    Adds home assets to the workspace.
+    Adds home assets to the workspace home.
 
-    Each entry in `assets` is a path relative to $HOME. The file is copied into the spaces store
-    under .spaces/store/home/$USER/<source> and hard-linked into the workspace at the same relative path.
+    Each entry in `assets` is a path relative to $HOME. The source is copied to
+    `.spaces/home/<source>`.
 
     Args:
         name: Name of the checkout rule
