@@ -19,7 +19,6 @@ load(
     "//@star/prelude/rules/ws.star",
     "workspace_get_env_var",
     "workspace_get_env_var_or",
-    "workspace_is_env_var_set",
     "workspace_load_value",
 )
 
