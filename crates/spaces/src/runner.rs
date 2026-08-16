@@ -385,7 +385,13 @@ pub fn run_shell_in_workspace(
         let store_path = workspace_arc.read().get_store_path();
         let mut default_sandbox = shell::create_sandbox(env_path, store_path)
             .context(format_context!("while creating sandbox"))?;
-        default_sandbox.extend(&workspace_arc.read().settings.json.sandbox);
+
+        let mut workspace_sandbox = workspace_arc.read().settings.json.sandbox.clone();
+        workspace_sandbox
+            .resolve(absolute_workspace_path)
+            .context(format_context!("while resolving workspace sandbox paths"))?;
+
+        default_sandbox.extend(&workspace_sandbox);
         default_sandbox
             .apply()
             .context(format_context!("while applying sandbox"))?;

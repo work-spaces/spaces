@@ -199,7 +199,9 @@ impl Sandbox {
                 support.details
             ));
         }
-        let caps = self.to_capability_set()?;
+        let caps = self
+            .to_capability_set()
+            .context(format_context!("while getting capability set"))?;
         nono::Sandbox::apply_auto(&caps)
             .with_context(|| format_context!("failed to apply sandbox `{}`", self.name))?;
         Ok(())
