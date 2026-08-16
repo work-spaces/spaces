@@ -52,7 +52,7 @@ spaces_add_devutils(
     "v0.20.7",
     devutils_version = "devutils-v0.1.15",
     system_paths = ["/usr/bin", "/bin"],
-    is_activate_sccache = True,
+    is_activate_sccache = not info_is_ci(),
 )
 
 spaces_add_star_formatter("star_formatter", configure_zed = True, deps = [":spaces0"])

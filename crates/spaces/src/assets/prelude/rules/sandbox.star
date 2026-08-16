@@ -1,7 +1,7 @@
 """
 Sandbox configuration for the workspace.
 
-Use these functions to build a sandbox dict for `workspace_set_sandbox()`.
+Use these functions to build a sandbox dict for `checkout_set_sandbox()`.
 
 Example:
 
