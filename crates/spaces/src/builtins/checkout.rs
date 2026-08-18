@@ -19,9 +19,9 @@ pub struct PlatformArchive {
     pub macos_x86_64: Option<http_archive::Archive>,
     #[serde(rename = "macos-aarch64")]
     pub macos_aarch64: Option<http_archive::Archive>,
-    #[serde(rename = "windows-x86_64")]
-    pub windows_aarch64: Option<http_archive::Archive>,
     #[serde(rename = "windows-aarch64")]
+    pub windows_aarch64: Option<http_archive::Archive>,
+    #[serde(rename = "windows-x86_64")]
     pub windows_x86_64: Option<http_archive::Archive>,
     #[serde(rename = "linux-x86_64")]
     pub linux_x86_64: Option<http_archive::Archive>,

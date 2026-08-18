@@ -375,6 +375,7 @@ SPACES_RELEASE_TAG_ENV = "SPACES_RELEASE_TAG"
 GITHUB_REPOSITORY_ENV = "GITHUB_REPOSITORY"
 
 release_tag = workspace_load_value(SPACES_RELEASE_TAG_ENV) or "dev"
+release_archive_version = release_tag.lstrip("v").replace("/", "_")
 github_repo = workspace_get_env_var_or(GITHUB_REPOSITORY_ENV, "work-spaces/spaces")
 
 run_add_exec(
@@ -400,7 +401,7 @@ run_add_exec(
     "archive_release",
     archive_name = "spaces",
     deps = [":build_release_install"],
-    version = release_tag.lstrip("v"),
+    version = release_archive_version,
     source_directory = "//build/install/bin",
     suffix = "zip",
     includes = ["spaces*"],
