@@ -23,7 +23,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: work-spaces/spaces-checkout-run@v0.20.7
+      - uses: work-spaces/spaces-checkout-run@v0.20.9
         with:
           checkout: >-
             --locked
@@ -40,7 +40,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: work-spaces/spaces-checkout-run@v0.20.7
+      - uses: work-spaces/spaces-checkout-run@v0.20.9
         with:
           checkout: >-
             --locked
@@ -57,7 +57,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: work-spaces/spaces-checkout-run@v0.20.7
+      - uses: work-spaces/spaces-checkout-run@v0.20.9
         with:
           checkout: >-
             --locked
@@ -74,7 +74,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: work-spaces/spaces-checkout-run@v0.20.7
+      - uses: work-spaces/spaces-checkout-run@v0.20.9
         with:
           checkout: >-
             --locked
@@ -92,7 +92,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: work-spaces/spaces-checkout-run@v0.20.7
+      - uses: work-spaces/spaces-checkout-run@v0.20.9
         with:
           checkout: >-
             --locked
