@@ -49,7 +49,7 @@ SPACES_CHECKOUT_PATH = workspace_get_path_to_checkout()
 
 spaces_add_devutils(
     "spaces0",
-    "v0.20.7",
+    "v0.20.9",
     devutils_version = "devutils-v0.1.15",
     system_paths = ["/usr/bin", "/bin"],
     is_activate_sccache = not info_is_ci(),
