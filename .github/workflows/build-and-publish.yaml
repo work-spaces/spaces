@@ -7,6 +7,31 @@ on:
         description: "Existing release tag to build and upload binaries for (e.g. v1.2.3)"
         required: true
         type: string
+      build-linux-x86_64:
+        description: "Build and publish Linux x86_64"
+        required: false
+        type: boolean
+        default: true
+      build-linux-aarch64:
+        description: "Build and publish Linux aarch64"
+        required: false
+        type: boolean
+        default: true
+      build-macos-aarch64:
+        description: "Build and publish macOS aarch64"
+        required: false
+        type: boolean
+        default: true
+      build-macos-x86_64:
+        description: "Build and publish macOS x86_64"
+        required: false
+        type: boolean
+        default: true
+      build-windows-x86_64:
+        description: "Build and publish Windows x86_64"
+        required: false
+        type: boolean
+        default: true
 
 jobs:
   check-release:
@@ -26,6 +51,7 @@ jobs:
           echo "Release '${{ inputs.tag }}' found."
 
   build-ubuntu:
+    if: ${{ inputs.build-linux-x86_64 }}
     name: Build and Publish Ubuntu Binary
     needs: check-release
     runs-on: ubuntu-22.04
@@ -68,6 +94,7 @@ jobs:
           gh release upload ${{ inputs.tag }} artifacts/spaces-linux-x86_64-${{ inputs.tag }}.zip --clobber
 
   build-matrix-windows:
+    if: ${{ inputs.build-windows-x86_64 }}
     name: Build and Upload Other OS Binaries
     needs: check-release
     runs-on: ${{ matrix.os }}
@@ -109,18 +136,15 @@ jobs:
         run: |
           gh.exe release upload ${{ inputs.tag }} artifacts/spaces-windows-x86_64-${{ inputs.tag }}.zip --clobber
 
-  build-matrix-macos:
-    name: Build and Upload Other OS Binaries
+  build-macos-x86_64:
+    if: ${{ inputs.build-macos-x86_64 }}
+    name: Build and Upload macOS x86_64
     needs: check-release
-    runs-on: ${{ matrix.os }}
+    runs-on: macos-latest
     permissions:
       contents: write
       pull-requests: write
       repository-projects: write
-    strategy:
-      matrix:
-        os: [macos-latest]
-        arch: [x86_64, aarch64]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -131,18 +155,18 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-          target: ${{ matrix.target }}
+          target: x86_64-apple-darwin
           components: rustfmt, clippy
 
-      - name: Build for ${{ matrix.os }}
+      - name: Build for macOS x86_64
         run: |
-          rustup target add ${{ matrix.arch }}-apple-darwin
-          cargo build --profile=release --target=${{ matrix.arch }}-apple-darwin
+          rustup target add x86_64-apple-darwin
+          cargo build --profile=release --target=x86_64-apple-darwin
 
       - name: Create binary artifact (zip)
         run: |
           mkdir -p artifacts
-          (cd target/${{ matrix.arch }}-apple-darwin/release; zip ../../../artifacts/spaces-macos-${{ matrix.arch }}-${{ inputs.tag }}.zip spaces)
+          (cd target/x86_64-apple-darwin/release; zip ../../../artifacts/spaces-macos-x86_64-${{ inputs.tag }}.zip spaces)
         shell: bash
 
       - name: Upload binary to release
@@ -150,9 +174,50 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload ${{ inputs.tag }} \
-            artifacts/spaces-macos-${{ matrix.arch }}-${{ inputs.tag }}.zip --clobber
+            artifacts/spaces-macos-x86_64-${{ inputs.tag }}.zip --clobber
+
+  build-macos-aarch64:
+    if: ${{ inputs.build-macos-aarch64 }}
+    name: Build and Upload macOS aarch64
+    needs: check-release
+    runs-on: macos-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      repository-projects: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: aarch64-apple-darwin
+          components: rustfmt, clippy
+
+      - name: Build for macOS aarch64
+        run: |
+          rustup target add aarch64-apple-darwin
+          cargo build --profile=release --target=aarch64-apple-darwin
+
+      - name: Create binary artifact (zip)
+        run: |
+          mkdir -p artifacts
+          (cd target/aarch64-apple-darwin/release; zip ../../../artifacts/spaces-macos-aarch64-${{ inputs.tag }}.zip spaces)
+        shell: bash
+
+      - name: Upload binary to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ inputs.tag }} \
+            artifacts/spaces-macos-aarch64-${{ inputs.tag }}.zip --clobber
 
   build-linux-aarch64:
+    if: ${{ inputs.build-linux-aarch64 }}
     name: Build and Upload Linux aarch64
     needs: check-release
     runs-on: ubuntu-22.04-arm
