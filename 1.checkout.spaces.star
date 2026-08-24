@@ -24,18 +24,15 @@ load(
     "checkout_add_home_store_env",
     "checkout_add_repo",
     "checkout_clone_default",
-    #"checkout_set_sandbox",
+    "checkout_set_sandbox",
     "checkout_store_value",
 )
 load("//@star/prelude/rules/env.star", "env_assign", "env_inherit")
-
-# Sandbox needs support in CI before this will work
-#load(
-#    "//@star/prelude/rules/sandbox.star",
-#    "sandbox_configure_for_os",
-#    "sandbox_new",
-#)
-
+load(
+    "//@star/prelude/rules/sandbox.star",
+    "sandbox_configure_for_os",
+    "sandbox_new",
+)
 load(
     "//@star/prelude/rules/ws.star",
     "workspace_get_absolute_path",
@@ -49,7 +46,7 @@ SPACES_CHECKOUT_PATH = workspace_get_path_to_checkout()
 
 spaces_add_devutils(
     "spaces0",
-    "v0.20.9",
+    "v0.21.0",
     devutils_version = "devutils-v0.1.15",
     system_paths = ["/usr/bin", "/bin"],
     is_activate_sccache = not info_is_ci(),
@@ -170,8 +167,7 @@ if workspace.load_value("CHECKOUT_INSTALL_SPACES") == "ON":
         rev = "main",
     )
 
-# Required for dbus and nono (linux only)
-
+# Required for dbus and nono (linux only - will build on macos for testing purposes)
 if info_is_platform_linux() or workspace_load_value("SPACES_ENABLE_SANDBOX") == "ON":
     checkout_store_value("SPACES_DBUS_ENABLED", True)
     cmake_add("cmake4", "v4.3.1")
@@ -192,20 +188,20 @@ if info_is_platform_linux() or workspace_load_value("SPACES_ENABLE_SANDBOX") == 
         clone = checkout_clone_default(),
     )
 
-    checkout_add_home_store_env("home_store_env")
-    checkout_add_home_assets(
-        "home_assets",
-        assets = [
-            ".gitconfig",
-            ".config/gh",
-            ".ssh",
-            ".gnupg",
-            ".config/git",
-            ".netrc",
-        ],
-    )
+checkout_add_home_store_env("home_store_env")
+checkout_add_home_assets(
+    "home_assets",
+    assets = [
+        ".gitconfig",
+        ".config/gh",
+        ".ssh",
+        ".gnupg",
+        ".config/git",
+        ".netrc",
+    ],
+)
 
-    #if not info_is_ci():
-    #    sandbox = sandbox_new("workspace-sandbox")
-    #    sandbox_configure_for_os(sandbox)
-    #    checkout_set_sandbox(sandbox)
+if not info_is_ci():
+    sandbox = sandbox_new("workspace-sandbox")
+    sandbox_configure_for_os(sandbox)
+    checkout_set_sandbox(sandbox)
