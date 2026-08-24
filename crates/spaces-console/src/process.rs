@@ -109,6 +109,9 @@ impl ExecuteOptions {
         }
 
         if let Some(directory) = &self.working_directory {
+            if !std::path::Path::new(directory.as_ref()).exists() {
+                return Err(anyhow::anyhow!("Invalid directory: {directory}",));
+            }
             process.current_dir(directory.as_ref());
         }
 
