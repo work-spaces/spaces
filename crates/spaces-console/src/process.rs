@@ -109,8 +109,11 @@ impl ExecuteOptions {
         }
 
         if let Some(directory) = &self.working_directory {
-            if !std::path::Path::new(directory.as_ref()).exists() {
-                return Err(anyhow::anyhow!("Invalid directory: {directory}",));
+            let dir_path = std::path::Path::new(directory.as_ref());
+            let metadata = std::fs::metadata(dir_path)
+                .with_context(|| format!("Bad directory: {directory}"))?;
+            if !metadata.is_dir() {
+                return Err(anyhow::anyhow!("Not a directory: {directory}"));
             }
             process.current_dir(directory.as_ref());
         }
