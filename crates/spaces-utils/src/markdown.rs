@@ -9,7 +9,7 @@ pub fn heading(level: u8, content: &str) -> String {
 }
 
 pub fn hline() -> &'static str {
-    "\n---\n\n"
+    "---\n\n"
 }
 
 pub fn list(items: Vec<Arc<str>>) -> String {
