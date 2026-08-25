@@ -279,26 +279,24 @@ impl Rule {
         }
         if let Some(help) = &self.help {
             md.bold("Description")?;
-            md.console.write("\n\n")?;
-            md.paragraph(help)?;
             md.console.write("\n")?;
+            md.paragraph(help)?;
         } else if is_run_rule {
             md.paragraph("No help text provided")?;
-            md.console.write("\n")?;
         }
 
         if let Some(details) = details {
             md.bold("Details")?;
-            md.console.write("\n\n")?;
-            md.paragraph(details.as_str())?;
             md.console.write("\n")?;
+            md.console.write(details.trim_end_matches('\n'))?;
+            md.console.write("\n\n")?;
         }
 
         if let Some(deps) = self.deps.as_ref()
             && !deps.is_empty()
         {
             md.bold("Dependencies")?;
-            md.console.write("\n\n")?;
+            md.console.write("\n")?;
             match deps {
                 Deps::Rules(rules) => {
                     for dep in rules {

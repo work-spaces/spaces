@@ -15,11 +15,7 @@ impl Writer {
 
 impl ConsoleWriter for Writer {
     fn write_str(&mut self, s: &dyn std::fmt::Display) -> anyhow::Result<()> {
-        let text = s.to_string();
-        let message = text.trim_end_matches('\n');
-        if !message.is_empty() {
-            writeln!(self.file, "{message}")?;
-        }
+        write!(self.file, "{s}")?;
         Ok(())
     }
 
