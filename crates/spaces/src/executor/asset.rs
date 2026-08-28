@@ -40,11 +40,66 @@ fn format_value(format: AssetFormat, value: &serde_json::Value) -> anyhow::Resul
     match format {
         AssetFormat::Json => serde_json::to_string_pretty(value)
             .context(format_context!("Failed to serialize asset file as JSON",)),
-        AssetFormat::Toml => toml::to_string_pretty(value)
-            .context(format_context!("Failed to serialize asset file as TOML",)),
+        AssetFormat::Toml => {
+            let toml_value = json_to_toml_value(value).context(format_context!(
+                "Failed to convert JSON value to TOML value",
+            ))?;
+            toml::to_string_pretty(&toml_value)
+                .context(format_context!("Failed to serialize asset file as TOML",))
+        }
         AssetFormat::Yaml => serde_yaml::to_string(value)
             .context(format_context!("Failed to serialize asset file as YAML",)),
     }
+}
+
+fn json_to_toml_value(value: &serde_json::Value) -> anyhow::Result<toml::Value> {
+    match value {
+        serde_json::Value::Null => Err(anyhow::anyhow!("TOML does not support null values")),
+        serde_json::Value::Bool(boolean) => Ok(toml::Value::Boolean(*boolean)),
+        serde_json::Value::Number(number) => json_number_to_toml_value(number),
+        serde_json::Value::String(string) => Ok(toml::Value::String(string.clone())),
+        serde_json::Value::Array(values) => {
+            let mut array = Vec::with_capacity(values.len());
+            for value in values {
+                array.push(json_to_toml_value(value)?);
+            }
+            Ok(toml::Value::Array(array))
+        }
+        serde_json::Value::Object(entries) => {
+            let mut table = toml::map::Map::new();
+            for (key, value) in entries {
+                table.insert(key.clone(), json_to_toml_value(value)?);
+            }
+            Ok(toml::Value::Table(table))
+        }
+    }
+}
+
+fn json_number_to_toml_value(number: &serde_json::Number) -> anyhow::Result<toml::Value> {
+    let number_text = number.to_string();
+
+    if number_text.contains('.') || number_text.contains('e') || number_text.contains('E') {
+        let float = number_text.parse::<f64>().map_err(|err| {
+            anyhow::anyhow!("Invalid JSON float '{number_text}' for TOML serialization: {err:?}")
+        })?;
+        return Ok(toml::Value::Float(float));
+    }
+
+    if let Ok(integer) = number_text.parse::<i64>() {
+        return Ok(toml::Value::Integer(integer));
+    }
+
+    let unsigned = number_text.parse::<u64>().map_err(|err| {
+        anyhow::anyhow!("Invalid JSON number '{number_text}' for TOML serialization: {err:?}")
+    })?;
+
+    let integer = i64::try_from(unsigned).map_err(|_| {
+        anyhow::anyhow!(
+            "TOML only supports signed 64-bit integers, but got JSON integer '{number_text}'"
+        )
+    })?;
+
+    Ok(toml::Value::Integer(integer))
 }
 
 impl UpdateAsset {
@@ -612,7 +667,8 @@ fn save_asset(workspace_path: Arc<str>, destination: &str, content: &str) -> any
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_home_asset_store_entry;
+    use super::{AssetFormat, format_value, normalize_home_asset_store_entry};
+    use serde_json::json;
 
     #[test]
     fn keeps_existing_file_for_file_source() -> anyhow::Result<()> {
@@ -662,6 +718,27 @@ mod tests {
         normalize_home_asset_store_entry(&store_full, true)?;
 
         assert!(!store_full.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn formats_toml_numbers_without_serde_json_private_wrapper() -> anyhow::Result<()> {
+        let value = json!({
+            "profile": {
+                "dev": {
+                    "codegen-units": 1,
+                    "debug": 2,
+                }
+            }
+        });
+
+        let formatted = format_value(AssetFormat::Toml, &value)?;
+
+        assert!(formatted.contains("codegen-units = 1"));
+        assert!(formatted.contains("debug = 2"));
+        assert!(!formatted.contains("$serde_json::private::Number"));
+        assert!(!formatted.contains("[profile.dev.codegen-units]"));
+
         Ok(())
     }
 }
