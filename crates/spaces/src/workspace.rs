@@ -1,4 +1,4 @@
-use crate::{singleton, stardoc};
+use crate::{label, singleton, stardoc};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
@@ -355,16 +355,41 @@ pub struct Workspace {
 }
 
 impl Workspace {
-    /// Checks if a lock key is overridden by a command line lock.
-    /// Handles both simple repo names and fully qualified labels.
-    fn is_lock_overridden_by_command_line(lock_key: &str) -> bool {
-        singleton::get_args_lock_for_repo(lock_key).is_some()
+    fn get_lock_for_repo_from_map(
+        locks: &HashMap<Arc<str>, Arc<str>>,
+        name: &str,
+    ) -> Option<Arc<str>> {
+        let repo_name = label::get_rule_name_from_label(name);
+
+        if let Some(lock) = locks.get(name) {
+            return Some(lock.clone());
+        }
+
+        if let Some(lock) = locks.get(repo_name) {
+            return Some(lock.clone());
+        }
+
+        for (lock_key, lock_value) in locks.iter() {
+            if label::get_rule_name_from_label(lock_key.as_ref()) == repo_name {
+                return Some(lock_value.clone());
+            }
+        }
+
+        None
+    }
+
+    pub fn get_settings_lock_for_repo(&self, name: &str) -> Option<Arc<str>> {
+        Self::get_lock_for_repo_from_map(&self.settings.json.locks, name)
+    }
+
+    fn is_lock_overridden_by_settings(&self, lock_key: &str) -> bool {
+        self.get_settings_lock_for_repo(lock_key).is_some()
     }
 
     pub fn update_locks(&mut self, locks: &HashMap<Arc<str>, Arc<str>>) {
         for (key, value) in locks.iter() {
-            // Don't override locks that were set from command line
-            if !Self::is_lock_overridden_by_command_line(key.as_ref()) {
+            // Don't override locks that are pinned in workspace settings
+            if !self.is_lock_overridden_by_settings(key.as_ref()) {
                 self.locks.insert(key.clone(), value.clone());
             }
         }
@@ -618,6 +643,11 @@ impl Workspace {
         // Load command line locks
         let locks = singleton::get_args_locks();
 
+        // Persist command-line lock overrides so sync can reuse them.
+        for (key, value) in locks.iter() {
+            settings.json.locks.insert(key.clone(), value.clone());
+        }
+
         if is_checkout_phase == IsCheckoutPhase::Yes {
             settings.json.scanned_modules = HashSet::default();
             // Clear store values written by scripts so sync starts fresh.
@@ -657,6 +687,28 @@ impl Workspace {
         settings.json.dev_branch_bases = normalized_dev_branch_bases;
 
         let sync_options = singleton::get_sync_options();
+
+        if !sync_options.no_locks.is_empty() {
+            let mut lock_keys_to_remove: HashSet<Arc<str>> = HashSet::new();
+            for selector in sync_options.no_locks.iter() {
+                let repo_selector = ws::normalize_repo_selector(selector.as_ref());
+                if repo_selector.is_empty() {
+                    return Err(format_error!(
+                        "Bad --no-lock argument `{selector}`: expected <repo-path>"
+                    ));
+                }
+
+                for lock_key in settings.json.locks.keys() {
+                    if ws::repo_selector_matches(lock_key.as_ref(), repo_selector.as_ref()) {
+                        lock_keys_to_remove.insert(lock_key.clone());
+                    }
+                }
+            }
+
+            for key in lock_keys_to_remove {
+                settings.json.locks.remove(&key);
+            }
+        }
 
         if !sync_options.dev_branch_bases.is_empty() {
             let mut seen_repo_paths: HashSet<Arc<str>> = HashSet::new();
@@ -1228,8 +1280,8 @@ impl Workspace {
     }
 
     pub fn add_git_commit_lock(&mut self, rule_name: &str, commit: Arc<str>) {
-        // Don't override locks that were set from command line
-        if !Self::is_lock_overridden_by_command_line(rule_name) {
+        // Don't override locks that are pinned in workspace settings
+        if !self.is_lock_overridden_by_settings(rule_name) {
             self.locks.insert(rule_name.into(), commit);
         }
     }
