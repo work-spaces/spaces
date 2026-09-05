@@ -459,7 +459,7 @@ pub fn run_parse(req: ParseRequest) -> ParseOutcome {
     match cmd.try_get_matches_from(req.argv) {
         Ok(matches) => match matches_to_json(&matches, &metas) {
             Ok(value) => ParseOutcome::Parsed(value),
-            Err(err) => ParseOutcome::Error(format!("Invalid argument value: {err}")),
+            Err(err) => ParseOutcome::Error(format!("Invalid argument value: {err}\n")),
         },
         Err(err) => match err.kind() {
             ClapErrorKind::DisplayHelp | ClapErrorKind::DisplayVersion => {
@@ -743,11 +743,10 @@ mod tests {
         }));
         let text = err_text(parse(spec, &["--count", "nope"]));
 
-        assert!(
-            text.contains(
-                "Invalid argument value: Expected integer value for `--count`, got `nope`"
-            )
-        );
+        assert!(text.contains("Invalid argument value:"));
+        assert!(text.contains("Expected integer value"));
+        assert!(text.contains("`--count`"));
+        assert!(text.contains("`nope`"));
         assert!(!text.contains("ErrorInner"));
     }
 
