@@ -429,28 +429,43 @@ fn matches_to_json(
 // Core entry point used by both Starlark builtin and tests
 // ---------------------------------------------------------------------------
 
+fn format_clap_parse_error(err: clap::Error) -> String {
+    let heading = match err.kind() {
+        ClapErrorKind::MissingRequiredArgument | ClapErrorKind::MissingSubcommand => {
+            "Missing required argument."
+        }
+        ClapErrorKind::UnknownArgument | ClapErrorKind::InvalidSubcommand => {
+            "Unknown or unexpected argument."
+        }
+        ClapErrorKind::InvalidValue | ClapErrorKind::ValueValidation => "Invalid argument value.",
+        ClapErrorKind::TooManyValues
+        | ClapErrorKind::TooFewValues
+        | ClapErrorKind::WrongNumberOfValues => "Wrong number of argument values.",
+        ClapErrorKind::ArgumentConflict => "Conflicting arguments.",
+        _ => "Failed to parse arguments.",
+    };
+
+    format!("{heading}\n\n{err}\n")
+}
+
 pub fn run_parse(req: ParseRequest) -> ParseOutcome {
     let (cmd, metas) = match build_command(&req.spec) {
         Ok(pair) => pair,
         Err(err) => {
-            return ParseOutcome::Error(format!(
-                "error: while building args parser because {err:?}"
-            ));
+            return ParseOutcome::Error(format!("Invalid args parser specification: {err}\n"));
         }
     };
 
     match cmd.try_get_matches_from(req.argv) {
         Ok(matches) => match matches_to_json(&matches, &metas) {
             Ok(value) => ParseOutcome::Parsed(value),
-            Err(err) => ParseOutcome::Error(format!(
-                "error: while getting matches for args parser because {err:?}"
-            )),
+            Err(err) => ParseOutcome::Error(format!("Invalid argument value: {err}")),
         },
         Err(err) => match err.kind() {
             ClapErrorKind::DisplayHelp | ClapErrorKind::DisplayVersion => {
                 ParseOutcome::Help(err.to_string())
             }
-            _ => ParseOutcome::Error(format!("error: while parsing arguments because {err:?}")),
+            _ => ParseOutcome::Error(format_clap_parse_error(err)),
         },
     }
 }
@@ -588,6 +603,14 @@ mod tests {
         }
     }
 
+    fn err_text(out: ParseOutcome) -> String {
+        match out {
+            ParseOutcome::Error(t) => t,
+            ParseOutcome::Parsed(v) => panic!("expected error, got parsed: {v}"),
+            ParseOutcome::Help(t) => panic!("expected error, got help: {t}"),
+        }
+    }
+
     #[test]
     fn flag_default_false_and_set_true() {
         let spec = make_spec(serde_json::json!({
@@ -688,6 +711,44 @@ mod tests {
         let spec = make_spec(serde_json::json!({"name": "p"}));
         let out = parse(spec, &["--nope"]);
         assert!(matches!(out, ParseOutcome::Error(_)));
+    }
+
+    #[test]
+    fn unknown_option_error_is_human_readable() {
+        let spec = make_spec(serde_json::json!({"name": "p"}));
+        let text = err_text(parse(spec, &["--nope"]));
+
+        assert!(text.contains("Unknown or unexpected argument."));
+        assert!(!text.contains("ErrorInner"));
+        assert!(!text.contains("FlatMap"));
+    }
+
+    #[test]
+    fn missing_required_argument_error_is_human_readable() {
+        let spec = make_spec(serde_json::json!({
+            "name": "p",
+            "positional": [{"name": "service", "required": true}],
+        }));
+        let text = err_text(parse(spec, &[]));
+
+        assert!(text.contains("Missing required argument."));
+        assert!(!text.contains("ErrorInner"));
+    }
+
+    #[test]
+    fn invalid_value_error_is_human_readable() {
+        let spec = make_spec(serde_json::json!({
+            "name": "p",
+            "options": [{"kind": "opt", "long": "--count", "type": "int"}],
+        }));
+        let text = err_text(parse(spec, &["--count", "nope"]));
+
+        assert!(
+            text.contains(
+                "Invalid argument value: Expected integer value for `--count`, got `nope`"
+            )
+        );
+        assert!(!text.contains("ErrorInner"));
     }
 
     #[test]
