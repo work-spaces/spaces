@@ -172,10 +172,14 @@ pub fn install_tools(console: console::Console, _is_force_link: bool) -> anyhow:
     ))?;
 
     // Load the store manifest to track installed tools
-    let mut manifest_store =
-        store::Store::new_from_store_path(std::path::Path::new(store_path.as_ref())).context(
-            format_context!("Failed to load store manifest from {}", store_path),
-        )?;
+    let mut manifest_store = store::Store::new_from_store_path_with_console(
+        std::path::Path::new(store_path.as_ref()),
+        Some(console.clone()),
+    )
+    .context(format_context!(
+        "Failed to load store manifest from {}",
+        store_path
+    ))?;
 
     for (name, json) in TOOLS {
         logger.info(format!("download and install {name}").as_str());

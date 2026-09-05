@@ -1484,7 +1484,7 @@ fn execute_tasks(
                 .context(format_context!("Failed to save bin settings"))?;
 
             read_workspace
-                .finalize_store()
+                .finalize_store(console.clone())
                 .context(format_context!("Failed to finalize store"))?;
 
             logger.debug("saving checkout store");

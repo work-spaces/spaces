@@ -173,6 +173,13 @@ impl Store {
     }
 
     pub fn new_from_store_path(path_to_store: &std::path::Path) -> anyhow::Result<Self> {
+        Self::new_from_store_path_with_console(path_to_store, None)
+    }
+
+    pub fn new_from_store_path_with_console(
+        path_to_store: &std::path::Path,
+        console: Option<console::Console>,
+    ) -> anyhow::Result<Self> {
         let path = path_to_store.join(MANIFEST_FILE_NAME);
         if !path.exists() {
             return Ok(Store::new(path_to_store));
@@ -182,7 +189,7 @@ impl Store {
             Ok(contents) => contents,
             // A truncated/interrupted manifest can contain invalid UTF-8.
             Err(err) if err.kind() == std::io::ErrorKind::InvalidData => {
-                return Ok(Self::rebuild_from_disk(path_to_store));
+                return Ok(Self::rebuild_from_disk(path_to_store, console));
             }
             Err(err) => {
                 return Err(err)
@@ -193,20 +200,42 @@ impl Store {
         let mut store: Store = match serde_json::from_str(&contents) {
             Ok(store) => store,
             // Corrupted manifest: recover by rebuilding from current on-disk store state.
-            Err(_) => return Ok(Self::rebuild_from_disk(path_to_store)),
+            Err(_) => return Ok(Self::rebuild_from_disk(path_to_store, console)),
         };
 
         store.path_to_store = path_to_store.into();
         Ok(store)
     }
 
-    fn rebuild_from_disk(path_to_store: &std::path::Path) -> Self {
+    fn rebuild_from_disk(
+        path_to_store: &std::path::Path,
+        console: Option<console::Console>,
+    ) -> Self {
+        let mut progress = console.map(|console| {
+            console::Progress::new(console, "rebuilding store manifest from disk", None, None)
+        });
+
+        let entries = Self::discover_entries_from_disk(path_to_store, progress.as_mut());
+        let rebuilt_count = entries.len();
+
+        if let Some(progress) = progress.as_mut() {
+            let message = format!("rebuilt manifest with {rebuilt_count} entr(ies)");
+            progress.set_finalize_lines(logger::make_finalize_line(
+                logger::FinalType::Finished,
+                progress.elapsed(),
+                message.as_str(),
+            ));
+        }
+
         let mut rebuilt = Store::new(path_to_store);
-        rebuilt.entries = Self::discover_entries_from_disk(path_to_store);
+        rebuilt.entries = entries;
         rebuilt
     }
 
-    fn discover_entries_from_disk(path_to_store: &std::path::Path) -> HashMap<Arc<str>, Entry> {
+    fn discover_entries_from_disk(
+        path_to_store: &std::path::Path,
+        mut progress: Option<&mut console::Progress>,
+    ) -> HashMap<Arc<str>, Entry> {
         let mut discovered: HashMap<Arc<str>, Entry> = HashMap::new();
 
         if !path_to_store.exists() {
@@ -231,6 +260,12 @@ impl Store {
             let Ok(relative_path) = candidate_path.strip_prefix(path_to_store) else {
                 continue;
             };
+
+            if let Some(progress) = progress.as_deref_mut() {
+                let message = relative_path.display().to_string();
+                progress.set_message(message.as_str());
+                progress.increment(1);
+            }
 
             let Some(top_level) = relative_path
                 .components()
@@ -294,8 +329,17 @@ impl Store {
         discovered
     }
 
-    fn rebuild_missing_entries_from_disk(&mut self) -> usize {
-        let discovered = Self::discover_entries_from_disk(&self.path_to_store);
+    fn rebuild_missing_entries_from_disk(&mut self, console: Option<console::Console>) -> usize {
+        let mut progress = console.map(|console| {
+            console::Progress::new(
+                console,
+                "scanning store entries for manifest rebuild",
+                None,
+                None,
+            )
+        });
+
+        let discovered = Self::discover_entries_from_disk(&self.path_to_store, progress.as_mut());
         let mut rebuilt = 0usize;
 
         for (key, entry) in discovered {
@@ -304,6 +348,19 @@ impl Store {
             }
             self.entries.insert(key, entry);
             rebuilt += 1;
+        }
+
+        if let Some(progress) = progress.as_mut() {
+            let message = if rebuilt == 0 {
+                "no missing manifest entries found".to_string()
+            } else {
+                format!("rebuilt {rebuilt} missing manifest entr(ies)")
+            };
+            progress.set_finalize_lines(logger::make_finalize_line(
+                logger::FinalType::Finished,
+                progress.elapsed(),
+                message.as_str(),
+            ));
         }
 
         rebuilt
@@ -852,7 +909,7 @@ impl Store {
             let entries_rebuilt_from_disk: usize = if is_dry_run {
                 0
             } else {
-                let rebuilt = self.rebuild_missing_entries_from_disk();
+                let rebuilt = self.rebuild_missing_entries_from_disk(Some(console.clone()));
                 if rebuilt > 0 {
                     log.message(
                         format!("Rebuilt {} missing manifest entr(ies) from disk", rebuilt)
@@ -2083,7 +2140,7 @@ mod tests {
         make_valid_archive_entry(&archive_path);
 
         let mut store = Store::new(store_root.path());
-        let rebuilt_count = store.rebuild_missing_entries_from_disk();
+        let rebuilt_count = store.rebuild_missing_entries_from_disk(None);
 
         assert_eq!(rebuilt_count, 1);
         assert!(
