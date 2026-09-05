@@ -224,6 +224,14 @@ fn resolve_pull_from(
     (!is_dev_branch && is_on_branch && is_rev_branch).then(|| format!("origin/{rev}").into())
 }
 
+fn canonicalize_dev_branch_base_ref(base_ref: &str) -> Arc<str> {
+    if base_ref.starts_with("origin/") || base_ref.contains('/') {
+        return base_ref.into();
+    }
+
+    format!("origin/{base_ref}").into()
+}
+
 fn resolve_explicit_dev_branch_base(
     member_path: &str,
     dev_branch_base_map: &HashMap<Arc<str>, Arc<str>>,
@@ -475,6 +483,9 @@ pub fn build_repo_sync_plan(
                     is_member_dev_branch(member_path.as_ref(), &requested_dev_branch_selectors);
                 let explicit_base_ref =
                     resolve_explicit_dev_branch_base(member_path.as_ref(), &dev_branch_base_map);
+                let effective_explicit_base_ref = explicit_base_ref
+                    .as_ref()
+                    .map(|base_ref| canonicalize_dev_branch_base_ref(base_ref.as_ref()));
                 let has_non_branch_rev_tracking_attempt = !is_rev_branch
                     && explicit_base_ref.is_none()
                     && (is_requested_dev_branch_repo || is_new_branch_repo);
@@ -601,7 +612,7 @@ pub fn build_repo_sync_plan(
                     } else if rev_not_branch_mismatch {
                         skip_reason = Some("rev is not a branch".into());
                     } else {
-                        let effective_base_ref = explicit_base_ref
+                        let effective_base_ref = effective_explicit_base_ref
                             .clone()
                             .unwrap_or_else(|| format!("origin/{}", member_rev).into());
                         if matches!(action, Some(DevBranchAction::Rebase)) {
@@ -626,10 +637,19 @@ pub fn build_repo_sync_plan(
                         ))?;
 
                     if !repo.base_ref_exists(&mut repo_progress, effective_base_ref.as_ref())? {
-                        if explicit_base_ref.is_some() {
+                        if let Some(explicit_base_ref) = explicit_base_ref.as_ref() {
+                            if explicit_base_ref.as_ref() == effective_base_ref.as_ref() {
+                                return Err(format_error!(
+                                    "//{} explicit base ref `{}` from `--dev-branch-base` was not found after fetch",
+                                    member_path,
+                                    effective_base_ref
+                                ));
+                            }
+
                             return Err(format_error!(
-                                "//{} explicit base ref `{}` from `--dev-branch-base` was not found after fetch",
+                                "//{} explicit base ref `{}` from `--dev-branch-base` resolves to `{}` which was not found after fetch",
                                 member_path,
+                                explicit_base_ref,
                                 effective_base_ref
                             ));
                         }
@@ -706,7 +726,7 @@ pub fn build_repo_sync_plan(
                 }
 
                 let new_branch_tracking_base = if create_new_branch.is_some() && !is_rev_branch {
-                    explicit_base_ref.clone()
+                    effective_explicit_base_ref.clone()
                 } else {
                     None
                 };
@@ -2426,6 +2446,30 @@ mod tests {
         let pull_from = resolve_pull_from(false, true, false, "deadbeef");
 
         assert_eq!(pull_from, None);
+    }
+
+    #[test]
+    fn canonicalize_dev_branch_base_ref_prefixes_origin_for_simple_branch_name() {
+        assert_eq!(
+            canonicalize_dev_branch_base_ref("main").as_ref(),
+            "origin/main"
+        );
+    }
+
+    #[test]
+    fn canonicalize_dev_branch_base_ref_preserves_origin_prefixed_ref() {
+        assert_eq!(
+            canonicalize_dev_branch_base_ref("origin/main").as_ref(),
+            "origin/main"
+        );
+    }
+
+    #[test]
+    fn canonicalize_dev_branch_base_ref_preserves_slash_qualified_ref() {
+        assert_eq!(
+            canonicalize_dev_branch_base_ref("upstream/main").as_ref(),
+            "upstream/main"
+        );
     }
 
     #[test]
