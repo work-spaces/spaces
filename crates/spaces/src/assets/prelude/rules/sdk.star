@@ -35,7 +35,8 @@ def sdk_add_repo(
         platforms: list[str] | None = None,
         type: str | None = None,
         deps: list[str] = [],
-        visibility: str | dict[str, list[str]] | None = None):
+        visibility: str | dict[str, list[str]] | None = None,
+        execute_pre_checkout = None):
     """
     Adds an SDK repo and associates with the calling repo.
 
@@ -55,6 +56,7 @@ def sdk_add_repo(
         type: Use [checkout_type_optional()](#checkout_type_optional) to skip rule checkout.
         deps: List of dependencies for the rule.
         visibility: Rule visibility: `Public|Private|Rules[]`. See visibility.star for more info.
+        execute_pre_checkout: Optional zero-argument lambda to run before checkout_add_repo().
     """
     if workspace_is_path_to_member_available(url):
         # No-op. The SDK is already avilable in th workspace
@@ -63,6 +65,9 @@ def sdk_add_repo(
     current_module_path = workspace_get_path_to_checkout()
     checkout_store_value(_SDK_OWNER_KEY, current_module_path, path = _SDK_NAMESPACE)
     effective_rev = workspace_load_value("PRELUDE_SDK_REV") or rev
+
+    if execute_pre_checkout != None:
+        execute_pre_checkout()
 
     checkout_add_repo(
         name,
@@ -80,6 +85,20 @@ def sdk_add_repo(
         visibility = visibility,
     )
 
+def sdk_is_owner() -> bool:
+    """
+    Checks if the calling repo is the owner of the SDK.
+
+    The calling module must be in the repo's root directory.
+
+    Returns:
+        True if the calling repo owns the SDK.
+    """
+
+    current_module_path = workspace_get_path_to_checkout()
+    sdk_module_path = workspace_load_value(_SDK_OWNER_KEY, path = _SDK_NAMESPACE)
+    return sdk_module_path == current_module_path
+
 def sdk_finalize_checkout(sdk_checkout):
     """
     Executes the sdk_checkout callback as a lambda if this repo owns the SDK.
@@ -87,7 +106,5 @@ def sdk_finalize_checkout(sdk_checkout):
     Args:
         sdk_checkout: A lambda function (with no arguments) executed if the caller is the SDK owner.
     """
-    current_module_path = workspace_get_path_to_checkout()
-    sdk_module_path = workspace_load_value(_SDK_OWNER_KEY, path = _SDK_NAMESPACE)
-    if sdk_module_path == current_module_path:
+    if sdk_is_owner():
         sdk_checkout()
