@@ -427,10 +427,10 @@ pub fn run_store_command_in_workspace(
         Err(_) => ws::get_checkout_store_path(),
     };
     let store_path = std::path::Path::new(store_path_str.as_ref());
-    let mut store = store::Store::new_from_store_path(store_path).context(format_context!(
-        "Failed to load store at {}",
-        store_path_str
-    ))?;
+    let mut store =
+        store::Store::new_from_store_path_with_console(store_path, Some(console.clone())).context(
+            format_context!("Failed to load store at {}", store_path_str),
+        )?;
     let is_ci: ci::IsCi = singleton::get_is_ci().into();
 
     match store_command {

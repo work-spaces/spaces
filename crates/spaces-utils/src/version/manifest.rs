@@ -774,8 +774,11 @@ impl Manifest {
                     format_context!("Failed to get relative path for {}", asset.url),
                 )?;
 
-            let mut manifest_store = store::Store::new_from_store_path(&self.path_to_store)
-                .context(format_context!("Failed to load store manifest"))?;
+            let mut manifest_store = store::Store::new_from_store_path_with_console(
+                &self.path_to_store,
+                Some(console.clone()),
+            )
+            .context(format_context!("Failed to load store manifest"))?;
             manifest_store
                 .add_entry(std::path::Path::new(&relative_path))
                 .context(format_context!("Failed to add version to store manifest"))?;
