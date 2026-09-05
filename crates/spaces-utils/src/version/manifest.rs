@@ -103,7 +103,7 @@ impl Manifest {
             format!("{host} may be experiencing an outage. Check with your administrator.")
         };
         let troubleshooting = format!(
-            "Troubleshooting:\n  - An expired {host} token can cause this error even though no token is required.\n    Run `{logout_cmd}` to remove it, then retry.\n  - {status_tip}"
+            "Troubleshooting:\n  - An expired {host} token can cause this error even though no token is required.\n    Run `{logout_cmd}` to remove it, then retry.\n    Or run `GH_TOKEN= spaces version fetch` to run with an empty token.\n  - {status_tip}"
         );
 
         let options = console::ExecuteOptions {
