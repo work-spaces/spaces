@@ -382,6 +382,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                 env,
                 store,
                 no_store,
+                no_lock,
                 dev_branch,
                 new_branch,
                 no_dev_branch,
@@ -455,6 +456,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                 new_branch_repos: new_branch,
                 dry_run,
                 skip_evaluation,
+                no_locks: no_lock,
             });
 
             if locked {

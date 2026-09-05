@@ -347,6 +347,8 @@ pub struct JsonSettings {
     pub is_use_locks: Option<bool>,
     pub minimum_version: Option<Arc<str>>,
     #[serde(default = "HashMap::new")]
+    pub locks: HashMap<Arc<str>, Arc<str>>,
+    #[serde(default = "HashMap::new")]
     pub members: HashMap<Arc<str>, Vec<Member>>,
     #[serde(default = "HashMap::new")]
     pub assets: HashMap<Arc<str>, Asset>,
@@ -384,6 +386,7 @@ impl JsonSettings {
             members: HashMap::new(),
             assets: HashMap::new(),
             minimum_version: None,
+            locks: HashMap::new(),
             dev_branches: Vec::new(),
             dev_branch_bases: HashMap::new(),
             max_run_queue: 8,

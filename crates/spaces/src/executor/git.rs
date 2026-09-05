@@ -722,15 +722,14 @@ impl Git {
         } else {
             let repo_name = label::get_rule_name_from_label(name);
 
-            // First check for command line locks (always apply if present)
-            // Uses comprehensive lookup that handles both simple names and fully-qualified labels
-            let command_line_lock = singleton::get_args_lock_for_repo(name);
+            // First check locks pinned in workspace settings.
+            let settings_lock = workspace.read().get_settings_lock_for_repo(name);
 
-            // Then check workspace locks only if --locked was passed
-            let (commit_hash_lock, lock_source) = if let Some(lock) = command_line_lock {
+            // Then check workspace lock-file locks if --locked is enabled.
+            let (commit_hash_lock, lock_source) = if let Some(lock) = settings_lock {
                 logger(progress.console.clone(), self.url.clone())
-                    .debug(format!("Found command line lock for {name}: {lock}").as_str());
-                (Some(lock), "command line")
+                    .debug(format!("Found settings lock for {name}: {lock}").as_str());
+                (Some(lock), "workspace settings")
             } else if is_use_lock {
                 let workspace_read = workspace.read();
                 let workspace_lock = workspace_read

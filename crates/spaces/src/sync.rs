@@ -70,6 +70,12 @@ pub struct SyncArgs {
     pub no_store: Vec<Arc<str>>,
     #[arg(
         long,
+        help = r#"Remove a repo lock previously set via checkout --lock=REPO=REV.
+  Use `--no-lock=<repo-path>`. This only updates workspace settings."#
+    )]
+    pub no_lock: Vec<Arc<str>>,
+    #[arg(
+        long,
         help = r#"Use --dev-branch=<repo-path> to add a repo to the dev-branch list.
   Unlike --new-branch, this does not create a new git branch."#
     )]
