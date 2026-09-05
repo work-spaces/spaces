@@ -246,9 +246,9 @@ impl AwsConfigValue {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-            .context(format_context!(
-                "Failed to build tokio runtime for AWS credential resolution"
-            ))?;
+            .map_err(|e| {
+                format_error!("Failed to build tokio runtime for AWS credential resolution: {e}")
+            })?;
 
         let profile = self.profile.clone();
         let region_override = self.region.clone();
@@ -270,13 +270,12 @@ impl AwsConfigValue {
                 None => return Ok(None),
             };
 
-            let credentials =
-                credentials_provider
-                    .provide_credentials()
-                    .await
-                    .context(format_context!(
-                        "Failed to provide AWS credentials for profile '{profile}'"
-                    ))?;
+            let credentials = credentials_provider
+                .provide_credentials()
+                .await
+                .map_err(|e| {
+                    format_error!("Failed to provide AWS credentials for profile '{profile}': {e}")
+                })?;
 
             let region =
                 region_override.or_else(|| sdk_config.region().map(|r| Arc::from(r.as_ref())));
@@ -466,7 +465,7 @@ impl TryFrom<serde_json::Value> for AnyEnvironment {
         let any_env = match env_result {
             Ok(env) => AnyEnvironment::from(&env),
             Err(_) => serde_json::from_value::<AnyEnvironment>(value)
-                .context(format_context!("Failed to parse AnyEnvironment from value"))?,
+                .map_err(|e| format_error!("Failed to parse AnyEnvironment from value: {e}"))?,
         };
         Ok(any_env)
     }
@@ -575,7 +574,7 @@ impl AnyEnvironment {
             if let Value::Inherit(inherit_value) = &mut any.value {
                 let env_value = inherit_value
                     .get_value(&any.name)
-                    .context(format_context!("When getting inherit value"))?;
+                    .map_err(|e| format_error!("When getting inherit value: {e}"))?;
 
                 if let Some(EnvBool::Yes) = inherit_value.is_save_at_checkout {
                     inherit_value.value = env_value;
@@ -585,7 +584,7 @@ impl AnyEnvironment {
             if let Value::Script(script_value) = &mut any.value {
                 let env_value = script_value
                     .get_value(&any.name)
-                    .context(format_context!("When getting script value"))?;
+                    .map_err(|e| format_error!("When getting script value: {e}"))?;
 
                 if let Some(EnvBool::Yes) = script_value.is_save_at_checkout {
                     script_value.value = env_value;
@@ -633,7 +632,7 @@ impl AnyEnvironment {
     pub fn get_secret_values(&self) -> anyhow::Result<Vec<Arc<str>>> {
         let result = self
             .get_secrets()
-            .context(format_context!("While getting secret values"))?
+            .map_err(|e| format_error!("While getting secret values: {e}"))?
             .values()
             .cloned()
             .collect();
@@ -656,7 +655,7 @@ impl AnyEnvironment {
                 Value::Inherit(inherit_value) => {
                     let env_value = inherit_value
                         .get_value(&name)
-                        .context(format_context!("while getting value for env {name}"))?;
+                        .map_err(|e| format_error!("while getting value for env {name}: {e}"))?;
 
                     if let Some(value) = env_value {
                         result.insert(name, value.clone());
@@ -665,7 +664,7 @@ impl AnyEnvironment {
                 Value::Script(script_value) => {
                     let env_value = script_value
                         .get_value(&name)
-                        .context(format_context!("while getting value for env {name}"))?;
+                        .map_err(|e| format_error!("while getting value for env {name}: {e}"))?;
 
                     if let Some(value) = env_value {
                         result.insert(name, value.clone());
@@ -693,7 +692,7 @@ impl AnyEnvironment {
                 Value::AwsConfig(aws_config_value) => {
                     if let Some(creds) = aws_config_value
                         .get_credentials()
-                        .context(format_context!("Failed to resolve AWS credentials"))?
+                        .map_err(|e| format_error!("Failed to resolve AWS credentials: {e}"))?
                     {
                         result.insert(Arc::from("AWS_ACCESS_KEY_ID"), creds.access_key_id);
                         result.insert(Arc::from("AWS_SECRET_ACCESS_KEY"), creds.secret_access_key);
@@ -725,7 +724,7 @@ impl AnyEnvironment {
                 .filter(|any| predicate(any))
                 .collect::<Vec<_>>(),
         )
-        .context(format_context!("failed to create yaml for list value"))?;
+        .map_err(|e| format_error!("failed to create yaml for list value: {e}"))?;
         Ok(any_yaml)
     }
 
