@@ -173,23 +173,148 @@ impl Store {
     }
 
     pub fn new_from_store_path(path_to_store: &std::path::Path) -> anyhow::Result<Self> {
-        let path = std::path::Path::new(path_to_store).join(MANIFEST_FILE_NAME);
-        if path.exists() {
-            let contents = std::fs::read_to_string(path.clone())
-                .context(format_context!("Failed to read file: {}", path.display()))?;
-            let mut store: Store = serde_json::from_str(&contents).context(format_context!(
-                "Failed to deserialize JSON: {}",
-                path.display()
-            ))?;
-            store.path_to_store = path_to_store.into();
-            Ok(store)
-        } else {
-            Ok(Store {
-                entries: HashMap::new(),
-                unmanaged: HashMap::new(),
-                path_to_store: path_to_store.into(),
-            })
+        let path = path_to_store.join(MANIFEST_FILE_NAME);
+        if !path.exists() {
+            return Ok(Store::new(path_to_store));
         }
+
+        let contents = match std::fs::read_to_string(path.clone()) {
+            Ok(contents) => contents,
+            // A truncated/interrupted manifest can contain invalid UTF-8.
+            Err(err) if err.kind() == std::io::ErrorKind::InvalidData => {
+                return Ok(Self::rebuild_from_disk(path_to_store));
+            }
+            Err(err) => {
+                return Err(err)
+                    .context(format_context!("Failed to read file: {}", path.display()));
+            }
+        };
+
+        let mut store: Store = match serde_json::from_str(&contents) {
+            Ok(store) => store,
+            // Corrupted manifest: recover by rebuilding from current on-disk store state.
+            Err(_) => return Ok(Self::rebuild_from_disk(path_to_store)),
+        };
+
+        store.path_to_store = path_to_store.into();
+        Ok(store)
+    }
+
+    fn rebuild_from_disk(path_to_store: &std::path::Path) -> Self {
+        let mut rebuilt = Store::new(path_to_store);
+        rebuilt.entries = Self::discover_entries_from_disk(path_to_store);
+        rebuilt
+    }
+
+    fn discover_entries_from_disk(path_to_store: &std::path::Path) -> HashMap<Arc<str>, Entry> {
+        let mut discovered: HashMap<Arc<str>, Entry> = HashMap::new();
+
+        if !path_to_store.exists() {
+            return discovered;
+        }
+
+        let mut iter = walkdir::WalkDir::new(path_to_store).into_iter();
+
+        while let Some(entry) = iter.next() {
+            let Ok(entry) = entry else {
+                continue;
+            };
+            if !entry.file_type().is_dir() {
+                continue;
+            }
+
+            let candidate_path = entry.path();
+            if candidate_path == path_to_store {
+                continue;
+            }
+
+            let Ok(relative_path) = candidate_path.strip_prefix(path_to_store) else {
+                continue;
+            };
+
+            let Some(top_level) = relative_path
+                .components()
+                .next()
+                .map(|component| component.as_os_str())
+            else {
+                continue;
+            };
+
+            if top_level == std::ffi::OsStr::new(SPACES_STORE_RCACHE) {
+                iter.skip_current_dir();
+                continue;
+            }
+
+            if candidate_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(http_archive::is_staging_dir_name)
+            {
+                iter.skip_current_dir();
+                continue;
+            }
+
+            let is_bare_repo = top_level == std::ffi::OsStr::new(SPACES_STORE_BARE)
+                && Self::is_probable_bare_repo(candidate_path);
+
+            // Archive entries are rooted at <scheme>/<host>/<...>, so the manifest key
+            // depth is at least 3 components. This avoids false positives on host
+            // container directories such as "https/example.com".
+            let is_archive_candidate = relative_path.components().count() >= 3;
+            let is_archive = is_archive_candidate
+                && !is_bare_repo
+                && http_archive::check_downloaded_archive(candidate_path).is_ok();
+
+            if !is_bare_repo && !is_archive {
+                continue;
+            }
+
+            let size = get_size_of_path(candidate_path).unwrap_or(0);
+            let last_used = std::fs::metadata(candidate_path)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis())
+                .unwrap_or(0);
+
+            discovered.insert(
+                relative_path.display().to_string().into(),
+                Entry {
+                    last_used,
+                    size,
+                    workspace_links: HashMap::new(),
+                },
+            );
+
+            // We've already identified this directory as a managed store entry.
+            // Skip descending into it to keep discovery fast on large stores.
+            iter.skip_current_dir();
+        }
+
+        discovered
+    }
+
+    fn rebuild_missing_entries_from_disk(&mut self) -> usize {
+        let discovered = Self::discover_entries_from_disk(&self.path_to_store);
+        let mut rebuilt = 0usize;
+
+        for (key, entry) in discovered {
+            if self.entries.contains_key(&key) {
+                continue;
+            }
+            self.entries.insert(key, entry);
+            rebuilt += 1;
+        }
+
+        rebuilt
+    }
+
+    fn is_probable_bare_repo(path: &std::path::Path) -> bool {
+        path.extension()
+            .is_some_and(|ext| ext.to_string_lossy().starts_with("git"))
+            && path.join("HEAD").is_file()
+            && path.join("objects").is_dir()
+            && path.join("config").is_file()
     }
 
     pub fn merge(&mut self, other: Store) {
@@ -724,6 +849,19 @@ impl Store {
                 keys_normalised = bad_keys.len();
             }
 
+            let entries_rebuilt_from_disk: usize = if is_dry_run {
+                0
+            } else {
+                let rebuilt = self.rebuild_missing_entries_from_disk();
+                if rebuilt > 0 {
+                    log.message(
+                        format!("Rebuilt {} missing manifest entr(ies) from disk", rebuilt)
+                            .as_str(),
+                    );
+                }
+                rebuilt
+            };
+
             let mut remove_entries = Vec::new();
             let mut delete_directories = Vec::new();
             let path_to_store = self.path_to_store.clone();
@@ -1007,6 +1145,14 @@ impl Store {
                         },
                     ),
                     (
+                        entries_rebuilt_from_disk,
+                        if is_dry_run {
+                            "manifest entr(ies) to rebuild"
+                        } else {
+                            "manifest entr(ies) rebuilt"
+                        },
+                    ),
+                    (
                         entries_removed,
                         if is_dry_run {
                             "entr(ies) to remove"
@@ -1060,6 +1206,7 @@ impl Store {
                 is_dry_run,
                 run_git_fsck,
                 keys_normalised,
+                entries_rebuilt_from_disk,
                 entries_removed,
                 unmanaged_refreshed,
                 stale_links_cleaned,
@@ -1196,6 +1343,7 @@ struct FixActionReport {
     is_dry_run: bool,
     run_git_fsck: bool,
     keys_normalised: usize,
+    entries_rebuilt_from_disk: usize,
     entries_removed: usize,
     unmanaged_refreshed: usize,
     stale_links_cleaned: usize,
@@ -1228,6 +1376,18 @@ fn emit_pretty_fix_report(console: &console::Console, report: &FixActionReport) 
         format!("normalised {} key(s)", report.keys_normalised)
     };
     rows.push(vec!["Manifest keys".to_string(), key_outcome]);
+
+    let rebuild_outcome = if report.is_dry_run {
+        "skipped (live-only manifest recovery step)".to_string()
+    } else if report.entries_rebuilt_from_disk == 0 {
+        "no missing manifest entries found on disk".to_string()
+    } else {
+        format!(
+            "rebuilt {} missing entr(ies) from disk",
+            report.entries_rebuilt_from_disk
+        )
+    };
+    rows.push(vec!["Manifest rebuild".to_string(), rebuild_outcome]);
 
     let entry_outcome = if report.entries_removed == 0 {
         "no missing/corrupted entries found".to_string()
@@ -1848,6 +2008,91 @@ fn show_bare_info(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn make_valid_archive_entry(path: &std::path::Path) {
+        std::fs::create_dir_all(path).unwrap();
+
+        let published_archive = path.join("abcd.zip");
+        let published_files = path.join("abcd.zip_files");
+        let published_json = path.join("abcd.zip_files.json");
+
+        std::fs::write(&published_archive, b"archive").unwrap();
+        std::fs::create_dir_all(published_files.join("bin")).unwrap();
+        std::fs::write(published_files.join("bin/tool"), b"tool").unwrap();
+        std::fs::write(&published_json, br#"{"files":["bin/tool"]}"#).unwrap();
+    }
+
+    #[test]
+    fn test_new_from_store_path_rebuilds_corrupted_manifest() {
+        let store_root = tempfile::tempdir().unwrap();
+
+        // Valid archive entry that should be rediscovered.
+        let archive_relative = std::path::Path::new("https/example.com/tool.zip");
+        let archive_path = store_root.path().join(archive_relative);
+        make_valid_archive_entry(&archive_path);
+
+        // Valid bare repo entry that should be rediscovered.
+        let bare_relative = std::path::Path::new("bare/https/github.com/org/repo.git");
+        let bare_path = store_root.path().join(bare_relative);
+        std::fs::create_dir_all(bare_path.join("objects")).unwrap();
+        std::fs::create_dir_all(bare_path.join("refs")).unwrap();
+        std::fs::write(bare_path.join("HEAD"), b"ref: refs/heads/main\n").unwrap();
+        std::fs::write(
+            bare_path.join("config"),
+            b"[core]\n\trepositoryformatversion = 0\n\tbare = true\n",
+        )
+        .unwrap();
+
+        // Stale staging area should be ignored by rebuild.
+        let staging_path = store_root.path().join("https/example.com/.staging-orphan");
+        std::fs::create_dir_all(&staging_path).unwrap();
+
+        // Corrupted manifest (invalid JSON).
+        std::fs::write(store_root.path().join(MANIFEST_FILE_NAME), "{not-json").unwrap();
+
+        let rebuilt = Store::new_from_store_path(store_root.path()).unwrap();
+
+        let archive_key = archive_relative.display().to_string();
+        let bare_key = bare_relative.display().to_string();
+
+        assert!(
+            rebuilt.entries.contains_key(archive_key.as_str()),
+            "archive entry should be rebuilt"
+        );
+        assert!(
+            rebuilt.entries.contains_key(bare_key.as_str()),
+            "bare repo entry should be rebuilt"
+        );
+        assert!(
+            !rebuilt
+                .entries
+                .contains_key("https/example.com/.staging-orphan"),
+            "staging directories must not be rebuilt as entries"
+        );
+
+        let archive_entry = rebuilt.entries.get(archive_key.as_str()).unwrap();
+        assert!(archive_entry.size > 0);
+        assert_eq!(archive_entry.workspace_links.len(), 0);
+    }
+
+    #[test]
+    fn test_rebuild_missing_entries_from_disk_adds_entries() {
+        let store_root = tempfile::tempdir().unwrap();
+        let archive_relative = std::path::Path::new("https/example.com/tool.zip");
+        let archive_path = store_root.path().join(archive_relative);
+        make_valid_archive_entry(&archive_path);
+
+        let mut store = Store::new(store_root.path());
+        let rebuilt_count = store.rebuild_missing_entries_from_disk();
+
+        assert_eq!(rebuilt_count, 1);
+        assert!(
+            store
+                .entries
+                .contains_key(archive_relative.display().to_string().as_str()),
+            "missing on-disk entry should be added to manifest"
+        );
+    }
 
     #[test]
     fn test_remove_stale_staging_areas_dry_run_and_live() {
