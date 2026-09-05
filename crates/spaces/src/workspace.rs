@@ -543,6 +543,11 @@ impl Workspace {
             if entry.path() == sysroot {
                 return false;
             }
+
+            let build = workspace_path.join(build_directory());
+            if entry.path() == build {
+                return false;
+            }
         }
 
         true
@@ -1517,6 +1522,26 @@ mod tests {
             "//spaces/1.checkout:install-spaces",
             "//spaces"
         ));
+    }
+
+    #[test]
+    fn filter_predicate_ignores_workspace_build_directory() -> anyhow::Result<()> {
+        let tempdir = tempfile::tempdir()?;
+        let workspace_path = tempdir.path();
+        let build_path = workspace_path.join(build_directory());
+        std::fs::create_dir_all(&build_path)?;
+
+        let mut build_entry = None;
+        for entry in walkdir::WalkDir::new(workspace_path).into_iter().flatten() {
+            if entry.path() == build_path {
+                build_entry = Some(entry);
+                break;
+            }
+        }
+
+        let build_entry = build_entry.expect("failed to find build directory entry");
+        assert!(!Workspace::filter_predicate(workspace_path, &build_entry));
+        Ok(())
     }
 
     #[test]
