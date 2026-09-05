@@ -1280,10 +1280,9 @@ impl Workspace {
     }
 
     pub fn add_git_commit_lock(&mut self, rule_name: &str, commit: Arc<str>) {
-        // Don't override locks that are pinned in workspace settings
-        if !self.is_lock_overridden_by_settings(rule_name) {
-            self.locks.insert(rule_name.into(), commit);
-        }
+        // Always capture the resolved repo commit when generating lock files.
+        // This keeps lock.spaces.star complete even when settings.json has pinned locks.
+        self.locks.insert(rule_name.into(), commit);
     }
 
     pub fn get_short_digest(&self) -> Arc<str> {
