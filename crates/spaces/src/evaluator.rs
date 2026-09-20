@@ -7,7 +7,7 @@ use starlark::environment::{FrozenModule, GlobalsBuilder, Module};
 use starlark::eval::{Evaluator, ReturnFileLoader};
 use starlark::syntax::{AstModule, Dialect};
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use utils::{
     ecode, environment, features, inspect, labels, logger, mtarget, query, rcache, rule, targets,
@@ -55,6 +55,7 @@ pub struct EvalConfig {
     pub workspace_env: Arc<HashMap<Arc<str>, Arc<str>>>,
     pub console: Option<console::Console>,
     pub load_result_cache: Arc<mtarget::LoadResultCache>,
+    pub load_cycle_state: Arc<Mutex<LoadCycleState>>,
 }
 
 fn star_logger(console: console::Console) -> logger::Logger {
@@ -221,6 +222,63 @@ fn embedded_prelude_relative_path(module_id: &str) -> Option<&str> {
         .filter(|s| !s.is_empty())
 }
 
+#[derive(Default)]
+pub struct LoadCycleState {
+    stack: Vec<Arc<str>>,
+    stack_index_by_module: HashMap<Arc<str>, usize>,
+}
+
+impl LoadCycleState {
+    fn push(&mut self, module_name: Arc<str>) {
+        let idx = self.stack.len();
+        self.stack_index_by_module.insert(module_name.clone(), idx);
+        self.stack.push(module_name);
+    }
+
+    fn pop(&mut self, expected_module_name: &str) {
+        if let Some(module_name) = self.stack.pop() {
+            self.stack_index_by_module.remove(module_name.as_ref());
+            if module_name.as_ref() != expected_module_name {
+                panic!(
+                    "Internal Error: load cycle stack mismatch. expected to pop '{expected_module_name}', got '{module_name}'"
+                );
+            }
+        }
+    }
+
+    fn get_cycle(&self, repeated_module_name: &str) -> Option<Vec<Arc<str>>> {
+        let start_idx = *self.stack_index_by_module.get(repeated_module_name)?;
+        let mut cycle = self.stack[start_idx..].to_vec();
+        cycle.push(repeated_module_name.into());
+        Some(cycle)
+    }
+}
+
+struct LoadCycleGuard {
+    state: Arc<Mutex<LoadCycleState>>,
+    module_name: Arc<str>,
+}
+
+impl LoadCycleGuard {
+    fn new(state: Arc<Mutex<LoadCycleState>>, module_name: Arc<str>) -> Self {
+        state
+            .lock()
+            .unwrap_or_else(|_| panic!("Internal Error: failed to lock LoadCycleState"))
+            .push(module_name.clone());
+
+        Self { state, module_name }
+    }
+}
+
+impl Drop for LoadCycleGuard {
+    fn drop(&mut self) {
+        self.state
+            .lock()
+            .unwrap_or_else(|_| panic!("Internal Error: failed to lock LoadCycleState"))
+            .pop(self.module_name.as_ref());
+    }
+}
+
 pub fn evaluate_loads(
     ast: &AstModule,
     name: Arc<str>,
@@ -267,6 +325,39 @@ pub fn evaluate_loads(
             return Err(Error::new_spanned(
                 ErrorKind::Fail(format_error!(
                     "\nAttempting to load module ending with `spaces.star` module. This is a reserved module name."
+                )),
+                load.span.span,
+                &load.span.file,
+            ));
+        }
+
+        // Normalize the load path to workspace-relative format (no leading slashes)
+        let normalized_path: Arc<str> = if let Some(relative_path) = embedded_rel {
+            format!("@star/prelude/{relative_path}").into()
+        } else {
+            module_load_path
+                .strip_prefix(workspace_path.as_ref())
+                .map(|p| p.trim_start_matches(['/', '\\']))
+                .map(|p| p.into())
+                .unwrap_or_else(|| module_load_path.clone())
+        };
+
+        if let Some(cycle) = eval_config
+            .load_cycle_state
+            .lock()
+            .unwrap_or_else(|_| panic!("Internal Error: failed to lock LoadCycleState"))
+            .get_cycle(normalized_path.as_ref())
+        {
+            singleton::set_is_show_latest_error();
+            use starlark::{Error, ErrorKind};
+            let cycle_str = cycle
+                .iter()
+                .map(|module_name| module_name.as_ref())
+                .collect::<Vec<_>>()
+                .join(" -> ");
+            return Err(Error::new_spanned(
+                ErrorKind::Fail(format_error!(
+                    "Circular load() dependency detected while loading '{normalized_path}' from '{name}'.\n\nCycle: {cycle_str}"
                 )),
                 load.span.span,
                 &load.span.file,
@@ -326,17 +417,6 @@ pub fn evaluate_loads(
 
         let content_hash: Arc<str> = blake3::hash(contents.as_bytes()).to_string().into();
 
-        // Normalize the load path to workspace-relative format (no leading slashes)
-        let normalized_path: Arc<str> = if let Some(relative_path) = embedded_rel {
-            format!("@star/prelude/{relative_path}").into()
-        } else {
-            module_load_path
-                .strip_prefix(workspace_path.as_ref())
-                .map(|p| p.trim_start_matches(['/', '\\']))
-                .map(|p| p.into())
-                .unwrap_or_else(|| module_load_path.clone())
-        };
-
         if let Some(mut cached_load_result) =
             eval_config.load_result_cache.get(content_hash.as_ref())
         {
@@ -351,7 +431,7 @@ pub fn evaluate_loads(
             Some("load-module".to_string()),
             None,
         );
-        let result = evaluate_module(
+        let result = evaluate_module_with_cycle_state(
             eval_config.workspace.clone(),
             workspace_path.clone(),
             ModuleEvalParams {
@@ -363,6 +443,7 @@ pub fn evaluate_loads(
             eval_config.workspace_env.clone(),
             eval_config.console.clone(),
             eval_config.load_result_cache.clone(),
+            eval_config.load_cycle_state.clone(),
         )?;
         let load_result = mtarget::LoadResult {
             module_id: load.module_id.to_owned(),
@@ -508,16 +589,18 @@ pub fn evaluate_ast(
     })
 }
 
-pub fn evaluate_module(
+fn evaluate_module_with_cycle_state(
     workspace: Option<WorkspaceArc>,
     workspace_path: Arc<str>,
     params: ModuleEvalParams,
     workspace_env: Arc<HashMap<Arc<str>, Arc<str>>>,
     console: Option<console::Console>,
     load_result_cache: Arc<mtarget::LoadResultCache>,
+    load_cycle_state: Arc<Mutex<LoadCycleState>>,
 ) -> starlark::Result<EvaluateModuleResult> {
     let _module_profile_guard =
         evaluation_profile::enter_module(params.name.as_ref(), singleton::get_execution_phase());
+    let _load_cycle_guard = LoadCycleGuard::new(load_cycle_state.clone(), params.name.clone());
 
     // Register the module name so that the global task-graph machinery can
     // track which modules exist, without writing to `latest_starlark_module`
@@ -552,6 +635,7 @@ pub fn evaluate_module(
             workspace_env,
             console,
             load_result_cache,
+            load_cycle_state,
         },
     );
 
@@ -588,6 +672,25 @@ pub fn evaluate_module(
         frozen_module: module,
         module_deps,
     })
+}
+
+pub fn evaluate_module(
+    workspace: Option<WorkspaceArc>,
+    workspace_path: Arc<str>,
+    params: ModuleEvalParams,
+    workspace_env: Arc<HashMap<Arc<str>, Arc<str>>>,
+    console: Option<console::Console>,
+    load_result_cache: Arc<mtarget::LoadResultCache>,
+) -> starlark::Result<EvaluateModuleResult> {
+    evaluate_module_with_cycle_state(
+        workspace,
+        workspace_path,
+        params,
+        workspace_env,
+        console,
+        load_result_cache,
+        Arc::new(Mutex::new(LoadCycleState::default())),
+    )
 }
 
 /// Attempts to evaluate a module with rcache caching.
@@ -1929,7 +2032,7 @@ pub fn run_starlark_script(name: Arc<str>, script: Arc<str>) -> anyhow::Result<(
 
 #[cfg(test)]
 mod tests {
-    use super::{remove_expired_checkout_entry, resolve_exec_script_module_name};
+    use super::{LoadCycleState, remove_expired_checkout_entry, resolve_exec_script_module_name};
 
     #[test]
     fn resolves_existing_relative_script_path_to_absolute_path() -> anyhow::Result<()> {
@@ -1945,6 +2048,31 @@ mod tests {
 
         assert_eq!(resolved_name.as_ref(), expected);
         Ok(())
+    }
+
+    #[test]
+    fn load_cycle_state_reports_cycle_from_repeated_module() {
+        let mut state = LoadCycleState::default();
+        state.push("a.star".into());
+        state.push("b.star".into());
+        state.push("c.star".into());
+
+        let cycle = state.get_cycle("b.star").unwrap();
+        let cycle_paths: Vec<&str> = cycle
+            .iter()
+            .map(|module_name| module_name.as_ref())
+            .collect();
+
+        assert_eq!(cycle_paths, vec!["b.star", "c.star", "b.star"]);
+    }
+
+    #[test]
+    fn load_cycle_state_returns_none_when_module_not_in_stack() {
+        let mut state = LoadCycleState::default();
+        state.push("a.star".into());
+        state.push("b.star".into());
+
+        assert!(state.get_cycle("missing.star").is_none());
     }
 
     #[test]

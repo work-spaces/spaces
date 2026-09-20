@@ -297,6 +297,9 @@ impl SpacesContext {
                 workspace_env: workspace_env.clone(),
                 console: None,
                 load_result_cache: Arc::new(mtarget::LoadResultCache::new()),
+                load_cycle_state: Arc::new(std::sync::Mutex::new(
+                    evaluator::LoadCycleState::default(),
+                )),
             },
         );
 
