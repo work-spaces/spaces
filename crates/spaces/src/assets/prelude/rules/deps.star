@@ -13,13 +13,15 @@ Types:
 
 """
 
-load("glob.star", "glob")
+load("globs.star", "globs_new")
 
 def deps_glob(
         includes: list[str],
         excludes: list[str] = []) -> dict:
     """
     Creates a glob that can be passed to deps to create the dependencies.
+
+    Deprecated: Use `globs_new()` via `globs.star` instead.
 
     Args:
         includes: list of glob expressions to include
@@ -28,7 +30,7 @@ def deps_glob(
     Returns:
         glob dict that can be passed to deps.
     """
-    return glob(includes, excludes)
+    return globs_new(includes, excludes)
 
 def deps_run_once(rules: list[str] = []) -> list[dict]:
     """
