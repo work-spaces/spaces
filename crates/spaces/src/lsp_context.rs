@@ -22,7 +22,7 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use starlark::syntax::DialectTypes;
 use std::sync::Arc;
-use utils::mtarget;
+use utils::{lock, mtarget};
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -297,9 +297,7 @@ impl SpacesContext {
                 workspace_env: workspace_env.clone(),
                 console: None,
                 load_result_cache: Arc::new(mtarget::LoadResultCache::new()),
-                load_cycle_state: Arc::new(std::sync::Mutex::new(
-                    evaluator::LoadCycleState::default(),
-                )),
+                load_cycle_state: lock::StateLock::new(evaluator::LoadCycleState::default()),
             },
         );
 

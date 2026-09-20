@@ -7,11 +7,11 @@ use starlark::environment::{FrozenModule, GlobalsBuilder, Module};
 use starlark::eval::{Evaluator, ReturnFileLoader};
 use starlark::syntax::{AstModule, Dialect};
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use utils::{
-    ecode, environment, features, inspect, labels, logger, mtarget, query, rcache, rule, targets,
-    ws,
+    ecode, environment, features, inspect, labels, lock, logger, mtarget, query, rcache, rule,
+    targets, ws,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -55,7 +55,7 @@ pub struct EvalConfig {
     pub workspace_env: Arc<HashMap<Arc<str>, Arc<str>>>,
     pub console: Option<console::Console>,
     pub load_result_cache: Arc<mtarget::LoadResultCache>,
-    pub load_cycle_state: Arc<Mutex<LoadCycleState>>,
+    pub load_cycle_state: lock::StateLock<LoadCycleState>,
 }
 
 fn star_logger(console: console::Console) -> logger::Logger {
@@ -222,7 +222,7 @@ fn embedded_prelude_relative_path(module_id: &str) -> Option<&str> {
         .filter(|s| !s.is_empty())
 }
 
-#[derive(Default)]
+#[derive(Debug, Default, Clone)]
 pub struct LoadCycleState {
     stack: Vec<Arc<str>>,
     stack_index_by_module: HashMap<Arc<str>, usize>,
@@ -255,16 +255,13 @@ impl LoadCycleState {
 }
 
 struct LoadCycleGuard {
-    state: Arc<Mutex<LoadCycleState>>,
+    state: lock::StateLock<LoadCycleState>,
     module_name: Arc<str>,
 }
 
 impl LoadCycleGuard {
-    fn new(state: Arc<Mutex<LoadCycleState>>, module_name: Arc<str>) -> Self {
-        state
-            .lock()
-            .unwrap_or_else(|_| panic!("Internal Error: failed to lock LoadCycleState"))
-            .push(module_name.clone());
+    fn new(state: lock::StateLock<LoadCycleState>, module_name: Arc<str>) -> Self {
+        state.write().push(module_name.clone());
 
         Self { state, module_name }
     }
@@ -272,10 +269,7 @@ impl LoadCycleGuard {
 
 impl Drop for LoadCycleGuard {
     fn drop(&mut self) {
-        self.state
-            .lock()
-            .unwrap_or_else(|_| panic!("Internal Error: failed to lock LoadCycleState"))
-            .pop(self.module_name.as_ref());
+        self.state.write().pop(self.module_name.as_ref());
     }
 }
 
@@ -344,8 +338,7 @@ pub fn evaluate_loads(
 
         if let Some(cycle) = eval_config
             .load_cycle_state
-            .lock()
-            .unwrap_or_else(|_| panic!("Internal Error: failed to lock LoadCycleState"))
+            .read()
             .get_cycle(normalized_path.as_ref())
         {
             singleton::set_is_show_latest_error();
@@ -596,7 +589,7 @@ fn evaluate_module_with_cycle_state(
     workspace_env: Arc<HashMap<Arc<str>, Arc<str>>>,
     console: Option<console::Console>,
     load_result_cache: Arc<mtarget::LoadResultCache>,
-    load_cycle_state: Arc<Mutex<LoadCycleState>>,
+    load_cycle_state: lock::StateLock<LoadCycleState>,
 ) -> starlark::Result<EvaluateModuleResult> {
     let _module_profile_guard =
         evaluation_profile::enter_module(params.name.as_ref(), singleton::get_execution_phase());
@@ -689,7 +682,7 @@ pub fn evaluate_module(
         workspace_env,
         console,
         load_result_cache,
-        Arc::new(Mutex::new(LoadCycleState::default())),
+        lock::StateLock::new(LoadCycleState::default()),
     )
 }
 
