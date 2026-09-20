@@ -2,7 +2,6 @@
 User friendly wrapper functions for the spaces run built-in functions.
 """
 
-load("visibility.star", "visibility_private")
 load(
     "ws.star",
     "workspace_get_build_archive_info",
