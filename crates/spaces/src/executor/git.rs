@@ -357,8 +357,11 @@ impl Git {
                         "while checking out existing workspace revision"
                     ))?;
 
-                // If on a branch, pull latest
-                if existing_repo.is_head_branch(progress)
+                // If on a branch, pull latest unless sync explicitly disables branch updates.
+                let is_branch_update_disabled_for_sync =
+                    singleton::get_is_sync() && singleton::get_sync_options().no_update_branches;
+                if !is_branch_update_disabled_for_sync
+                    && existing_repo.is_head_branch(progress)
                     && existing_repo.is_remote_branch_tracked(progress)
                 {
                     existing_repo
