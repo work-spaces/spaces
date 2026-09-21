@@ -129,6 +129,13 @@ pub struct SyncArgs {
     pub no_rebase: bool,
     #[arg(
         long,
+        help = r#"Skip branch update operations during sync.
+  Implies `--no-rebase`: dev-branch repos will not rebase, and branch repos will not pull.
+  Commit-pinned repos still follow checkout rules."#
+    )]
+    pub no_update_branches: bool,
+    #[arg(
+        long,
         help = r#"Override sync base ref for a repo.
   Use `--dev-branch-base=<repo-path>=<ref>`. This flag can be used multiple times.
   Useful for dev-branch rebases/merges and for non-branch rev repos checked out on a local branch."#
@@ -219,9 +226,11 @@ fn resolve_pull_from(
     is_dev_branch: bool,
     is_on_branch: bool,
     is_rev_branch: bool,
+    no_update_branches: bool,
     rev: &str,
 ) -> Option<Arc<str>> {
-    (!is_dev_branch && is_on_branch && is_rev_branch).then(|| format!("origin/{rev}").into())
+    (!no_update_branches && !is_dev_branch && is_on_branch && is_rev_branch)
+        .then(|| format!("origin/{rev}").into())
 }
 
 fn canonicalize_dev_branch_base_ref(base_ref: &str) -> Arc<str> {
@@ -397,6 +406,7 @@ pub fn build_repo_sync_plan(
 
     let workspace_new_branch_name = workspace_arc.read().get_new_branch_name();
     let no_rebase_global = sync_options.no_rebase;
+    let no_update_branches = sync_options.no_update_branches;
 
     let mut dev_branch_dirty = Vec::new();
     let mut branch_dirty = Vec::new();
@@ -575,7 +585,14 @@ pub fn build_repo_sync_plan(
                         action = Some(DevBranchAction::Merge);
                     } else if no_rebase_global {
                         action = Some(DevBranchAction::Skip);
-                        skip_reason = Some("--no-rebase".into());
+                        skip_reason = Some(
+                            if no_update_branches {
+                                "--no-update-branches (implies --no-rebase)"
+                            } else {
+                                "--no-rebase"
+                            }
+                            .into(),
+                        );
                     } else {
                         action = Some(DevBranchAction::Rebase);
                     }
@@ -595,7 +612,13 @@ pub fn build_repo_sync_plan(
                 let pull_from = if create_new_branch.is_some() {
                     None
                 } else {
-                    resolve_pull_from(is_dev_branch, is_on_branch, is_rev_branch, member_rev)
+                    resolve_pull_from(
+                        is_dev_branch,
+                        is_on_branch,
+                        is_rev_branch,
+                        no_update_branches,
+                        member_rev,
+                    )
                 };
                 let mut rebase_from = None;
                 let mut merge_from = None;
@@ -2443,7 +2466,14 @@ mod tests {
 
     #[test]
     fn resolve_pull_from_skips_non_branch_revs() {
-        let pull_from = resolve_pull_from(false, true, false, "deadbeef");
+        let pull_from = resolve_pull_from(false, true, false, false, "deadbeef");
+
+        assert_eq!(pull_from, None);
+    }
+
+    #[test]
+    fn resolve_pull_from_skips_when_no_update_branches_enabled() {
+        let pull_from = resolve_pull_from(false, true, true, true, "main");
 
         assert_eq!(pull_from, None);
     }

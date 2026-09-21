@@ -392,6 +392,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                 merge,
                 no_rebase_repo,
                 no_rebase,
+                no_update_branches,
                 dev_branch_base,
                 no_dev_branch_base,
                 dry_run,
@@ -414,16 +415,17 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             singleton::set_args_store_removals(no_store);
 
             let skip_pre_evaluation_enabled = allow_dirty || skip_pre_evaluation;
+            let effective_no_rebase = no_rebase || no_update_branches;
 
             if skip_pre_evaluation_enabled
                 && (!merge.is_empty()
                     || !no_rebase_repo.is_empty()
-                    || no_rebase
+                    || effective_no_rebase
                     || !dev_branch_base.is_empty()
                     || !new_branch.is_empty())
             {
                 return Err(format_error!(
-                    "`--skip-pre-evaluation` (or deprecated `--allow-dirty`) cannot be combined with `--merge`, `--no-rebase`, `--no-rebase-repo`, `--dev-branch-base`, or `--new-branch`"
+                    "`--skip-pre-evaluation` (or deprecated `--allow-dirty`) cannot be combined with:\n  - `--merge`\n  - `--no-rebase`\n  - `--no-update-branches`\n  - `--no-rebase-repo`\n  - `--dev-branch-base`\n  - `--new-branch`"
                 ));
             }
 
@@ -449,7 +451,8 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
                 force: skip_pre_evaluation_enabled,
                 merge_repos: merge,
                 no_rebase_repos: no_rebase_repo,
-                no_rebase,
+                no_rebase: effective_no_rebase,
+                no_update_branches,
                 dev_branch_bases: dev_branch_base,
                 no_dev_branch_bases: no_dev_branch_base,
                 dev_branch_repos: dev_branch,
