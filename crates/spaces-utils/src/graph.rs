@@ -1,4 +1,4 @@
-use crate::{ecode, suggest};
+use crate::suggest;
 use anyhow_source_location::format_error;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
@@ -86,10 +86,7 @@ impl Graph {
         let mut topo_tasks =
             petgraph::algo::toposort(&self.directed_graph, None).map_err(|err| {
                 let description = self.describe_cycle(err.node_id());
-                ecode::anyhow(
-                    ecode::Ecode::DependencyGraphContainsCircularDependency,
-                    description.as_str(),
-                )
+                format_error!("{}", description.as_str())
             })?;
 
         let sorted_tasks = if let Some(target) = target {
@@ -332,7 +329,7 @@ mod tests {
         graph.add_dependency("b", "a").unwrap();
 
         let err = graph.get_sorted_tasks(None).unwrap_err().to_string();
-        assert!(err.contains("circular dependency"), "got: {err}");
+        assert!(err.contains("cycle"), "got: {err}");
         assert!(err.contains("a") && err.contains("b"), "got: {err}");
         // The cycle line should close on itself.
         assert!(

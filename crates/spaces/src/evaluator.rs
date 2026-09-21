@@ -10,8 +10,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use utils::{
-    ecode, environment, features, inspect, labels, lock, logger, mtarget, query, rcache, rule,
-    targets, ws,
+    environment, features, inspect, labels, lock, logger, mtarget, query, rcache, rule, targets, ws,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -751,12 +750,7 @@ fn try_evaluate_with_cache(
             Some(console.clone()),
             load_result_cache,
         )
-        .map_err(|err| {
-            ecode::anyhow(
-                ecode::Ecode::FailedToEvaluateModuleDuringCheckout,
-                &format!("{err:?}"),
-            )
-        })?;
+        .map_err(|err| format_error!("{err:?}"))?;
         return Ok(());
     }
 
@@ -809,9 +803,7 @@ fn try_evaluate_with_cache(
                 load_result_cache.clone(),
             )
             .map(|_| ());
-            result.map_err(|err| {
-                ecode::anyhow(ecode::Ecode::FailedToEvaluateModule, &format!("{err:?}"))
-            })
+            result.map_err(|err| format_error!("{err:?}"))
         },
         || vec![Arc::from(std::path::Path::new(json_target.as_ref()))],
     );
