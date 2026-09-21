@@ -1,7 +1,8 @@
 use crate::workspace;
 
+use anyhow_source_location::format_error;
 use serde::{Deserialize, Serialize};
-use utils::{ecode, labels, logger};
+use utils::{labels, logger};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -22,10 +23,7 @@ impl Archive {
         let console = progress.console.clone();
 
         std::fs::create_dir_all(output_directory.as_str()).map_err(|err| {
-            ecode::anyhow(
-                ecode::Ecode::ArchiveExecutorOperationFailed,
-                &format!("failed to create output directory {output_directory}\n{err:?}"),
-            )
+            format_error!("failed to create output directory {output_directory}\n{err:?}")
         })?;
 
         logger::Logger::new(console.clone(), name.into())
@@ -41,12 +39,7 @@ impl Archive {
         let (_, digest) = self
             .create_archive
             .create(output_directory.as_str(), archive_progress)
-            .map_err(|err| {
-                ecode::anyhow(
-                    ecode::Ecode::ArchiveExecutorOperationFailed,
-                    &format!("failed to create archive {output_directory}\n{err:?}"),
-                )
-            })?;
+            .map_err(|err| format_error!("failed to create archive {output_directory}\n{err:?}"))?;
 
         let output_sha_path = format!(
             "{}/{}",
@@ -55,10 +48,7 @@ impl Archive {
         );
 
         std::fs::write(output_sha_path.as_str(), digest).map_err(|err| {
-            ecode::anyhow(
-                ecode::Ecode::ArchiveExecutorOperationFailed,
-                &format!("failed to write sha256 file {output_sha_path}\n{err:?}"),
-            )
+            format_error!("failed to write sha256 file {output_sha_path}\n{err:?}")
         })?;
 
         Ok(())

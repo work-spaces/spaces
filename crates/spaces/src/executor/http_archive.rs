@@ -1,7 +1,8 @@
 use crate::workspace;
 
+use anyhow_source_location::format_error;
 use serde::{Deserialize, Serialize};
-use utils::{ecode, http_archive, logger};
+use utils::{http_archive, logger};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpArchive {
@@ -21,23 +22,17 @@ impl HttpArchive {
 
         logger.debug(format!("acquiring lock for {}", self.http_archive.archive.url).as_str());
         lock_file.lock(console.clone()).map_err(|err| {
-            ecode::anyhow(
-                ecode::Ecode::FailedToCreateOrAcquireLockFile,
-                &format!(
-                    "{name} - Failed to lock the spaces store for {}\n{err:?}",
-                    self.http_archive.archive.url
-                ),
+            format_error!(
+                "{name} - Failed to lock the spaces store for {}\n{err:?}",
+                self.http_archive.archive.url
             )
         })?;
 
         logger.debug(format!("syncing http archive {}", self.http_archive.archive.url).as_str());
         self.http_archive.sync(console.clone()).map_err(|err| {
-            ecode::anyhow(
-                ecode::Ecode::FailedToLoadJsonFilesManifest,
-                &format!(
-                    "{name} - Failed to sync http archive {}\n{err:?}",
-                    self.http_archive.archive.url
-                ),
+            format_error!(
+                "{name} - Failed to sync http archive {}\n{err:?}",
+                self.http_archive.archive.url
             )
         })?;
 
@@ -53,12 +48,9 @@ impl HttpArchive {
                 &mut workspace_write_lock.settings.checkout.links,
             )
             .map_err(|err| {
-                ecode::anyhow(
-                    ecode::Ecode::HttpArchiveExecutorOperationFailed,
-                    &format!(
-                        "{name} - Failed to create links for\n{}\n{err:?}",
-                        self.http_archive.archive.url
-                    ),
+                format_error!(
+                    "{name} - Failed to create links for\n{}\n{err:?}",
+                    self.http_archive.archive.url
                 )
             })?;
 
