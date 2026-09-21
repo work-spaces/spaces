@@ -1,7 +1,7 @@
 use crate::workspace;
 
 use serde::{Deserialize, Serialize};
-use utils::{ecode, http_archive};
+use utils::{ecode, http_archive, logger};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpArchive {
@@ -17,6 +17,9 @@ impl HttpArchive {
     ) -> anyhow::Result<()> {
         let mut lock_file = self.http_archive.get_file_lock();
         let console = progress.console.clone();
+        let logger = logger::Logger::new(console.clone(), name.into());
+
+        logger.debug(format!("acquiring lock for {}", self.http_archive.archive.url).as_str());
         lock_file.lock(console.clone()).map_err(|err| {
             ecode::anyhow(
                 ecode::Ecode::FailedToCreateOrAcquireLockFile,
@@ -27,6 +30,7 @@ impl HttpArchive {
             )
         })?;
 
+        logger.debug(format!("syncing http archive {}", self.http_archive.archive.url).as_str());
         self.http_archive.sync(console.clone()).map_err(|err| {
             ecode::anyhow(
                 ecode::Ecode::FailedToLoadJsonFilesManifest,
@@ -39,6 +43,7 @@ impl HttpArchive {
 
         let mut workspace_write_lock = workspace.write();
 
+        logger.debug(format!("creating links for {}", self.http_archive.archive.url).as_str());
         let workspace_directory = workspace_write_lock.get_absolute_path();
         self.http_archive
             .create_links(
