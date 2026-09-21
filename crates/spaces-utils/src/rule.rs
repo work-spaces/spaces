@@ -1,5 +1,6 @@
 use crate::{deps, labels, logger, markdown, platform, targets};
-use anyhow_source_location::format_error;
+use anyhow::Context;
+use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -144,11 +145,14 @@ impl Rule {
 
         if let Some(Visibility::Rules(list)) = self.visibility.as_mut() {
             for vis_rule in list.iter_mut() {
-                *vis_rule = labels::sanitize_rule(
+                *vis_rule = labels::try_sanitize_rule(
                     vis_rule.clone(),
                     latest_starlark_module.clone(),
                     spaces_module_suffix,
-                );
+                )
+                .context(format_context!(
+                    "Failed to sanitize visibility rule `{vis_rule}`"
+                ))?;
             }
         }
 

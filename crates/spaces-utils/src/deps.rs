@@ -59,11 +59,12 @@ impl AnyDep {
         match self {
             AnyDep::Rule(dep) => {
                 if !labels::is_rule_sanitized(dep) {
-                    *dep = labels::sanitize_rule(
+                    *dep = labels::try_sanitize_rule(
                         dep.clone(),
                         starlark_module.clone(),
                         spaces_module_suffix,
-                    );
+                    )
+                    .context(format_context!("while sanitizing rule `{dep}`"))?;
                 }
             }
             AnyDep::Glob(glob) => match glob {
@@ -225,11 +226,12 @@ impl Deps {
                     if labels::is_rule_sanitized(dep) {
                         continue;
                     }
-                    *dep = labels::sanitize_rule(
+                    *dep = labels::try_sanitize_rule(
                         dep.clone(),
                         starlark_module.clone(),
                         spaces_module_suffix,
-                    );
+                    )
+                    .context(format_context!("while sanitizing dep rule `{dep}`"))?;
                 }
             }
             Deps::Any(any_list) => {

@@ -79,7 +79,7 @@ fn sanitize_exit_value_tokens(
                 ));
             }
             let expanded =
-                rules::get_sanitized_rule_name_for_module(raw_name.as_str().into(), module_name);
+                rules::get_sanitized_rule_name_for_module(raw_name.as_str().into(), module_name)?;
             let old_token = format!("{marker_open}{raw_name}}}");
             let new_token = format!("{marker_open}{expanded}}}");
             result = result.replace(&old_token, &new_token);
@@ -115,7 +115,10 @@ fn add_exit_value_rule_deps(
 
     for raw_name in &rule_names {
         let sanitized: Arc<str> =
-            rules::get_sanitized_rule_name_for_module(raw_name.as_str().into(), module_name);
+            rules::get_sanitized_rule_name_for_module(raw_name.as_str().into(), module_name)
+                .context(format_context!(
+                    "while getting sanitized rule name for `{raw_name}`"
+                ))?;
         let already_dep = rule
             .deps
             .iter()
@@ -184,14 +187,11 @@ fn add_rule_to_all(
 ) -> anyhow::Result<()> {
     if let Some(rule::RuleType::Run) = rule.type_.as_ref() {
         let mut workspace = workspace_arc.write();
-        workspace
-            .settings
-            .bin
-            .run_all
-            .insert(rules::get_sanitized_rule_name_for_module(
-                rule.name.clone(),
-                module_name,
-            ));
+        workspace.settings.bin.run_all.insert(
+            rules::get_sanitized_rule_name_for_module(rule.name.clone(), module_name).context(
+                format_context!("while getting sanitized rule name for `{}`", rule.name),
+            )?,
+        );
     }
     Ok(())
 }
@@ -449,7 +449,11 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             kill_exec.target = rules::get_sanitized_rule_name_for_module(
                 kill_exec.target.clone(),
                 &ctx.module_name,
-            );
+            )
+            .context(format_context!(
+                "while getting sanitized rule name for `{}`",
+                kill_exec.target
+            ))?;
 
             let rule_name = rule.name.clone();
             rules::insert_task_for_module(
@@ -518,7 +522,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             );
 
             let sane_rule_name =
-                rules::get_sanitized_rule_name_for_module(rule_name.clone(), &ctx.module_name);
+                rules::get_sanitized_rule_name_for_module(rule_name.clone(), &ctx.module_name)
+                    .context(format_context!(
+                        "while getting sanitized rule name for `{rule_name}`"
+                    ))?;
             let folder_name = labels::get_folder_name_from_rule(&sane_rule_name);
 
             let target_path =

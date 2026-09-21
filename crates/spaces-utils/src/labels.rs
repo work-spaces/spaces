@@ -59,16 +59,23 @@ pub fn sanitize_rule_for_display(rule_name: Arc<str>) -> Arc<str> {
     result.into()
 }
 
-pub fn sanitize_rule(
+pub fn try_sanitize_rule(
     rule_name: Arc<str>,
     starlark_module: Option<Arc<str>>,
     spaces_module_suffix: &str,
-) -> Arc<str> {
-    if is_rule_sanitized(rule_name.as_ref()) {
-        return rule_name;
+) -> anyhow::Result<Arc<str>> {
+    if rule_name.matches(':').count() > 1 {
+        return Err(format_error!(
+            "Invalid rule label `{}`: multiple ':' separators are not allowed",
+            rule_name
+        ));
     }
 
-    if let Some(latest_module) = starlark_module.clone() {
+    if is_rule_sanitized(rule_name.as_ref()) {
+        return Ok(rule_name);
+    }
+
+    if let Some(latest_module) = starlark_module {
         let rule_name = rule_name.strip_prefix(':').unwrap_or(rule_name.as_ref());
         let slash_suffix = format!("/{}", spaces_module_suffix);
         let dot_suffix = format!(".{}", spaces_module_suffix);
@@ -79,9 +86,9 @@ pub fn sanitize_rule(
             .unwrap_or("");
 
         let separator = if rule_name.contains(':') { '/' } else { ':' };
-        format!("//{rule_prefix}{separator}{rule_name}").into()
+        Ok(format!("//{rule_prefix}{separator}{rule_name}").into())
     } else {
-        rule_name
+        Ok(rule_name)
     }
 }
 
@@ -312,84 +319,102 @@ mod tests {
     }
 
     #[test]
-    fn test_sanitize_rule() {
+    fn test_try_sanitize_rule() {
         // Already sanitized (starts with "//") → returned as same Arc
         let sanitized: Arc<str> = "//already/sanitized:rule".into();
         assert!(Arc::ptr_eq(
             &sanitized,
-            &sanitize_rule(
+            &try_sanitize_rule(
                 sanitized.clone(),
                 Some("module/spaces.star".into()),
                 "spaces.star",
             )
+            .unwrap()
         ));
 
         // None module → returned as-is
         let unsanitized: Arc<str> = "unsanitized_rule".into();
         assert!(Arc::ptr_eq(
             &unsanitized,
-            &sanitize_rule(unsanitized.clone(), None, "spaces.star")
+            &try_sanitize_rule(unsanitized.clone(), None, "spaces.star").unwrap()
         ));
 
         // Module with /spaces.star suffix → prefix extracted, colon separator
         assert_eq!(
-            sanitize_rule(
+            try_sanitize_rule(
                 "my_rule".into(),
                 Some("path/to/pkg/spaces.star".into()),
                 "spaces.star",
             )
+            .unwrap()
             .as_ref(),
             "//path/to/pkg:my_rule"
         );
 
         // Module with .spaces.star suffix → prefix extracted, colon separator
         assert_eq!(
-            sanitize_rule(
+            try_sanitize_rule(
                 "my_rule".into(),
                 Some("path/to/pkg.spaces.star".into()),
                 "spaces.star",
             )
+            .unwrap()
             .as_ref(),
             "//path/to/pkg:my_rule"
         );
 
         // Leading colon on rule name is stripped before formatting
         assert_eq!(
-            sanitize_rule(
+            try_sanitize_rule(
                 ":my_rule".into(),
                 Some("path/to/pkg/spaces.star".into()),
                 "spaces.star",
             )
+            .unwrap()
             .as_ref(),
             "//path/to/pkg:my_rule"
         );
 
         // Rule containing colon → uses '/' separator instead of ':'
         assert_eq!(
-            sanitize_rule(
+            try_sanitize_rule(
                 "nested:rule".into(),
                 Some("path/to/pkg/spaces.star".into()),
                 "spaces.star",
             )
+            .unwrap()
             .as_ref(),
             "//path/to/pkg/nested:rule"
         );
 
         // Module without a recognized suffix → empty prefix
         assert_eq!(
-            sanitize_rule(
+            try_sanitize_rule(
                 "my_rule".into(),
                 Some("no_suffix_match.star".into()),
                 "spaces.star",
             )
+            .unwrap()
             .as_ref(),
             "//:my_rule"
         );
 
         // Module that is just "spaces.star" → neither suffix matches, empty prefix
         assert_eq!(
-            sanitize_rule("my_rule".into(), Some("spaces.star".into()), "spaces.star",).as_ref(),
+            try_sanitize_rule("my_rule".into(), Some("spaces.star".into()), "spaces.star",)
+                .unwrap()
+                .as_ref(),
             "//:my_rule"
+        );
+
+        // Multiple ':' is invalid
+        assert!(
+            try_sanitize_rule(
+                "//path:to:rule".into(),
+                Some("module/spaces.star".into()),
+                "spaces.star",
+            )
+            .is_err()
         );
     }
 
