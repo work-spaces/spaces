@@ -9,8 +9,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use utils::{
-    changes, ecode, environment, graph, labels, lock, logger, logs, markdown, mtarget, platform,
-    rcache, rule, targets, ws,
+    changes, environment, graph, labels, lock, logger, logs, markdown, mtarget, platform, rcache,
+    rule, targets, ws,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -841,9 +841,8 @@ impl State {
                             file_map.insert(file.clone(), rule_name.clone())
                         {
                             singleton::set_is_show_latest_error();
-                            return Err(ecode::anyhow(
-                                ecode::Ecode::TargetFileIsClaimedByMultipleRules,
-                                &format!("{file} is claimed by:\n- {existing_rule}\n- {rule_name}",),
+                            return Err(format_error!(
+                                "{file} is claimed by:\n- {existing_rule}\n- {rule_name}",
                             ));
                         };
                     }
@@ -851,9 +850,8 @@ impl State {
                         if let Some(existing_rule) = dir_map.insert(file.clone(), rule_name.clone())
                         {
                             singleton::set_is_show_latest_error();
-                            return Err(ecode::anyhow(
-                                ecode::Ecode::TargetDirIsClaimedByMultipleRules,
-                                &format!("{file} is claimed by:\n- {existing_rule}\n- {rule_name}",),
+                            return Err(format_error!(
+                                "{file} is claimed by:\n- {existing_rule}\n- {rule_name}",
                             ));
                         };
                     }
@@ -870,11 +868,8 @@ impl State {
                 };
                 if file_path_label.starts_with(dir_prefix.as_str()) {
                     singleton::set_is_show_latest_error();
-                    return Err(ecode::anyhow(
-                        ecode::Ecode::TargetArtifactIsContainedInTargetDir,
-                        &format!(
-                            "{file_path_label} from\n{file_rule} is contained in target dir\n{dir_path_label}\nfrom rule {dir_rule}",
-                        ),
+                    return Err(format_error!(
+                        "{file_path_label} from\n{file_rule} is contained in target dir\n{dir_path_label}\nfrom rule {dir_rule}",
                     ));
                 }
             }

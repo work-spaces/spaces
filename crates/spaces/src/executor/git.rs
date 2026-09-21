@@ -1,9 +1,9 @@
 use crate::{label, singleton, workspace};
 use anyhow::Context;
-use anyhow_source_location::format_context;
+use anyhow_source_location::{format_context, format_error};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use utils::{ecode, features, git, lock, logger, ws};
+use utils::{features, git, lock, logger, ws};
 
 fn logger(console: console::Console, url: Arc<str>) -> logger::Logger {
     logger::Logger::new(console, url)
@@ -651,10 +651,7 @@ impl Git {
             git::Clone::Shallow => self.execute_shallow_clone(progress, workspace.clone()),
         }
         .map_err(|err| {
-            ecode::anyhow(
-                ecode::Ecode::GitExecutorFailedToExecuteGitCommand,
-                &format!("Failed to execute git clone workflow for rule {name}\n{err:?}"),
-            )
+            format_error!("Failed to execute git clone workflow for rule {name}\n{err:?}")
         })?;
 
         let ref_name = match &self.checkout {
@@ -672,10 +669,7 @@ impl Git {
                 if member.version.is_none() {
                     let latest_tag = git::get_latest_tag(progress, &self.url, &self.spaces_key)
                         .map_err(|err| {
-                            ecode::anyhow(
-                                ecode::Ecode::GitExecutorFailedToExecuteGitCommand,
-                                &format!("Failed to get latest tag for rule {name}\n{err:?}"),
-                            )
+                            format_error!("Failed to get latest tag for rule {name}\n{err:?}")
                         })?;
                     member.version = Self::rev_to_version(latest_tag.clone());
                 }
@@ -705,12 +699,7 @@ impl Git {
             logger(progress.console.clone(), self.url.clone()).debug("creating lock file");
             if let Some(commit_hash) =
                 git::get_commit_hash(progress, &self.url, working_directory.as_ref()).map_err(
-                    |err| {
-                        ecode::anyhow(
-                            ecode::Ecode::GitExecutorFailedToExecuteGitCommand,
-                            &format!("Failed to get commit hash for rule {name}\n{err:?}"),
-                        )
-                    },
+                    |err| format_error!("Failed to get commit hash for rule {name}\n{err:?}"),
                 )?
             {
                 let rev: Arc<str> =
@@ -774,10 +763,7 @@ impl Git {
                     .debug(format!("{}: git {options:?}", self.spaces_key).as_str());
 
                 git::execute_git_command(progress, &self.url, options).map_err(|err| {
-                    ecode::anyhow(
-                        ecode::Ecode::GitExecutorFailedToExecuteGitCommand,
-                        &format!("Failed to checkout lock revision for rule {name}\n{err:?}"),
-                    )
+                    format_error!("Failed to checkout lock revision for rule {name}\n{err:?}")
                 })?;
 
                 is_locked = true;
@@ -796,12 +782,8 @@ impl Git {
             logger(progress.console.clone(), self.url.clone())
                 .debug(format!("{}: git {options:?}", self.spaces_key).as_str());
 
-            git::execute_git_command(progress, &self.url, options).map_err(|err| {
-                ecode::anyhow(
-                    ecode::Ecode::GitExecutorFailedToExecuteGitCommand,
-                    &format!("Failed to create branch for rule {name}\n{err:?}"),
-                )
-            })?;
+            git::execute_git_command(progress, &self.url, options)
+                .map_err(|err| format_error!("Failed to create branch for rule {name}\n{err:?}"))?;
         }
 
         // after possibly checking out the lock commit, check if on a branch or commit

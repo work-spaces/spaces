@@ -1,7 +1,8 @@
 use crate::workspace;
 
+use anyhow_source_location::format_error;
 use serde::{Deserialize, Serialize};
-use utils::{ecode, environment, logger};
+use utils::{environment, logger};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -22,12 +23,7 @@ impl UpdateEnv {
         workspace
             .write()
             .update_env(self.environment.clone())
-            .map_err(|err| {
-                ecode::anyhow(
-                    ecode::Ecode::EnvironmentExecutorOperationFailed,
-                    &format!("failed to update env\n{err:?}"),
-                )
-            })?;
+            .map_err(|err| format_error!("failed to update env\n{err:?}"))?;
         Ok(())
     }
 }
