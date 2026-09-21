@@ -523,11 +523,12 @@ impl State {
             Some(module_name.clone())
         };
 
-        let rule_label = labels::sanitize_rule(
+        let rule_label = labels::try_sanitize_rule(
             task_to_insert.rule.name,
             module_opt.clone(),
             workspace::SPACES_MODULE_NAME,
-        );
+        )
+        .context(format_context!("while sanitizing task rule name"))?;
 
         if let Some(ws_dest) = workspace_destination {
             let mut workspace_destinations = self.workspace_destinations.write();
@@ -558,11 +559,14 @@ impl State {
             .context(format_context!("while sanitizing rule {rule_label}"))?;
 
         if let Some(trailing_args_rule) = task_to_insert.rule.apply_trailing_args_to.as_ref() {
-            let sane_trailing_args_label = labels::sanitize_rule(
+            let sane_trailing_args_label = labels::try_sanitize_rule(
                 trailing_args_rule.clone(),
                 module_opt,
                 workspace::SPACES_MODULE_NAME,
-            );
+            )
+            .context(format_context!(
+                "while sanitizing apply_trailing_args_to for {rule_label}"
+            ))?;
             let mut trailing_args_rule_map = self.trailing_args_rule_map.write();
             let _ = trailing_args_rule_map.insert(rule_label.clone(), sane_trailing_args_label);
         }
@@ -1357,14 +1361,17 @@ pub fn get_checkout_path_for_module(module_name: &Arc<str>) -> Arc<str> {
 pub fn get_path_to_build_checkout_for_module(
     rule_name: Arc<str>,
     module_name: &Arc<str>,
-) -> Arc<str> {
-    let sanitized = get_sanitized_rule_name_for_module(rule_name, module_name);
-    format!("build/{sanitized}").into()
+) -> anyhow::Result<Arc<str>> {
+    let sanitized = get_sanitized_rule_name_for_module(rule_name, module_name)?;
+    Ok(format!("build/{sanitized}").into())
 }
 
 /// Sanitize a rule name using a caller-supplied module name instead of global state.
-pub fn get_sanitized_rule_name_for_module(rule_name: Arc<str>, module_name: &Arc<str>) -> Arc<str> {
-    labels::sanitize_rule(
+pub fn get_sanitized_rule_name_for_module(
+    rule_name: Arc<str>,
+    module_name: &Arc<str>,
+) -> anyhow::Result<Arc<str>> {
+    labels::try_sanitize_rule(
         rule_name,
         Some(module_name.clone()),
         workspace::SPACES_MODULE_NAME,
@@ -1613,7 +1620,7 @@ pub fn get_cloned_task_for_module(
     name: &str,
     module_name: &Arc<str>,
 ) -> anyhow::Result<task::Task> {
-    let sanitized_name = get_sanitized_rule_name_for_module(name.into(), module_name);
+    let sanitized_name = get_sanitized_rule_name_for_module(name.into(), module_name)?;
     let state = get_state().read();
     let tasks = state.tasks.read();
     if let Some(task) = tasks.get(&sanitized_name) {

@@ -365,7 +365,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             }
             let workspace = workspace_arc.read();
             let rule_name =
-                rules::get_sanitized_rule_name_for_module(rule.into(), &ctx.module_name);
+                rules::get_sanitized_rule_name_for_module(rule.into(), &ctx.module_name).context(
+                    format_context!("while getting sanitized rule name for `{rule}`"),
+                )?;
             Ok(workspace.get_log_file(rule_name.as_ref()).to_string())
         })
     }
@@ -419,6 +421,9 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             let ctx = get_eval_context(eval)?;
             Ok(
                 rules::get_path_to_build_checkout_for_module(rule_name.into(), &ctx.module_name)
+                    .context(format_context!(
+                        "while getting path to build checkout for `{rule_name}`"
+                    ))?
                     .to_string(),
             )
         })
@@ -454,7 +459,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                     .context(format_context!("bad options for archive"))?;
 
             let sanitized_rule_name =
-                rules::get_sanitized_rule_name_for_module(rule_name.into(), &ctx.module_name);
+                rules::get_sanitized_rule_name_for_module(rule_name.into(), &ctx.module_name)
+                    .context(format_context!(
+                        "while getting sanitized rule name for `{rule_name}`"
+                    ))?;
 
             let folder_name = labels::get_folder_name_from_rule(&sanitized_rule_name);
 
@@ -498,7 +506,10 @@ pub fn globals(builder: &mut GlobalsBuilder) {
             let output_sha_suffix = create_archive.get_output_sha256_file();
 
             let sanitized_rule_name =
-                rules::get_sanitized_rule_name_for_module(rule_name.into(), &ctx.module_name);
+                rules::get_sanitized_rule_name_for_module(rule_name.into(), &ctx.module_name)
+                    .context(format_context!(
+                        "while getting sanitized rule name for `{rule_name}`"
+                    ))?;
 
             let folder_name = labels::get_folder_name_from_rule(&sanitized_rule_name);
 
