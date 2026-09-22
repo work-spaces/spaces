@@ -302,82 +302,88 @@ impl Git {
             return Ok(());
         }
 
+        // Step 2: Handle existing workspace
+        let repo_workspace_path = std::path::Path::new(self.spaces_key.as_ref());
+        let repo_workspace_path_exists = repo_workspace_path.exists();
+        let repo_workspace_has_content = if repo_workspace_path_exists {
+            let entries = std::fs::read_dir(repo_workspace_path).context(format_context!(
+                "while reading existing workspace directory {}",
+                self.spaces_key
+            ))?;
+            entries.count() > 0
+        } else {
+            false
+        };
+
+        if repo_workspace_has_content {
+            logger(progress.console.clone(), self.url.clone()).debug(
+                format!(
+                    "{} already exists and is populated - try to update",
+                    repo_workspace_path.display()
+                )
+                .as_str(),
+            );
+
+            let existing_repo = git::Repository::new(self.url.clone(), self.spaces_key.clone());
+
+            if existing_repo.is_dirty(progress, git::IgnoreSubmodules::Yes) {
+                logger(progress.console.clone(), self.url.clone()).warning(
+                    format!(
+                        "{} already exists and is dirty - not updating",
+                        self.spaces_key
+                    )
+                    .as_str(),
+                );
+                return Ok(());
+            }
+
+            logger(progress.console.clone(), self.url.clone())
+                .debug("Fetching updates in existing workspace");
+
+            let force_fetch_tags = !workspace
+                .read()
+                .features
+                .is_enabled(features::Feature::SkipForceFetchTags);
+
+            existing_repo
+                .fetch_with_tags(progress, force_fetch_tags, git::IgnoreSubmodules::Yes)
+                .context(format_context!(
+                    "while fetching updates in existing workspace"
+                ))?;
+
+            // Checkout the desired revision
+            existing_repo
+                .checkout(progress, &self.checkout)
+                .context(format_context!(
+                    "while checking out existing workspace revision"
+                ))?;
+
+            // If on a branch, pull latest unless sync explicitly disables branch updates.
+            let is_branch_update_disabled_for_sync =
+                singleton::get_is_sync() && singleton::get_sync_options().no_update_branches;
+            if !is_branch_update_disabled_for_sync
+                && existing_repo.is_head_branch(progress)
+                && existing_repo.is_remote_branch_tracked(progress)
+            {
+                existing_repo
+                    .pull(progress, git::IsRecurseSubmodules::No)
+                    .context(format_context!(
+                        "while pulling latest changes in existing workspace"
+                    ))?;
+            }
+
+            return Ok(());
+        }
+
         let (bare_repo, _lock_file) = self
             .ensure_bare_repository(progress, workspace.clone(), filter.clone())
             .context(format_context!("while ensuring bare repository"))?;
 
-        // Step 2: Handle existing workspace
-        let workspace_path = std::path::Path::new(self.spaces_key.as_ref());
-        if workspace_path.exists() {
-            let entries = std::fs::read_dir(workspace_path).context(format_context!(
-                "while reading existing workspace directory {}",
-                self.spaces_key
-            ))?;
-
-            if entries.count() > 0 {
-                logger(progress.console.clone(), self.url.clone()).debug(
-                    format!(
-                        "{} already exists and is populated - try to update",
-                        workspace_path.display()
-                    )
-                    .as_str(),
-                );
-
-                let existing_repo = git::Repository::new(self.url.clone(), self.spaces_key.clone());
-
-                if existing_repo.is_dirty(progress, git::IgnoreSubmodules::Yes) {
-                    logger(progress.console.clone(), self.url.clone()).warning(
-                        format!(
-                            "{} already exists and is dirty - not updating",
-                            self.spaces_key
-                        )
-                        .as_str(),
-                    );
-                    return Ok(());
-                }
-
-                logger(progress.console.clone(), self.url.clone())
-                    .debug("Fetching updates in existing workspace");
-
-                let force_fetch_tags = !workspace
-                    .read()
-                    .features
-                    .is_enabled(features::Feature::SkipForceFetchTags);
-
-                existing_repo
-                    .fetch_with_tags(progress, force_fetch_tags, git::IgnoreSubmodules::Yes)
-                    .context(format_context!(
-                        "while fetching updates in existing workspace"
-                    ))?;
-
-                // Checkout the desired revision
-                existing_repo
-                    .checkout(progress, &self.checkout)
-                    .context(format_context!(
-                        "while checking out existing workspace revision"
-                    ))?;
-
-                // If on a branch, pull latest unless sync explicitly disables branch updates.
-                let is_branch_update_disabled_for_sync =
-                    singleton::get_is_sync() && singleton::get_sync_options().no_update_branches;
-                if !is_branch_update_disabled_for_sync
-                    && existing_repo.is_head_branch(progress)
-                    && existing_repo.is_remote_branch_tracked(progress)
-                {
-                    existing_repo
-                        .pull(progress, git::IsRecurseSubmodules::No)
-                        .context(format_context!(
-                            "while pulling latest changes in existing workspace"
-                        ))?;
-                }
-
-                return Ok(());
-            }
-
+        if repo_workspace_path_exists {
             logger(progress.console.clone(), self.url.clone()).debug(
                 format!(
                     "{} already exists, but is not populated, try to clone",
-                    workspace_path.display()
+                    repo_workspace_path.display()
                 )
                 .as_str(),
             );
