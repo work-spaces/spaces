@@ -85,6 +85,15 @@ def sdk_add_repo(
         visibility = visibility,
     )
 
+def sdk_get_owner() -> str | None:
+    """
+    Gets the path to the repo that owns the SDK.
+
+    Returns:
+        The workspace path of the repo that owns the SDK, or None if the SDK has no owner.
+    """
+    return workspace_load_value(_SDK_OWNER_KEY, path = _SDK_NAMESPACE)
+
 def sdk_is_owner() -> bool:
     """
     Checks if the calling repo is the owner of the SDK.
@@ -96,8 +105,7 @@ def sdk_is_owner() -> bool:
     """
 
     current_module_path = workspace_get_path_to_checkout()
-    sdk_module_path = workspace_load_value(_SDK_OWNER_KEY, path = _SDK_NAMESPACE)
-    return sdk_module_path == current_module_path
+    return sdk_get_owner() == current_module_path
 
 def sdk_finalize_checkout(sdk_checkout):
     """
