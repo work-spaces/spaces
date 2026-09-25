@@ -251,6 +251,72 @@ pub fn execute() -> anyhow::Result<()> {
     result
 }
 
+fn is_in_workspace() -> anyhow::Result<bool> {
+    let current_working_directory = workspace::get_current_working_directory()
+        .context(format_context!("while getting current working directory"))?;
+
+    Ok(workspace::Workspace::find_workspace_root(current_working_directory.as_ref()).is_ok())
+}
+
+fn execute_query_command(
+    command: utils::query::QueryCommand,
+    effective_console: console::Console,
+) -> anyhow::Result<()> {
+    singleton::set_execution_phase(task::Phase::Inspect);
+    singleton::set_query_command(command.clone());
+
+    // When exporting stardoc, reuse the inspect --stardoc pipeline:
+    // set_rescan forces re-evaluation (clears cached hashes → is_dirty=true)
+    // so evaluate_starlark_modules runs and collects per-module docs, then
+    // calls workspace.stardoc.generate(path) before execute_tasks returns.
+    if let Some(stardoc_path) = command.export_stardoc_path() {
+        singleton::set_rescan(true);
+        singleton::set_inspect_options(utils::inspect::Options {
+            stardoc: Some(stardoc_path),
+            ..Default::default()
+        });
+    }
+
+    if effective_console.get_level() > console::Level::Info {
+        effective_console.set_level(console::Level::Info);
+    }
+
+    runner::run_starlark_modules_in_workspace(
+        effective_console.clone(),
+        task::Phase::Inspect,
+        None,
+        workspace::IsClearInputs::No,
+        runner::RunWorkspace::Target(None, vec![]),
+        runner::IsCreateLockFile::No,
+        runner::IsExecuteTasks::Yes,
+    )
+    .context(format_context!("while loading workspace for query"))?;
+
+    let ctx = singleton::take_query_context()
+        .ok_or_else(|| format_error!("Internal error: query context was not built"))?;
+
+    command
+        .execute(effective_console, &ctx)
+        .context(format_context!("while executing query command"))?;
+
+    Ok(())
+}
+
+fn execute_query_co_command(
+    command: utils::co::QueryCoCommand,
+    effective_console: console::Console,
+) -> anyhow::Result<()> {
+    if effective_console.get_level() > console::Level::Info {
+        effective_console.set_level(console::Level::Info);
+    }
+
+    command
+        .execute(effective_console)
+        .context(format_context!("while executing query-co command"))?;
+
+    Ok(())
+}
+
 fn execute_command(command: Commands, effective_console: console::Console) -> anyhow::Result<()> {
     match command {
         Commands::Checkout {
@@ -741,52 +807,59 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
         }
 
         Commands::Query { command } => {
-            singleton::set_execution_phase(task::Phase::Inspect);
-            singleton::set_query_command(command.clone());
-
-            // When exporting stardoc, reuse the inspect --stardoc pipeline:
-            // set_rescan forces re-evaluation (clears cached hashes → is_dirty=true)
-            // so evaluate_starlark_modules runs and collects per-module docs, then
-            // calls workspace.stardoc.generate(path) before execute_tasks returns.
-            if let Some(stardoc_path) = command.export_stardoc_path() {
-                singleton::set_rescan(true);
-                singleton::set_inspect_options(utils::inspect::Options {
-                    stardoc: Some(stardoc_path),
-                    ..Default::default()
-                });
-            }
-
-            if effective_console.get_level() > console::Level::Info {
-                effective_console.set_level(console::Level::Info);
-            }
-
-            runner::run_starlark_modules_in_workspace(
-                effective_console.clone(),
-                task::Phase::Inspect,
-                None,
-                workspace::IsClearInputs::No,
-                runner::RunWorkspace::Target(None, vec![]),
-                runner::IsCreateLockFile::No,
-                runner::IsExecuteTasks::Yes,
-            )
-            .context(format_context!("while loading workspace for query"))?;
-
-            let ctx = singleton::take_query_context()
-                .ok_or_else(|| format_error!("Internal error: query context was not built"))?;
-
-            command
-                .execute(effective_console, &ctx)
+            execute_query_command(command, effective_console)
                 .context(format_context!("while executing query command"))?;
         }
 
-        Commands::QueryCo { command } => {
-            if effective_console.get_level() > console::Level::Info {
-                effective_console.set_level(console::Level::Info);
-            }
+        Commands::Search {
+            query,
+            deps,
+            checkout,
+            limit,
+            format,
+        } => {
+            if is_in_workspace().context(format_context!("while detecting workspace for search"))? {
+                if format.is_some() {
+                    return Err(format_error!(
+                        "`--format` is only supported outside a workspace"
+                    ));
+                }
 
-            command
-                .execute(effective_console)
-                .context(format_context!("while executing query-co command"))?;
+                execute_query_command(
+                    utils::query::QueryCommand::Search {
+                        query,
+                        deps,
+                        checkout,
+                        limit,
+                    },
+                    effective_console,
+                )?;
+            } else {
+                if deps {
+                    return Err(format_error!(
+                        "`--deps` is only supported when running in a workspace"
+                    ));
+                }
+
+                if checkout {
+                    return Err(format_error!(
+                        "`--checkout` is only supported when running in a workspace"
+                    ));
+                }
+
+                execute_query_co_command(
+                    utils::co::QueryCoCommand::Search {
+                        keywords: query,
+                        limit,
+                        format: format.unwrap_or(console::Format::Pretty),
+                    },
+                    effective_console,
+                )?;
+            }
+        }
+
+        Commands::QueryCo { command } => {
+            execute_query_co_command(command, effective_console)?;
         }
 
         Commands::Completions {
@@ -1143,6 +1216,26 @@ create-lock-file = false # optionally create a lock file
     Query {
         #[command(subcommand)]
         command: utils::query::QueryCommand,
+    },
+    #[command(about = r"Search rules or checkout entries depending on context.
+  - In a workspace: equivalent to `spaces query search ...`
+  - Outside a workspace: equivalent to `spaces query-co search ...`")]
+    Search {
+        /// One or more search terms/keywords
+        #[arg(required = true, num_args = 1..)]
+        query: Vec<Arc<str>>,
+        /// Include expanded deps and targets in results (workspace only)
+        #[arg(long)]
+        deps: bool,
+        /// Include checkout-phase rules in search (workspace only)
+        #[arg(long)]
+        checkout: bool,
+        /// Maximum number of results to show
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+        /// Output format (outside workspace only)
+        #[arg(long, value_enum)]
+        format: Option<console::Format>,
     },
     /// Query checkout entries from co.spaces.toml.
     QueryCo {
