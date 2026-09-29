@@ -719,6 +719,8 @@ mod tests {
         let text = err_text(parse(spec, &["--nope"]));
 
         assert!(text.contains("Unknown or unexpected argument."));
+        assert!(text.contains("--nope"));
+        assert!(text.contains("Usage:"));
         assert!(!text.contains("ErrorInner"));
         assert!(!text.contains("FlatMap"));
     }
@@ -732,6 +734,8 @@ mod tests {
         let text = err_text(parse(spec, &[]));
 
         assert!(text.contains("Missing required argument."));
+        assert!(text.contains("<service>"));
+        assert!(text.contains("Usage:"));
         assert!(!text.contains("ErrorInner"));
     }
 
