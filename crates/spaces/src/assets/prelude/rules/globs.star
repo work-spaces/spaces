@@ -28,7 +28,7 @@ def globs_includes(globs: dict) -> list[str]:
     Returns:
         Includes list for the globs
     """
-    return globs.get[_INCLUDES_KEY]
+    return globs[_INCLUDES_KEY]
 
 def globs_excludes(globs: dict) -> list[str]:
     """
@@ -40,4 +40,4 @@ def globs_excludes(globs: dict) -> list[str]:
     Returns:
         Includes list for the globs
     """
-    return globs.get[_EXCLUDES_KEY]
+    return globs[_EXCLUDES_KEY]
