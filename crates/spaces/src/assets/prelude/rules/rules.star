@@ -1,9 +1,12 @@
 """
 Helper functions for managing rules that are grouped together.
 
-This helps creating related rules in functins and informing
+This helps creating related rules in functions and informing
 the caller about the rules that were added.
 """
+
+_NAME_KEY = "name"
+_RULES_KEY = "rules"
 
 def rules_new(name: str, rules: list[str]) -> dict:
     """
@@ -21,7 +24,7 @@ def rules_new(name: str, rules: list[str]) -> dict:
     for value in rules:
         rules_entries[value] = "{}_{}".format(name, value)
 
-    return {"name": name, "rules": rules_entries}
+    return {_NAME_KEY: name, _RULES_KEY: rules_entries}
 
 def rules_as_rule(rules: dict, rule_name: str) -> str:
     """
@@ -32,7 +35,7 @@ def rules_as_rule(rules: dict, rule_name: str) -> str:
         rule_name: The name of the rule to retrieve.
 
     """
-    return rules["rules"][rule_name]
+    return rules[_RULES_KEY][rule_name]
 
 def rules_as_dep(rules: dict, rule_name: str) -> str:
     """
@@ -64,7 +67,7 @@ def rules_name(rules: dict) -> str:
         rules: The return value of rules_new()
 
     """
-    return rules["name"]
+    return rules[_NAME_KEY]
 
 def rules_name_as_dep(rules: dict) -> str:
     """
