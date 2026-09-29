@@ -32,12 +32,12 @@ def globs_includes(globs: dict) -> list[str]:
 
 def globs_excludes(globs: dict) -> list[str]:
     """
-    Gets the Includes part of the globs.
+    Gets the Excludes part of the globs.
 
     Args:
         globs: Return value of `globs_new()`
 
     Returns:
-        Includes list for the globs
+        Excludes list for the globs
     """
     return globs[_EXCLUDES_KEY]
