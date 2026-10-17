@@ -18,8 +18,16 @@ load("//@star/prelude/rules/visibility.star", "visibility_private", "visibility_
 load(
     "//@star/prelude/rules/ws.star",
     "workspace_get_env_var",
-    "workspace_get_env_var_or",
     "workspace_load_value",
+)
+load(
+    "//@star/sdk/star/checkout-config.star",
+    "checkout_config_load_value",
+)
+load(
+    "star/internal/config.star",
+    "GITHUB_REPOSITORY_CONFIG_KEY",
+    "SPACES_RELEASE_TAG_CONFIG_KEY",
 )
 
 GLOB_DEPS = glob(includes = [
@@ -369,12 +377,10 @@ run_add_exec(
 )
 
 RELEASE_INSTALL_DIR = "build/install"
-SPACES_RELEASE_TAG_ENV = "SPACES_RELEASE_TAG"
-GITHUB_REPOSITORY_ENV = "GITHUB_REPOSITORY"
 
-release_tag = workspace_load_value(SPACES_RELEASE_TAG_ENV) or "dev"
+release_tag = checkout_config_load_value(SPACES_RELEASE_TAG_CONFIG_KEY) or "dev"
 release_archive_version = release_tag.lstrip("v").replace("/", "_")
-github_repo = workspace_get_env_var_or(GITHUB_REPOSITORY_ENV, "work-spaces/spaces")
+github_repo = checkout_config_load_value(GITHUB_REPOSITORY_CONFIG_KEY) or "work-spaces/spaces"
 
 run_add_exec(
     "build_release_install",
