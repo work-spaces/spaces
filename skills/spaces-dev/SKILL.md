@@ -1,6 +1,6 @@
 ---
-name: create-spaces-pr
-description: Use this skill when making general code changes in this workspace's Spaces codebase and validates changes with spaces rules as broadly as practical.
+name: spaces-dev
+description: Use when making general code changes (implementation, refactoring, debugging) in this workspace's Spaces codebase (`spaces/`). Covers checking, building, linting, and formatting via `spaces run` rules and validating changes as broadly as practical.
 ---
 
 # Spaces Dev
@@ -66,7 +66,6 @@ When running tools directly, ensure `sysroot/bin` is first in `PATH`. Use this p
 PATH=<workspace_root>/sysroot/bin:/usr/bin:/bin:/usr/sbin:/sbin <command>
 ```
 
-sysroot/bin contains sccache, rg, and other helpful tools.
-
+`sysroot/bin` contains sccache, rg, and other helpful tools.
 
 Use `git -C spaces ...` if checking changes with git.
