@@ -15,7 +15,7 @@ load(
     "info_is_ci",
     "info_is_platform_linux",
 )
-load("//@star/prelude/rules/asset.star", "asset_hard_link", "asset_soft_link")
+load("//@star/prelude/rules/asset.star", "asset_hard_link")
 load(
     "//@star/prelude/rules/checkout.star",
     "checkout_add_any_assets",
@@ -148,7 +148,8 @@ checkout_add_any_assets(
 
 rust_add(
     "rust_toolchain",
-    version = None,  # use rust-toolchain.toml
+    rust_toolchain_toml_dir = "//",
+    version = None,  # Keep in sync with default.rust-toolchain.toml and musl.rust-toolchain.toml.
     deps = [":spaces0", ":cargo_workspace_assets"],
 )
 
@@ -208,20 +209,19 @@ if info_is_platform_linux():
             vars = pkg_config_vars,
         )
 
-checkout_add_home_store_env("home_store_env")
-checkout_add_home_assets(
-    "home_assets",
-    assets = [
-        ".gitconfig",
-        ".config/gh",
-        ".ssh",
-        ".gnupg",
-        ".config/git",
-        ".netrc",
-    ],
-)
-
 if not info_is_ci():
+    checkout_add_home_store_env("home_store_env")
+    checkout_add_home_assets(
+        "home_assets",
+        assets = [
+            ".gitconfig",
+            ".config/gh",
+            ".ssh",
+            ".gnupg",
+            ".config/git",
+            ".netrc",
+        ],
+    )
     sandbox = sandbox_new("workspace-sandbox")
     sandbox_configure_for_os(sandbox)
     checkout_set_sandbox(sandbox)

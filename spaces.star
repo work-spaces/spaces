@@ -5,8 +5,8 @@ With VSCode/Zed integration
 
 load("//@star/packages/star/musl-gcc.star", "musl_gcc_get_env")
 load("//@star/prelude/info.star", "info_is_platform_aarch64", "info_is_platform_linux")
-load("//@star/prelude/rules/deps.star", deps_new = "deps")
-load("//@star/prelude/rules/glob.star", "glob")
+load("//@star/prelude/rules/deps.star", "deps_new")
+load("//@star/prelude/rules/globs.star", "globs_new")
 load(
     "//@star/prelude/rules/run.star",
     "run_add",
@@ -30,7 +30,7 @@ load(
     "SPACES_RELEASE_TAG_CONFIG_KEY",
 )
 
-GLOB_DEPS = glob(includes = [
+GLOB_DEPS = globs_new(includes = [
     "//Cargo.toml",
     "//spaces/Cargo.toml",
     "//spaces/Cargo.workspace.toml",
