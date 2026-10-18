@@ -126,7 +126,7 @@ if info_is_platform_linux() or checkout_config_load_option(SPACES_ENABLE_SANDBOX
 # Skills
 skill_register_checkout(
     "spaces_dev",
-    path = "skills/spaces-dev",
+    path = "{}/skills/spaces-dev".format(SPACES_CHECKOUT_PATH),
     config_key = SPACES_DEV_SKILL_CONFIG_KEY,
 )
 
@@ -142,10 +142,6 @@ checkout_add_any_assets(
         asset_hard_link(
             source = "{}/Cargo.workspace.toml".format(SPACES_CHECKOUT_PATH),
             destination = "//Cargo.toml",
-        ),
-        asset_soft_link(
-            source = "{}/spaces/skills/spaces-dev".format(workspace_get_absolute_path()),
-            destination = ".agents/skills/spaces-dev",
         ),
     ],
 )
