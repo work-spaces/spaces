@@ -6,7 +6,7 @@ load("//@star/prelude/rules/checkout.star", "checkout_add_env_vars", "checkout_a
 load("//@star/prelude/rules/env.star", "env_append")
 
 workspace.set_locks(locks = {
-    "@star/sdk": "v0.5.2",
+    "@star/sdk": "35f87209e4f3a1aa5bf8e4f849d97799b7a14efa",
     "@star/packages": "v0.2.76",
 })
 
