@@ -57,7 +57,7 @@ run_add_exec(
     command = "cargo",
     args = ["tree"],
     deps = deps_new(rules = [":rustup_update"], files = rustup_files),
-    help = "Run cargo tree. This is used to clean up the result of rustup update without any race conditions.",
+    help = "Run cargo tree. This is used to clean up the result of rustup update without any race conditions. #internal",
     visibility = visibility_private(),
 )
 DBUS_DEPS = ["//spaces/deps:dbus"] if workspace_load_value("SPACES_DBUS_ENABLED") else []
@@ -73,7 +73,7 @@ run_add_exec(
     "check",
     command = "cargo",
     args = ["check"],
-    help = "Run cargo check on workspace",
+    help = "Run cargo check on workspace.",
     deps = deps_new(rules = [":cargo_tree"], globs = [GLOB_DEPS]),
     visibility = visibility_private(),
 )
@@ -108,7 +108,6 @@ run_add_exec(
             See this blockquote.
             > This is a blockquote with **bold**.
             > And on the next line.
-
     """,
     workspace_vars = ["SCCACHE_DIR", "RUSTUP_HOME", "CARGO_HOME"],
 )

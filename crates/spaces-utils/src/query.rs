@@ -339,7 +339,7 @@ impl QueryCommand {
 mod tests {
     use super::{
         DependencyNode, build_dependency_tree, dependency_node_to_tree, render_locks_starlark,
-        validate_locks_output_path,
+        score_rule_for_search, validate_locks_output_path,
     };
     use crate::{graph, inspect, search};
     use std::collections::HashSet;
@@ -394,6 +394,45 @@ mod tests {
             .collect();
 
         assert_eq!(highlighted, vec![0, 1, 2, 3, 4, 10, 11, 12, 13]);
+    }
+
+    #[test]
+    fn internal_help_hashtag_is_penalized_unless_searched() {
+        let query = ["build"];
+        let ordinary = score_rule_for_search("//pkg:build", "Build tool", &query).unwrap();
+        let internal =
+            score_rule_for_search("//pkg:build", "Build tool #internal", &query).unwrap();
+
+        assert!(internal < ordinary);
+
+        let internal_name_match =
+            score_rule_for_search("//pkg:cargo_tree", "Run cargo tree #internal", &["cargo"])
+                .unwrap();
+        let public_help_match =
+            score_rule_for_search("//pkg:build", "Run cargo build", &["cargo"]).unwrap();
+        assert!(internal_name_match < public_help_match);
+
+        let internal_search =
+            score_rule_for_search("//pkg:task", "Internal tool #internal", &["internal"]).unwrap();
+        let plain_search =
+            score_rule_for_search("//pkg:task", "Internal tool", &["internal"]).unwrap();
+        assert!(internal_search > plain_search);
+    }
+
+    #[test]
+    fn matching_help_hashtag_promotes_the_result() {
+        let tagged =
+            score_rule_for_search("//pkg:task", "Deploy process #release", &["release"]).unwrap();
+        let untagged =
+            score_rule_for_search("//pkg:task", "Deploy process release", &["release"]).unwrap();
+        let tagged_name_match =
+            score_rule_for_search("//pkg:release", "Deploy process #release", &["release"])
+                .unwrap();
+        let untagged_name_match =
+            score_rule_for_search("//pkg:release", "Deploy process release", &["release"]).unwrap();
+
+        assert!(tagged > untagged);
+        assert!(tagged_name_match > untagged_name_match);
     }
 
     #[test]
@@ -565,6 +604,76 @@ LOCKS = {
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+const HASHTAG_MATCH_SCORE: isize = 5_000;
+const INTERNAL_RESULT_SCORE_DIVISOR: isize = 10;
+
+fn help_hashtags(help_text: &str) -> Vec<&str> {
+    help_text
+        .match_indices('#')
+        .filter_map(|(index, _)| {
+            let remaining = &help_text[index + 1..];
+            let tag_len = remaining
+                .find(|ch: char| !ch.is_alphanumeric() && ch != '_' && ch != '-')
+                .unwrap_or(remaining.len());
+            (tag_len > 0).then_some(&remaining[..tag_len])
+        })
+        .collect()
+}
+
+fn keyword_matches_hashtag(keyword: &str, hashtag: &str) -> bool {
+    keyword
+        .strip_prefix('#')
+        .unwrap_or(keyword)
+        .eq_ignore_ascii_case(hashtag)
+}
+
+fn score_rule_for_search(raw_name: &str, help_text: &str, search_terms: &[&str]) -> Option<isize> {
+    if search_terms.is_empty() {
+        return Some(1000);
+    }
+
+    let hashtags = help_hashtags(help_text);
+    let has_internal_tag = hashtags
+        .iter()
+        .any(|tag| tag.eq_ignore_ascii_case("internal"));
+    let internal_requested = search_terms
+        .iter()
+        .any(|term| keyword_matches_hashtag(term, "internal"));
+
+    let mut total_score: isize = 0;
+    let mut matched_terms = 0;
+
+    for query_term in search_terms {
+        let name_score = search::score_match(query_term, raw_name);
+        let help_score = search::score_match(query_term, help_text) / 3;
+        let hashtag_score = if hashtags
+            .iter()
+            .any(|tag| keyword_matches_hashtag(query_term, tag))
+        {
+            HASHTAG_MATCH_SCORE
+        } else {
+            0
+        };
+        let term_score = name_score.max(help_score) + hashtag_score;
+
+        if term_score > 0 {
+            total_score += term_score;
+            matched_terms += 1;
+        }
+    }
+
+    if matched_terms == 0 {
+        return None;
+    }
+
+    let final_score = total_score * matched_terms as isize;
+    Some(if has_internal_tag && !internal_requested {
+        final_score / INTERNAL_RESULT_SCORE_DIVISOR
+    } else {
+        final_score
+    })
+}
 
 /// A node in the dependency tree used for JSON/YAML serialization
 #[derive(Debug, Serialize)]
@@ -1584,40 +1693,11 @@ impl QueryCommand {
                         }
                     }
 
-                    let mut total_score: isize = 0;
-                    let mut matched_terms = 0;
-
-                    // Aggregate score across all search terms (non-filter terms)
-                    for query_term in &search_terms {
-                        // Score against name (higher weight)
-                        let name_score = search::score_match(query_term, raw_name);
-
-                        // Score against help text (lower weight: 1/3 of name)
-                        let help_score = search::score_match(query_term, help_text) / 3;
-
-                        // Take the better of the two
-                        let term_score = name_score.max(help_score);
-
-                        if term_score > 0 {
-                            total_score += term_score;
-                            matched_terms += 1;
-                        }
-                    }
-
-                    // If there are search terms, require at least one to match
-                    // If there are only filters (no search terms), pass through with a default score
-                    if !search_terms.is_empty() && matched_terms == 0 {
+                    let Some(final_score) =
+                        score_rule_for_search(raw_name, help_text, &search_terms)
+                    else {
                         return;
-                    }
-
-                    // If there are no search terms (only filters), use a neutral default score
-                    if search_terms.is_empty() {
-                        total_score = 1000;
-                        matched_terms = 1;
-                    }
-
-                    // Apply bonus for matching more terms (rewards broader matches)
-                    let final_score = total_score * matched_terms as isize;
+                    };
 
                     let (rule_deps, rule_targets) = if *deps {
                         (qr.expanded_deps.clone(), Some(extract_targets(&qr.rule)))
