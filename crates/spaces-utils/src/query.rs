@@ -1667,6 +1667,9 @@ impl QueryCommand {
                 if top.is_empty() {
                     console.error("No Results", "No matching rules found")?;
                 } else {
+                    console.emit_lines(console::components::h3(
+                        "Search Results (least relevant to most relevant)",
+                    ));
                     for (name, info) in &top {
                         emit_styled_rule(
                             &console,
