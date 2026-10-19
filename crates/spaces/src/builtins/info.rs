@@ -341,7 +341,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
 
             if version > current_version {
                 return Err(anyhow::anyhow!(
-                    "Minimum required `spaces` version is `{version}`. `spaces` version is `{current_version}`"
+                    "Minimum required `spaces` version is `{version}`. `spaces` version is `{current_version}`. \n  Run `spaces version fetch` to install the required version."
                 ));
             }
             Ok(NoneType)
