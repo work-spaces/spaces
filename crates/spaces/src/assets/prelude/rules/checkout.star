@@ -627,6 +627,17 @@ def checkout_modify_value(name: str, modifier, path: str | None = None):
         modifier: A function/lambda taking one argument (current value).
         path: Optional path to store under. When omitted, the member
             path for the calling module is used.
+
+    Example:
+
+    ```python
+    def increment(current):
+        if current == None:
+            return 1
+        return current + 1
+
+    checkout_modify_value("attempts", increment)
+    ```
     """
 
     if path != None:
