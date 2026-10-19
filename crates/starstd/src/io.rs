@@ -3,7 +3,7 @@ use anyhow::{Context, anyhow};
 use anyhow_source_location::{format_context, format_error};
 use starlark::environment::GlobalsBuilder;
 use starlark::values::none::NoneType;
-use std::io::{IsTerminal, Read, Write};
+use std::io::{BufRead, IsTerminal, Read, Write};
 use std::sync::OnceLock;
 
 static STDIN_BYTES: OnceLock<Result<Vec<u8>, String>> = OnceLock::new();
@@ -74,6 +74,12 @@ fn strip_one_trailing_line_ending(s: &str) -> String {
     }
 }
 
+fn read_line_bytes(reader: &mut impl BufRead) -> std::io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    reader.read_until(b'\n', &mut bytes)?;
+    Ok(bytes)
+}
+
 fn split_lines_preserve_terminators(s: &str) -> Vec<String> {
     if s.is_empty() {
         return Vec::new();
@@ -108,6 +114,36 @@ pub fn globals(builder: &mut GlobalsBuilder) {
         }
 
         Ok(std::io::stdin().is_terminal())
+    }
+
+    /// Read one line from stdin, stopping after the user presses Enter or stdin reaches EOF.
+    ///
+    /// # Arguments
+    ///
+    /// * `encoding` - `"utf-8"` (strict, default) or `"lossy"`.
+    /// * `strip_newline` - If true (default), remove one trailing `\n` or `\r\n`.
+    ///
+    /// # Returns
+    ///
+    /// The decoded line as `str`, without its line ending by default.
+    fn read_stdin_line(
+        #[starlark(require = named, default = "utf-8")] encoding: &str,
+        #[starlark(require = named, default = true)] strip_newline: bool,
+    ) -> anyhow::Result<String> {
+        if is_lsp_mode() {
+            return Ok(String::new());
+        }
+
+        let stdin = std::io::stdin();
+        let mut stdin = stdin.lock();
+        let bytes =
+            read_line_bytes(&mut stdin).context(format_context!("Failed to read stdin line"))?;
+        let mut line = decode_bytes(&bytes, encoding)?;
+        if strip_newline {
+            line = strip_one_trailing_line_ending(&line);
+        }
+
+        Ok(line)
     }
 
     /// Read all stdin bytes once and decode to a string.
@@ -308,6 +344,23 @@ mod tests {
         assert_eq!(strip_one_trailing_line_ending("a\r\n"), "a");
         assert_eq!(strip_one_trailing_line_ending("a\n\n"), "a\n");
         assert_eq!(strip_one_trailing_line_ending("a"), "a");
+    }
+
+    #[test]
+    fn read_line_bytes_stops_after_one_line() {
+        let mut input = std::io::Cursor::new(b"first\nsecond\n");
+
+        assert_eq!(read_line_bytes(&mut input).unwrap(), b"first\n");
+        assert_eq!(read_line_bytes(&mut input).unwrap(), b"second\n");
+        assert!(read_line_bytes(&mut input).unwrap().is_empty());
+    }
+
+    #[test]
+    fn read_line_bytes_returns_final_line_without_newline() {
+        let mut input = std::io::Cursor::new(b"last line");
+
+        assert_eq!(read_line_bytes(&mut input).unwrap(), b"last line");
+        assert!(read_line_bytes(&mut input).unwrap().is_empty());
     }
 
     #[test]

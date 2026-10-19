@@ -5,7 +5,8 @@ Ergonomic wrappers around the built-in `io` namespace for stdin/stdout/stderr
 operations in exec scripts.
 
 The underlying built-ins are implemented in `starstd` and already handle:
-- one-time stdin caching across multiple reads
+- one-time stdin caching for whole-stream and line-list reads
+- line-at-a-time stdin reads for interactive input
 - UTF-8 strict/lossy decoding modes
 - optional size/line limits
 - safe no-op behavior in LSP mode
@@ -13,6 +14,9 @@ The underlying built-ins are implemented in `starstd` and already handle:
 This module adds friendly, consistently named `io_*` helpers for prelude users.
 
 Examples:
+    # Read one line interactively (press Enter to finish)
+    name = io_read_stdin_line()
+
     # Read stdin text
     content = io_read_stdin()
 
@@ -40,6 +44,22 @@ def io_stdin_is_terminal() -> bool:
         bool: True when stdin is interactive; False for piped/redirected input.
     """
     return io.stdin_is_terminal()
+
+def io_read_stdin_line(encoding: str = "utf-8", strip_newline: bool = True) -> str:
+    """
+    Read one line from stdin, waiting until the user presses Enter or stdin reaches EOF.
+
+    Args:
+        encoding: "utf-8" (strict, default) or "lossy".
+        strip_newline: If True (default), remove the trailing line ending.
+
+    Returns:
+        str: The decoded line, without its line ending by default.
+
+    Raises:
+        Error: On unsupported encoding or decode failure in UTF-8 mode.
+    """
+    return io.read_stdin_line(encoding = encoding, strip_newline = strip_newline)
 
 def io_read_stdin_to_string(
         encoding: str = "utf-8",
