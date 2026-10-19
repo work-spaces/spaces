@@ -101,6 +101,18 @@ io_eprint(\"w\", end = \"\")
 io_eprint(\"q\", end = \"?\", flush = True)
 """
 
+READ_LINE_SCRIPT = """#!/usr/bin/env spaces
+load(\"//@star/prelude/exec/io.star\", \"io_read_stdin_line\")
+load(\"//@star/prelude/exec/json.star\", \"json_dumps\")
+
+results = {
+    \"first\": io_read_stdin_line(),
+    \"second_keep_newline\": io_read_stdin_line(strip_newline = False),
+}
+
+print(json_dumps(results))
+"""
+
 READ_SCRIPT = """#!/usr/bin/env spaces
 load(\"//@star/prelude/exec/io.star\", \"io_read_stdin\", \"io_read_stdin_lines\", \"io_read_stdin_to_string\")
 load(\"//@star/prelude/exec/json.star\", \"json_dumps\")
@@ -156,6 +168,19 @@ record("stdout_stderr_writes", "stderr_content", output_result.get("stderr") == 
 # ============================================================================
 # Stdin reading behavior
 # ============================================================================
+
+line_read_result = run_io_child(
+    READ_LINE_SCRIPT,
+    stdin = "first line\nsecond line\r\n",
+)
+record("stdin_reads", "line_reader_child_exits_zero", line_read_result.get("status") == 0)
+line_read_data = json_loads(line_read_result.get("stdout"))
+record("stdin_reads", "line_reader_stops_at_enter", line_read_data.get("first") == "first line")
+record(
+    "stdin_reads",
+    "line_reader_can_keep_newline",
+    line_read_data.get("second_keep_newline") == "second line\r\n",
+)
 
 stdin_payload = "line1\nline2\n"
 read_result = run_io_child(READ_SCRIPT, stdin = stdin_payload)
