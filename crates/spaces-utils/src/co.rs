@@ -738,6 +738,9 @@ impl QueryCoCommand {
 
                 match format {
                     console::Format::Pretty => {
+                        console.emit_lines(console::components::h3(
+                            "Search Results (least relevant to most relevant)",
+                        ));
                         for scored in &results {
                             emit_pretty_query_co_entry(&console, &scored.entry, Some(keywords));
                         }
