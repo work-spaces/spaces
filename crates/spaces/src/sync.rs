@@ -8,7 +8,7 @@ use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
 };
-use utils::{git, ws};
+use utils::{git, store, ws};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
 enum DevBranchAction {
@@ -1424,7 +1424,7 @@ pub fn emit_sync_complete_report(
         })
         .collect::<Vec<_>>();
 
-    emit_complete_report(console, "Sync Complete", report_rows);
+    emit_complete_report(console, "Sync Complete", report_rows, Vec::new());
 
     Ok(())
 }
@@ -1448,6 +1448,7 @@ fn describe_checkout_complete_result(snapshot: &RepoSyncSnapshot) -> String {
 pub fn emit_checkout_complete_report(
     console: console::Console,
     snapshots: &[RepoSyncSnapshot],
+    store_maintenance_status: Option<store::MaintenanceStatus>,
 ) -> anyhow::Result<()> {
     let report_rows = snapshots
         .iter()
@@ -1461,15 +1462,51 @@ pub fn emit_checkout_complete_report(
         })
         .collect::<Vec<_>>();
 
-    emit_complete_report(console, "Checkout Complete", report_rows);
+    let recommended_actions = store_maintenance_status
+        .map(|status| recommend_store_maintenance(&status))
+        .unwrap_or_default();
+
+    emit_complete_report(
+        console,
+        "Checkout Complete",
+        report_rows,
+        recommended_actions,
+    );
 
     Ok(())
+}
+
+fn recommend_store_maintenance(status: &store::MaintenanceStatus) -> Vec<console::Line> {
+    let (reason, interval_days) = match status {
+        store::MaintenanceStatus::UpToDate => return Vec::new(),
+        store::MaintenanceStatus::NeverRun { interval_days } => (
+            "Store maintenance has never been run.".to_string(),
+            interval_days,
+        ),
+        store::MaintenanceStatus::Overdue {
+            days_since_last_run,
+            interval_days,
+        } => (
+            format!("Store maintenance was last run {days_since_last_run} day(s) ago."),
+            interval_days,
+        ),
+    };
+
+    vec![
+        console::bootstrap::plain_text(format!("{reason}")).into_line(),
+        console::bootstrap::plain_text(format!(
+            "Run maintenance at least every {interval_days} day(s):"
+        ))
+        .into_line(),
+        console::bootstrap::code("  spaces store fix --git-fsck").into_line(),
+    ]
 }
 
 fn emit_complete_report(
     console: console::Console,
     title: &str,
     report_rows: Vec<(String, String)>,
+    recommended_actions: Vec<console::Line>,
 ) {
     use console::container;
 
@@ -1489,6 +1526,15 @@ fn emit_complete_report(
         report_list = report_list.item(label, summary);
     }
     container.add(report_list);
+
+    if !recommended_actions.is_empty() {
+        container.add(console::bootstrap::VerticalSpacer::new(1));
+        container.add(
+            console::components::Alert::new(recommended_actions)
+                .title("Recommended Actions")
+                .width(console::bootstrap::Width::Large),
+        );
+    }
 
     container.add(console::bootstrap::VerticalSpacer::new(1));
     container
