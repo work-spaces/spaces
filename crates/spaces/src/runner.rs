@@ -938,6 +938,26 @@ pub fn run_starlark_modules_in_workspace(
         }
     }
 
+    let is_new_checkout =
+        phase == task::Phase::Checkout && !is_sync_checkout && singleton::get_is_checkout();
+    if is_new_checkout && evaluation_result.is_ok() {
+        // The workspace has already been created successfully. Don't propagate report
+        // errors because a checkout failure causes the new workspace to be removed.
+        let report_result = sync::collect_repo_sync_snapshots(
+            console.clone(),
+            workspace_arc.clone(),
+            "checkout current revisions",
+        )
+        .and_then(|snapshots| {
+            sync::emit_checkout_complete_report(console.clone(), snapshots.as_slice())
+        });
+
+        if let Err(error) = report_result {
+            logger::Logger::new(console.clone(), "checkout".into())
+                .warning(format!("Failed to emit checkout report: {error:?}").as_str());
+        }
+    }
+
     drop(workspace_lock);
 
     // Now return the original sync result
