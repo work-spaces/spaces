@@ -1392,8 +1392,6 @@ pub fn emit_sync_complete_report(
     after_snapshots: &[RepoSyncSnapshot],
     plans: &[RepoSyncPlan],
 ) -> anyhow::Result<()> {
-    use console::container;
-
     let after_by_path = after_snapshots
         .iter()
         .map(|snapshot| (snapshot.path.clone(), snapshot))
@@ -1426,16 +1424,62 @@ pub fn emit_sync_complete_report(
         })
         .collect::<Vec<_>>();
 
+    emit_complete_report(console, "Sync Complete", report_rows);
+
+    Ok(())
+}
+
+fn describe_checkout_complete_result(snapshot: &RepoSyncSnapshot) -> String {
+    let current_ref = describe_snapshot_ref(snapshot);
+
+    if snapshot.is_dev_branch
+        && let Some(branch) = snapshot.current_branch.as_ref()
+        && branch != &snapshot.workspace_rev
+    {
+        return format!(
+            "created dev branch `{branch}` from {}\n{current_ref}",
+            snapshot.workspace_rev
+        );
+    }
+
+    current_ref
+}
+
+pub fn emit_checkout_complete_report(
+    console: console::Console,
+    snapshots: &[RepoSyncSnapshot],
+) -> anyhow::Result<()> {
+    let report_rows = snapshots
+        .iter()
+        .map(|snapshot| {
+            let label = format_repo_label_from_kind(
+                snapshot.path.as_ref(),
+                snapshot.is_dev_branch,
+                snapshot.is_rev_branch,
+            );
+            (label, describe_checkout_complete_result(snapshot))
+        })
+        .collect::<Vec<_>>();
+
+    emit_complete_report(console, "Checkout Complete", report_rows);
+
+    Ok(())
+}
+
+fn emit_complete_report(
+    console: console::Console,
+    title: &str,
+    report_rows: Vec<(String, String)>,
+) {
+    use console::container;
+
     let mut container = container::Container::new();
 
     container.add(console::bootstrap::VerticalSpacer::new(1));
     container.add(
-        console::bootstrap::Banner::new(format!(
-            "{} Sync Complete ",
-            console::bootstrap::icon_success()
-        ))
-        .width(console::bootstrap::Width::Large)
-        .variant(console::bootstrap::Variant::Success),
+        console::bootstrap::Banner::new(format!("{} {title} ", console::bootstrap::icon_success()))
+            .width(console::bootstrap::Width::Large)
+            .variant(console::bootstrap::Variant::Success),
     );
 
     let mut report_list = console::bootstrap::DescriptionList::new()
@@ -1451,8 +1495,6 @@ pub fn emit_sync_complete_report(
         .add(console::bootstrap::Divider::new().style(console::bootstrap::DividerStyle::Double));
 
     console.emit_container(&container);
-
-    Ok(())
 }
 
 fn resolve_removed_tracked_repo_paths(
@@ -2371,6 +2413,57 @@ mod tests {
             current_tag: current_tag.map(Arc::<str>::from),
             current_commit_hash: current_commit_hash.map(Arc::<str>::from),
         }
+    }
+
+    #[test]
+    fn describe_checkout_complete_result_reports_branch_with_short_hash() {
+        let snapshot = repo_sync_snapshot(
+            false,
+            true,
+            "main",
+            Some("main"),
+            None,
+            Some("1234567890abcdef"),
+        );
+
+        assert_eq!(
+            describe_checkout_complete_result(&snapshot),
+            "main 12345678"
+        );
+    }
+
+    #[test]
+    fn describe_checkout_complete_result_reports_tag_for_detached_checkout() {
+        let snapshot = repo_sync_snapshot(
+            false,
+            false,
+            "v1.0.0",
+            None,
+            Some("v1.0.0"),
+            Some("1234567890abcdef"),
+        );
+
+        assert_eq!(
+            describe_checkout_complete_result(&snapshot),
+            "v1.0.0 12345678"
+        );
+    }
+
+    #[test]
+    fn describe_checkout_complete_result_reports_dev_branch_creation() {
+        let snapshot = repo_sync_snapshot(
+            true,
+            true,
+            "main",
+            Some("user/feature"),
+            None,
+            Some("1234567890abcdef"),
+        );
+
+        assert_eq!(
+            describe_checkout_complete_result(&snapshot),
+            "created dev branch `user/feature` from main\nuser/feature 12345678"
+        );
     }
 
     #[test]
