@@ -328,10 +328,53 @@ impl CheckoutDerivedRepo {
             new_branch: self.new_branch.or(base.new_branch),
             clone: self.clone.or(base.clone),
             sparse_checkout: self.sparse_checkout.or(base.sparse_checkout),
-            env: self.env.or(base.env),
-            store: self.store.or(base.store),
+            env: Self::merge_env(base.env, self.env),
+            store: Self::merge_store(base.store, self.store),
             create_lock_file: self.create_lock_file.or(base.create_lock_file),
             help: self.help.or(base.help),
+        }
+    }
+
+    /// Base env entries initialize the derived env. Derived entries are appended and
+    /// replace any base entry with the same `NAME`.
+    fn merge_env(
+        base: Option<Vec<Arc<str>>>,
+        derived: Option<Vec<Arc<str>>>,
+    ) -> Option<Vec<Arc<str>>> {
+        fn env_key(entry: &str) -> &str {
+            entry.split_once('=').map(|(key, _)| key).unwrap_or(entry)
+        }
+
+        match (base, derived) {
+            (Some(base), Some(derived)) => {
+                let mut merged: Vec<Arc<str>> = base
+                    .into_iter()
+                    .filter(|base_entry| {
+                        let base_key = env_key(base_entry);
+                        !derived
+                            .iter()
+                            .any(|derived_entry| env_key(derived_entry) == base_key)
+                    })
+                    .collect();
+                merged.extend(derived);
+                Some(merged)
+            }
+            (base, derived) => derived.or(base),
+        }
+    }
+
+    /// Base store values initialize the derived store. Derived values are added and
+    /// replace any base value with the same key.
+    fn merge_store(
+        base: Option<HashMap<Arc<str>, toml::Value>>,
+        derived: Option<HashMap<Arc<str>, toml::Value>>,
+    ) -> Option<HashMap<Arc<str>, toml::Value>> {
+        match (base, derived) {
+            (Some(mut base), Some(derived)) => {
+                base.extend(derived);
+                Some(base)
+            }
+            (base, derived) => derived.or(base),
         }
     }
 }
@@ -1617,7 +1660,10 @@ env = ["CHILD=yes"]
         assert_eq!(repo.rev.as_ref(), "feature");
         assert_eq!(repo.rule_name.as_deref(), Some("spaces"));
         assert_eq!(repo.clone, Some(crate::git::Clone::Blobless));
-        assert_eq!(repo.env.as_deref(), Some([arc("CHILD=yes")].as_slice()));
+        assert_eq!(
+            repo.env.as_deref(),
+            Some([arc("BASE=yes"), arc("CHILD=yes")].as_slice())
+        );
         assert_eq!(
             repo.new_branch.as_deref(),
             Some([arc("//spaces")].as_slice())
@@ -1630,6 +1676,99 @@ env = ["CHILD=yes"]
                 .and_then(|store| store.get("REGION"))
                 .and_then(|value| value.as_str()),
             Some("us")
+        );
+    }
+
+    #[test]
+    fn checkout_repo_load_checkout_file_derive_from_merges_env_and_store() {
+        let temp_dir = tempdir().expect("failed to create tempdir");
+        let manifest_path = temp_dir.path().join("co.spaces.toml");
+
+        fs::write(
+            &manifest_path,
+            r#"
+[base.Repo]
+url = "https://example.com/base"
+rev = "main"
+env = ["SHARED=base", "BASE_ONLY=yes"]
+store = { SHARED = "base", BASE_ONLY = 1 }
+
+[middle.RepoDerived]
+derive-from = "base"
+env = ["SHARED=middle", "MIDDLE_ONLY=yes"]
+store = { SHARED = "middle", MIDDLE_ONLY = true }
+
+[child.RepoDerived]
+derive-from = "middle"
+env = ["CHILD_ONLY=yes"]
+store = { CHILD_ONLY = "yes" }
+"#,
+        )
+        .expect("failed to write checkout manifest");
+
+        let checkout_map =
+            Checkout::load_checkout_file(&manifest_path).expect("failed to load checkout repos");
+
+        let middle = match checkout_map.get("middle") {
+            Some(Checkout::Repo(repo)) => repo,
+            _ => panic!("expected middle checkout repo entry"),
+        };
+        assert_eq!(
+            middle.env.as_deref(),
+            Some(
+                [
+                    arc("BASE_ONLY=yes"),
+                    arc("SHARED=middle"),
+                    arc("MIDDLE_ONLY=yes")
+                ]
+                .as_slice()
+            )
+        );
+
+        let child = match checkout_map.get("child") {
+            Some(Checkout::Repo(repo)) => repo,
+            _ => panic!("expected child checkout repo entry"),
+        };
+        assert_eq!(
+            child.env.as_deref(),
+            Some(
+                [
+                    arc("BASE_ONLY=yes"),
+                    arc("SHARED=middle"),
+                    arc("MIDDLE_ONLY=yes"),
+                    arc("CHILD_ONLY=yes"),
+                ]
+                .as_slice()
+            )
+        );
+
+        let store = child.store.as_ref().expect("expected child store");
+        assert_eq!(store.len(), 4);
+        assert_eq!(store.get("SHARED").and_then(|v| v.as_str()), Some("middle"));
+        assert_eq!(store.get("BASE_ONLY").and_then(|v| v.as_integer()), Some(1));
+        assert_eq!(
+            store.get("MIDDLE_ONLY").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            store.get("CHILD_ONLY").and_then(|v| v.as_str()),
+            Some("yes")
+        );
+
+        let base = match checkout_map.get("base") {
+            Some(Checkout::Repo(repo)) => repo,
+            _ => panic!("expected base checkout repo entry"),
+        };
+        assert_eq!(
+            base.env.as_deref(),
+            Some([arc("SHARED=base"), arc("BASE_ONLY=yes")].as_slice())
+        );
+        assert_eq!(
+            base.store
+                .as_ref()
+                .and_then(|store| store.get("SHARED"))
+                .and_then(|v| v.as_str()),
+            Some("base")
         );
     }
 
