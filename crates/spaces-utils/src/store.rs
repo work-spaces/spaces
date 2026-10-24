@@ -13,6 +13,11 @@ const MANIFEST_FILE_NAME: &str = "store.spaces.json";
 pub const SPACES_STORE: &str = ".spaces/store";
 pub const SPACES_STORE_RCACHE: &str = "rcache";
 pub const SPACES_STORE_BARE: &str = "bare";
+const DEFAULT_MAINTENANCE_INTERVAL_DAYS: u128 = 7;
+const GIT_ACTION_FSCK: &str = "git fsck (checking integrity)";
+const GIT_ACTION_GC: &str = "git gc (optimizing)";
+const GIT_ACTION_FETCH: &str = "git fetch (repairing)";
+const GIT_ACTION_VALIDATE: &str = "validating";
 pub fn logger(console: console::Console) -> logger::Logger {
     logger::Logger::new(console, "store".into())
 }
@@ -148,11 +153,48 @@ fn collapse_slashes(s: &str) -> String {
     out
 }
 
+fn default_maintenance_interval_days() -> u128 {
+    DEFAULT_MAINTENANCE_INTERVAL_DAYS
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Maintenance {
+    /// Recommend running `spaces store fix --git-fsck` when it has not been run for this many days.
+    #[serde(default = "default_maintenance_interval_days")]
+    interval_days: u128,
+    /// Milliseconds since the UNIX epoch when `spaces store fix --git-fsck` last completed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_git_fsck: Option<u128>,
+}
+
+impl Default for Maintenance {
+    fn default() -> Self {
+        Self {
+            interval_days: DEFAULT_MAINTENANCE_INTERVAL_DAYS,
+            last_git_fsck: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MaintenanceStatus {
+    UpToDate,
+    NeverRun {
+        interval_days: u128,
+    },
+    Overdue {
+        days_since_last_run: u128,
+        interval_days: u128,
+    },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Store {
     entries: HashMap<Arc<str>, Entry>,
     #[serde(default)]
     unmanaged: HashMap<Arc<str>, UnmanagedDirectory>,
+    #[serde(default)]
+    maintenance: Maintenance,
     #[serde(skip)]
     path_to_store: std::path::PathBuf,
 }
@@ -168,7 +210,28 @@ impl Store {
         Self {
             entries: HashMap::new(),
             unmanaged: HashMap::new(),
+            maintenance: Maintenance::default(),
             path_to_store: path_to_store.into(),
+        }
+    }
+
+    /// Returns whether `spaces store fix --git-fsck` should be recommended based on
+    /// when it was last run against this store.
+    pub fn get_maintenance_status(&self, reference: u128) -> MaintenanceStatus {
+        let interval_days = self.maintenance.interval_days;
+        match self.maintenance.last_git_fsck {
+            None => MaintenanceStatus::NeverRun { interval_days },
+            Some(last_run) => {
+                let days_since_last_run = age::LastUsed::new(last_run).get_age(reference);
+                if days_since_last_run >= interval_days {
+                    MaintenanceStatus::Overdue {
+                        days_since_last_run,
+                        interval_days,
+                    }
+                } else {
+                    MaintenanceStatus::UpToDate
+                }
+            }
         }
     }
 
@@ -1024,6 +1087,7 @@ impl Store {
                 }
             }
 
+            progress.set_message("checking for unlisted entries");
             self.remove_unlisted_entries(console.clone(), is_dry_run)
                 .context(format_context!("While checking for unlisted entries"))?;
 
@@ -1048,6 +1112,7 @@ impl Store {
 
             // Clean up stale workspace links
             log.message("Verifying workspace links");
+            progress.set_message("verifying workspace links");
 
             let stale_links_cleaned = if is_dry_run {
                 // Count stale links without removing them
@@ -1091,9 +1156,8 @@ impl Store {
                     let mut repos_needing_repair = Vec::new();
                     for repo_path in &bare_repo_paths {
                         let path_str = repo_path.to_string_lossy();
-                        let (mut git_progress, display_name) =
-                            get_git_progress(progress.console.clone(), repo_path);
-                        progress.set_message(&display_name);
+                        let mut git_progress =
+                            start_git_progress(&progress, repo_path, GIT_ACTION_FSCK);
 
                         if !git::is_bare_repo_healthy(&mut git_progress, path_str.as_ref()) {
                             log.warning(
@@ -1124,9 +1188,8 @@ impl Store {
                     // Phase 1: maintenance (gc) - always run
                     for repo_path in &bare_repo_paths {
                         let path_str = repo_path.to_string_lossy();
-                        let (mut git_progress, display_name) =
-                            get_git_progress(progress.console.clone(), repo_path);
-                        progress.set_message(&display_name);
+                        let mut git_progress =
+                            start_git_progress(&progress, repo_path, GIT_ACTION_GC);
 
                         if !git::run_bare_repo_maintenance(&mut git_progress, path_str.as_ref()) {
                             log.warning(format!("gc failed for bare repo: {path_str}").as_str());
@@ -1138,10 +1201,8 @@ impl Store {
                     let mut repos_needing_repair = Vec::new();
                     for repo_path in &bare_repo_paths {
                         let path_str = repo_path.to_string_lossy();
-
-                        let (mut git_progress, display_name) =
-                            get_git_progress(progress.console.clone(), repo_path);
-                        progress.set_message(&display_name);
+                        let mut git_progress =
+                            start_git_progress(&progress, repo_path, GIT_ACTION_FSCK);
 
                         if !git::is_bare_repo_healthy(&mut git_progress, path_str.as_ref()) {
                             repos_needing_repair.push(repo_path.clone());
@@ -1157,9 +1218,8 @@ impl Store {
                         progress.update_progress(0, total);
                         for repo_path in &repos_needing_repair {
                             let path_str = repo_path.to_string_lossy();
-                            let (mut git_progress, display_name) =
-                                get_git_progress(progress.console.clone(), repo_path);
-                            progress.set_message(&display_name);
+                            let mut git_progress =
+                                start_git_progress(&progress, repo_path, GIT_ACTION_FETCH);
                             if git::fetch_bare_repo(&mut git_progress, path_str.as_ref()) {
                                 bare_repos_repaired += 1;
                                 log.info(format!("Fetched bare repo: {path_str}").as_str());
@@ -1181,9 +1241,7 @@ impl Store {
                 // Only run gc (no fsck or repair)
                 for repo_path in &bare_repo_paths {
                     let path_str = repo_path.to_string_lossy();
-                    let (mut git_progress, display_name) =
-                        get_git_progress(progress.console.clone(), repo_path);
-                    progress.set_message(&display_name);
+                    let mut git_progress = start_git_progress(&progress, repo_path, GIT_ACTION_GC);
 
                     if !git::run_bare_repo_maintenance(&mut git_progress, path_str.as_ref()) {
                         log.warning(format!("gc failed for bare repo: {path_str}").as_str());
@@ -1278,6 +1336,10 @@ impl Store {
                 progress.elapsed(),
                 finalize_message.as_str(),
             ));
+
+            if run_git_fsck && !is_dry_run {
+                self.maintenance.last_git_fsck = Some(age::get_now());
+            }
 
             emit_pretty_fix_report(&console, &fix_report);
 
@@ -1978,19 +2040,25 @@ fn emit_pretty_bare_info(
     bare_separator(console, console::bootstrap::Width::Custom(56));
 }
 
-fn get_git_progress(
-    console: console::Console,
+/// Creates a per-repo progress bar for a git command and labels both it and the
+/// overall `progress` bar with `action`. Some git commands (e.g. `fsck --no-progress`)
+/// produce no output until they finish, so without an initial message the bar
+/// would appear blank for the duration of the command.
+fn start_git_progress(
+    progress: &console::Progress,
     repo_path: &std::path::Path,
-) -> (console::Progress, String) {
+    action: &str,
+) -> console::Progress {
     let display_name = repo_path
         .file_name()
         .unwrap_or_default()
         .to_string_lossy()
         .to_string();
-    (
-        console::Progress::new(console, display_name.as_str(), None, None),
-        display_name,
-    )
+    progress.set_message(format!("{action}: {display_name}").as_str());
+    let git_progress =
+        console::Progress::new(progress.console.clone(), display_name.as_str(), None, None);
+    git_progress.set_message(action);
+    git_progress
 }
 
 fn show_bare_info(
@@ -2013,9 +2081,7 @@ fn show_bare_info(
         progress.update_progress(0, bare_repo_paths.len() as u64);
         for repo_path in bare_repo_paths {
             let path_str = repo_path.to_string_lossy();
-            let (mut git_progress, display_name) =
-                get_git_progress(progress.console.clone(), repo_path);
-            progress.set_message(&display_name);
+            let mut git_progress = start_git_progress(progress, repo_path, GIT_ACTION_VALIDATE);
 
             // Use lightweight validation for info command (no fsck)
             if !git::is_bare_repo_valid(&mut git_progress, path_str.as_ref()) {
@@ -2204,5 +2270,99 @@ mod tests {
         assert!(published_files.exists());
         assert!(published_json.exists());
         assert!(outside_staging.exists());
+    }
+
+    #[test]
+    fn test_maintenance_status() {
+        const DAY_MS: u128 = 24 * 60 * 60 * 1000;
+        let store_root = tempfile::tempdir().unwrap();
+        let mut store = Store::new(store_root.path());
+        let now = age::get_now();
+
+        assert_eq!(
+            store.get_maintenance_status(now),
+            MaintenanceStatus::NeverRun {
+                interval_days: DEFAULT_MAINTENANCE_INTERVAL_DAYS
+            }
+        );
+
+        store.maintenance.last_git_fsck = Some(now - DAY_MS);
+        assert_eq!(
+            store.get_maintenance_status(now),
+            MaintenanceStatus::UpToDate
+        );
+
+        store.maintenance.last_git_fsck = Some(now - DEFAULT_MAINTENANCE_INTERVAL_DAYS * DAY_MS);
+        assert_eq!(
+            store.get_maintenance_status(now),
+            MaintenanceStatus::Overdue {
+                days_since_last_run: DEFAULT_MAINTENANCE_INTERVAL_DAYS,
+                interval_days: DEFAULT_MAINTENANCE_INTERVAL_DAYS
+            }
+        );
+
+        // A custom interval from the manifest is respected.
+        store.maintenance.interval_days = 30;
+        assert_eq!(
+            store.get_maintenance_status(now),
+            MaintenanceStatus::UpToDate
+        );
+    }
+
+    #[test]
+    fn test_fix_with_git_fsck_records_maintenance() {
+        let store_root = tempfile::tempdir().unwrap();
+        let mut store = Store::new(store_root.path());
+
+        store
+            .fix(console::Console::new_null(), true, ci::IsCi::No, true)
+            .unwrap();
+        assert!(
+            store.maintenance.last_git_fsck.is_none(),
+            "dry run should not record maintenance"
+        );
+
+        store
+            .fix(console::Console::new_null(), false, ci::IsCi::No, false)
+            .unwrap();
+        assert!(
+            store.maintenance.last_git_fsck.is_none(),
+            "fix without --git-fsck should not record maintenance"
+        );
+
+        store
+            .fix(console::Console::new_null(), false, ci::IsCi::No, true)
+            .unwrap();
+        assert!(store.maintenance.last_git_fsck.is_some());
+
+        store.save(store_root.path()).unwrap();
+        let reloaded = Store::new_from_store_path(store_root.path()).unwrap();
+        assert_eq!(
+            reloaded.maintenance.last_git_fsck,
+            store.maintenance.last_git_fsck
+        );
+    }
+
+    #[test]
+    fn test_manifest_without_maintenance_deserializes() {
+        let store: Store = serde_json::from_str(r#"{"entries":{}}"#).unwrap();
+        assert!(store.maintenance.last_git_fsck.is_none());
+        assert_eq!(
+            store.maintenance.interval_days,
+            DEFAULT_MAINTENANCE_INTERVAL_DAYS
+        );
+
+        // `maintenance` present but without `interval_days` still defaults.
+        let store: Store =
+            serde_json::from_str(r#"{"entries":{},"maintenance":{"last_git_fsck":1}}"#).unwrap();
+        assert_eq!(store.maintenance.last_git_fsck, Some(1));
+        assert_eq!(
+            store.maintenance.interval_days,
+            DEFAULT_MAINTENANCE_INTERVAL_DAYS
+        );
+
+        let store: Store =
+            serde_json::from_str(r#"{"entries":{},"maintenance":{"interval_days":14}}"#).unwrap();
+        assert_eq!(store.maintenance.interval_days, 14);
     }
 }
