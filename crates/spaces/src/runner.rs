@@ -949,7 +949,16 @@ pub fn run_starlark_modules_in_workspace(
             "checkout current revisions",
         )
         .and_then(|snapshots| {
-            sync::emit_checkout_complete_report(console.clone(), snapshots.as_slice())
+            let store_path = workspace_arc.read().get_store_path();
+            let store_maintenance_status =
+                store::Store::new_from_store_path(std::path::Path::new(store_path.as_ref()))
+                    .ok()
+                    .map(|store| store.get_maintenance_status(utils::age::get_now()));
+            sync::emit_checkout_complete_report(
+                console.clone(),
+                snapshots.as_slice(),
+                store_maintenance_status,
+            )
         });
 
         if let Err(error) = report_result {
