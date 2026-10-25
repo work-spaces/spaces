@@ -24,6 +24,7 @@ pub const USAGE_PREFIX: &str = "spaces.usage.";
 
 pub const PERF_COMMAND_DURATION: &str = "spaces.perf.command.duration_seconds";
 pub const PERF_RULE_DURATION: &str = "spaces.perf.rule.duration_seconds";
+pub const PERF_RULE_HASH_INPUTS_DURATION: &str = "spaces.perf.rule.hash_inputs.duration_seconds";
 pub const PERF_EVALUATE_DURATION: &str = "spaces.perf.evaluate.duration_seconds";
 pub const PERF_STEP_DURATION: &str = "spaces.perf.step.duration_seconds";
 pub const PERF_REPO_STEP_DURATION: &str = "spaces.perf.repo_step.duration_seconds";

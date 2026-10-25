@@ -227,6 +227,10 @@ pub fn execute_rule(
         };
 
         let updated_digest = if !dep_globs.is_empty() && skip_execute_message.is_empty() {
+            let _hash_inputs_timer = telemetry::Timer::new(metrics::histogram!(
+                telemetry::PERF_RULE_HASH_INPUTS_DURATION,
+                "rule" => rule_name.clone()
+            ));
             logger
                 .debug(format!("update workspace changes with deps globs {dep_globs:?}").as_str());
 
