@@ -1,4 +1,4 @@
-use crate::{singleton, workspace};
+use crate::{singleton, telemetry, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use console::bootstrap::{IntoLine, replace_ascii_with_typography};
@@ -46,6 +46,32 @@ pub struct RepoSyncSnapshot {
 type NewBranchRevMismatch = (Arc<str>, Arc<str>, Arc<str>, Arc<str>);
 type NewBranchAlreadyExists = (Arc<str>, Arc<str>);
 type NonBranchRevTrackingAttempt = (Arc<str>, Arc<str>, bool, bool);
+
+/// When repository snapshots are collected; determines the progress name and metric step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnapshotStage {
+    PreEvalSync,
+    PostEvalSync,
+    Checkout,
+}
+
+impl SnapshotStage {
+    fn progress_name(self) -> &'static str {
+        match self {
+            SnapshotStage::PreEvalSync => "pre-eval sync current revisions",
+            SnapshotStage::PostEvalSync => "post-eval sync current revisions",
+            SnapshotStage::Checkout => "checkout current revisions",
+        }
+    }
+
+    fn metric_step(self) -> &'static str {
+        match self {
+            SnapshotStage::PreEvalSync => "sync.snapshots.pre_eval",
+            SnapshotStage::PostEvalSync => "sync.snapshots.post_eval",
+            SnapshotStage::Checkout => "co.snapshots",
+        }
+    }
+}
 
 #[derive(Debug, clap::Args)]
 pub struct SyncArgs {
@@ -342,6 +368,7 @@ pub fn build_repo_sync_plan(
     top_progress: &mut console::Progress,
     workspace_arc: workspace::WorkspaceArc,
 ) -> anyhow::Result<Vec<RepoSyncPlan>> {
+    let _timer = telemetry::time_step("sync.build_plan");
     let workspace_members = workspace_arc.read().settings.json.members.clone();
     let dev_branch_rules = workspace_arc.read().settings.json.dev_branches.clone();
     let stored_dev_branch_base_map = workspace_arc.read().settings.json.dev_branch_bases.clone();
@@ -458,6 +485,8 @@ pub fn build_repo_sync_plan(
             .par_iter()
             .map(
             |(url, member_path, member_rev)| -> anyhow::Result<Option<RepoPlanEvaluation>> {
+                let _repo_timer =
+                    telemetry::time_repo_step("sync.build_plan", member_path.clone());
                 let mut repo_progress = console::Progress::new(
                     console.clone(),
                     format!("//{}", member_path),
@@ -653,11 +682,15 @@ pub fn build_repo_sync_plan(
                         .expect("sync pre-evaluation action base ref should be present");
 
                     repo_progress.set_message("fetching latest");
-                    repo.fetch_with_prune(&mut repo_progress, git::IgnoreSubmodules::Yes)
-                        .context(format_context!(
-                            "//{} while fetching updates before sync pre-evaluation planning",
-                            member_path
-                        ))?;
+                    {
+                        let _fetch_timer =
+                            telemetry::time_repo_step("sync.fetch", member_path.clone());
+                        repo.fetch_with_prune(&mut repo_progress, git::IgnoreSubmodules::Yes)
+                            .context(format_context!(
+                                "//{} while fetching updates before sync pre-evaluation planning",
+                                member_path
+                            ))?;
+                    }
 
                     if !repo.base_ref_exists(&mut repo_progress, effective_base_ref.as_ref())? {
                         if let Some(explicit_base_ref) = explicit_base_ref.as_ref() {
@@ -688,6 +721,8 @@ pub fn build_repo_sync_plan(
                         );
                     } else if rebase_from.is_some() {
                         repo_progress.set_message("checking for rebase conflicts");
+                        let _check_timer =
+                            telemetry::time_repo_step("sync.rebase_check", member_path.clone());
                         match repo
                             .can_rebase_without_conflicts(
                                 &mut repo_progress,
@@ -707,6 +742,8 @@ pub fn build_repo_sync_plan(
                         }
                     } else if merge_from.is_some() {
                         repo_progress.set_message("checking for merge conflicts");
+                        let _check_timer =
+                            telemetry::time_repo_step("sync.merge_check", member_path.clone());
                         match repo
                             .can_merge_without_conflicts(
                                 &mut repo_progress,
@@ -1312,12 +1349,13 @@ fn describe_sync_complete_result(
 pub fn collect_repo_sync_snapshots(
     console: console::Console,
     workspace_arc: workspace::WorkspaceArc,
-    progress_name: &str,
+    stage: SnapshotStage,
 ) -> anyhow::Result<Vec<RepoSyncSnapshot>> {
+    let _timer = telemetry::time_step(stage.metric_step());
     let workspace_members = workspace_arc.read().settings.json.members.clone();
     let dev_branch_rules = workspace_arc.read().settings.json.dev_branches.clone();
 
-    let mut progress = console::Progress::new(console.clone(), progress_name, None, None);
+    let mut progress = console::Progress::new(console.clone(), stage.progress_name(), None, None);
     progress.set_message("capturing repositories in parallel");
 
     let snapshot_pool = rayon::ThreadPoolBuilder::new()
@@ -1335,6 +1373,8 @@ pub fn collect_repo_sync_snapshots(
                         return None;
                     }
 
+                    let _repo_timer =
+                        telemetry::time_repo_step(stage.metric_step(), member.path.clone());
                     let mut repo_progress = console::Progress::new(
                         console.clone(),
                         format!("//{}", member.path),
@@ -1634,6 +1674,7 @@ pub fn execute_removed_repo_post_sync_actions(
         return Ok(());
     }
 
+    let _timer = telemetry::time_step("sync.remove_repos");
     let mut deleted_repos = Vec::new();
     let mut dirty_repos = Vec::new();
     let mut repos_with_local_commits_not_on_remotes = Vec::new();
@@ -2035,6 +2076,7 @@ fn execute_pre_sync_actions_for_repo(
     console: console::Console,
     plan: RepoSyncPlan,
 ) -> Result<PreSyncExecutionOutcome, PreSyncExecutionFailure> {
+    let _repo_timer = telemetry::time_repo_step("sync.execute_plan", plan.path.clone());
     let mut repo_progress = console::Progress::new(
         console.clone(),
         format!("//{}", plan.path),
@@ -2199,6 +2241,7 @@ pub fn execute_repo_sync_plan(
     workspace_arc: workspace::WorkspaceArc,
     plans: &[RepoSyncPlan],
 ) -> anyhow::Result<Vec<Arc<str>>> {
+    let _timer = telemetry::time_step("sync.execute_plan");
     let actionable_plans = plans
         .iter()
         .filter(|plan| {
@@ -2269,6 +2312,7 @@ fn pop_stash_for_repo(
     url: Arc<str>,
     path: Arc<str>,
 ) -> anyhow::Result<()> {
+    let _repo_timer = telemetry::time_repo_step("sync.pop_stash", path.clone());
     let mut repo_progress = console::Progress::new(
         console.clone(),
         format!("//{}", path),
@@ -2335,6 +2379,7 @@ pub fn pop_stashed_repos(
         return Ok(());
     }
 
+    let _timer = telemetry::time_step("sync.pop_stashes");
     let workspace_members = workspace_arc.read().settings.json.members.clone();
     let current_repo_urls_by_path = workspace_members
         .iter()

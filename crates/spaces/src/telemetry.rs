@@ -25,6 +25,8 @@ pub const USAGE_PREFIX: &str = "spaces.usage.";
 pub const PERF_COMMAND_DURATION: &str = "spaces.perf.command.duration_seconds";
 pub const PERF_RULE_DURATION: &str = "spaces.perf.rule.duration_seconds";
 pub const PERF_EVALUATE_DURATION: &str = "spaces.perf.evaluate.duration_seconds";
+pub const PERF_STEP_DURATION: &str = "spaces.perf.step.duration_seconds";
+pub const PERF_REPO_STEP_DURATION: &str = "spaces.perf.repo_step.duration_seconds";
 pub const USAGE_COMMAND: &str = "spaces.usage.command";
 pub const USAGE_TARGET: &str = "spaces.usage.target";
 pub const USAGE_RULE: &str = "spaces.usage.rule";
@@ -46,6 +48,42 @@ pub fn cache_status_label(cache_status: &rcache::CacheStatus) -> &'static str {
         rcache::CacheStatus::Executed(_) => "executed",
         rcache::CacheStatus::Restored(_) => "restored",
     }
+}
+
+/// Records the time from creation until drop, so early returns and errors are included.
+#[must_use = "the elapsed time is recorded when the timer is dropped"]
+pub struct Timer {
+    histogram: Histogram,
+    start_time: std::time::Instant,
+}
+
+impl Timer {
+    pub fn new(histogram: Histogram) -> Self {
+        Self {
+            histogram,
+            start_time: std::time::Instant::now(),
+        }
+    }
+}
+
+impl Drop for Timer {
+    fn drop(&mut self) {
+        self.histogram.record(self.start_time.elapsed());
+    }
+}
+
+/// Times a workspace-level step (e.g. `sync.build_plan`).
+pub fn time_step(step: &'static str) -> Timer {
+    Timer::new(metrics::histogram!(PERF_STEP_DURATION, "step" => step))
+}
+
+/// Times a step applied to a single repository.
+pub fn time_repo_step(step: &'static str, repo: Arc<str>) -> Timer {
+    Timer::new(metrics::histogram!(
+        PERF_REPO_STEP_DURATION,
+        "step" => step,
+        "repo" => repo
+    ))
 }
 
 struct SpacesRecorder {
@@ -542,6 +580,29 @@ mod tests {
         let binding = new_binding(&workspace, store_dir.path(), true);
         let sinks = resolve_sinks(Some(&binding), || unreachable!()).unwrap();
         assert!(sinks.perf_path.is_none());
+    }
+
+    #[test]
+    fn test_timers_record_on_drop() {
+        let recorder = SpacesRecorder::new();
+        metrics::with_local_recorder(&recorder, || {
+            let _step_timer = time_step("sync.build_plan");
+            let _repo_timer = time_repo_step("sync.fetch", "repo-a".into());
+        });
+
+        let snapshot = take_snapshot(&recorder.registry);
+        assert_eq!(snapshot.histograms.len(), 2);
+
+        let repo_step = &snapshot.histograms[0];
+        assert_eq!(repo_step.name, PERF_REPO_STEP_DURATION);
+        assert_eq!(repo_step.labels["step"], "sync.fetch");
+        assert_eq!(repo_step.labels["repo"], "repo-a");
+        assert_eq!(repo_step.samples.len(), 1);
+
+        let step = &snapshot.histograms[1];
+        assert_eq!(step.name, PERF_STEP_DURATION);
+        assert_eq!(step.labels["step"], "sync.build_plan");
+        assert_eq!(step.samples.len(), 1);
     }
 
     #[test]

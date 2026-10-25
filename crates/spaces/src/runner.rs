@@ -55,6 +55,7 @@ fn get_workspace(
     is_checkout_phase: workspace::IsCheckoutPhase,
     is_create_log_folder: workspace::IsCreateLogFolder,
 ) -> anyhow::Result<workspace::Workspace> {
+    let _timer = telemetry::time_step("workspace.load");
     let checkout_scripts: Option<Vec<Arc<str>>> = match &run_workspace {
         RunWorkspace::Target(_, _) => None,
         RunWorkspace::Script(scripts) => Some(scripts.iter().map(|e| e.0.clone()).collect()),
@@ -757,7 +758,7 @@ pub fn run_starlark_modules_in_workspace(
             let before_snapshots = sync::collect_repo_sync_snapshots(
                 console.clone(),
                 workspace_arc.clone(),
-                "pre-eval sync current revisions",
+                sync::SnapshotStage::PreEvalSync,
             )
             .context(format_context!(
                 "while collecting pre-eval repository revisions"
@@ -907,7 +908,7 @@ pub fn run_starlark_modules_in_workspace(
             let after_sync_snapshots = sync::collect_repo_sync_snapshots(
                 console.clone(),
                 workspace_arc.clone(),
-                "post-eval sync current revisions",
+                sync::SnapshotStage::PostEvalSync,
             )
             .context(format_context!(
                 "while collecting post-eval sync repository revisions"
@@ -950,7 +951,7 @@ pub fn run_starlark_modules_in_workspace(
         let report_result = sync::collect_repo_sync_snapshots(
             console.clone(),
             workspace_arc.clone(),
-            "checkout current revisions",
+            sync::SnapshotStage::Checkout,
         )
         .and_then(|snapshots| {
             let store_path = workspace_arc.read().get_store_path();

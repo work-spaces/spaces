@@ -1,4 +1,4 @@
-use crate::{runner, singleton, task, tools, workspace};
+use crate::{runner, singleton, task, telemetry, tools, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use std::sync::Arc;
@@ -119,12 +119,16 @@ checkout_add_repo(
     )
     .into();
 
-    tools::install_tools(console.clone(), args.force_install_tools)
-        .context(format_context!("while installing tools"))?;
+    {
+        let _timer = telemetry::time_step("co.install_tools");
+        tools::install_tools(console.clone(), args.force_install_tools)
+            .context(format_context!("while installing tools"))?;
+    }
 
     co_logger(console.clone()).debug(format!("Adding branches {:?}", args.new_branch).as_str());
     handle_new_branch(args.new_branch);
 
+    let _timer = telemetry::time_step("co.checkout_workspace");
     runner::checkout(
         console.clone(),
         name,
@@ -158,6 +162,7 @@ pub fn checkout_workflow(
     singleton::set_args_locks(args.lock).context(format_context!("While checking out workflow"))?;
 
     if let Some(workflow) = workflow_args.workflow.or(workflow_args.wf) {
+        let _timer = telemetry::time_step("co.resolve_workflow");
         let parts: Vec<_> = workflow.split(':').collect();
         if parts.len() != 2 {
             return Err(format_error!(
@@ -220,9 +225,13 @@ pub fn checkout_workflow(
         }
     }
 
-    tools::install_tools(console.clone(), args.force_install_tools)
-        .context(format_context!("while installing tools"))?;
+    {
+        let _timer = telemetry::time_step("co.install_tools");
+        tools::install_tools(console.clone(), args.force_install_tools)
+            .context(format_context!("while installing tools"))?;
+    }
 
+    let _timer = telemetry::time_step("co.checkout_workspace");
     runner::checkout(
         console.clone(),
         name,
