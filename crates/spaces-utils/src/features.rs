@@ -1,3 +1,4 @@
+use crate::logger;
 use anyhow::Context;
 use anyhow_source_location::format_context;
 use clap::ValueEnum as _;
@@ -35,6 +36,9 @@ pub enum Feature {
     AllowInternalLoad,
     SkipForceFetchTags,
     EnableWorktreeClone,
+    TracingInfo,
+    TracingDebug,
+    TracingTrace,
 }
 
 impl Feature {
@@ -85,6 +89,15 @@ impl Feature {
             Feature::EnableWorktreeClone => {
                 r"Enable cloning repositories using git worktrees. When disabled,
                 requesting clone = 'Worktree' returns an error. Worktrees are deprecated and should be phased out."
+            }
+            Feature::TracingInfo => {
+                r"Write info-level diagnostic to `spaces.trace.log` in the log folder."
+            }
+            Feature::TracingDebug => {
+                r"Write debug-level diagnostic to `spaces.trace.log` in the log folder."
+            }
+            Feature::TracingTrace => {
+                r"Write trace-level diagnostic to `spaces.trace.log` in the log folder."
             }
         }
     }
@@ -191,6 +204,18 @@ impl Features {
     /// Disable a feature in the manifest
     pub fn disable(&mut self, feature: Feature) {
         self.features.insert(feature.to_string(), false);
+    }
+
+    /// Most verbose enabled `tracing-*` feature, or None.
+    pub fn get_trace_level(&self) -> Option<logger::TraceLevel> {
+        [
+            (Feature::TracingTrace, logger::TraceLevel::Trace),
+            (Feature::TracingDebug, logger::TraceLevel::Debug),
+            (Feature::TracingInfo, logger::TraceLevel::Info),
+        ]
+        .into_iter()
+        .find(|(feature, _)| self.is_enabled(*feature))
+        .map(|(_, level)| level)
     }
 
     /// Get the status of a feature and its source
@@ -513,5 +538,54 @@ mod tests {
             env::remove_var("SPACES_ENV_MODULE_CACHE");
             env::remove_var("SPACES_ENV_DEPRECATION_WARNINGS");
         }
+    }
+
+    #[test]
+    fn test_get_trace_level() {
+        const TRACING_ENV_VARS: [&str; 3] = [
+            "SPACES_ENV_TRACING_INFO",
+            "SPACES_ENV_TRACING_DEBUG",
+            "SPACES_ENV_TRACING_TRACE",
+        ];
+        let clear_env = || {
+            for var in TRACING_ENV_VARS {
+                unsafe { env::remove_var(var) };
+            }
+        };
+        clear_env();
+
+        assert_eq!(
+            Feature::TracingDebug.env_var_name(),
+            "SPACES_ENV_TRACING_DEBUG"
+        );
+        assert_eq!(
+            Feature::TracingDebug.into_kebab_case().as_ref(),
+            "tracing-debug"
+        );
+
+        // Default: no tracing
+        let mut features = Features::new();
+        assert_eq!(features.get_trace_level(), None);
+
+        // Manifest: most verbose wins
+        features.enable(Feature::TracingInfo);
+        assert_eq!(features.get_trace_level(), Some(logger::TraceLevel::Info));
+        features.enable(Feature::TracingDebug);
+        assert_eq!(features.get_trace_level(), Some(logger::TraceLevel::Debug));
+        features.disable(Feature::TracingInfo);
+        assert_eq!(features.get_trace_level(), Some(logger::TraceLevel::Debug));
+
+        // Env OFF overrides the manifest
+        unsafe { env::set_var("SPACES_ENV_TRACING_DEBUG", "OFF") };
+        assert_eq!(features.get_trace_level(), None);
+
+        // Env ON enables without the manifest
+        unsafe { env::set_var("SPACES_ENV_TRACING_TRACE", "ON") };
+        assert_eq!(
+            Features::new().get_trace_level(),
+            Some(logger::TraceLevel::Trace)
+        );
+
+        clear_env();
     }
 }

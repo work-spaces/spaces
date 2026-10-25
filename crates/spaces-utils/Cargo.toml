@@ -55,6 +55,8 @@ serde_yaml.workspace = true
 state.workspace = true
 starlark.workspace = true
 url.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
 termtree = "0.5"
 
 [dev-dependencies]

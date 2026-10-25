@@ -24,6 +24,8 @@ serde_yaml = "0.9"
 strum = { version = "0.26", features = ["derive"] }
 indexmap = { version = "2", features = ["serde"] }
 rayon = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 archiver = { path = "crates/spaces-archiver", package = "spaces-archiver"  }
 utils = { path = "crates/spaces-utils", package = "spaces-utils" }

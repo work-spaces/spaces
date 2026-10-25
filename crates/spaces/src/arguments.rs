@@ -57,6 +57,15 @@ pub struct Arguments {
     /// Create per-rule digest reports under `.spaces/digests` when running rules.
     #[arg(long)]
     create_digest_reports: bool,
+    /// Write a diagnostic trace to the run log folder (overrides `tracing-*` features)
+    #[arg(long)]
+    trace_level: Option<logger::TraceLevel>,
+    /// Advanced: tracing EnvFilter directives (overrides --trace-level)
+    #[arg(long, env = "SPACES_ENV_TRACE_FILTER")]
+    trace_filter: Option<String>,
+    /// Write the trace to this file instead of the run log folder (implies --trace-level=debug if no level is given)
+    #[arg(long, value_hint = ValueHint::FilePath)]
+    trace_file: Option<String>,
     #[command(subcommand)]
     commands: Commands,
 }
@@ -152,6 +161,9 @@ pub fn execute() -> anyhow::Result<()> {
         disable_logs,
         rescan,
         create_digest_reports,
+        trace_level,
+        trace_filter,
+        trace_file,
         commands,
     } = args;
 
@@ -191,6 +203,21 @@ pub fn execute() -> anyhow::Result<()> {
         show_elapsed_time,
     );
     singleton::set_is_create_digest_reports(create_digest_reports);
+
+    let trace_level = if trace_file.is_some() && trace_filter.is_none() {
+        Some(trace_level.unwrap_or(logger::TraceLevel::Debug))
+    } else {
+        trace_level
+    };
+    if let Err(error) = logger::init_tracing(logger::TraceOptions {
+        level: trace_level,
+        env_level: features::Features::new().get_trace_level(),
+        filter: trace_filter.map(Into::into),
+        file: trace_file.map(Into::into),
+    }) {
+        logger::Logger::new(effective_console.clone(), "tracing".into())
+            .warning(format!("Tracing is disabled: {error:#}").as_str());
+    }
 
     let refresh_handle = effective_console.start_refresh_thread();
     let result = execute_command(commands, effective_console.clone());
@@ -243,6 +270,19 @@ pub fn execute() -> anyhow::Result<()> {
     } else {
         Ok(())
     };
+
+    let is_tracing_enabled = logger::is_tracing_enabled();
+    if let Some(trace_path) = logger::shutdown_tracing() {
+        let _ = effective_console.log(
+            console::Level::Message,
+            format!("trace written to {trace_path}").as_str(),
+        );
+    } else if is_tracing_enabled {
+        let _ = effective_console.log(
+            console::Level::Message,
+            "trace discarded: not running in a workspace, use --trace-file=<path> to capture it",
+        );
+    }
 
     effective_console.shutdown_refresh_thread();
     let _ = refresh_handle.join();
