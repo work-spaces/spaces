@@ -30,6 +30,7 @@ pub const PERF_REPO_STEP_DURATION: &str = "spaces.perf.repo_step.duration_second
 pub const USAGE_COMMAND: &str = "spaces.usage.command";
 pub const USAGE_TARGET: &str = "spaces.usage.target";
 pub const USAGE_RULE: &str = "spaces.usage.rule";
+pub const USAGE_SEARCH: &str = "spaces.usage.search";
 
 type MetricsRegistry = Registry<Key, AtomicStorage>;
 
@@ -38,6 +39,30 @@ type MetricsRegistry = Registry<Key, AtomicStorage>;
 pub enum Status {
     Ok,
     Err,
+}
+
+/// What `spaces search` searched, used as the `scope` label of search metrics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::IntoStaticStr)]
+#[strum(serialize_all = "lowercase")]
+pub enum SearchScope {
+    /// Rules in the current workspace (`spaces query search`).
+    Rules,
+    /// Checkout workflows/repos in `co.spaces.toml` (`spaces query-co search`).
+    Workflows,
+}
+
+/// Counts each keyword passed to `spaces search`, `spaces query search`, or
+/// `spaces query-co search`. Keywords are lowercased because matching is case-insensitive.
+pub fn record_search(scope: SearchScope, keywords: &[Arc<str>]) {
+    let scope_label: &'static str = scope.into();
+    for keyword in keywords {
+        metrics::counter!(
+            USAGE_SEARCH,
+            "scope" => scope_label,
+            "keyword" => keyword.to_lowercase()
+        )
+        .increment(1);
+    }
 }
 
 /// Label value for the `cache` label of rule metrics.
@@ -603,6 +628,38 @@ mod tests {
         assert_eq!(step.name, PERF_STEP_DURATION);
         assert_eq!(step.labels["step"], "sync.build_plan");
         assert_eq!(step.samples.len(), 1);
+    }
+
+    #[test]
+    fn test_record_search_counts_keywords_by_scope() {
+        let recorder = SpacesRecorder::new();
+        metrics::with_local_recorder(&recorder, || {
+            record_search(SearchScope::Rules, &["build".into(), "check".into()]);
+            record_search(SearchScope::Rules, &["Build".into()]);
+            record_search(SearchScope::Workflows, &["build".into()]);
+        });
+
+        let snapshot = take_snapshot(&recorder.registry);
+        let counts: Vec<_> = snapshot
+            .counters
+            .iter()
+            .map(|counter| {
+                assert_eq!(counter.name, USAGE_SEARCH);
+                (
+                    counter.labels["scope"].as_str(),
+                    counter.labels["keyword"].as_str(),
+                    counter.value,
+                )
+            })
+            .collect();
+        assert_eq!(
+            counts,
+            vec![
+                ("rules", "build", 2),
+                ("workflows", "build", 1),
+                ("rules", "check", 1),
+            ]
+        );
     }
 
     #[test]

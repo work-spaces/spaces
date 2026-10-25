@@ -385,6 +385,9 @@ fn execute_query_command(
     effective_console: console::Console,
 ) -> anyhow::Result<()> {
     singleton::set_execution_phase(task::Phase::Inspect);
+    if let utils::query::QueryCommand::Search { query, .. } = &command {
+        telemetry::record_search(telemetry::SearchScope::Rules, query);
+    }
     singleton::set_query_command(command.clone());
 
     // When exporting stardoc, reuse the inspect --stardoc pipeline:
@@ -430,6 +433,10 @@ fn execute_query_co_command(
 ) -> anyhow::Result<()> {
     if effective_console.get_level() > console::Level::Info {
         effective_console.set_level(console::Level::Info);
+    }
+
+    if let utils::co::QueryCoCommand::Search { keywords, .. } = &command {
+        telemetry::record_search(telemetry::SearchScope::Workflows, keywords);
     }
 
     command
