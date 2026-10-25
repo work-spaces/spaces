@@ -792,7 +792,8 @@ impl Workspace {
             logger(progress.console.clone()).debug(format!("Digesting {name}").as_str());
         }
 
-        let log_folder_name = format!("logs_{}", date.format("%Y%m%d-%H-%M-%S-%3f"));
+        let log_timestamp = date.format("%Y%m%d-%H-%M-%S-%3f").to_string();
+        let log_folder_name = format!("logs_{log_timestamp}");
         let log_directory: Arc<str> = format!("{}/{log_folder_name}", ws::SPACES_LOGS_NAME).into();
 
         if is_create_log_folder == IsCreateLogFolder::Yes {
@@ -1019,6 +1020,32 @@ impl Workspace {
 
         if features.is_enabled(features::Feature::DeprecationWarnings) {
             logger::enable_deprecation_warnings();
+        }
+
+        if !logger::is_trace_level_overridden() {
+            logger::apply_trace_level(features.get_trace_level().unwrap_or_default());
+        }
+
+        if logger::is_tracing_enabled() {
+            // Creating a run log folder just for tracing would move the `latest` symlink to a
+            // folder without a log status file, so commands without one write a standalone
+            // trace file directly into `.spaces/logs`.
+            let trace_path = if is_create_log_folder == IsCreateLogFolder::Yes {
+                format!(
+                    "{absolute_path}/{log_directory}/{}",
+                    logger::TRACE_FILE_NAME
+                )
+            } else {
+                format!(
+                    "{absolute_path}/{}/{}",
+                    ws::SPACES_LOGS_NAME,
+                    logger::get_standalone_trace_file_name(log_timestamp.as_str())
+                )
+            };
+            if let Err(error) = logger::attach_trace_file(trace_path.as_str()) {
+                logger(console.clone())
+                    .warning(format!("Failed to attach trace file: {error:#}").as_str());
+            }
         }
 
         Ok(Self {
