@@ -11,7 +11,8 @@ pub use crate::bin_detail::{BinDetail, Blake3Hash};
 
 pub const SPACES_HOME_NAME: &str = ".spaces/home";
 pub const SPACES_LOGS_NAME: &str = ".spaces/logs";
-pub const METRICS_FILE_NAME: &str = ".spaces/metrics.spaces.json";
+pub const METRICS_DIR_NAME: &str = ".spaces/metrics";
+pub const PERF_METRICS_FILE_NAME: &str = "spaces.perf.jsonl";
 pub const SETTINGS_FILE_NAME: &str = ".spaces/settings.spaces.json";
 const CHECKOUT_FILE_NAME: &str = ".spaces/checkout.spaces.json";
 pub const CHECKOUT_STORE_FILE_NAME: &str = ".spaces/store.spaces.json";

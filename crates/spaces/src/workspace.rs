@@ -1,12 +1,12 @@
-use crate::{label, singleton, stardoc};
+use crate::{label, singleton, stardoc, telemetry};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use utils::{
-    age, changes, environment, features, fs_mutex, inputs, lock, logger, logs, mtarget, platform,
-    rcache, rule, store, ws,
+    age, changes, environment, features, inputs, lock, logger, logs, mtarget, platform, rcache,
+    rule, store, ws,
 };
 
 pub use rcache::CacheStatus;
@@ -92,18 +92,6 @@ fn parse_dev_branch_base_argument(entry: &str) -> anyhow::Result<(Arc<str>, Arc<
     Ok((ws::normalize_repo_selector(repo_selector), base_ref.into()))
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RuleMetrics {
-    elapsed_time: f64,
-    #[serde(default)]
-    cache_status: CacheStatus,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct RuleMetricsFile {
-    metrics: Vec<HashMap<Arc<str>, RuleMetrics>>,
-}
-
 #[derive(Debug, Serialize)]
 struct RuleDigestInput {
     workspace_path: Arc<str>,
@@ -115,42 +103,6 @@ struct RuleDigestReport {
     cache_digest: Arc<str>,
     rule_digest: Arc<str>,
     inputs: Vec<RuleDigestInput>,
-}
-
-impl RuleMetricsFile {
-    pub fn update(workspace: WorkspaceArc) -> anyhow::Result<()> {
-        let workspace_path = workspace.read().get_absolute_path();
-        let metric_entry = workspace.read().rule_metrics.clone();
-        let metrics_file = format!("{workspace_path}/{}", ws::METRICS_FILE_NAME);
-        let metrics_path: Arc<std::path::Path> = std::path::Path::new(metrics_file.as_str()).into();
-        let mut mutex = fs_mutex::FsMutex::new(metrics_path);
-        mutex.with_lock(|path| {
-            let metrics = if path.exists() {
-                let content = std::fs::read_to_string(path).context(format_context!(
-                    "Failed to read metrics file {}",
-                    path.display()
-                ))?;
-                let mut metrics_content: RuleMetricsFile =
-                    serde_json::from_str(content.as_str()).unwrap_or_default();
-                metrics_content.metrics.push(metric_entry);
-                metrics_content
-            } else {
-                RuleMetricsFile {
-                    metrics: vec![metric_entry],
-                }
-            };
-
-            let content = serde_json::to_string_pretty(&metrics)
-                .context(format_context!("Failed to serialize metrics"))?;
-
-            std::fs::write(path, content.as_str()).context(format_context!(
-                "Failed to write metrics file {}",
-                path.display()
-            ))
-        })?;
-
-        Ok(())
-    }
 }
 
 pub fn get_short_digest(digest: &str) -> Arc<str> {
@@ -344,7 +296,6 @@ pub struct Workspace {
     pub target: Option<Arc<str>>,     // target called from the command line
     pub trailing_args: Vec<Arc<str>>,
     pub updated_assets: HashSet<Arc<str>>, // used by assets to keep track of exclusive access
-    pub rule_metrics: HashMap<Arc<str>, RuleMetrics>, // used to keep track of rule metrics
     pub stardoc: stardoc::StarDoc,         // used to keep track of rule documentation
     pub settings: ws::Settings,
     pub is_any_digest_updated: bool,
@@ -393,21 +344,6 @@ impl Workspace {
                 self.locks.insert(key.clone(), value.clone());
             }
         }
-    }
-
-    pub fn update_rule_metrics(
-        &mut self,
-        rule_name: &str,
-        elapsed_time: std::time::Duration,
-        cache_status: CacheStatus,
-    ) {
-        self.rule_metrics.insert(
-            rule_name.into(),
-            RuleMetrics {
-                elapsed_time: elapsed_time.as_secs_f64(),
-                cache_status,
-            },
-        );
     }
 
     pub fn update_minimum_version(&mut self, version: &semver::Version) {
@@ -1026,6 +962,12 @@ impl Workspace {
             logger::apply_trace_level(features.get_trace_level().unwrap_or_default());
         }
 
+        telemetry::bind_workspace(
+            absolute_path.clone(),
+            settings.json.store_path.clone(),
+            &features,
+        );
+
         if logger::is_tracing_enabled() {
             // Creating a run log folder just for tracing would move the `latest` symlink to a
             // folder without a log status file, so commands without one write a standalone
@@ -1060,7 +1002,6 @@ impl Workspace {
             is_bin_dirty: is_dirty,
             minimum_version: semver::Version::new(0, 0, 0),
             updated_assets: HashSet::new(),
-            rule_metrics: HashMap::new(),
             stardoc: stardoc::StarDoc::default(),
             trailing_args: vec![],
             target: None,

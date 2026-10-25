@@ -1,5 +1,6 @@
 use crate::{
-    about, co, completions, docs, evaluator, rules, runner, singleton, sync, task, tools, workspace,
+    about, co, completions, docs, evaluator, rules, runner, singleton, sync, task, telemetry,
+    tools, workspace,
 };
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
@@ -220,7 +221,24 @@ pub fn execute() -> anyhow::Result<()> {
     }
 
     let refresh_handle = effective_console.start_refresh_thread();
+
+    // The LSP server is long-lived; metrics are per-invocation.
+    let telemetry_command = if matches!(commands, Commands::RunLsp { .. }) {
+        None
+    } else {
+        telemetry::init();
+        let command_name: &'static str = (&commands).into();
+        let targets: Vec<Arc<str>> = match &commands {
+            Commands::Run { target, .. } | Commands::Inspect { target, .. } => {
+                target.iter().cloned().collect()
+            }
+            _ => Vec::new(),
+        };
+        Some((command_name, targets, std::time::Instant::now()))
+    };
+
     let result = execute_command(commands, effective_console.clone());
+    let is_ok = result.is_ok();
     {
         let deferred_warnings = utils::logger::get_deferred_warnings();
         if !deferred_warnings.is_empty() {
@@ -271,6 +289,16 @@ pub fn execute() -> anyhow::Result<()> {
         Ok(())
     };
 
+    if let Some((command_name, targets, start_time)) = telemetry_command {
+        finish_telemetry(
+            effective_console,
+            command_name,
+            &targets,
+            is_ok,
+            start_time.elapsed(),
+        );
+    }
+
     let is_tracing_enabled = logger::is_tracing_enabled();
     if let Some(trace_path) = logger::shutdown_tracing() {
         let _ = effective_console.log(
@@ -289,6 +317,60 @@ pub fn execute() -> anyhow::Result<()> {
     effective_console.finalize();
 
     result
+}
+
+fn finish_telemetry(
+    console: &console::Console,
+    command_name: &'static str,
+    targets: &[Arc<str>],
+    is_ok: bool,
+    elapsed: std::time::Duration,
+) {
+    let status = if is_ok {
+        telemetry::Status::Ok
+    } else {
+        telemetry::Status::Err
+    };
+    let status_label: &'static str = status.into();
+    let ci_label = if singleton::get_is_ci() {
+        "true"
+    } else {
+        "false"
+    };
+
+    metrics::counter!(
+        telemetry::USAGE_COMMAND,
+        "command" => command_name,
+        "status" => status_label,
+        "ci" => ci_label
+    )
+    .increment(1);
+    for target in targets {
+        metrics::counter!(
+            telemetry::USAGE_TARGET,
+            "command" => command_name,
+            "target" => target.clone()
+        )
+        .increment(1);
+    }
+    metrics::histogram!(telemetry::PERF_COMMAND_DURATION, "command" => command_name)
+        .record(elapsed);
+
+    let Some(report) = telemetry::finish(command_name, status) else {
+        return;
+    };
+    for path in report.written {
+        let _ = console.log(
+            console::Level::Debug,
+            format!("metrics appended to {}", path.display()).as_str(),
+        );
+    }
+    for error in report.errors {
+        let _ = console.log(
+            console::Level::Debug,
+            format!("Failed to write metrics: {error:#}").as_str(),
+        );
+    }
 }
 
 fn is_in_workspace() -> anyhow::Result<bool> {
@@ -1010,7 +1092,8 @@ enum ForEachMode {
     },
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, strum::IntoStaticStr)]
+#[strum(serialize_all = "kebab-case")]
 enum Commands {
     #[command(about = r#"
 Executes the checkout rules in the specified scripts or workflow files."#)]

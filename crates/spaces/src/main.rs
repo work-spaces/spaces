@@ -19,6 +19,7 @@ mod singleton;
 mod stardoc;
 mod sync;
 mod task;
+mod telemetry;
 mod tools;
 mod workspace;
 
