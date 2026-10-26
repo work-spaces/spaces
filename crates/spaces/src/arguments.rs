@@ -6,7 +6,7 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
 use std::{io::IsTerminal, sync::Arc};
-use utils::{ci, features, git, logger, logs, shell, store, version};
+use utils::{ci, features, git, logger, logs, metrics_log, shell, store, version};
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
 pub enum Level {
@@ -222,20 +222,22 @@ pub fn execute() -> anyhow::Result<()> {
 
     let refresh_handle = effective_console.start_refresh_thread();
 
-    // The LSP server is long-lived; metrics are per-invocation.
-    let telemetry_command = if matches!(commands, Commands::RunLsp { .. }) {
-        None
-    } else {
-        telemetry::init();
-        let command_name: &'static str = (&commands).into();
-        let targets: Vec<Arc<str>> = match &commands {
-            Commands::Run { target, .. } | Commands::Inspect { target, .. } => {
-                target.iter().cloned().collect()
-            }
-            _ => Vec::new(),
+    // The LSP server is long-lived; metrics are per-invocation. The metrics viewer
+    // doesn't record metrics about itself.
+    let telemetry_command =
+        if matches!(commands, Commands::RunLsp { .. } | Commands::Metrics { .. }) {
+            None
+        } else {
+            telemetry::init();
+            let command_name: &'static str = (&commands).into();
+            let targets: Vec<Arc<str>> = match &commands {
+                Commands::Run { target, .. } | Commands::Inspect { target, .. } => {
+                    target.iter().cloned().collect()
+                }
+                _ => Vec::new(),
+            };
+            Some((command_name, targets, std::time::Instant::now()))
         };
-        Some((command_name, targets, std::time::Instant::now()))
-    };
 
     let result = execute_command(commands, effective_console.clone());
     let is_ok = result.is_ok();
@@ -1048,6 +1050,14 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             runner::run_features_command_in_workspace(effective_console, command)
                 .context(format_context!("Failed to run features command"))?
         }
+        Commands::Metrics { command } => {
+            effective_console.set_is_show_progress_bars(false);
+            if effective_console.get_level() > console::Level::Info {
+                effective_console.set_level(console::Level::Info);
+            }
+            runner::run_metrics_command_in_workspace(effective_console, command)
+                .context(format_context!("Failed to run metrics command"))?
+        }
         Commands::Version { command } => {
             if effective_console.get_level() > console::Level::Info {
                 effective_console.set_level(console::Level::Info);
@@ -1438,6 +1448,36 @@ create-lock-file = false # optionally create a lock file
         /// The mode to run the command in.
         #[command(subcommand)]
         command: features::FeaturesCommand,
+    },
+    /// View perf and usage metrics (tables and terminal plots).
+    #[command(
+        after_help = r#"Metrics are recorded when the `collect-metrics` feature is enabled
+(`spaces features enable collect-metrics`). `perf.*` metrics are stored in the
+workspace, `usage.*` metrics in the store.
+
+Examples:
+  spaces metrics info
+  spaces metrics summary perf.rule --label cache=executed --since 7d
+  # slowest rules by mean, or by p90
+  spaces metrics top perf.rule --limit 10
+  spaces metrics top perf.rule --stat p90 --limit 10
+  # most-used commands and top search keywords
+  spaces metrics top usage.command
+  spaces metrics top usage.search
+  # cache hit breakdown
+  spaces metrics top perf.rule --group-by cache --stat count
+  # distribution of `spaces run` time, and is it getting slower?
+  spaces metrics histogram perf.command --command run
+  spaces metrics trend perf.command --command run --bucket day
+  # compare spaces releases
+  spaces metrics summary perf.command --group-by @version
+  spaces metrics trend perf.repo_step --label step=sync.fetch --group-by repo
+  spaces metrics prune --age 90 --dry-run"#
+    )]
+    Metrics {
+        /// The metrics command to run.
+        #[command(subcommand)]
+        command: metrics_log::MetricsCommand,
     },
     /// Commands for managing the spaces version including checking for updates.
     Version {

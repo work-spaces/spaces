@@ -60,5 +60,6 @@ tracing-subscriber.workspace = true
 termtree = "0.5"
 
 [dev-dependencies]
+chrono-tz = "0.10"
 tempfile = "3"
 wiremock = "0.6"

@@ -2,8 +2,11 @@
 //!
 //! A single in-memory recorder collects all `metrics` samples during the process. At exit,
 //! `finish()` partitions them by name prefix and appends one JSON line per sink:
-//! - `spaces.perf.*` -> `<workspace>/.spaces/metrics/perf.jsonl`
-//! - `spaces.usage.*` -> `<store>/metrics/usage.jsonl`
+//! - `spaces.perf.*` -> `<workspace>/.spaces/metrics/spaces.perf.jsonl`
+//! - `spaces.usage.*` -> `<store>/metrics/spaces.usage.jsonl`
+//!
+//! The record schema, metric names, and paths are shared with the viewer in
+//! `utils::metrics_log` (`spaces metrics`).
 //!
 //! Collection is controlled by `Feature::CollectMetrics`. Errors never fail a command.
 
@@ -11,27 +14,19 @@ use anyhow::Context;
 use anyhow_source_location::format_context;
 use metrics::{Counter, Gauge, Histogram, Key, KeyName, Metadata, Recorder, SharedString, Unit};
 use metrics_util::registry::{AtomicStorage, Registry};
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::io::Write;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
-use utils::{features, fs_mutex, rcache, store, ws};
+use utils::metrics_log::{CounterRecord, HistogramRecord, Record};
+use utils::{features, fs_mutex, metrics_log, rcache, ws};
 
-pub const PERF_PREFIX: &str = "spaces.perf.";
-pub const USAGE_PREFIX: &str = "spaces.usage.";
-
-pub const PERF_COMMAND_DURATION: &str = "spaces.perf.command.duration_seconds";
-pub const PERF_RULE_DURATION: &str = "spaces.perf.rule.duration_seconds";
-pub const PERF_RULE_HASH_INPUTS_DURATION: &str = "spaces.perf.rule.hash_inputs.duration_seconds";
-pub const PERF_EVALUATE_DURATION: &str = "spaces.perf.evaluate.duration_seconds";
-pub const PERF_STEP_DURATION: &str = "spaces.perf.step.duration_seconds";
-pub const PERF_REPO_STEP_DURATION: &str = "spaces.perf.repo_step.duration_seconds";
-pub const USAGE_COMMAND: &str = "spaces.usage.command";
-pub const USAGE_TARGET: &str = "spaces.usage.target";
-pub const USAGE_RULE: &str = "spaces.usage.rule";
-pub const USAGE_SEARCH: &str = "spaces.usage.search";
+pub use utils::metrics_log::{
+    PERF_COMMAND_DURATION, PERF_EVALUATE_DURATION, PERF_PREFIX, PERF_REPO_STEP_DURATION,
+    PERF_RULE_DURATION, PERF_RULE_HASH_INPUTS_DURATION, PERF_STEP_DURATION, USAGE_COMMAND,
+    USAGE_PREFIX, USAGE_RULE, USAGE_SEARCH, USAGE_TARGET,
+};
 
 type MetricsRegistry = Registry<Key, AtomicStorage>;
 
@@ -237,9 +232,7 @@ struct Sinks {
 }
 
 fn get_usage_path(store_path: &str) -> PathBuf {
-    Path::new(store_path)
-        .join(store::SPACES_STORE_METRICS)
-        .join(store::USAGE_METRICS_FILE_NAME)
+    metrics_log::get_usage_path(Path::new(store_path))
 }
 
 /// Decides whether metrics are enabled and where they go. Uses the workspace binding if
@@ -265,31 +258,17 @@ fn resolve_sinks(
 
     // The workspace directory is removed when a checkout fails; don't recreate it.
     let workspace_path = Path::new(binding.workspace_path.as_ref());
-    let perf_path = workspace_path.is_dir().then(|| {
-        workspace_path
-            .join(ws::METRICS_DIR_NAME)
-            .join(ws::PERF_METRICS_FILE_NAME)
-    });
+    let perf_path = (workspace_path.is_dir()
+        && workspace_path
+            .join(crate::workspace::ENV_FILE_NAME)
+            .is_file())
+    .then(|| metrics_log::get_perf_path(workspace_path));
 
     Some(Sinks {
         workspace_path: Some(binding.workspace_path.clone()),
         perf_path,
         usage_path: get_usage_path(binding.store_path.as_ref()),
     })
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-struct CounterRecord {
-    name: String,
-    labels: BTreeMap<String, String>,
-    value: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-struct HistogramRecord {
-    name: String,
-    labels: BTreeMap<String, String>,
-    samples: Vec<f64>,
 }
 
 #[derive(Debug, Default)]
@@ -360,17 +339,6 @@ fn take_snapshot(registry: &MetricsRegistry) -> Snapshot {
     snapshot
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct Record {
-    timestamp_ms: u64,
-    spaces_version: String,
-    command: String,
-    status: String,
-    workspace: Option<String>,
-    counters: Vec<CounterRecord>,
-    histograms: Vec<HistogramRecord>,
-}
-
 fn write_records(
     registry: &MetricsRegistry,
     sinks: &Sinks,
@@ -426,12 +394,24 @@ fn append_record(path: &Path, record: &Record) -> anyhow::Result<()> {
         }
         let mut file = std::fs::OpenOptions::new()
             .create(true)
+            .read(true)
             .append(true)
             .open(path)
             .context(format_context!(
                 "Failed to open metrics file {}",
                 path.display()
             ))?;
+        if file.metadata()?.len() > 0 {
+            file.seek(SeekFrom::End(-1))?;
+            let mut last_byte = [0];
+            file.read_exact(&mut last_byte)?;
+            if last_byte[0] != b'\n' {
+                file.write_all(b"\n").context(format_context!(
+                    "Failed to write metrics file {}",
+                    path.display()
+                ))?;
+            }
+        }
         file.write_all(line.as_bytes()).context(format_context!(
             "Failed to write metrics file {}",
             path.display()
@@ -442,6 +422,7 @@ fn append_record(path: &Path, record: &Record) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use utils::store;
 
     fn record_sample_metrics(recorder: &SpacesRecorder) {
         metrics::with_local_recorder(recorder, || {
@@ -479,15 +460,65 @@ mod tests {
         }
     }
 
-    fn get_perf_path(workspace: &Path) -> PathBuf {
+    fn new_workspace() -> tempfile::TempDir {
+        let workspace = tempfile::tempdir().unwrap();
+        std::fs::write(workspace.path().join(crate::workspace::ENV_FILE_NAME), "").unwrap();
         workspace
-            .join(ws::METRICS_DIR_NAME)
-            .join(ws::PERF_METRICS_FILE_NAME)
+    }
+
+    fn get_perf_path(workspace: &Path) -> PathBuf {
+        metrics_log::get_perf_path(workspace)
+    }
+
+    #[test]
+    fn test_written_records_round_trip_through_metrics_log() {
+        let workspace = new_workspace();
+        let store_dir = tempfile::tempdir().unwrap();
+        let binding = new_binding(workspace.path(), store_dir.path(), true);
+        let sinks = resolve_sinks(Some(&binding), || unreachable!()).unwrap();
+
+        let recorder = SpacesRecorder::new();
+        record_sample_metrics(&recorder);
+        let report = write_records(&recorder.registry, &sinks, "run", Status::Ok, 42);
+        assert!(report.errors.is_empty(), "{:?}", report.errors);
+
+        let perf = metrics_log::read_records(&get_perf_path(workspace.path())).unwrap();
+        assert_eq!(perf.skipped, 0);
+        assert_eq!(perf.records.len(), 1);
+        let record = &perf.records[0];
+        assert_eq!(record.timestamp_ms, 42);
+        assert_eq!(record.command, "run");
+        assert_eq!(record.status, "ok");
+        assert_eq!(
+            record.workspace.as_deref(),
+            Some(binding.workspace_path.as_ref())
+        );
+        assert_eq!(record.histograms.len(), 2);
+        assert_eq!(record.histograms[1].name, PERF_RULE_DURATION);
+        assert_eq!(record.histograms[1].samples, vec![1.5]);
+
+        let usage = metrics_log::read_records(&get_usage_path(&binding.store_path)).unwrap();
+        assert_eq!(usage.records.len(), 1);
+        assert_eq!(usage.records[0].counters.len(), 2);
+        assert_eq!(usage.records[0].counters[0].name, USAGE_COMMAND);
+
+        // The viewer selects the written samples by short metric name.
+        let metric = metrics_log::Metric::parse("perf.rule").unwrap();
+        let selection = metrics_log::select(
+            &perf.records,
+            &metric,
+            metric.kind(&perf.records),
+            metric.default_group_by(),
+            &metrics_log::Filter::default(),
+            false,
+            None,
+        );
+        assert_eq!(selection.groups["//spaces:check"][0].value, 1.5);
     }
 
     #[test]
     fn test_metrics_are_partitioned_by_prefix() {
-        let workspace = tempfile::tempdir().unwrap();
+        let workspace = new_workspace();
         let store_dir = tempfile::tempdir().unwrap();
         let binding = new_binding(workspace.path(), store_dir.path(), true);
         let sinks = resolve_sinks(Some(&binding), || unreachable!()).unwrap();
@@ -520,8 +551,34 @@ mod tests {
     }
 
     #[test]
+    fn test_append_after_partial_line_starts_new_record() {
+        let workspace = new_workspace();
+        let store_dir = tempfile::tempdir().unwrap();
+        let binding = new_binding(workspace.path(), store_dir.path(), true);
+        let sinks = resolve_sinks(Some(&binding), || unreachable!()).unwrap();
+
+        let perf_path = sinks.perf_path.as_ref().unwrap();
+        for path in [&sinks.usage_path, perf_path] {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, b"{\"interrupted\":").unwrap();
+        }
+
+        let recorder = SpacesRecorder::new();
+        record_sample_metrics(&recorder);
+        let report = write_records(&recorder.registry, &sinks, "run", Status::Ok, 1);
+        assert!(report.errors.is_empty(), "{:?}", report.errors);
+
+        for path in [&sinks.usage_path, perf_path] {
+            let records = metrics_log::read_records(path).unwrap();
+            assert_eq!(records.skipped, 1);
+            assert_eq!(records.records.len(), 1);
+            assert_eq!(records.records[0].command, "run");
+        }
+    }
+
+    #[test]
     fn test_finish_twice_appends_two_lines() {
-        let workspace = tempfile::tempdir().unwrap();
+        let workspace = new_workspace();
         let store_dir = tempfile::tempdir().unwrap();
         let binding = new_binding(workspace.path(), store_dir.path(), true);
         let sinks = resolve_sinks(Some(&binding), || unreachable!()).unwrap();
@@ -600,12 +657,22 @@ mod tests {
     }
 
     #[test]
-    fn test_missing_workspace_skips_perf() {
+    fn test_workspace_marker_controls_perf_sink() {
         let store_dir = tempfile::tempdir().unwrap();
-        let workspace = store_dir.path().join("removed-workspace");
+        let workspace = store_dir.path().join("workspace");
+        std::fs::create_dir(&workspace).unwrap();
         let binding = new_binding(&workspace, store_dir.path(), true);
-        let sinks = resolve_sinks(Some(&binding), || unreachable!()).unwrap();
-        assert!(sinks.perf_path.is_none());
+
+        // A checkout failure may leave the original directory but removes its contents.
+        let cleaned_up_sinks = resolve_sinks(Some(&binding), || unreachable!()).unwrap();
+        assert!(cleaned_up_sinks.perf_path.is_none());
+
+        std::fs::write(workspace.join(crate::workspace::ENV_FILE_NAME), "").unwrap();
+        let valid_workspace_sinks = resolve_sinks(Some(&binding), || unreachable!()).unwrap();
+        assert_eq!(
+            valid_workspace_sinks.perf_path,
+            Some(get_perf_path(&workspace))
+        );
     }
 
     #[test]

@@ -101,7 +101,7 @@ impl Feature {
                 r"Write trace-level diagnostic to `spaces.trace.log` in the log folder."
             }
             Feature::CollectMetrics => {
-                r"Record command usage (in the store) and rule/operation timings (in the workspace)."
+                r"Record command usage (in the store) and rule/operation timings (in the workspace). View them with `spaces metrics`."
             }
         }
     }
@@ -223,7 +223,7 @@ impl Features {
     }
 
     /// Get the status of a feature and its source
-    fn get_status_with_source(&self, feature: Feature) -> (bool, FeatureSource) {
+    pub fn get_status_with_source(&self, feature: Feature) -> (bool, FeatureSource) {
         // Check environment variable first
         if let Ok(env_value) = std::env::var(feature.env_var_name()) {
             let enabled = env_value.to_uppercase() == "ON";
