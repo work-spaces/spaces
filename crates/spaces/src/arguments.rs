@@ -1,11 +1,12 @@
 use crate::{
-    about, co, completions, docs, evaluator, rules, runner, singleton, sync, task, tools, workspace,
+    about, co, completions, docs, evaluator, rules, runner, singleton, sync, task, telemetry,
+    tools, workspace,
 };
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
 use std::{io::IsTerminal, sync::Arc};
-use utils::{ci, features, git, logger, logs, shell, store, version};
+use utils::{ci, features, git, logger, logs, metrics_log, shell, store, version};
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
 pub enum Level {
@@ -220,7 +221,26 @@ pub fn execute() -> anyhow::Result<()> {
     }
 
     let refresh_handle = effective_console.start_refresh_thread();
+
+    // The LSP server is long-lived; metrics are per-invocation. The metrics viewer
+    // doesn't record metrics about itself.
+    let telemetry_command =
+        if matches!(commands, Commands::RunLsp { .. } | Commands::Metrics { .. }) {
+            None
+        } else {
+            telemetry::init();
+            let command_name: &'static str = (&commands).into();
+            let targets: Vec<Arc<str>> = match &commands {
+                Commands::Run { target, .. } | Commands::Inspect { target, .. } => {
+                    target.iter().cloned().collect()
+                }
+                _ => Vec::new(),
+            };
+            Some((command_name, targets, std::time::Instant::now()))
+        };
+
     let result = execute_command(commands, effective_console.clone());
+    let is_ok = result.is_ok();
     {
         let deferred_warnings = utils::logger::get_deferred_warnings();
         if !deferred_warnings.is_empty() {
@@ -271,6 +291,16 @@ pub fn execute() -> anyhow::Result<()> {
         Ok(())
     };
 
+    if let Some((command_name, targets, start_time)) = telemetry_command {
+        finish_telemetry(
+            effective_console,
+            command_name,
+            &targets,
+            is_ok,
+            start_time.elapsed(),
+        );
+    }
+
     let is_tracing_enabled = logger::is_tracing_enabled();
     if let Some(trace_path) = logger::shutdown_tracing() {
         let _ = effective_console.log(
@@ -291,6 +321,60 @@ pub fn execute() -> anyhow::Result<()> {
     result
 }
 
+fn finish_telemetry(
+    console: &console::Console,
+    command_name: &'static str,
+    targets: &[Arc<str>],
+    is_ok: bool,
+    elapsed: std::time::Duration,
+) {
+    let status = if is_ok {
+        telemetry::Status::Ok
+    } else {
+        telemetry::Status::Err
+    };
+    let status_label: &'static str = status.into();
+    let ci_label = if singleton::get_is_ci() {
+        "true"
+    } else {
+        "false"
+    };
+
+    metrics::counter!(
+        telemetry::USAGE_COMMAND,
+        "command" => command_name,
+        "status" => status_label,
+        "ci" => ci_label
+    )
+    .increment(1);
+    for target in targets {
+        metrics::counter!(
+            telemetry::USAGE_TARGET,
+            "command" => command_name,
+            "target" => target.clone()
+        )
+        .increment(1);
+    }
+    metrics::histogram!(telemetry::PERF_COMMAND_DURATION, "command" => command_name)
+        .record(elapsed);
+
+    let Some(report) = telemetry::finish(command_name, status) else {
+        return;
+    };
+    for path in report.written {
+        let _ = console.log(
+            console::Level::Debug,
+            format!("metrics appended to {}", path.display()).as_str(),
+        );
+    }
+    for error in report.errors {
+        let _ = console.log(
+            console::Level::Debug,
+            format!("Failed to write metrics: {error:#}").as_str(),
+        );
+    }
+}
+
 fn is_in_workspace() -> anyhow::Result<bool> {
     let current_working_directory = workspace::get_current_working_directory()
         .context(format_context!("while getting current working directory"))?;
@@ -303,6 +387,9 @@ fn execute_query_command(
     effective_console: console::Console,
 ) -> anyhow::Result<()> {
     singleton::set_execution_phase(task::Phase::Inspect);
+    if let utils::query::QueryCommand::Search { query, .. } = &command {
+        telemetry::record_search(telemetry::SearchScope::Rules, query);
+    }
     singleton::set_query_command(command.clone());
 
     // When exporting stardoc, reuse the inspect --stardoc pipeline:
@@ -348,6 +435,10 @@ fn execute_query_co_command(
 ) -> anyhow::Result<()> {
     if effective_console.get_level() > console::Level::Info {
         effective_console.set_level(console::Level::Info);
+    }
+
+    if let utils::co::QueryCoCommand::Search { keywords, .. } = &command {
+        telemetry::record_search(telemetry::SearchScope::Workflows, keywords);
     }
 
     command
@@ -959,6 +1050,14 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             runner::run_features_command_in_workspace(effective_console, command)
                 .context(format_context!("Failed to run features command"))?
         }
+        Commands::Metrics { command } => {
+            effective_console.set_is_show_progress_bars(false);
+            if effective_console.get_level() > console::Level::Info {
+                effective_console.set_level(console::Level::Info);
+            }
+            runner::run_metrics_command_in_workspace(effective_console, command)
+                .context(format_context!("Failed to run metrics command"))?
+        }
         Commands::Version { command } => {
             if effective_console.get_level() > console::Level::Info {
                 effective_console.set_level(console::Level::Info);
@@ -1010,7 +1109,8 @@ enum ForEachMode {
     },
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, strum::IntoStaticStr)]
+#[strum(serialize_all = "kebab-case")]
 enum Commands {
     #[command(about = r#"
 Executes the checkout rules in the specified scripts or workflow files."#)]
@@ -1348,6 +1448,36 @@ create-lock-file = false # optionally create a lock file
         /// The mode to run the command in.
         #[command(subcommand)]
         command: features::FeaturesCommand,
+    },
+    /// View perf and usage metrics (tables and terminal plots).
+    #[command(
+        after_help = r#"Metrics are recorded when the `collect-metrics` feature is enabled
+(`spaces features enable collect-metrics`). `perf.*` metrics are stored in the
+workspace, `usage.*` metrics in the store.
+
+Examples:
+  spaces metrics info
+  spaces metrics summary perf.rule --label cache=executed --since 7d
+  # slowest rules by mean, or by p90
+  spaces metrics top perf.rule --limit 10
+  spaces metrics top perf.rule --stat p90 --limit 10
+  # most-used commands and top search keywords
+  spaces metrics top usage.command
+  spaces metrics top usage.search
+  # cache hit breakdown
+  spaces metrics top perf.rule --group-by cache --stat count
+  # distribution of `spaces run` time, and is it getting slower?
+  spaces metrics histogram perf.command --command run
+  spaces metrics trend perf.command --command run --bucket day
+  # compare spaces releases
+  spaces metrics summary perf.command --group-by @version
+  spaces metrics trend perf.repo_step --label step=sync.fetch --group-by repo
+  spaces metrics prune --age 90 --dry-run"#
+    )]
+    Metrics {
+        /// The metrics command to run.
+        #[command(subcommand)]
+        command: metrics_log::MetricsCommand,
     },
     /// Commands for managing the spaces version including checking for updates.
     Version {

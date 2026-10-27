@@ -1,6 +1,8 @@
 use crate::builtins::eval_context::EvalContext;
 use crate::workspace::WorkspaceArc;
-use crate::{builtins, evaluation_profile, executor, prelude, rules, singleton, task, workspace};
+use crate::{
+    builtins, evaluation_profile, executor, prelude, rules, singleton, task, telemetry, workspace,
+};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use starlark::environment::{FrozenModule, GlobalsBuilder, Module};
@@ -1065,6 +1067,7 @@ pub fn evaluate_starlark_modules(
     let checkout_state_digest = if phase != task::Phase::Checkout
         && let Some((name, content, queued_at)) = module_queue.pop_front()
     {
+        let _timer = telemetry::time_step("eval.env_module");
         let queue_wait = Some(queued_at.elapsed());
         evaluation_profile::set_next_module_metadata(
             evaluation_profile::ModuleCacheStatus::Bypass,
@@ -1112,6 +1115,11 @@ pub fn evaluate_starlark_modules(
     // to subsequent modules
     const MAX_CONCURRENT_EVALS: usize = 8;
     let mut eval_handles: Vec<(Arc<str>, std::thread::JoinHandle<anyhow::Result<()>>)> = Vec::new();
+    // Outside of checkout, modules are evaluated in parallel so the whole loop is timed.
+    // During checkout, evaluation is interleaved with rule execution so each module
+    // evaluation is timed separately below.
+    let eval_modules_timer =
+        (phase != task::Phase::Checkout).then(|| telemetry::time_step("eval.modules"));
     while !module_queue.is_empty() {
         if let Some((name, content, queued_at)) = module_queue.pop_front() {
             let queue_wait = Some(queued_at.elapsed());
@@ -1186,29 +1194,41 @@ pub fn evaluate_starlark_modules(
                 let rule_name = utils::labels::get_rule_name_from_label(name.as_ref());
                 progress.set_prefix(format!("[{rule_name}]").as_str());
 
-                show_eval_progress(console.clone(), &name, handle)
-                    .with_context(|| format_context!("Failed to show eval progress"))?;
+                {
+                    let _timer = telemetry::time_step("eval.modules");
+                    show_eval_progress(console.clone(), &name, handle)
+                        .with_context(|| format_context!("Failed to show eval progress"))?;
+                }
 
                 logger.debug("--Checkout Phase--");
 
-                rules::update_depedency_graph(console.clone(), None, phase)
-                    .with_context(|| format_context!("Failed to evaluate dependency graph"))?;
+                {
+                    let _timer = telemetry::time_step("graph.build");
+                    rules::update_depedency_graph(console.clone(), None, phase)
+                        .with_context(|| format_context!("Failed to evaluate dependency graph"))?;
+                }
 
-                rules::update_target_dependency_graph(console.clone(), None).with_context(
-                    || {
-                        format_context!(
-                            "Failed to update run target dependency graph during checkout"
-                        )
-                    },
-                )?;
+                {
+                    let _timer = telemetry::time_step("graph.sort");
+                    rules::update_target_dependency_graph(console.clone(), None).with_context(
+                        || {
+                            format_context!(
+                                "Failed to update run target dependency graph during checkout"
+                            )
+                        },
+                    )?;
+                }
 
                 rules::debug_sorted_tasks(console.clone(), phase)
                     .with_context(|| format_context!("Failed to debug sorted tasks"))?;
 
                 progress.set_message(format!("Executing {phase} rules").as_str());
 
-                let task_result = rules::execute(progress, workspace.clone(), phase)
-                    .with_context(|| format_context!("Failed to execute tasks"))?;
+                let task_result = {
+                    let _timer = telemetry::time_step("graph.execute");
+                    rules::execute(progress, workspace.clone(), phase)
+                        .with_context(|| format_context!("Failed to execute tasks"))?
+                };
 
                 update_secrets(console.clone(), workspace.clone())
                     .with_context(|| format_context!("while running checkout tasks"))?;
@@ -1285,6 +1305,7 @@ pub fn evaluate_starlark_modules(
         h.join()
             .map_err(|_| format_error!("eval thread panicked for {n}"))??;
     }
+    drop(eval_modules_timer);
 
     if let Some(stardoc) = singleton::get_inspect_options().stardoc {
         let workspace = workspace.read();
@@ -1378,10 +1399,13 @@ fn execute_tasks(
         task::Phase::Run => {
             update_secrets(console.clone(), workspace.clone())
                 .context(format_context!("while entering run phase"))?;
-            rules::update_target_dependency_graph(console.clone(), Some(run_target.clone()))
-                .context(format_context!(
-                    "Failed to update run target dependency graph for {run_target}"
-                ))?;
+            {
+                let _timer = telemetry::time_step("graph.sort");
+                rules::update_target_dependency_graph(console.clone(), Some(run_target.clone()))
+                    .context(format_context!(
+                        "Failed to update run target dependency graph for {run_target}"
+                    ))?;
+            }
 
             {
                 // apply args_env to workspace
@@ -1409,7 +1433,10 @@ fn execute_tasks(
             let mut progress =
                 console::Progress::new(console.clone(), "Executing tasks", Some(0), None);
 
-            let execute_result = rules::execute(&mut progress, workspace.clone(), phase);
+            let execute_result = {
+                let _timer = telemetry::time_step("graph.execute");
+                rules::execute(&mut progress, workspace.clone(), phase)
+            };
 
             rules::export_log_status(workspace.clone())
                 .context(format_context!("Failed to export log status"))?;
@@ -1431,9 +1458,12 @@ fn execute_tasks(
                 .context(format_context!("while entering inspect phase"))?;
             logger.message("--Inspect Phase--");
 
-            rules::update_target_dependency_graph(console.clone(), target.clone()).context(
-                format_context!("Failed to update target dependency graph for {target:?}"),
-            )?;
+            {
+                let _timer = telemetry::time_step("graph.sort");
+                rules::update_target_dependency_graph(console.clone(), target.clone()).context(
+                    format_context!("Failed to update target dependency graph for {target:?}"),
+                )?;
+            }
 
             rules::debug_sorted_tasks(console.clone(), task::Phase::Checkout)
                 .context(format_context!("Failed to debug sorted tasks"))?;
@@ -1533,9 +1563,12 @@ fn execute_tasks(
             rules::export_log_status(workspace.clone())
                 .context(format_context!("Failed to export log status"))?;
 
-            rules::update_target_dependency_graph(console.clone(), None).context(
-                format_context!("Failed to update target dependency graph for {target:?}"),
-            )?;
+            {
+                let _timer = telemetry::time_step("graph.sort");
+                rules::update_target_dependency_graph(console.clone(), None).context(
+                    format_context!("Failed to update target dependency graph for {target:?}"),
+                )?;
+            }
 
             // warn if any new branches don't match a git rule
             let new_branches = singleton::get_new_branches();
@@ -1918,15 +1951,25 @@ pub fn run_starlark_modules(
             evaluate_starlark_modules(console.clone(), workspace.clone(), &modules, phase)?;
 
             logger.message("Inserting //:setup, //:all, //:test, //:clean rules");
-            let run_target = insert_setup_and_all_rules(workspace.clone(), target.clone())
-                .context(format_context!("failed to insert run all"))?;
+            let run_target = {
+                let _timer = telemetry::time_step("eval.insert_builtin_rules");
+                insert_setup_and_all_rules(workspace.clone(), target.clone())
+                    .context(format_context!("failed to insert run all"))?
+            };
 
             // after checkout, the dependencies need to be inserted for run rules
-            rules::update_depedency_graph(console.clone(), Some(workspace.clone()), phase)
-                .context(format_context!("Failed to update dependency graph"))?;
+            {
+                let _timer = telemetry::time_step("graph.build");
+                rules::update_depedency_graph(console.clone(), Some(workspace.clone()), phase)
+                    .context(format_context!("Failed to update dependency graph"))?;
+            }
 
-            rules::update_tasks_digests(console.clone(), workspace.clone())
-                .context(format_context!("updating digests"))?;
+            // sorts all rules and hashes each rule definition in dependency order
+            {
+                let _timer = telemetry::time_step("graph.digest_rules");
+                rules::update_tasks_digests(console.clone(), workspace.clone())
+                    .context(format_context!("updating digests"))?;
+            }
 
             (run_target, IsSaveBin::Yes)
         } else {
@@ -1935,12 +1978,15 @@ pub fn run_starlark_modules(
                 IsExecuteTasks::No => rules::NeedsGraph::No,
                 IsExecuteTasks::Yes => rules::NeedsGraph::Yes(phase),
             };
-            rules::import_tasks_from_workspace_settings(
-                console.clone(),
-                workspace.clone(),
-                needs_graph,
-            )
-            .context(format_context!("importing tasks"))?;
+            {
+                let _timer = telemetry::time_step("eval.import_cached_rules");
+                rules::import_tasks_from_workspace_settings(
+                    console.clone(),
+                    workspace.clone(),
+                    needs_graph,
+                )
+                .context(format_context!("importing tasks"))?;
+            }
             logger.trace(format!("tasks {}", rules::get_pretty_tasks()).as_str());
             (
                 target.clone().unwrap_or(rule::ALL_RULE_NAME.into()),

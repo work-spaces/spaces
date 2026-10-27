@@ -1,9 +1,10 @@
-use crate::{completions, evaluator, executor, rules, task, workspace};
+use crate::{completions, evaluator, executor, rules, task, telemetry, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use std::{collections::HashMap, sync::Arc};
 use utils::{
-    ci, features, git, labels, lock, logger, logs, mtarget, rcache, shell, store, version, ws,
+    ci, features, git, labels, lock, logger, logs, metrics_log, mtarget, rcache, shell, store,
+    version, ws,
 };
 
 use crate::{lsp_context, singleton, sync};
@@ -55,6 +56,7 @@ fn get_workspace(
     is_checkout_phase: workspace::IsCheckoutPhase,
     is_create_log_folder: workspace::IsCreateLogFolder,
 ) -> anyhow::Result<workspace::Workspace> {
+    let _timer = telemetry::time_step("workspace.load");
     let checkout_scripts: Option<Vec<Arc<str>>> = match &run_workspace {
         RunWorkspace::Target(_, _) => None,
         RunWorkspace::Script(scripts) => Some(scripts.iter().map(|e| e.0.clone()).collect()),
@@ -501,6 +503,61 @@ pub fn run_features_command_in_workspace(
     Ok(())
 }
 
+fn resolve_metrics_file_paths(
+    command: &mut metrics_log::MetricsCommand,
+    invocation_directory: &std::path::Path,
+) {
+    let resolve_file = |file: &mut Option<std::path::PathBuf>| {
+        if let Some(path) = file.as_mut().filter(|path| path.is_relative()) {
+            *path = invocation_directory.join(&*path);
+        }
+    };
+
+    match command {
+        metrics_log::MetricsCommand::Info { file, .. }
+        | metrics_log::MetricsCommand::Prune { file, .. } => resolve_file(file),
+        metrics_log::MetricsCommand::Summary { query, .. }
+        | metrics_log::MetricsCommand::Histogram { query, .. }
+        | metrics_log::MetricsCommand::Top { query, .. }
+        | metrics_log::MetricsCommand::Trend { query, .. } => resolve_file(&mut query.file),
+    }
+}
+
+pub fn run_metrics_command_in_workspace(
+    console: console::Console,
+    metrics_command: metrics_log::MetricsCommand,
+) -> anyhow::Result<()> {
+    let invocation_directory = std::env::current_dir()
+        .context(format_context!("Failed to get current working directory"))?;
+    let mut metrics_command = metrics_command;
+    resolve_metrics_file_paths(&mut metrics_command, &invocation_directory);
+
+    let workspace_result = get_workspace(
+        console::Console::new_null(),
+        RunWorkspace::Target(None, vec![]),
+        None,
+        workspace::IsClearInputs::No,
+        workspace::IsCheckoutPhase::No,
+        workspace::IsCreateLogFolder::No,
+    );
+    // `perf.*` metrics need a workspace (or --file); `usage.*` metrics work anywhere.
+    let (workspace_path, store_path) = match workspace_result {
+        Ok(workspace) => (
+            Some(std::path::PathBuf::from(workspace.absolute_path.as_ref())),
+            workspace.get_store_path(),
+        ),
+        Err(_) => (None, ws::get_checkout_store_path()),
+    };
+    let context = metrics_log::MetricsContext {
+        workspace_path,
+        store_path: std::path::PathBuf::from(store_path.as_ref()),
+        is_tty: console.is_tty(),
+    };
+
+    metrics_log::execute(&console, &context, metrics_command)
+        .context(format_context!("Failed to execute metrics command"))
+}
+
 pub fn run_logs_command_in_workspace(
     console: console::Console,
     logs_command: logs::LogsCommand,
@@ -627,6 +684,7 @@ fn run_starlark_modules_with_workspace(
     is_create_lock_file: IsCreateLockFile,
     is_execute_tasks: IsExecuteTasks,
 ) -> anyhow::Result<()> {
+    let evaluate_start_time = std::time::Instant::now();
     match run_workspace {
         RunWorkspace::Target(target, trailing_args) => {
             workspace.write().trailing_args = trailing_args;
@@ -676,8 +734,11 @@ fn run_starlark_modules_with_workspace(
         }
     }
 
-    workspace::RuleMetricsFile::update(workspace.clone())
-        .context(format_context!("Failed to update rule metrics file"))?;
+    metrics::histogram!(
+        telemetry::PERF_EVALUATE_DURATION,
+        "phase" => phase.to_string().to_lowercase()
+    )
+    .record(evaluate_start_time.elapsed());
 
     Ok(())
 }
@@ -753,7 +814,7 @@ pub fn run_starlark_modules_in_workspace(
             let before_snapshots = sync::collect_repo_sync_snapshots(
                 console.clone(),
                 workspace_arc.clone(),
-                "pre-eval sync current revisions",
+                sync::SnapshotStage::PreEvalSync,
             )
             .context(format_context!(
                 "while collecting pre-eval repository revisions"
@@ -903,7 +964,7 @@ pub fn run_starlark_modules_in_workspace(
             let after_sync_snapshots = sync::collect_repo_sync_snapshots(
                 console.clone(),
                 workspace_arc.clone(),
-                "post-eval sync current revisions",
+                sync::SnapshotStage::PostEvalSync,
             )
             .context(format_context!(
                 "while collecting post-eval sync repository revisions"
@@ -946,7 +1007,7 @@ pub fn run_starlark_modules_in_workspace(
         let report_result = sync::collect_repo_sync_snapshots(
             console.clone(),
             workspace_arc.clone(),
-            "checkout current revisions",
+            sync::SnapshotStage::Checkout,
         )
         .and_then(|snapshots| {
             let store_path = workspace_arc.read().get_store_path();
