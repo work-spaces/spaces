@@ -1565,6 +1565,7 @@ pub struct DescriptionList {
     items: Vec<DescriptionItem>,
     variant: Variant,
     compact: bool,
+    width: Width,
 }
 
 impl DescriptionList {
@@ -1573,7 +1574,14 @@ impl DescriptionList {
             items: Vec::new(),
             variant: Variant::Default,
             compact: false,
+            width: Width::default(),
         }
+    }
+
+    /// Set the maximum width of the rendered description list.
+    pub fn width(mut self, width: impl Into<Width>) -> Self {
+        self.width = width.into();
+        self
     }
 
     /// Add a term-description pair to the list.
@@ -1621,9 +1629,19 @@ impl DescriptionList {
             .map(|item| item.term.len())
             .max()
             .unwrap_or(0);
+        let description_width = self
+            .width
+            .as_usize()
+            .saturating_sub(2 + max_term_width + 2)
+            .max(1);
 
         for (idx, item) in self.items.iter().enumerate() {
             let term_width = item.term.len();
+            let description_lines: Vec<Line> = item
+                .description
+                .iter()
+                .flat_map(|line| wrap_line_to_width(line, description_width))
+                .collect();
 
             // First line: 2 spaces, term (left-justified), padding, then description
             let mut first_line = Line::default();
@@ -1633,14 +1651,14 @@ impl DescriptionList {
             // Padding to align descriptions: from end of term to description start
             let padding = max_term_width - term_width + 2;
 
-            if let Some(first_desc_line) = item.description.first() {
+            if let Some(first_desc_line) = description_lines.first() {
                 first_line.push(span::unstyled_span(" ".repeat(padding)));
                 first_line.extend(first_desc_line.iter().cloned());
             }
             lines.push(first_line);
 
             // Subsequent description lines (aligned with first description line)
-            for desc_line in item.description.iter().skip(1) {
+            for desc_line in description_lines.iter().skip(1) {
                 let mut line = Line::default();
                 // Indent to align with description: 2 spaces + max_term_width + padding
                 let indent = 2 + max_term_width + 2;
@@ -2374,7 +2392,11 @@ impl Alert {
         }
 
         // Body (colored border + rich body content)
-        for body_line in self.body_lines() {
+        for body_line in self
+            .body_lines()
+            .into_iter()
+            .flat_map(|line| wrap_line_to_width(&line, inner_width))
+        {
             let mut line = Line::default();
             line.push(span::styled_span(
                 border_style,
@@ -2877,6 +2899,29 @@ mod tests {
     }
 
     #[test]
+    fn test_alert_wraps_rich_body_to_inner_width() {
+        let mut rich_line = Line::default();
+        rich_line.push(code("spaces sync"));
+        rich_line.push(span::unstyled_span(
+            " --stash --new-branch=//repo".to_string(),
+        ));
+
+        let lines = Alert::new(rich_line)
+            .title("Recommended Actions")
+            .width(24)
+            .render();
+        let body_lines = &lines[3..lines.len() - 1];
+
+        assert!(body_lines.len() > 1);
+        assert!(body_lines.iter().all(|line| line.len() <= 24));
+        assert!(
+            body_lines
+                .iter()
+                .any(|line| line.fmt_for_test().to_string().contains("fg=magenta"))
+        );
+    }
+
+    #[test]
     fn test_alert_minimum_width() {
         // Test that small widths don't cause underflow panics
         let alert1 = Alert::new("Test").width(0);
@@ -2976,7 +3021,9 @@ mod tests {
         assert_eq!(Width::largest_preset_within(40), Width::Small);
         assert_eq!(Width::largest_preset_within(79), Width::Medium);
         assert_eq!(Width::largest_preset_within(80), Width::Large);
-        assert_eq!(Width::largest_preset_within(159), Width::Large);
+        assert_eq!(Width::largest_preset_within(119), Width::Large);
+        assert_eq!(Width::largest_preset_within(120), Width::ExtraLarge);
+        assert_eq!(Width::largest_preset_within(159), Width::ExtraLarge);
         assert_eq!(Width::largest_preset_within(160), Width::ExtraLarge);
         assert_eq!(Width::largest_preset_within(400), Width::ExtraLarge);
     }
@@ -3126,6 +3173,28 @@ mod tests {
         // Multi-line description: first line includes term + first description line,
         // plus two continuation description lines
         assert_eq!(lines.len(), 3);
+    }
+
+    #[test]
+    fn test_description_list_wraps_descriptions_with_label_indent() {
+        let dl = DescriptionList::new()
+            .width(20)
+            .compact(true)
+            .item("label", "one two three four five six");
+        let lines = dl.render();
+
+        assert!(lines.len() > 1);
+        assert!(lines.iter().all(|line| line.len() <= 20));
+        let words = lines
+            .iter()
+            .flat_map(|line| {
+                line.to_unstyled()
+                    .split_whitespace()
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(words.join(" "), "label one two three four five six");
     }
 
     #[test]
