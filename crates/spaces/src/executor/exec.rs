@@ -161,7 +161,7 @@ impl Exec {
                 "{} Failed ",
                 console::bootstrap::icon_danger()
             ))
-            .width(console::components::Width::Large)
+            .width(console::components::Width::default())
             .variant(console::components::Variant::Danger),
         );
 
@@ -195,7 +195,7 @@ impl Exec {
         container.add(
             console::components::Divider::new()
                 .style(console::components::DividerStyle::Double)
-                .width(console::components::Width::Large),
+                .width(console::components::Width::default()),
         );
 
         logger::push_deferred_error_lines(container.render());

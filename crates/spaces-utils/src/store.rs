@@ -1347,7 +1347,7 @@ impl Store {
 
             emit_pretty_fix_report(&console, &fix_report);
 
-            bare_separator(&console, console::bootstrap::Width::Large);
+            bare_separator(&console, console::bootstrap::Width::default());
 
             Ok(())
         })
@@ -1603,7 +1603,7 @@ fn emit_pretty_fix_report(console: &console::Console, report: &FixActionReport) 
         .headers(vec!["Action".to_string(), "Outcome".to_string()])
         .alignments(vec![components::Align::Left, components::Align::Left])
         .rows(rows)
-        .width(console::bootstrap::Width::Large);
+        .width(console::bootstrap::Width::default());
 
     console.emit_lines(table.render());
 
@@ -1617,7 +1617,7 @@ fn emit_pretty_fix_report(console: &console::Console, report: &FixActionReport) 
         ))
         .title("Bare repo repair warning")
         .variant(Variant::Warning)
-        .width(console::bootstrap::Width::Large);
+        .width(console::bootstrap::Width::default());
         console.emit_lines(warning.render());
     }
 }
@@ -1701,7 +1701,7 @@ fn emit_pretty_summary(
             components::Align::Right,
             components::Align::Right,
         ])
-        .width(console::bootstrap::Width::Large);
+        .width(console::bootstrap::Width::default());
 
     table = table
         .row(vec![
@@ -1861,7 +1861,7 @@ fn emit_pretty_issues(console: &console::Console, entries: &[StoreInfoEntry]) {
             issues.len()
         ))
         .variant(Variant::Warning)
-        .width(console::bootstrap::Width::Large);
+        .width(console::bootstrap::Width::default());
 
     console.emit_lines(alert.render());
 }

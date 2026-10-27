@@ -205,6 +205,10 @@ pub fn execute() -> anyhow::Result<()> {
     );
     singleton::set_is_create_digest_reports(create_digest_reports);
 
+    let _ = console::bootstrap::set_default_width(console::bootstrap::default_width_for_terminal(
+        effective_console.is_tty(),
+    ));
+
     let trace_level = if trace_file.is_some() && trace_filter.is_none() {
         Some(trace_level.unwrap_or(logger::TraceLevel::Debug))
     } else {
