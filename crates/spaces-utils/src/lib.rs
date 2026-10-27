@@ -20,6 +20,7 @@ pub mod logger;
 pub mod logs;
 pub mod markdown;
 pub mod marker;
+pub mod metrics_log;
 pub mod mtarget;
 pub mod placeholder;
 pub mod platform;

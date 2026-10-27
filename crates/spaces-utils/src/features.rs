@@ -39,6 +39,7 @@ pub enum Feature {
     TracingInfo,
     TracingDebug,
     TracingTrace,
+    CollectMetrics,
 }
 
 impl Feature {
@@ -98,6 +99,9 @@ impl Feature {
             }
             Feature::TracingTrace => {
                 r"Write trace-level diagnostic to `spaces.trace.log` in the log folder."
+            }
+            Feature::CollectMetrics => {
+                r"Record command usage (in the store) and rule/operation timings (in the workspace). View them with `spaces metrics`."
             }
         }
     }
@@ -219,7 +223,7 @@ impl Features {
     }
 
     /// Get the status of a feature and its source
-    fn get_status_with_source(&self, feature: Feature) -> (bool, FeatureSource) {
+    pub fn get_status_with_source(&self, feature: Feature) -> (bool, FeatureSource) {
         // Check environment variable first
         if let Ok(env_value) = std::env::var(feature.env_var_name()) {
             let enabled = env_value.to_uppercase() == "ON";
@@ -395,6 +399,14 @@ mod tests {
             Feature::DeprecationWarnings.env_var_name(),
             "SPACES_ENV_DEPRECATION_WARNINGS"
         );
+        assert_eq!(
+            Feature::CollectMetrics.env_var_name(),
+            "SPACES_ENV_COLLECT_METRICS"
+        );
+        assert_eq!(
+            Feature::CollectMetrics.into_kebab_case().as_ref(),
+            "collect-metrics"
+        );
     }
 
     /// Consolidated test for all functionality that manipulates environment variables.
@@ -406,6 +418,7 @@ mod tests {
             env::remove_var("SPACES_ENV_RULE_CACHE");
             env::remove_var("SPACES_ENV_MODULE_CACHE");
             env::remove_var("SPACES_ENV_DEPRECATION_WARNINGS");
+            env::remove_var("SPACES_ENV_COLLECT_METRICS");
         }
 
         // Test 1: Manifest default behavior
@@ -413,6 +426,7 @@ mod tests {
             let manifest = Features::new();
             assert!(!manifest.is_enabled(Feature::ModuleCache));
             assert!(!manifest.is_enabled(Feature::DeprecationWarnings));
+            assert!(!manifest.is_enabled(Feature::CollectMetrics));
         }
 
         // Test 2: Manifest enable/disable
@@ -532,11 +546,30 @@ mod tests {
             // temp_dir dropped here → automatic cleanup
         }
 
+        // Test 8: SPACES_ENV_COLLECT_METRICS overrides the manifest in both directions
+        {
+            let mut features = Features::new();
+
+            unsafe { env::set_var("SPACES_ENV_COLLECT_METRICS", "ON") };
+            assert!(features.is_enabled(Feature::CollectMetrics));
+            let (enabled, source) = features.get_status_with_source(Feature::CollectMetrics);
+            assert!(enabled);
+            assert_eq!(source, FeatureSource::Environment);
+
+            features.enable(Feature::CollectMetrics);
+            unsafe { env::set_var("SPACES_ENV_COLLECT_METRICS", "OFF") };
+            assert!(!features.is_enabled(Feature::CollectMetrics));
+
+            unsafe { env::remove_var("SPACES_ENV_COLLECT_METRICS") };
+            assert!(features.is_enabled(Feature::CollectMetrics));
+        }
+
         // Final cleanup of all env vars
         unsafe {
             env::remove_var("SPACES_ENV_RULE_CACHE");
             env::remove_var("SPACES_ENV_MODULE_CACHE");
             env::remove_var("SPACES_ENV_DEPRECATION_WARNINGS");
+            env::remove_var("SPACES_ENV_COLLECT_METRICS");
         }
     }
 

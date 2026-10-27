@@ -26,6 +26,8 @@ serde_yaml = "0.9"
 rayon = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+metrics = "0.24"
+metrics-util = { version = "0.20", default-features = false, features = ["registry"] }
 strum = { version = "0.26", features = ["derive"] }
 indexmap = { version = "2", features = ["serde"] }
 

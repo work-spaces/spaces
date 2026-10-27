@@ -12,6 +12,8 @@ use std::sync::Arc;
 const MANIFEST_FILE_NAME: &str = "store.spaces.json";
 pub const SPACES_STORE: &str = ".spaces/store";
 pub const SPACES_STORE_RCACHE: &str = "rcache";
+pub const SPACES_STORE_METRICS: &str = "metrics";
+pub const USAGE_METRICS_FILE_NAME: &str = "spaces.usage.jsonl";
 pub const SPACES_STORE_BARE: &str = "bare";
 const DEFAULT_MAINTENANCE_INTERVAL_DAYS: u128 = 7;
 const GIT_ACTION_FSCK: &str = "git fsck (checking integrity)";
@@ -338,7 +340,9 @@ impl Store {
                 continue;
             };
 
-            if top_level == std::ffi::OsStr::new(SPACES_STORE_RCACHE) {
+            if top_level == std::ffi::OsStr::new(SPACES_STORE_RCACHE)
+                || top_level == std::ffi::OsStr::new(SPACES_STORE_METRICS)
+            {
                 iter.skip_current_dir();
                 continue;
             }

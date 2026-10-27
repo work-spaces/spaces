@@ -1,6 +1,6 @@
 use crate::builtins::eval_context::EvalContext;
 use crate::workspace::WorkspaceArc;
-use crate::{executor, singleton, task, workspace};
+use crate::{executor, singleton, task, telemetry, workspace};
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 
@@ -227,6 +227,10 @@ pub fn execute_rule(
         };
 
         let updated_digest = if !dep_globs.is_empty() && skip_execute_message.is_empty() {
+            let _hash_inputs_timer = telemetry::Timer::new(metrics::histogram!(
+                telemetry::PERF_RULE_HASH_INPUTS_DURATION,
+                "rule" => rule_name.clone()
+            ));
             logger
                 .debug(format!("update workspace changes with deps globs {dep_globs:?}").as_str());
 
@@ -406,9 +410,19 @@ pub fn execute_rule(
         };
 
         let elapsed_time = start_time.elapsed();
-        workspace
-            .write()
-            .update_rule_metrics(&rule_name, elapsed_time, cache_status.clone());
+        let cache_label = telemetry::cache_status_label(&cache_status);
+        metrics::histogram!(
+            telemetry::PERF_RULE_DURATION,
+            "rule" => rule_name.clone(),
+            "cache" => cache_label
+        )
+        .record(elapsed_time);
+        metrics::counter!(
+            telemetry::USAGE_RULE,
+            "rule" => rule_name.clone(),
+            "cache" => cache_label
+        )
+        .increment(1);
 
         if task_result.is_ok() {
             if did_complete {
