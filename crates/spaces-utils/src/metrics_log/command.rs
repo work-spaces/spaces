@@ -352,13 +352,27 @@ fn emit_serialized<T: Serialize>(
     console.write(&text)
 }
 
-fn plot_options(query: &MetricsQueryArgs, context: &MetricsContext) -> PlotOptions {
-    let is_ascii_mode =
-        bootstrap::typography_mode() == bootstrap::TypographyMode::Ascii || !context.is_tty;
+/// Chart options derived from the terminal: ASCII when not a TTY (or in ASCII typography
+/// mode) and color only on a TTY without `NO_COLOR`.
+pub(crate) fn default_plot_options(is_tty: bool) -> PlotOptions {
+    let is_ascii_mode = bootstrap::typography_mode() == bootstrap::TypographyMode::Ascii || !is_tty;
     let is_no_color = std::env::var_os("NO_COLOR").is_some_and(|value| !value.is_empty());
     PlotOptions {
-        ascii: query.ascii.unwrap_or(is_ascii_mode),
-        color: context.is_tty && !is_no_color,
+        ascii: is_ascii_mode,
+        color: is_tty && !is_no_color,
+    }
+}
+
+/// Default plot width selected for the current terminal.
+pub(crate) fn default_plot_width(is_tty: bool) -> usize {
+    bootstrap::default_width_for_terminal(is_tty).as_usize()
+}
+
+fn plot_options(query: &MetricsQueryArgs, context: &MetricsContext) -> PlotOptions {
+    let options = default_plot_options(context.is_tty);
+    PlotOptions {
+        ascii: query.ascii.unwrap_or(options.ascii),
+        ..options
     }
 }
 

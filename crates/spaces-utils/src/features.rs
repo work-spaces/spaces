@@ -40,6 +40,7 @@ pub enum Feature {
     TracingDebug,
     TracingTrace,
     CollectMetrics,
+    EnableRunMetrics,
 }
 
 impl Feature {
@@ -102,6 +103,9 @@ impl Feature {
             }
             Feature::CollectMetrics => {
                 r"Record command usage (in the store) and rule/operation timings (in the workspace). View them with `spaces metrics`."
+            }
+            Feature::EnableRunMetrics => {
+                r"Show a chart of the longest running tasks (rules, starlark evaluation, and internal steps) at the end of a successful `spaces run`, `checkout`, `checkout-repo`, `co`, or `sync`."
             }
         }
     }
@@ -406,6 +410,14 @@ mod tests {
         assert_eq!(
             Feature::CollectMetrics.into_kebab_case().as_ref(),
             "collect-metrics"
+        );
+        assert_eq!(
+            Feature::EnableRunMetrics.env_var_name(),
+            "SPACES_ENV_ENABLE_RUN_METRICS"
+        );
+        assert_eq!(
+            Feature::EnableRunMetrics.into_kebab_case().as_ref(),
+            "enable-run-metrics"
         );
     }
 
