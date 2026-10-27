@@ -8,17 +8,11 @@ mod charts;
 
 pub use charts::{BarChart, Bin, HistogramChart, LineChart, Series};
 
+pub use crate::bootstrap::terminal_width;
+
 use crate::bootstrap::{TypographyMode, Variant, typography_mode};
 use crossterm::style::StyledContent;
 use superconsole::{Line, Span};
-
-/// Width of the attached terminal in columns, if any.
-pub fn terminal_width() -> Option<usize> {
-    crossterm::terminal::size()
-        .ok()
-        .map(|(cols, _)| cols as usize)
-        .filter(|cols| *cols > 0)
-}
 
 /// Rendering options shared by all charts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

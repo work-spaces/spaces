@@ -263,14 +263,27 @@ pub enum Width {
 }
 
 impl Width {
+    /// Fixed presets, smallest to largest.
+    pub const PRESETS: [Width; 4] = [Width::Small, Width::Medium, Width::Large, Width::ExtraLarge];
+
     pub fn as_usize(self) -> usize {
         match self {
             Width::Small => 40,
             Width::Medium => 64,
             Width::Large => 80,
-            Width::ExtraLarge => 160,
+            Width::ExtraLarge => 120,
             Width::Custom(width) => width,
         }
+    }
+
+    /// Largest fixed preset that fits within `columns`, or [`Width::Small`] if none fit.
+    pub fn largest_preset_within(columns: usize) -> Width {
+        Self::PRESETS
+            .iter()
+            .rev()
+            .copied()
+            .find(|preset| preset.as_usize() <= columns)
+            .unwrap_or(Width::Small)
     }
 }
 
@@ -278,6 +291,48 @@ impl From<usize> for Width {
     fn from(value: usize) -> Self {
         Width::Custom(value)
     }
+}
+
+/// The global default width. See [`default_width`].
+impl Default for Width {
+    fn default() -> Self {
+        default_width()
+    }
+}
+
+static DEFAULT_WIDTH: std::sync::OnceLock<Width> = std::sync::OnceLock::new();
+
+/// Width of the attached terminal in columns, if any.
+pub fn terminal_width() -> Option<usize> {
+    crossterm::terminal::size()
+        .ok()
+        .map(|(cols, _)| cols as usize)
+        .filter(|cols| *cols > 0)
+}
+
+/// Computes a default width sized to the attached terminal.
+///
+/// Picks the largest fixed preset that fits in the terminal. Falls back to
+/// [`Width::Large`] when not attached to a terminal.
+pub fn default_width_for_terminal(is_tty: bool) -> Width {
+    if !is_tty {
+        return Width::Large;
+    }
+    terminal_width()
+        .map(Width::largest_preset_within)
+        .unwrap_or(Width::Large)
+}
+
+/// Sets the global default width. This can only be called once.
+pub fn set_default_width(width: Width) -> anyhow::Result<()> {
+    DEFAULT_WIDTH
+        .set(width)
+        .map_err(|_| anyhow::anyhow!("Default width already set"))
+}
+
+/// Gets the global default width. Defaults to [`Width::Large`] if not explicitly set.
+pub fn default_width() -> Width {
+    *DEFAULT_WIDTH.get_or_init(|| Width::Large)
 }
 
 // ---------------------------------------------------------------------------
@@ -464,7 +519,7 @@ impl Divider {
     }
 
     fn render_line(&self) -> Line {
-        let width = self.width.unwrap_or(Width::Large).as_usize();
+        let width = self.width.unwrap_or_default().as_usize();
         let line_str = self.get_char().repeat(width);
         let style = self.variant.style();
 
@@ -1510,6 +1565,7 @@ pub struct DescriptionList {
     items: Vec<DescriptionItem>,
     variant: Variant,
     compact: bool,
+    width: Width,
 }
 
 impl DescriptionList {
@@ -1518,7 +1574,14 @@ impl DescriptionList {
             items: Vec::new(),
             variant: Variant::Default,
             compact: false,
+            width: Width::default(),
         }
+    }
+
+    /// Set the maximum width of the rendered description list.
+    pub fn width(mut self, width: impl Into<Width>) -> Self {
+        self.width = width.into();
+        self
     }
 
     /// Add a term-description pair to the list.
@@ -1566,9 +1629,19 @@ impl DescriptionList {
             .map(|item| item.term.len())
             .max()
             .unwrap_or(0);
+        let description_width = self
+            .width
+            .as_usize()
+            .saturating_sub(2 + max_term_width + 2)
+            .max(1);
 
         for (idx, item) in self.items.iter().enumerate() {
             let term_width = item.term.len();
+            let description_lines: Vec<Line> = item
+                .description
+                .iter()
+                .flat_map(|line| wrap_line_to_width(line, description_width))
+                .collect();
 
             // First line: 2 spaces, term (left-justified), padding, then description
             let mut first_line = Line::default();
@@ -1578,14 +1651,14 @@ impl DescriptionList {
             // Padding to align descriptions: from end of term to description start
             let padding = max_term_width - term_width + 2;
 
-            if let Some(first_desc_line) = item.description.first() {
+            if let Some(first_desc_line) = description_lines.first() {
                 first_line.push(span::unstyled_span(" ".repeat(padding)));
                 first_line.extend(first_desc_line.iter().cloned());
             }
             lines.push(first_line);
 
             // Subsequent description lines (aligned with first description line)
-            for desc_line in item.description.iter().skip(1) {
+            for desc_line in description_lines.iter().skip(1) {
                 let mut line = Line::default();
                 // Indent to align with description: 2 spaces + max_term_width + padding
                 let indent = 2 + max_term_width + 2;
@@ -2319,7 +2392,11 @@ impl Alert {
         }
 
         // Body (colored border + rich body content)
-        for body_line in self.body_lines() {
+        for body_line in self
+            .body_lines()
+            .into_iter()
+            .flat_map(|line| wrap_line_to_width(&line, inner_width))
+        {
             let mut line = Line::default();
             line.push(span::styled_span(
                 border_style,
@@ -2822,6 +2899,29 @@ mod tests {
     }
 
     #[test]
+    fn test_alert_wraps_rich_body_to_inner_width() {
+        let mut rich_line = Line::default();
+        rich_line.push(code("spaces sync"));
+        rich_line.push(span::unstyled_span(
+            " --stash --new-branch=//repo".to_string(),
+        ));
+
+        let lines = Alert::new(rich_line)
+            .title("Recommended Actions")
+            .width(24)
+            .render();
+        let body_lines = &lines[3..lines.len() - 1];
+
+        assert!(body_lines.len() > 1);
+        assert!(body_lines.iter().all(|line| line.len() <= 24));
+        assert!(
+            body_lines
+                .iter()
+                .any(|line| line.fmt_for_test().to_string().contains("fg=magenta"))
+        );
+    }
+
+    #[test]
     fn test_alert_minimum_width() {
         // Test that small widths don't cause underflow panics
         let alert1 = Alert::new("Test").width(0);
@@ -2913,6 +3013,19 @@ mod tests {
             Variant::Default.style().foreground_color,
             default_style().foreground_color
         );
+    }
+
+    #[test]
+    fn test_largest_preset_within() {
+        assert_eq!(Width::largest_preset_within(20), Width::Small);
+        assert_eq!(Width::largest_preset_within(40), Width::Small);
+        assert_eq!(Width::largest_preset_within(79), Width::Medium);
+        assert_eq!(Width::largest_preset_within(80), Width::Large);
+        assert_eq!(Width::largest_preset_within(119), Width::Large);
+        assert_eq!(Width::largest_preset_within(120), Width::ExtraLarge);
+        assert_eq!(Width::largest_preset_within(159), Width::ExtraLarge);
+        assert_eq!(Width::largest_preset_within(160), Width::ExtraLarge);
+        assert_eq!(Width::largest_preset_within(400), Width::ExtraLarge);
     }
 
     #[test]
@@ -3060,6 +3173,28 @@ mod tests {
         // Multi-line description: first line includes term + first description line,
         // plus two continuation description lines
         assert_eq!(lines.len(), 3);
+    }
+
+    #[test]
+    fn test_description_list_wraps_descriptions_with_label_indent() {
+        let dl = DescriptionList::new()
+            .width(20)
+            .compact(true)
+            .item("label", "one two three four five six");
+        let lines = dl.render();
+
+        assert!(lines.len() > 1);
+        assert!(lines.iter().all(|line| line.len() <= 20));
+        let words = lines
+            .iter()
+            .flat_map(|line| {
+                line.to_unstyled()
+                    .split_whitespace()
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(words.join(" "), "label one two three four five six");
     }
 
     #[test]

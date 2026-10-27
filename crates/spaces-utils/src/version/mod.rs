@@ -258,7 +258,7 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
                 ))
                 .title("Custom version config")
                 .variant(console::bootstrap::Variant::Warning)
-                .width(console::bootstrap::Width::Large),
+                .width(console::bootstrap::Width::default()),
             );
 
             ui.add(
@@ -326,7 +326,7 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
                 console::bootstrap::Alert::new("No releases are currently available")
                     .title("Version list")
                     .variant(console::bootstrap::Variant::Warning)
-                    .width(console::bootstrap::Width::Large),
+                    .width(console::bootstrap::Width::default()),
             );
         }
 
@@ -334,7 +334,7 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
             ui.add(
                 console::bootstrap::Divider::new()
                     .style(console::bootstrap::DividerStyle::Double)
-                    .width(console::bootstrap::Width::Large),
+                    .width(console::bootstrap::Width::default()),
             );
 
             let mut release_line = console::Line::default();
@@ -398,7 +398,7 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
             ui.add(
                 console::bootstrap::Divider::new()
                     .style(console::bootstrap::DividerStyle::Double)
-                    .width(console::bootstrap::Width::Large),
+                    .width(console::bootstrap::Width::default()),
             );
         }
 
@@ -446,7 +446,7 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
             let mut ui = console::container::Container::new();
             ui.add(
                 console::bootstrap::Banner::new("Release fetched")
-                    .width(console::bootstrap::Width::Large)
+                    .width(console::bootstrap::Width::default())
                     .variant(console::bootstrap::Variant::Success),
             );
             ui.add(
@@ -481,7 +481,7 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
             ui.add(
                 console::bootstrap::Divider::new()
                     .style(console::bootstrap::DividerStyle::Double)
-                    .width(console::bootstrap::Width::Large),
+                    .width(console::bootstrap::Width::default()),
             );
 
             console.emit_container(&ui);
@@ -500,7 +500,7 @@ Authorization = "Bearer {{SPACES_VERSION_TOKEN}}"
                 ))
                 .title("Release unavailable")
                 .variant(console::bootstrap::Variant::Danger)
-                .width(console::bootstrap::Width::Large),
+                .width(console::bootstrap::Width::default()),
             );
             console.emit_container(&ui);
 
