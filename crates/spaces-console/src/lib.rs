@@ -16,6 +16,7 @@ pub mod container {
 
 mod file;
 mod null;
+pub mod plot;
 mod process;
 mod secrets;
 mod super_console;
