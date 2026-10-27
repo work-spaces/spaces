@@ -673,7 +673,7 @@ pub fn show_error(
                 "{} Failed",
                 console::bootstrap::icon_danger()
             ))
-            .width(console::bootstrap::Width::Large)
+            .width(console::bootstrap::Width::default())
             .variant(console::bootstrap::Variant::Danger),
         );
 
@@ -686,7 +686,7 @@ pub fn show_error(
         container.add(
             console::bootstrap::Divider::new()
                 .style(console::bootstrap::DividerStyle::Double)
-                .width(console::bootstrap::Width::Large),
+                .width(console::bootstrap::Width::default()),
         );
     } else {
         for error_line in error_lines {

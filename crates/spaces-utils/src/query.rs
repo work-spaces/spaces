@@ -933,7 +933,7 @@ fn normalize_help_text(help: &str) -> String {
 
 fn make_help_lines(help: &str, _highlight_terms: Option<&[Arc<str>]>) -> Vec<console::Line> {
     let mut container =
-        console::bootstrap::Container::new().width(console::bootstrap::Width::Large);
+        console::bootstrap::Container::new().width(console::bootstrap::Width::default());
     container.add_markdown(help);
     container.render()
 }

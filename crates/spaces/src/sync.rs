@@ -1083,7 +1083,7 @@ pub fn build_repo_sync_plan(
         container.add(
             console::bootstrap::Banner::new("Sync operation cannot proceed".to_string())
                 .variant(console::bootstrap::Variant::Danger)
-                .width(console::bootstrap::Width::Large),
+                .width(console::bootstrap::Width::default()),
         );
 
         container.add(problems);
@@ -1161,7 +1161,7 @@ pub fn build_repo_sync_plan(
             container.add(
                 console::components::Alert::new(recommended_actions)
                     .title("Recommended Actions")
-                    .width(console::bootstrap::Width::Large),
+                    .width(console::bootstrap::Width::default()),
             );
         }
 
@@ -1533,7 +1533,7 @@ fn recommend_store_maintenance(status: &store::MaintenanceStatus) -> Vec<console
     };
 
     vec![
-        console::bootstrap::plain_text(format!("{reason}")).into_line(),
+        console::bootstrap::plain_text(reason.to_string()).into_line(),
         console::bootstrap::plain_text(format!(
             "Run maintenance at least every {interval_days} day(s):"
         ))
@@ -1555,7 +1555,7 @@ fn emit_complete_report(
     container.add(console::bootstrap::VerticalSpacer::new(1));
     container.add(
         console::bootstrap::Banner::new(format!("{} {title} ", console::bootstrap::icon_success()))
-            .width(console::bootstrap::Width::Large)
+            .width(console::bootstrap::Width::default())
             .variant(console::bootstrap::Variant::Success),
     );
 
@@ -1572,7 +1572,7 @@ fn emit_complete_report(
         container.add(
             console::components::Alert::new(recommended_actions)
                 .title("Recommended Actions")
-                .width(console::bootstrap::Width::Large),
+                .width(console::bootstrap::Width::default()),
         );
     }
 
@@ -1820,7 +1820,7 @@ pub fn execute_removed_repo_post_sync_actions(
     container.add(
         console::bootstrap::Banner::new("Removed Repository Cleanup".to_string())
             .variant(console::bootstrap::Variant::Warning)
-            .width(console::bootstrap::Width::Large),
+            .width(console::bootstrap::Width::default()),
     );
 
     let mut status_list = console::components::DescriptionList::new()
@@ -1906,7 +1906,7 @@ pub fn execute_removed_repo_post_sync_actions(
         container.add(
             console::components::Alert::new(recommendation_lines)
                 .title("Recommended Actions")
-                .width(console::bootstrap::Width::Large),
+                .width(console::bootstrap::Width::default()),
         );
     }
 

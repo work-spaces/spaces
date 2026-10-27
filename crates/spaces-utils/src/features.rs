@@ -352,7 +352,7 @@ impl FeaturesCommand {
         container.add(bootstrap::VerticalSpacer::new(1));
         container.add(
             bootstrap::Banner::new(banner_text)
-                .width(bootstrap::Width::Large)
+                .width(bootstrap::Width::default())
                 .variant(bootstrap::Variant::Success),
         );
         container.add(
@@ -367,7 +367,7 @@ impl FeaturesCommand {
         container.add(
             bootstrap::Divider::new()
                 .style(bootstrap::DividerStyle::Double)
-                .width(bootstrap::Width::Large),
+                .width(bootstrap::Width::default()),
         );
 
         console.emit_container(&container);

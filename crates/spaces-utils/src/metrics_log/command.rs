@@ -12,14 +12,12 @@ use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
 use bytesize::ByteSize;
 use console::bootstrap::{self, Align, Variant};
-use console::plot::{self, BarChart, Bin, HistogramChart, LineChart, PlotOptions, Series};
+use console::plot::{BarChart, Bin, HistogramChart, LineChart, PlotOptions, Series};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 const DEFAULT_HEIGHT: usize = 20;
-const MAX_WIDTH: usize = 120;
-const NON_TTY_WIDTH: usize = 100;
 const DEFAULT_TOP_LIMIT: usize = 15;
 const DEFAULT_TREND_LIMIT: usize = 5;
 const TREND_AUTO_BUCKET_POINTS: usize = 200;
@@ -68,7 +66,7 @@ pub struct MetricsQueryArgs {
     /// Output format. json and yaml print the aggregated data instead of a chart.
     #[arg(long, value_enum)]
     pub format: Option<console::Format>,
-    /// Plot width in columns (default: terminal width up to 120, or 100 when not a TTY).
+    /// Plot width in columns (default: the largest standard width that fits the terminal, or 80 when not a TTY).
     #[arg(long, value_name = "COLS")]
     pub width: Option<usize>,
     /// Plot height in rows (default: 20).
@@ -364,17 +362,10 @@ fn plot_options(query: &MetricsQueryArgs, context: &MetricsContext) -> PlotOptio
     }
 }
 
-fn plot_width(query: &MetricsQueryArgs, context: &MetricsContext) -> usize {
-    query.width.unwrap_or_else(|| {
-        if context.is_tty {
-            plot::terminal_width()
-                .map(|width| width.saturating_sub(1))
-                .unwrap_or(NON_TTY_WIDTH)
-                .min(MAX_WIDTH)
-        } else {
-            NON_TTY_WIDTH
-        }
-    })
+fn plot_width(query: &MetricsQueryArgs) -> usize {
+    query
+        .width
+        .unwrap_or_else(|| bootstrap::default_width().as_usize())
 }
 
 fn subtitle(text: String) -> bootstrap::Paragraph {
@@ -818,7 +809,7 @@ fn show_top(
     let chart = BarChart::new(bars)
         .title(loaded.description(&selection, &[format!("top {limit} by {stat}")]))
         .value_formatter(move |value| value_format.format_stat(stat, value))
-        .width(plot_width(query, context))
+        .width(plot_width(query))
         .options(options);
 
     let mut container = bootstrap::Container::new();
@@ -902,7 +893,7 @@ fn show_histogram(
     .title(loaded.description(&selection, &[format!("{scale} bins"), unit.to_string()]))
     .x_formatter(move |value| value_format.format(value))
     .footer(footer)
-    .width(plot_width(query, context))
+    .width(plot_width(query))
     .height(query.height.unwrap_or(DEFAULT_HEIGHT))
     .options(options);
 
@@ -981,7 +972,7 @@ fn show_trend(
     .title(loaded.description(&selection, &[format!("{stat} {per}")]))
     .x_formatter(move |value| format_local(value.max(0.0) as u64, date_format))
     .y_formatter(move |value| value_format.format_stat(stat, value))
-    .width(plot_width(query, context))
+    .width(plot_width(query))
     .height(query.height.unwrap_or(DEFAULT_HEIGHT))
     .options(options);
     if let Some(other) = &other {
