@@ -263,14 +263,27 @@ pub enum Width {
 }
 
 impl Width {
+    /// Fixed presets, smallest to largest.
+    pub const PRESETS: [Width; 4] = [Width::Small, Width::Medium, Width::Large, Width::ExtraLarge];
+
     pub fn as_usize(self) -> usize {
         match self {
             Width::Small => 40,
             Width::Medium => 64,
             Width::Large => 80,
-            Width::ExtraLarge => 160,
+            Width::ExtraLarge => 120,
             Width::Custom(width) => width,
         }
+    }
+
+    /// Largest fixed preset that fits within `columns`, or [`Width::Small`] if none fit.
+    pub fn largest_preset_within(columns: usize) -> Width {
+        Self::PRESETS
+            .iter()
+            .rev()
+            .copied()
+            .find(|preset| preset.as_usize() <= columns)
+            .unwrap_or(Width::Small)
     }
 }
 
@@ -278,6 +291,48 @@ impl From<usize> for Width {
     fn from(value: usize) -> Self {
         Width::Custom(value)
     }
+}
+
+/// The global default width. See [`default_width`].
+impl Default for Width {
+    fn default() -> Self {
+        default_width()
+    }
+}
+
+static DEFAULT_WIDTH: std::sync::OnceLock<Width> = std::sync::OnceLock::new();
+
+/// Width of the attached terminal in columns, if any.
+pub fn terminal_width() -> Option<usize> {
+    crossterm::terminal::size()
+        .ok()
+        .map(|(cols, _)| cols as usize)
+        .filter(|cols| *cols > 0)
+}
+
+/// Computes a default width sized to the attached terminal.
+///
+/// Picks the largest fixed preset that fits in the terminal. Falls back to
+/// [`Width::Large`] when not attached to a terminal.
+pub fn default_width_for_terminal(is_tty: bool) -> Width {
+    if !is_tty {
+        return Width::Large;
+    }
+    terminal_width()
+        .map(Width::largest_preset_within)
+        .unwrap_or(Width::Large)
+}
+
+/// Sets the global default width. This can only be called once.
+pub fn set_default_width(width: Width) -> anyhow::Result<()> {
+    DEFAULT_WIDTH
+        .set(width)
+        .map_err(|_| anyhow::anyhow!("Default width already set"))
+}
+
+/// Gets the global default width. Defaults to [`Width::Large`] if not explicitly set.
+pub fn default_width() -> Width {
+    *DEFAULT_WIDTH.get_or_init(|| Width::Large)
 }
 
 // ---------------------------------------------------------------------------
@@ -464,7 +519,7 @@ impl Divider {
     }
 
     fn render_line(&self) -> Line {
-        let width = self.width.unwrap_or(Width::Large).as_usize();
+        let width = self.width.unwrap_or_default().as_usize();
         let line_str = self.get_char().repeat(width);
         let style = self.variant.style();
 
@@ -2913,6 +2968,17 @@ mod tests {
             Variant::Default.style().foreground_color,
             default_style().foreground_color
         );
+    }
+
+    #[test]
+    fn test_largest_preset_within() {
+        assert_eq!(Width::largest_preset_within(20), Width::Small);
+        assert_eq!(Width::largest_preset_within(40), Width::Small);
+        assert_eq!(Width::largest_preset_within(79), Width::Medium);
+        assert_eq!(Width::largest_preset_within(80), Width::Large);
+        assert_eq!(Width::largest_preset_within(159), Width::Large);
+        assert_eq!(Width::largest_preset_within(160), Width::ExtraLarge);
+        assert_eq!(Width::largest_preset_within(400), Width::ExtraLarge);
     }
 
     #[test]

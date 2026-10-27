@@ -119,7 +119,7 @@ pub fn format_log_file_summary<'a>(
 
             log_container.add(
                 bootstrap::Banner::new(format!("{} Failed ", bootstrap::icon_danger()))
-                    .width(components::Width::Large)
+                    .width(components::Width::default())
                     .variant(components::Variant::Danger),
             );
 
@@ -159,7 +159,7 @@ pub fn format_log_file_summary<'a>(
             log_container.add(
                 bootstrap::Divider::new()
                     .style(bootstrap::DividerStyle::Double)
-                    .width(bootstrap::Width::Large),
+                    .width(bootstrap::Width::default()),
             );
 
             log_container
