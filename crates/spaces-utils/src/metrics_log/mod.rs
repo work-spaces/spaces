@@ -19,7 +19,9 @@ pub use command::{
     MetricsCommand, MetricsContext, MetricsQueryArgs, PruneSource, StatusFilter, execute,
 };
 pub use prune::{PruneReport, prune_file};
-pub use query::{Filter, LabelFilter, PSEUDO_KEYS, Sample, Selection, When, group_key, select};
+pub use query::{
+    Filter, LabelFilter, PSEUDO_KEYS, Sample, Selection, Selector, When, group_key, select,
+};
 pub use run_summary::show_run_summary;
 pub use stats::{BinCount, Bucket, Scale, Stat, Stats, make_bins, percentile, trend};
 
@@ -250,10 +252,15 @@ impl Metric {
             .unwrap_or("@command")
     }
 
+    /// The kind from `KNOWN_METRICS`, or `None` for unknown metrics.
+    pub fn known_kind(&self) -> Option<MetricKind> {
+        self.info().map(|info| info.kind)
+    }
+
     /// The kind from `KNOWN_METRICS`, or inferred from the data for unknown metrics.
     pub fn kind(&self, records: &[Record]) -> MetricKind {
-        if let Some(info) = self.info() {
-            return info.kind;
+        if let Some(kind) = self.known_kind() {
+            return kind;
         }
         let is_histogram = records
             .iter()
@@ -296,12 +303,24 @@ pub fn read_records_filtered(
     path: &Path,
     mut keep: impl FnMut(&Record) -> bool,
 ) -> anyhow::Result<ReadOutcome> {
+    let mut records = Vec::new();
+    let skipped = for_each_record(path, |record| {
+        if keep(&record) {
+            records.push(record);
+        }
+    })?;
+    Ok(ReadOutcome { records, skipped })
+}
+
+/// Streams a JSONL metrics file and passes each parsed record to `visit`.
+/// Malformed lines are counted and returned as the skipped count.
+pub fn for_each_record(path: &Path, mut visit: impl FnMut(Record)) -> anyhow::Result<usize> {
     let file = std::fs::File::open(path).context(format_context!(
         "Failed to open metrics file {}",
         path.display()
     ))?;
     let reader = std::io::BufReader::new(file);
-    let mut outcome = ReadOutcome::default();
+    let mut skipped = 0;
     for line in reader.split(b'\n') {
         let line = line.context(format_context!(
             "Failed to read metrics file {}",
@@ -311,15 +330,11 @@ pub fn read_records_filtered(
             continue;
         }
         match serde_json::from_slice::<Record>(&line) {
-            Ok(record) => {
-                if keep(&record) {
-                    outcome.records.push(record);
-                }
-            }
-            Err(_) => outcome.skipped += 1,
+            Ok(record) => visit(record),
+            Err(_) => skipped += 1,
         }
     }
-    Ok(outcome)
+    Ok(skipped)
 }
 
 #[cfg(test)]

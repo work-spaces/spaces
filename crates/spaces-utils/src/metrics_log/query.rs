@@ -3,7 +3,7 @@
 use super::{Metric, MetricKind, Record};
 use chrono::{Local, NaiveDate, NaiveDateTime, TimeZone};
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 /// Group-by keys that select record fields instead of labels.
 pub const PSEUDO_KEYS: &[&str] = &["@command", "@status", "@version", "@workspace", "@day"];
@@ -262,6 +262,129 @@ impl Selection {
     }
 }
 
+/// Incremental selector that extracts samples for a single metric while streaming records.
+#[derive(Debug)]
+pub struct Selector {
+    metric: Metric,
+    kind: Option<MetricKind>,
+    group_by: String,
+    filter: Filter,
+    last: Option<usize>,
+    matched_records: usize,
+    contributions: VecDeque<(usize, u64, BTreeMap<String, Vec<f64>>)>,
+}
+
+impl Selector {
+    pub fn new(
+        metric: Metric,
+        kind: Option<MetricKind>,
+        group_by: impl Into<String>,
+        filter: Filter,
+        last: Option<usize>,
+    ) -> Self {
+        Self {
+            kind: kind.or_else(|| metric.known_kind()),
+            metric,
+            group_by: group_by.into(),
+            filter,
+            last,
+            matched_records: 0,
+            contributions: VecDeque::new(),
+        }
+    }
+
+    pub fn push(&mut self, record: &Record) {
+        if !self.filter.matches_record(record) {
+            return;
+        }
+        let index = self.matched_records;
+        self.matched_records += 1;
+
+        if self.kind.is_none()
+            && record
+                .histograms
+                .iter()
+                .any(|entry| entry.name == self.metric.name)
+        {
+            self.kind = Some(MetricKind::Histogram);
+            self.contributions.clear();
+        }
+        let kind = self.kind.unwrap_or(MetricKind::Counter);
+
+        let mut groups: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+        match kind {
+            MetricKind::Histogram => {
+                for entry in record.histograms.iter().filter(|entry| {
+                    entry.name == self.metric.name && self.filter.matches_labels(&entry.labels)
+                }) {
+                    groups
+                        .entry(group_key(&self.group_by, record, &entry.labels))
+                        .or_default()
+                        .extend(entry.samples.iter().copied().filter(|v| v.is_finite()));
+                }
+            }
+            MetricKind::Counter => {
+                for entry in record.counters.iter().filter(|entry| {
+                    entry.name == self.metric.name && self.filter.matches_labels(&entry.labels)
+                }) {
+                    groups
+                        .entry(group_key(&self.group_by, record, &entry.labels))
+                        .or_default()
+                        .push(entry.value as f64);
+                }
+            }
+        }
+        groups.retain(|_, values| !values.is_empty());
+        if !groups.is_empty() {
+            if let Some(last) = self.last {
+                if last == 0 {
+                    return;
+                }
+                while self.contributions.len() >= last {
+                    self.contributions.pop_front();
+                }
+            }
+            self.contributions
+                .push_back((index, record.timestamp_ms, groups));
+        }
+    }
+
+    pub fn kind(&self) -> MetricKind {
+        self.kind.unwrap_or(MetricKind::Counter)
+    }
+
+    pub fn matched_records(&self) -> usize {
+        self.matched_records
+    }
+
+    pub fn finish(&self, per_record: bool) -> Selection {
+        let kind = self.kind();
+        let mut selection = Selection {
+            records: self.contributions.len(),
+            ..Default::default()
+        };
+        let sum_per_record = per_record || kind == MetricKind::Counter;
+        for (index, timestamp_ms, groups) in &self.contributions {
+            let index = *index;
+            let timestamp_ms = *timestamp_ms;
+            for (key, values) in groups {
+                let samples = selection.groups.entry(key.clone()).or_default();
+                let make = |value| Sample {
+                    timestamp_ms,
+                    value,
+                    record: index,
+                };
+                if sum_per_record {
+                    samples.push(make(values.iter().sum()));
+                } else {
+                    samples.extend(values.iter().copied().map(make));
+                }
+            }
+        }
+        selection
+    }
+}
+
 /// Selects the values of `metric` from the records that pass `filter`, grouped by
 /// `group_by`. `last` keeps only the last N contributing records.
 pub fn select(
@@ -273,67 +396,11 @@ pub fn select(
     per_record: bool,
     last: Option<usize>,
 ) -> Selection {
-    let mut contributions: Vec<(usize, BTreeMap<String, Vec<f64>>)> = Vec::new();
-    for (index, record) in records.iter().enumerate() {
-        if !filter.matches_record(record) {
-            continue;
-        }
-        let mut groups: BTreeMap<String, Vec<f64>> = BTreeMap::new();
-        match kind {
-            MetricKind::Histogram => {
-                for entry in record.histograms.iter().filter(|entry| {
-                    entry.name == metric.name && filter.matches_labels(&entry.labels)
-                }) {
-                    groups
-                        .entry(group_key(group_by, record, &entry.labels))
-                        .or_default()
-                        .extend(entry.samples.iter().copied().filter(|v| v.is_finite()));
-                }
-            }
-            MetricKind::Counter => {
-                for entry in record.counters.iter().filter(|entry| {
-                    entry.name == metric.name && filter.matches_labels(&entry.labels)
-                }) {
-                    groups
-                        .entry(group_key(group_by, record, &entry.labels))
-                        .or_default()
-                        .push(entry.value as f64);
-                }
-            }
-        }
-        groups.retain(|_, values| !values.is_empty());
-        if !groups.is_empty() {
-            contributions.push((index, groups));
-        }
+    let mut selector = Selector::new(metric.clone(), Some(kind), group_by, filter.clone(), last);
+    for record in records {
+        selector.push(record);
     }
-
-    if let Some(last) = last {
-        let skip = contributions.len().saturating_sub(last);
-        contributions.drain(..skip);
-    }
-
-    let mut selection = Selection {
-        records: contributions.len(),
-        ..Default::default()
-    };
-    let sum_per_record = per_record || kind == MetricKind::Counter;
-    for (index, groups) in contributions {
-        let timestamp_ms = records[index].timestamp_ms;
-        for (key, values) in groups {
-            let samples = selection.groups.entry(key).or_default();
-            let make = |value| Sample {
-                timestamp_ms,
-                value,
-                record: index,
-            };
-            if sum_per_record {
-                samples.push(make(values.iter().sum()));
-            } else {
-                samples.extend(values.into_iter().map(make));
-            }
-        }
-    }
-    selection
+    selector.finish(per_record)
 }
 
 #[cfg(test)]
@@ -609,5 +676,31 @@ mod tests {
         assert_eq!(selection.records, 1);
         assert_eq!(selection.groups.len(), 2);
         assert_eq!(selection.groups["//:b"][0].value, 2.0);
+    }
+
+    #[test]
+    fn test_selector_infers_unknown_kind_and_caps_last() {
+        let metric = Metric::new("spaces.perf.custom.duration_seconds");
+        let r1 = sample_record(1, "run", &[1.0]);
+        let mut r2 = sample_record(2, "run", &[2.0]);
+        r2.histograms
+            .push(histogram(&metric.name, &[("step", "a")], &[0.5]));
+        let mut r3 = sample_record(3, "run", &[3.0]);
+        r3.histograms
+            .push(histogram(&metric.name, &[("step", "b")], &[1.5]));
+
+        let mut selector = Selector::new(metric, None, "step", Filter::default(), Some(1));
+        selector.push(&r1);
+        assert_eq!(selector.kind(), MetricKind::Counter);
+        selector.push(&r2);
+        assert_eq!(selector.kind(), MetricKind::Histogram);
+        selector.push(&r3);
+        assert_eq!(selector.matched_records(), 3);
+
+        let selection = selector.finish(false);
+        assert_eq!(selection.records, 1);
+        assert_eq!(selection.groups.len(), 1);
+        assert_eq!(selection.groups["b"][0].value, 1.5);
+        assert_eq!(selection.groups["b"][0].record, 2);
     }
 }

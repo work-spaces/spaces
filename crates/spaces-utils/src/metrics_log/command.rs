@@ -3,9 +3,9 @@
 use super::query::{LabelFilter, format_local, validate_group_by};
 use super::stats::rank;
 use super::{
-    BinCount, Bucket, Filter, Metric, MetricKind, PruneReport, Record, Scale, Selection, Source,
-    Stat, Stats, When, get_perf_path, get_short_name, get_usage_path, make_bins,
-    read_records_filtered, select, trend,
+    BinCount, Bucket, Filter, Metric, MetricKind, PruneReport, Scale, Selection, Selector, Source,
+    Stat, Stats, When, for_each_record, get_perf_path, get_short_name, get_usage_path, make_bins,
+    trend,
 };
 use crate::features;
 use anyhow::Context;
@@ -191,7 +191,7 @@ pub fn execute(
         }
         MetricsCommand::Summary { metric, query } => {
             let metric = metric.unwrap_or_else(|| Metric::new(super::PERF_COMMAND_DURATION));
-            let loaded = Loaded::new(console, context, &metric, &query, now_ms)?;
+            let loaded = Loaded::new(console, context, &metric, &query, false, now_ms)?;
             show_summary(console, context, &loaded, &query)
         }
         MetricsCommand::Histogram {
@@ -202,12 +202,12 @@ pub fn execute(
             query,
         } => {
             let metric = metric.unwrap_or_else(|| Metric::new(super::PERF_COMMAND_DURATION));
-            let loaded = Loaded::new(console, context, &metric, &query, now_ms)?;
+            let loaded = Loaded::new(console, context, &metric, &query, per_record, now_ms)?;
             show_histogram(console, context, &loaded, &query, bins, scale, per_record)
         }
         MetricsCommand::Top { metric, query } => {
             let metric = metric.unwrap_or_else(|| Metric::new(super::PERF_RULE_DURATION));
-            let loaded = Loaded::new(console, context, &metric, &query, now_ms)?;
+            let loaded = Loaded::new(console, context, &metric, &query, false, now_ms)?;
             show_top(console, context, &loaded, &query)
         }
         MetricsCommand::Trend {
@@ -216,7 +216,7 @@ pub fn execute(
             query,
         } => {
             let metric = metric.unwrap_or_else(|| Metric::new(super::PERF_COMMAND_DURATION));
-            let loaded = Loaded::new(console, context, &metric, &query, now_ms)?;
+            let loaded = Loaded::new(console, context, &metric, &query, false, now_ms)?;
             show_trend(console, context, &loaded, &query, bucket)
         }
         MetricsCommand::Prune {
@@ -423,7 +423,7 @@ struct Loaded {
     exists: bool,
     records_read: usize,
     skipped_lines: usize,
-    records: Vec<Record>,
+    selection: Selection,
 }
 
 impl Loaded {
@@ -432,6 +432,7 @@ impl Loaded {
         context: &MetricsContext,
         metric: &Metric,
         query: &MetricsQueryArgs,
+        per_record: bool,
         now_ms: u64,
     ) -> anyhow::Result<Self> {
         let group_by = query
@@ -464,12 +465,18 @@ impl Loaded {
 
         let path = resolve_path(metric.source(), query.file.as_ref(), context)?;
         let exists = path.exists();
-        let (records, skipped_lines) = if exists {
-            let outcome = read_records_filtered(&path, |record| filter.matches_record(record))
-                .context(format_context!("while reading {}", path.display()))?;
-            (outcome.records, outcome.skipped)
+        let mut selector = Selector::new(
+            metric.clone(),
+            metric.known_kind(),
+            group_by.clone(),
+            filter.clone(),
+            query.last,
+        );
+        let skipped_lines = if exists {
+            for_each_record(&path, |record| selector.push(&record))
+                .context(format_context!("while reading {}", path.display()))?
         } else {
-            (Vec::new(), 0)
+            0
         };
         if skipped_lines > 0 {
             console.debug(
@@ -507,30 +514,22 @@ impl Loaded {
             filter_descriptions.push(format!("last {last}"));
         }
 
+        let kind = selector.kind();
+        let records_read = selector.matched_records();
+        let selection = selector.finish(per_record);
+
         Ok(Self {
-            kind: metric.kind(&records),
+            kind,
             metric: metric.clone(),
             group_by,
             filter,
             filter_descriptions,
             path,
             exists,
-            records_read: records.len(),
+            records_read,
             skipped_lines,
-            records,
+            selection,
         })
-    }
-
-    fn select(&self, query: &MetricsQueryArgs, per_record: bool) -> Selection {
-        select(
-            &self.records,
-            &self.metric,
-            self.kind,
-            &self.group_by,
-            &self.filter,
-            per_record,
-            query.last,
-        )
     }
 
     fn default_stat(&self, query: &MetricsQueryArgs) -> Stat {
@@ -540,7 +539,7 @@ impl Loaded {
         })
     }
 
-    fn description(&self, selection: &Selection, extra: &[String]) -> String {
+    fn description(&self, extra: &[String]) -> String {
         let mut parts = vec![
             self.metric.short_name().to_string(),
             format!("by {}", self.group_by),
@@ -549,15 +548,15 @@ impl Loaded {
         parts.extend(self.filter_descriptions.iter().cloned());
         parts.push(format!(
             "{} record{}",
-            selection.records,
-            if selection.records == 1 { "" } else { "s" }
+            self.selection.records,
+            if self.selection.records == 1 { "" } else { "s" }
         ));
         parts.join(" · ")
     }
 
     /// Shows why there is nothing to display. Returns true if the selection is empty.
-    fn emit_if_empty(&self, console: &console::Console, selection: &Selection) -> bool {
-        if !selection.is_empty() {
+    fn emit_if_empty(&self, console: &console::Console) -> bool {
+        if !self.selection.is_empty() {
             return false;
         }
         let lines = if self.exists {
@@ -591,14 +590,14 @@ impl Loaded {
         true
     }
 
-    fn output<'a>(&'a self, selection: &Selection) -> QueryOutput<'a> {
+    fn output<'a>(&'a self) -> QueryOutput<'a> {
         QueryOutput {
             metric: &self.metric.name,
             kind: self.kind,
             file: self.path.display().to_string(),
             group_by: &self.group_by,
             filters: &self.filter,
-            records: selection.records,
+            records: self.selection.records,
             skipped_lines: self.skipped_lines,
             stat: None,
             groups: Vec::new(),
@@ -763,18 +762,18 @@ fn show_summary(
     query: &MetricsQueryArgs,
 ) -> anyhow::Result<()> {
     let format = query.format.clone().unwrap_or_default();
-    let selection = loaded.select(query, false);
+    let selection = &loaded.selection;
     let stat = loaded.default_stat(query);
-    let (groups, other) = ranked_groups(&selection, stat, query.limit);
+    let (groups, other) = ranked_groups(selection, stat, query.limit);
 
     if !matches!(format, console::Format::Pretty) {
-        let mut output = loaded.output(&selection);
+        let mut output = loaded.output();
         output.stat = Some(stat);
         output.groups = groups;
         output.other = other;
         return emit_serialized(console, &format, &output);
     }
-    if loaded.emit_if_empty(console, &selection) {
+    if loaded.emit_if_empty(console) {
         return Ok(());
     }
     let value_format = ValueFormat::new(
@@ -783,9 +782,7 @@ fn show_summary(
         plot_options(query, context).ascii,
     );
     let mut container = bootstrap::Container::new();
-    container.add(subtitle(
-        loaded.description(&selection, &[format!("sorted by {stat}")]),
-    ));
+    container.add(subtitle(loaded.description(&[format!("sorted by {stat}")])));
     container.add(stats_table(loaded, &groups, other.as_ref(), value_format));
     console.emit_container(&container);
     Ok(())
@@ -798,19 +795,19 @@ fn show_top(
     query: &MetricsQueryArgs,
 ) -> anyhow::Result<()> {
     let format = query.format.clone().unwrap_or_default();
-    let selection = loaded.select(query, false);
+    let selection = &loaded.selection;
     let stat = loaded.default_stat(query);
     let limit = query.limit.unwrap_or(DEFAULT_TOP_LIMIT);
-    let (groups, other) = ranked_groups(&selection, stat, Some(limit));
+    let (groups, other) = ranked_groups(selection, stat, Some(limit));
 
     if !matches!(format, console::Format::Pretty) {
-        let mut output = loaded.output(&selection);
+        let mut output = loaded.output();
         output.stat = Some(stat);
         output.groups = groups;
         output.other = other;
         return emit_serialized(console, &format, &output);
     }
-    if loaded.emit_if_empty(console, &selection) {
+    if loaded.emit_if_empty(console) {
         return Ok(());
     }
 
@@ -821,7 +818,7 @@ fn show_top(
         .map(|group| (group.key.clone(), group.stats.get(stat)))
         .collect();
     let chart = BarChart::new(bars)
-        .title(loaded.description(&selection, &[format!("top {limit} by {stat}")]))
+        .title(loaded.description(&[format!("top {limit} by {stat}")]))
         .value_formatter(move |value| value_format.format_stat(stat, value))
         .width(plot_width(query))
         .options(options);
@@ -855,14 +852,14 @@ fn show_histogram(
     } else {
         Scale::Linear
     });
-    let selection = loaded.select(query, per_record);
+    let selection = &loaded.selection;
     let values = selection.values();
     let stats = Stats::new(&values);
     let bin_counts = make_bins(&values, bins.max(1), scale);
 
     if !matches!(format, console::Format::Pretty) {
-        let mut output = loaded.output(&selection);
-        let (groups, _) = ranked_groups(&selection, loaded.default_stat(query), None);
+        let mut output = loaded.output();
+        let (groups, _) = ranked_groups(selection, loaded.default_stat(query), None);
         output.groups = groups;
         output.scale = Some(scale);
         output.per_record = Some(per_record);
@@ -870,7 +867,7 @@ fn show_histogram(
         output.bins = Some(bin_counts);
         return emit_serialized(console, &format, &output);
     }
-    if loaded.emit_if_empty(console, &selection) {
+    if loaded.emit_if_empty(console) {
         return Ok(());
     }
 
@@ -904,7 +901,7 @@ fn show_histogram(
             })
             .collect(),
     )
-    .title(loaded.description(&selection, &[format!("{scale} bins"), unit.to_string()]))
+    .title(loaded.description(&[format!("{scale} bins"), unit.to_string()]))
     .x_formatter(move |value| value_format.format(value))
     .footer(footer)
     .width(plot_width(query))
@@ -935,7 +932,7 @@ fn show_trend(
     bucket: Option<Bucket>,
 ) -> anyhow::Result<()> {
     let format = query.format.clone().unwrap_or_default();
-    let selection = loaded.select(query, false);
+    let selection = &loaded.selection;
     let stat = loaded.default_stat(query);
     let bucket = bucket.unwrap_or(if selection.records < TREND_AUTO_BUCKET_POINTS {
         Bucket::None
@@ -943,7 +940,7 @@ fn show_trend(
         Bucket::Day
     });
     let limit = query.limit.unwrap_or(DEFAULT_TREND_LIMIT);
-    let (groups, other) = ranked_groups(&selection, stat, Some(limit));
+    let (groups, other) = ranked_groups(selection, stat, Some(limit));
     let series: Vec<SeriesOutput> = groups
         .iter()
         .map(|group| SeriesOutput {
@@ -953,7 +950,7 @@ fn show_trend(
         .collect();
 
     if !matches!(format, console::Format::Pretty) {
-        let mut output = loaded.output(&selection);
+        let mut output = loaded.output();
         output.stat = Some(stat);
         output.bucket = Some(bucket);
         output.groups = groups;
@@ -961,7 +958,7 @@ fn show_trend(
         output.series = Some(series);
         return emit_serialized(console, &format, &output);
     }
-    if loaded.emit_if_empty(console, &selection) {
+    if loaded.emit_if_empty(console) {
         return Ok(());
     }
 
@@ -983,7 +980,7 @@ fn show_trend(
             })
             .collect(),
     )
-    .title(loaded.description(&selection, &[format!("{stat} {per}")]))
+    .title(loaded.description(&[format!("{stat} {per}")]))
     .x_formatter(move |value| format_local(value.max(0.0) as u64, date_format))
     .y_formatter(move |value| value_format.format_stat(stat, value))
     .width(plot_width(query))
@@ -1082,7 +1079,7 @@ fn summarize_source(source: &str, path: &Path) -> anyhow::Result<SourceOutput> {
     };
 
     let (mut first, mut last, mut records) = (u64::MAX, 0, 0);
-    let outcome = read_records_filtered(path, |record| {
+    let skipped = for_each_record(path, |record| {
         records += 1;
         first = first.min(record.timestamp_ms);
         last = last.max(record.timestamp_ms);
@@ -1104,12 +1101,11 @@ fn summarize_source(source: &str, path: &Path) -> anyhow::Result<SourceOutput> {
                 histogram.samples.iter().filter(|v| v.is_finite()).sum(),
             );
         }
-        false
     })
     .context(format_context!("while reading {}", path.display()))?;
 
     output.records = records;
-    output.skipped_lines = outcome.skipped;
+    output.skipped_lines = skipped;
     if records > 0 {
         output.first_timestamp_ms = Some(first);
         output.last_timestamp_ms = Some(last);
