@@ -522,22 +522,28 @@ impl LineChart {
         self
     }
 
+    fn finite_points(series: &Series) -> impl Iterator<Item = (f64, f64)> + '_ {
+        series
+            .points
+            .iter()
+            .copied()
+            .filter(|(x, y)| x.is_finite() && y.is_finite())
+    }
+
     fn is_empty(&self) -> bool {
-        self.series.iter().all(|s| s.points.is_empty())
+        self.series
+            .iter()
+            .all(|s| Self::finite_points(s).next().is_none())
     }
 
     fn render_canvas(&self) -> Result<Canvas, String> {
-        let points = self
-            .series
-            .iter()
-            .flat_map(|s| s.points.iter())
-            .filter(|(x, y)| x.is_finite() && y.is_finite());
+        let points = self.series.iter().flat_map(Self::finite_points);
         let (mut x_min, mut x_max, mut y_min, mut y_max) = (f64::MAX, f64::MIN, 0.0_f64, f64::MIN);
         for (x, y) in points {
-            x_min = x_min.min(*x);
-            x_max = x_max.max(*x);
-            y_min = y_min.min(*y);
-            y_max = y_max.max(*y);
+            x_min = x_min.min(x);
+            x_max = x_max.max(x);
+            y_min = y_min.min(y);
+            y_max = y_max.max(y);
         }
         if x_max <= x_min {
             x_min -= 0.5;
@@ -547,6 +553,10 @@ impl LineChart {
             y_max = y_min + 1.0;
         }
         y_max += (y_max - y_min) * 0.05;
+        // plotters' key-point computation never terminates on an infinite span.
+        if !(x_max - x_min).is_finite() || !(y_max - y_min).is_finite() {
+            return Err("data range is too large to plot".to_string());
+        }
 
         let plot_rows = self
             .frame
@@ -590,12 +600,7 @@ impl LineChart {
         plot(&layout, mesh, |chart| {
             for (index, series) in self.series.iter().enumerate() {
                 let color = rgb(PlotColor::series(index));
-                let mut points: Vec<(f64, f64)> = series
-                    .points
-                    .iter()
-                    .copied()
-                    .filter(|(x, y)| x.is_finite() && y.is_finite())
-                    .collect();
+                let mut points: Vec<(f64, f64)> = Self::finite_points(series).collect();
                 points.sort_by(|a, b| a.0.total_cmp(&b.0));
                 if points.len() > 1 {
                     chart.draw_series(LineSeries::new(points.iter().copied(), color))?;
@@ -840,5 +845,41 @@ mod tests {
         .height(0)
         .options(ascii());
         assert!(!chart.render().is_empty());
+    }
+
+    /// Renders on a worker thread so a regression fails instead of hanging the test run.
+    fn render_line_chart_with_timeout(points: Vec<(f64, f64)>) -> String {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let chart = LineChart::new(vec![Series {
+                name: "x".to_string(),
+                points,
+            }])
+            .options(ascii());
+            let _ = tx.send(to_text(chart.render()));
+        });
+        rx.recv_timeout(std::time::Duration::from_secs(10))
+            .expect("LineChart::render did not finish")
+    }
+
+    #[test]
+    fn line_chart_non_finite_does_not_hang() {
+        for points in [
+            vec![(1.0, f64::NAN)],
+            vec![(f64::INFINITY, 1.0), (f64::NAN, f64::NEG_INFINITY)],
+        ] {
+            assert_eq!(render_line_chart_with_timeout(points), "No data to plot");
+        }
+
+        for points in [
+            vec![(0.0, f64::MAX)],
+            vec![(0.0, -f64::MAX), (1.0, f64::MAX)],
+            vec![(-f64::MAX, 1.0), (f64::MAX, 2.0)],
+        ] {
+            assert_eq!(
+                render_line_chart_with_timeout(points),
+                "Unable to render chart: data range is too large to plot"
+            );
+        }
     }
 }
