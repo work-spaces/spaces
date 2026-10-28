@@ -9,6 +9,8 @@
 //! `utils::metrics_log` (`spaces metrics`).
 //!
 //! Collection is controlled by `Feature::CollectMetrics`. Errors never fail a command.
+//! `Feature::ShowRunMetrics` uses the same in-memory samples to show the longest running
+//! tasks at the end of `run`, checkout, and `sync` commands (see `show_run_summary`).
 
 use anyhow::Context;
 use anyhow_source_location::format_context;
@@ -23,9 +25,9 @@ use utils::metrics_log::{CounterRecord, HistogramRecord, Record};
 use utils::{features, fs_mutex, metrics_log, rcache, ws};
 
 pub use utils::metrics_log::{
-    PERF_COMMAND_DURATION, PERF_EVALUATE_DURATION, PERF_PREFIX, PERF_REPO_STEP_DURATION,
-    PERF_RULE_DURATION, PERF_RULE_HASH_INPUTS_DURATION, PERF_STEP_DURATION, USAGE_COMMAND,
-    USAGE_PREFIX, USAGE_RULE, USAGE_SEARCH, USAGE_TARGET,
+    PERF_COMMAND_DURATION, PERF_EVALUATE_DURATION, PERF_MODULE_DURATION, PERF_PREFIX,
+    PERF_REPO_STEP_DURATION, PERF_RULE_DURATION, PERF_RULE_HASH_INPUTS_DURATION,
+    PERF_STEP_DURATION, USAGE_COMMAND, USAGE_PREFIX, USAGE_RULE, USAGE_SEARCH, USAGE_TARGET,
 };
 
 type MetricsRegistry = Registry<Key, AtomicStorage>;
@@ -107,6 +109,22 @@ pub fn time_repo_step(step: &'static str, repo: Arc<str>) -> Timer {
     ))
 }
 
+/// Records the evaluation time of one starlark module. The module is labeled relative to
+/// the workspace. `cache` is `hit`, `miss`, or `bypass` (module cache not used).
+pub fn record_module(
+    workspace_path: &str,
+    module: &str,
+    cache: &'static str,
+    elapsed: std::time::Duration,
+) {
+    let module = module
+        .strip_prefix(workspace_path)
+        .and_then(|relative| relative.strip_prefix('/'))
+        .unwrap_or(module)
+        .to_string();
+    metrics::histogram!(PERF_MODULE_DURATION, "module" => module, "cache" => cache).record(elapsed);
+}
+
 struct SpacesRecorder {
     registry: Arc<MetricsRegistry>,
 }
@@ -145,6 +163,7 @@ struct WorkspaceBinding {
     workspace_path: Arc<str>,
     store_path: Arc<str>,
     is_enabled: bool,
+    is_run_metrics_enabled: bool,
 }
 
 struct TelemetryState {
@@ -154,13 +173,18 @@ struct TelemetryState {
 
 static TELEMETRY_STATE: OnceLock<TelemetryState> = OnceLock::new();
 
+fn is_feature_disabled_by_env(feature: features::Feature) -> bool {
+    std::env::var(feature.env_var_name()).is_ok_and(|value| !value.eq_ignore_ascii_case("ON"))
+}
+
 fn is_disabled_by_env() -> bool {
-    std::env::var(features::Feature::CollectMetrics.env_var_name())
-        .is_ok_and(|value| !value.eq_ignore_ascii_case("ON"))
+    is_feature_disabled_by_env(features::Feature::CollectMetrics)
+        && is_feature_disabled_by_env(features::Feature::ShowRunMetrics)
 }
 
 /// Installs the global metrics recorder. Only env vars are known at this point, so the
-/// recorder is skipped (macros become no-ops) only if `SPACES_ENV_COLLECT_METRICS` disables it.
+/// recorder is skipped (macros become no-ops) only if both `SPACES_ENV_COLLECT_METRICS`
+/// and `SPACES_ENV_SHOW_RUN_METRICS` disable it.
 pub fn init() {
     if TELEMETRY_STATE.get().is_some() || is_disabled_by_env() {
         return;
@@ -189,7 +213,43 @@ pub fn bind_workspace(
         workspace_path,
         store_path,
         is_enabled: features.is_enabled(features::Feature::CollectMetrics),
+        is_run_metrics_enabled: features.is_enabled(features::Feature::ShowRunMetrics),
     });
+}
+
+/// Shows the longest running tasks recorded so far if `show-run-metrics` is enabled for
+/// the bound workspace. Doesn't consume the samples, so call it before `finish()`.
+pub fn show_run_summary(console: &console::Console, elapsed: std::time::Duration) {
+    let Some(state) = TELEMETRY_STATE.get() else {
+        return;
+    };
+    let is_run_metrics_enabled = state
+        .binding
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .is_some_and(|binding| binding.is_run_metrics_enabled);
+    if !is_run_metrics_enabled {
+        return;
+    }
+    let histograms = get_histograms(&state.registry);
+    metrics_log::show_run_summary(console, &histograms, elapsed, console.is_tty());
+}
+
+/// Reads the histogram samples without draining them.
+fn get_histograms(registry: &MetricsRegistry) -> Vec<HistogramRecord> {
+    let mut histograms = Vec::new();
+    registry.visit_histograms(|key, bucket| {
+        let samples = bucket.data();
+        if !samples.is_empty() {
+            histograms.push(HistogramRecord {
+                name: key.name().to_string(),
+                labels: get_labels(key),
+                samples,
+            });
+        }
+    });
+    histograms
 }
 
 #[derive(Debug, Default)]
@@ -457,6 +517,7 @@ mod tests {
             workspace_path: workspace.to_string_lossy().into(),
             store_path: store.to_string_lossy().into(),
             is_enabled,
+            is_run_metrics_enabled: false,
         }
     }
 
@@ -696,6 +757,23 @@ mod tests {
         assert_eq!(step.name, PERF_STEP_DURATION);
         assert_eq!(step.labels["step"], "sync.build_plan");
         assert_eq!(step.samples.len(), 1);
+    }
+
+    #[test]
+    fn test_run_summary_histograms_do_not_drain() {
+        let recorder = SpacesRecorder::new();
+        metrics::with_local_recorder(&recorder, || {
+            let _step_timer = time_step("graph.execute");
+        });
+
+        let histograms = get_histograms(&recorder.registry);
+        assert_eq!(histograms.len(), 1);
+        assert_eq!(histograms[0].name, PERF_STEP_DURATION);
+        assert_eq!(histograms[0].labels["step"], "graph.execute");
+
+        // the samples are still available for `finish()`
+        let snapshot = take_snapshot(&recorder.registry);
+        assert_eq!(snapshot.histograms, histograms);
     }
 
     #[test]
