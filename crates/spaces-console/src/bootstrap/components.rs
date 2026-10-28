@@ -781,6 +781,17 @@ fn split_line_by_width(line: &Line, width: usize) -> Vec<Line> {
 }
 
 fn wrap_line_to_width(line: &Line, width: usize) -> Vec<Line> {
+    wrap_line_impl(line, width, true)
+}
+
+/// Wraps only at whitespace. Tokens longer than `width` (paths, URLs, long
+/// command arguments) are kept intact on their own line so they remain
+/// copy/paste-able and parseable, even if that line exceeds `width`.
+fn wrap_line_at_whitespace(line: &Line, width: usize) -> Vec<Line> {
+    wrap_line_impl(line, width, false)
+}
+
+fn wrap_line_impl(line: &Line, width: usize, split_long_words: bool) -> Vec<Line> {
     let width = width.max(1);
     let mut lines = Vec::new();
     let mut current = Line::default();
@@ -798,7 +809,7 @@ fn wrap_line_to_width(line: &Line, width: usize) -> Vec<Line> {
         let word_len = word.len();
 
         if current.is_empty() {
-            if word_len <= width {
+            if word_len <= width || !split_long_words {
                 current.extend(word);
             } else {
                 let mut chunks = split_line_by_width(&word, width);
@@ -822,7 +833,7 @@ fn wrap_line_to_width(line: &Line, width: usize) -> Vec<Line> {
             lines.push(current);
             current = Line::default();
 
-            if word_len <= width {
+            if word_len <= width || !split_long_words {
                 current.extend(word);
             } else {
                 let mut chunks = split_line_by_width(&word, width);
@@ -1565,7 +1576,7 @@ pub struct DescriptionList {
     items: Vec<DescriptionItem>,
     variant: Variant,
     compact: bool,
-    width: Width,
+    width: Option<Width>,
 }
 
 impl DescriptionList {
@@ -1574,13 +1585,17 @@ impl DescriptionList {
             items: Vec::new(),
             variant: Variant::Default,
             compact: false,
-            width: Width::default(),
+            width: None,
         }
     }
 
     /// Set the maximum width of the rendered description list.
+    ///
+    /// Without an explicit width, descriptions are never wrapped. When a width
+    /// is set, descriptions wrap only at whitespace; single tokens such as
+    /// paths are never split.
     pub fn width(mut self, width: impl Into<Width>) -> Self {
-        self.width = width.into();
+        self.width = Some(width.into());
         self
     }
 
@@ -1624,24 +1639,35 @@ impl DescriptionList {
 
         const MIN_DESCRIPTION_WIDTH: usize = 20;
 
-        let width = self.width.as_usize();
-        let max_term_column_width = width.saturating_sub(4 + MIN_DESCRIPTION_WIDTH);
-        let max_term_width = self
+        let width = self.width.map(|width| width.as_usize());
+        let longest_term = self
             .items
             .iter()
             .map(|item| item.term.len())
             .max()
-            .unwrap_or(0)
-            .min(max_term_column_width);
-        let description_width = width.saturating_sub(2 + max_term_width + 2).max(1);
-        let stacked_description_width = width.saturating_sub(2).max(1);
+            .unwrap_or(0);
+        let max_term_width = match width {
+            Some(width) => longest_term.min(width.saturating_sub(4 + MIN_DESCRIPTION_WIDTH)),
+            None => longest_term,
+        };
+        let wrap_description = |line: &Line, wrap_width: Option<usize>| match wrap_width {
+            Some(wrap_width) => wrap_line_at_whitespace(line, wrap_width),
+            None => vec![line.clone()],
+        };
+        let description_width =
+            width.map(|width| width.saturating_sub(2 + max_term_width + 2).max(1));
+        let stacked_description_width = width.map(|width| width.saturating_sub(2).max(1));
 
         for (idx, item) in self.items.iter().enumerate() {
             let term_width = item.term.len();
 
             if term_width > max_term_width {
-                let term_lines =
-                    wrap_line_to_width(&plain_line(&item.term), stacked_description_width);
+                // Only reachable with an explicit width (otherwise
+                // `max_term_width` is the longest term).
+                let term_lines = wrap_line_to_width(
+                    &plain_line(&item.term),
+                    stacked_description_width.unwrap_or(usize::MAX),
+                );
                 for term_line in term_lines {
                     let mut line = Line::default();
                     line.push(span::unstyled_span("  ".to_string()));
@@ -1652,7 +1678,7 @@ impl DescriptionList {
                 for desc_line in item
                     .description
                     .iter()
-                    .flat_map(|line| wrap_line_to_width(line, stacked_description_width))
+                    .flat_map(|line| wrap_description(line, stacked_description_width))
                 {
                     let mut line = Line::default();
                     line.push(span::unstyled_span("  ".to_string()));
@@ -1663,7 +1689,7 @@ impl DescriptionList {
                 let description_lines: Vec<Line> = item
                     .description
                     .iter()
-                    .flat_map(|line| wrap_line_to_width(line, description_width))
+                    .flat_map(|line| wrap_description(line, description_width))
                     .collect();
 
                 // First line: 2 spaces, term (left-justified), padding, then description
@@ -3241,6 +3267,42 @@ mod tests {
             lines
                 .iter()
                 .any(|line| line.to_unstyled().contains("short description"))
+        );
+    }
+
+    #[test]
+    fn test_description_list_does_not_wrap_without_explicit_width() {
+        let long_path = format!("/{}", "very/long/path/segment".repeat(10));
+        let long_command = "cmd ".repeat(40);
+        let dl = DescriptionList::new()
+            .compact(true)
+            .item("log:", long_path.clone())
+            .item("command:", long_command.clone());
+        let lines = dl.render();
+
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].to_unstyled().ends_with(&long_path));
+        assert!(lines[1].to_unstyled().ends_with(&long_command));
+    }
+
+    #[test]
+    fn test_description_list_never_splits_long_tokens() {
+        let long_path = format!("/{}", "very/long/path/segment".repeat(5));
+        let dl = DescriptionList::new()
+            .width(40)
+            .compact(true)
+            .item("log:", format!("see {long_path} for details"));
+        let lines = dl.render();
+
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.to_unstyled().trim() == long_path)
+        );
+        assert!(
+            lines
+                .iter()
+                .all(|line| line.len() <= 40 || line.to_unstyled().trim() == long_path)
         );
     }
 
