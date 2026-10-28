@@ -1519,8 +1519,13 @@ pub fn emit_checkout_complete_report(
 fn recommend_store_maintenance(status: &store::MaintenanceStatus) -> Vec<console::Line> {
     let (reason, interval_days) = match status {
         store::MaintenanceStatus::UpToDate => return Vec::new(),
-        store::MaintenanceStatus::NeverRun { interval_days } => (
-            "Store maintenance has never been run.".to_string(),
+        store::MaintenanceStatus::NeverRun {
+            days_since_created,
+            interval_days,
+        } => (
+            format!(
+                "Store maintenance has never been run (store created {days_since_created} day(s) ago)."
+            ),
             interval_days,
         ),
         store::MaintenanceStatus::Overdue {
@@ -1533,7 +1538,7 @@ fn recommend_store_maintenance(status: &store::MaintenanceStatus) -> Vec<console
     };
 
     vec![
-        console::bootstrap::plain_text(reason.to_string()).into_line(),
+        console::bootstrap::plain_text(reason).into_line(),
         console::bootstrap::plain_text(format!(
             "Run maintenance at least every {interval_days} day(s):"
         ))
@@ -3282,6 +3287,43 @@ mod tests {
         assert_eq!(
             describe_sync_complete_result(&before, &after, Some(&plan)),
             "rebased onto origin/main 35c4bd9a (no change)"
+        );
+    }
+
+    #[test]
+    fn recommend_store_maintenance_formats_statuses() {
+        assert!(recommend_store_maintenance(&store::MaintenanceStatus::UpToDate).is_empty());
+
+        let never_run = recommend_store_maintenance(&store::MaintenanceStatus::NeverRun {
+            days_since_created: 30,
+            interval_days: 30,
+        })
+        .into_iter()
+        .map(|l| l.to_unstyled())
+        .collect::<Vec<_>>();
+        assert_eq!(
+            never_run,
+            vec![
+                "Store maintenance has never been run (store created 30 day(s) ago).",
+                "Run maintenance at least every 30 day(s):",
+                "  spaces store fix --git-fsck",
+            ]
+        );
+
+        let overdue = recommend_store_maintenance(&store::MaintenanceStatus::Overdue {
+            days_since_last_run: 35,
+            interval_days: 30,
+        })
+        .into_iter()
+        .map(|l| l.to_unstyled())
+        .collect::<Vec<_>>();
+        assert_eq!(
+            overdue,
+            vec![
+                "Store maintenance was last run 35 day(s) ago.",
+                "Run maintenance at least every 30 day(s):",
+                "  spaces store fix --git-fsck",
+            ]
         );
     }
 }
