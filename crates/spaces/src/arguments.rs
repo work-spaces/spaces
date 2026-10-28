@@ -243,6 +243,14 @@ pub fn execute() -> anyhow::Result<()> {
             Some((command_name, targets, std::time::Instant::now()))
         };
 
+    let is_show_run_summary = matches!(
+        commands,
+        Commands::Run { .. }
+            | Commands::Checkout { .. }
+            | Commands::CheckoutRepo { .. }
+            | Commands::Co { .. }
+            | Commands::Sync { .. }
+    );
     let result = execute_command(commands, effective_console.clone());
     let is_ok = result.is_ok();
     {
@@ -296,13 +304,12 @@ pub fn execute() -> anyhow::Result<()> {
     };
 
     if let Some((command_name, targets, start_time)) = telemetry_command {
-        finish_telemetry(
-            effective_console,
-            command_name,
-            &targets,
-            is_ok,
-            start_time.elapsed(),
-        );
+        let elapsed = start_time.elapsed();
+        // Must run before `finish_telemetry()`, which drains the samples.
+        if is_show_run_summary && is_ok {
+            telemetry::show_run_summary(effective_console, elapsed);
+        }
+        finish_telemetry(effective_console, command_name, &targets, is_ok, elapsed);
     }
 
     let is_tracing_enabled = logger::is_tracing_enabled();

@@ -40,6 +40,7 @@ pub enum Feature {
     TracingDebug,
     TracingTrace,
     CollectMetrics,
+    ShowRunMetrics,
 }
 
 impl Feature {
@@ -88,8 +89,8 @@ impl Feature {
                 By default, tags are force-fetched to ensure local tags match remote tags."
             }
             Feature::EnableWorktreeClone => {
-                r"Enable cloning repositories using git worktrees. When disabled,
-                requesting clone = 'Worktree' returns an error. Worktrees are deprecated and should be phased out."
+                r"Enable cloning repositories using git worktrees.
+                Worktrees are deprecated and should be phased out."
             }
             Feature::TracingInfo => {
                 r"Write info-level diagnostic to `spaces.trace.log` in the log folder."
@@ -100,9 +101,8 @@ impl Feature {
             Feature::TracingTrace => {
                 r"Write trace-level diagnostic to `spaces.trace.log` in the log folder."
             }
-            Feature::CollectMetrics => {
-                r"Record command usage (in the store) and rule/operation timings (in the workspace). View them with `spaces metrics`."
-            }
+            Feature::CollectMetrics => r"Record command usage and rule/operation timings.",
+            Feature::ShowRunMetrics => r"Show a chart of the longest running tasks.",
         }
     }
 }
@@ -406,6 +406,14 @@ mod tests {
         assert_eq!(
             Feature::CollectMetrics.into_kebab_case().as_ref(),
             "collect-metrics"
+        );
+        assert_eq!(
+            Feature::ShowRunMetrics.env_var_name(),
+            "SPACES_ENV_SHOW_RUN_METRICS"
+        );
+        assert_eq!(
+            Feature::ShowRunMetrics.into_kebab_case().as_ref(),
+            "show-run-metrics"
         );
     }
 

@@ -744,15 +744,22 @@ fn try_evaluate_with_cache(
             Some(reason.to_string()),
             queue_wait,
         );
+        let module_name = params.name.clone();
         let _ = evaluate_module(
             Some(workspace),
-            workspace_path,
+            workspace_path.clone(),
             params,
             workspace_env,
             Some(console.clone()),
             load_result_cache,
         )
         .map_err(|err| format_error!("{err:?}"))?;
+        telemetry::record_module(
+            &workspace_path,
+            &module_name,
+            "bypass",
+            module_start.elapsed(),
+        );
         return Ok(());
     }
 
@@ -813,6 +820,12 @@ fn try_evaluate_with_cache(
     match result {
         Some(Ok(_)) => {
             eval_logger.debug(format!("No cache hit for module {:?}", params.name).as_str());
+            telemetry::record_module(
+                &workspace_path,
+                &params.name,
+                "miss",
+                module_start.elapsed(),
+            );
             Ok(())
         }
         Some(Err(e)) => Err(e),
@@ -833,7 +846,9 @@ fn try_evaluate_with_cache(
                 ));
             };
             // Cache hit - restore tasks from mtarget
-            rules::restore_tasks_from_cache(&mtarget, &params.name)
+            rules::restore_tasks_from_cache(&mtarget, &params.name)?;
+            telemetry::record_module(&workspace_path, &params.name, "hit", module_start.elapsed());
+            Ok(())
         }
     }
 }
@@ -1075,6 +1090,7 @@ pub fn evaluate_starlark_modules(
             queue_wait,
         );
         eval_progress.set_message("env.spaces.star (first module)");
+        let env_module_start = Instant::now();
         let _ = evaluate_module(
             Some(workspace.clone()),
             workspace_path.clone(),
@@ -1089,6 +1105,7 @@ pub fn evaluate_starlark_modules(
             load_result_cache.clone(),
         )
         .map_err(|e| format_error!("Failed to evaluate module {:?}", e))?;
+        telemetry::record_module(&workspace_path, &name, "bypass", env_module_start.elapsed());
 
         // After env.spaces.star is evaluated, compute the checkout_state_digest
         // The workspace env is now fully populated and will be cached in
