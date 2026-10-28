@@ -61,11 +61,19 @@ pub fn prune_file(path: &Path, cutoff_ms: u64, dry_run: bool) -> anyhow::Result<
             return Ok(report);
         }
 
+        let permissions = std::fs::metadata(path)
+            .context(format_context!(
+                "Failed to read metrics file permissions {}",
+                path.display()
+            ))?
+            .permissions();
         let mut tmp_name = path.as_os_str().to_owned();
         tmp_name.push(".tmp");
         let tmp_path = PathBuf::from(tmp_name);
         let write_tmp = || -> std::io::Result<()> {
-            let mut file = std::io::BufWriter::new(std::fs::File::create(&tmp_path)?);
+            let file = std::fs::File::create(&tmp_path)?;
+            file.set_permissions(permissions)?;
+            let mut file = std::io::BufWriter::new(file);
             for line in &kept {
                 file.write_all(line)?;
                 file.write_all(b"\n")?;
@@ -125,6 +133,22 @@ mod tests {
         assert_eq!(commands, vec!["b", "d"]);
         assert_eq!(outcome.skipped, 1);
         assert!(!dir.path().join("spaces.perf.jsonl.tmp").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_prune_preserves_file_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("spaces.perf.jsonl");
+        write_file(&path);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        prune_file(&path, 2, false).unwrap();
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
     }
 
     #[test]
