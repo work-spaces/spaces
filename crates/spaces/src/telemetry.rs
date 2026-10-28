@@ -19,7 +19,7 @@ use metrics_util::registry::{AtomicStorage, Registry};
 use std::collections::BTreeMap;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use utils::metrics_log::{CounterRecord, HistogramRecord, Record};
 use utils::{features, fs_mutex, metrics_log, rcache, ws};
@@ -52,6 +52,9 @@ pub enum SearchScope {
 /// Counts each keyword passed to `spaces search`, `spaces query search`, or
 /// `spaces query-co search`. Keywords are lowercased because matching is case-insensitive.
 pub fn record_search(scope: SearchScope, keywords: &[Arc<str>]) {
+    if !is_recording() {
+        return;
+    }
     let scope_label: &'static str = scope.into();
     for keyword in keywords {
         metrics::counter!(
@@ -77,31 +80,46 @@ pub fn cache_status_label(cache_status: &rcache::CacheStatus) -> &'static str {
 #[must_use = "the elapsed time is recorded when the timer is dropped"]
 pub struct Timer {
     histogram: Histogram,
-    start_time: std::time::Instant,
+    start_time: Option<std::time::Instant>,
 }
 
 impl Timer {
     pub fn new(histogram: Histogram) -> Self {
         Self {
             histogram,
-            start_time: std::time::Instant::now(),
+            start_time: is_recording().then(std::time::Instant::now),
+        }
+    }
+
+    fn noop() -> Self {
+        Self {
+            histogram: Histogram::noop(),
+            start_time: None,
         }
     }
 }
 
 impl Drop for Timer {
     fn drop(&mut self) {
-        self.histogram.record(self.start_time.elapsed());
+        if let Some(start_time) = self.start_time {
+            self.histogram.record(start_time.elapsed());
+        }
     }
 }
 
 /// Times a workspace-level step (e.g. `sync.build_plan`).
 pub fn time_step(step: &'static str) -> Timer {
+    if !is_recording() {
+        return Timer::noop();
+    }
     Timer::new(metrics::histogram!(PERF_STEP_DURATION, "step" => step))
 }
 
 /// Times a step applied to a single repository.
 pub fn time_repo_step(step: &'static str, repo: Arc<str>) -> Timer {
+    if !is_recording() {
+        return Timer::noop();
+    }
     Timer::new(metrics::histogram!(
         PERF_REPO_STEP_DURATION,
         "step" => step,
@@ -117,6 +135,9 @@ pub fn record_module(
     cache: &'static str,
     elapsed: std::time::Duration,
 ) {
+    if !is_recording() {
+        return;
+    }
     let module = module
         .strip_prefix(workspace_path)
         .and_then(|relative| relative.strip_prefix('/'))
@@ -127,12 +148,14 @@ pub fn record_module(
 
 struct SpacesRecorder {
     registry: Arc<MetricsRegistry>,
+    is_recording: Arc<AtomicBool>,
 }
 
 impl SpacesRecorder {
     fn new() -> Self {
         Self {
             registry: Arc::new(Registry::atomic()),
+            is_recording: Arc::new(AtomicBool::new(true)),
         }
     }
 }
@@ -143,16 +166,25 @@ impl Recorder for SpacesRecorder {
     fn describe_histogram(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
 
     fn register_counter(&self, key: &Key, _: &Metadata<'_>) -> Counter {
+        if !self.is_recording.load(Ordering::Relaxed) {
+            return Counter::noop();
+        }
         self.registry
             .get_or_create_counter(key, |handle| Counter::from_arc(handle.clone()))
     }
 
     fn register_gauge(&self, key: &Key, _: &Metadata<'_>) -> Gauge {
+        if !self.is_recording.load(Ordering::Relaxed) {
+            return Gauge::noop();
+        }
         self.registry
             .get_or_create_gauge(key, |handle| Gauge::from_arc(handle.clone()))
     }
 
     fn register_histogram(&self, key: &Key, _: &Metadata<'_>) -> Histogram {
+        if !self.is_recording.load(Ordering::Relaxed) {
+            return Histogram::noop();
+        }
         self.registry
             .get_or_create_histogram(key, |handle| Histogram::from_arc(handle.clone()))
     }
@@ -166,12 +198,41 @@ struct WorkspaceBinding {
     is_run_metrics_enabled: bool,
 }
 
+impl WorkspaceBinding {
+    fn new(workspace_path: Arc<str>, store_path: Arc<str>, features: &features::Features) -> Self {
+        Self {
+            workspace_path,
+            store_path,
+            is_enabled: features.is_enabled(features::Feature::CollectMetrics),
+            is_run_metrics_enabled: features.is_enabled(features::Feature::ShowRunMetrics),
+        }
+    }
+
+    fn is_recording(&self) -> bool {
+        self.is_enabled || self.is_run_metrics_enabled
+    }
+}
+
 struct TelemetryState {
     registry: Arc<MetricsRegistry>,
+    is_recording: Arc<AtomicBool>,
     binding: Mutex<Option<WorkspaceBinding>>,
 }
 
 static TELEMETRY_STATE: OnceLock<TelemetryState> = OnceLock::new();
+
+fn is_recording() -> bool {
+    TELEMETRY_STATE
+        .get()
+        .is_none_or(|state| state.is_recording.load(Ordering::Relaxed))
+}
+
+fn set_recording(registry: &MetricsRegistry, is_recording_flag: &AtomicBool, is_recording: bool) {
+    is_recording_flag.store(is_recording, Ordering::Relaxed);
+    if !is_recording {
+        registry.clear();
+    }
+}
 
 fn is_feature_disabled_by_env(feature: features::Feature) -> bool {
     std::env::var(feature.env_var_name()).is_ok_and(|value| !value.eq_ignore_ascii_case("ON"))
@@ -184,23 +245,28 @@ fn is_disabled_by_env() -> bool {
 
 /// Installs the global metrics recorder. Only env vars are known at this point, so the
 /// recorder is skipped (macros become no-ops) only if both `SPACES_ENV_COLLECT_METRICS`
-/// and `SPACES_ENV_SHOW_RUN_METRICS` disable it.
+/// and `SPACES_ENV_SHOW_RUN_METRICS` disable it; otherwise `bind_workspace()` stops
+/// recording once the workspace features are loaded if both features are off.
 pub fn init() {
     if TELEMETRY_STATE.get().is_some() || is_disabled_by_env() {
         return;
     }
     let recorder = SpacesRecorder::new();
     let registry = recorder.registry.clone();
+    let is_recording = recorder.is_recording.clone();
     if metrics::set_global_recorder(recorder).is_err() {
         return;
     }
     let _ = TELEMETRY_STATE.set(TelemetryState {
         registry,
+        is_recording,
         binding: Mutex::new(None),
     });
 }
 
 /// Associates the collected metrics with a workspace. The last call wins.
+/// Stops recording and clears pre-binding samples if both `collect-metrics` and
+/// `show-run-metrics` are disabled.
 pub fn bind_workspace(
     workspace_path: Arc<str>,
     store_path: Arc<str>,
@@ -209,12 +275,9 @@ pub fn bind_workspace(
     let Some(state) = TELEMETRY_STATE.get() else {
         return;
     };
-    *state.binding.lock().unwrap_or_else(PoisonError::into_inner) = Some(WorkspaceBinding {
-        workspace_path,
-        store_path,
-        is_enabled: features.is_enabled(features::Feature::CollectMetrics),
-        is_run_metrics_enabled: features.is_enabled(features::Feature::ShowRunMetrics),
-    });
+    let binding = WorkspaceBinding::new(workspace_path, store_path, features);
+    set_recording(&state.registry, &state.is_recording, binding.is_recording());
+    *state.binding.lock().unwrap_or_else(PoisonError::into_inner) = Some(binding);
 }
 
 /// Shows the longest running tasks recorded so far if `show-run-metrics` is enabled for
@@ -815,5 +878,64 @@ mod tests {
             cache_status_label(&rcache::CacheStatus::Restored("digest".into())),
             "restored"
         );
+    }
+
+    #[test]
+    fn test_binding_with_both_features_off_stops_recording_and_clears_registry() {
+        let recorder = SpacesRecorder::new();
+
+        // Samples recorded before bind_workspace (e.g. `workspace.load`).
+        metrics::with_local_recorder(&recorder, || {
+            let _timer = time_step("workspace.load");
+        });
+        assert_eq!(get_histograms(&recorder.registry).len(), 1);
+
+        let features = features::Features::new();
+        let binding = WorkspaceBinding::new("/ws".into(), "/store".into(), &features);
+        assert!(!binding.is_recording());
+        set_recording(
+            &recorder.registry,
+            &recorder.is_recording,
+            binding.is_recording(),
+        );
+
+        // Pre-binding samples are cleared and subsequent metrics are ignored.
+        assert!(take_snapshot(&recorder.registry).is_empty());
+        record_sample_metrics(&recorder);
+        metrics::with_local_recorder(&recorder, || {
+            let _step_timer = time_step("graph.execute");
+            let _repo_timer = time_repo_step("sync.fetch", "repo-a".into());
+            record_module(
+                "/ws",
+                "/ws/spaces.star",
+                "hit",
+                std::time::Duration::from_millis(5),
+            );
+            record_search(SearchScope::Rules, &["build".into()]);
+        });
+        assert!(take_snapshot(&recorder.registry).is_empty());
+    }
+
+    #[test]
+    fn test_binding_keeps_recording_when_either_feature_is_enabled() {
+        for feature in [
+            features::Feature::CollectMetrics,
+            features::Feature::ShowRunMetrics,
+        ] {
+            let recorder = SpacesRecorder::new();
+            let mut features = features::Features::new();
+            features.enable(feature);
+
+            let binding = WorkspaceBinding::new("/ws".into(), "/store".into(), &features);
+            assert!(binding.is_recording());
+            set_recording(
+                &recorder.registry,
+                &recorder.is_recording,
+                binding.is_recording(),
+            );
+
+            record_sample_metrics(&recorder);
+            assert!(!take_snapshot(&recorder.registry).is_empty());
+        }
     }
 }
