@@ -1622,49 +1622,73 @@ impl DescriptionList {
         let style = self.variant.style();
         let mut lines = Vec::new();
 
-        // Calculate the maximum term width
+        const MIN_DESCRIPTION_WIDTH: usize = 20;
+
+        let width = self.width.as_usize();
+        let max_term_column_width = width.saturating_sub(4 + MIN_DESCRIPTION_WIDTH);
         let max_term_width = self
             .items
             .iter()
             .map(|item| item.term.len())
             .max()
-            .unwrap_or(0);
-        let description_width = self
-            .width
-            .as_usize()
-            .saturating_sub(2 + max_term_width + 2)
-            .max(1);
+            .unwrap_or(0)
+            .min(max_term_column_width);
+        let description_width = width.saturating_sub(2 + max_term_width + 2).max(1);
+        let stacked_description_width = width.saturating_sub(2).max(1);
 
         for (idx, item) in self.items.iter().enumerate() {
             let term_width = item.term.len();
-            let description_lines: Vec<Line> = item
-                .description
-                .iter()
-                .flat_map(|line| wrap_line_to_width(line, description_width))
-                .collect();
 
-            // First line: 2 spaces, term (left-justified), padding, then description
-            let mut first_line = Line::default();
-            first_line.push(span::unstyled_span("  ".to_string()));
-            first_line.push(span::styled_span(style.bold(), item.term.clone()));
+            if term_width > max_term_width {
+                let term_lines =
+                    wrap_line_to_width(&plain_line(&item.term), stacked_description_width);
+                for term_line in term_lines {
+                    let mut line = Line::default();
+                    line.push(span::unstyled_span("  ".to_string()));
+                    line.push(span::styled_span(style.bold(), term_line.to_unstyled()));
+                    lines.push(line);
+                }
 
-            // Padding to align descriptions: from end of term to description start
-            let padding = max_term_width - term_width + 2;
+                for desc_line in item
+                    .description
+                    .iter()
+                    .flat_map(|line| wrap_line_to_width(line, stacked_description_width))
+                {
+                    let mut line = Line::default();
+                    line.push(span::unstyled_span("  ".to_string()));
+                    line.extend(desc_line);
+                    lines.push(line);
+                }
+            } else {
+                let description_lines: Vec<Line> = item
+                    .description
+                    .iter()
+                    .flat_map(|line| wrap_line_to_width(line, description_width))
+                    .collect();
 
-            if let Some(first_desc_line) = description_lines.first() {
-                first_line.push(span::unstyled_span(" ".repeat(padding)));
-                first_line.extend(first_desc_line.iter().cloned());
-            }
-            lines.push(first_line);
+                // First line: 2 spaces, term (left-justified), padding, then description
+                let mut first_line = Line::default();
+                first_line.push(span::unstyled_span("  ".to_string()));
+                first_line.push(span::styled_span(style.bold(), item.term.clone()));
 
-            // Subsequent description lines (aligned with first description line)
-            for desc_line in description_lines.iter().skip(1) {
-                let mut line = Line::default();
-                // Indent to align with description: 2 spaces + max_term_width + padding
-                let indent = 2 + max_term_width + 2;
-                line.push(span::unstyled_span(" ".repeat(indent)));
-                line.extend(desc_line.iter().cloned());
-                lines.push(line);
+                // Padding to align descriptions: from end of term to description start
+                let padding = max_term_width - term_width + 2;
+
+                if let Some(first_desc_line) = description_lines.first() {
+                    first_line.push(span::unstyled_span(" ".repeat(padding)));
+                    first_line.extend(first_desc_line.iter().cloned());
+                }
+                lines.push(first_line);
+
+                // Subsequent description lines (aligned with first description line)
+                for desc_line in description_lines.iter().skip(1) {
+                    let mut line = Line::default();
+                    // Indent to align with description: 2 spaces + max_term_width + padding
+                    let indent = 2 + max_term_width + 2;
+                    line.push(span::unstyled_span(" ".repeat(indent)));
+                    line.extend(desc_line.iter().cloned());
+                    lines.push(line);
+                }
             }
 
             // Add spacing between items (unless compact mode or last item)
@@ -3195,6 +3219,29 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(words.join(" "), "label one two three four five six");
+    }
+
+    #[test]
+    fn test_description_list_stacks_oversized_terms_without_shrinking_other_descriptions() {
+        let long_term = "repository-name-".repeat(5);
+        let dl = DescriptionList::new()
+            .width(40)
+            .compact(true)
+            .item(long_term, "long description remains readable")
+            .item("short", "short description");
+        let lines = dl.render();
+
+        assert!(lines.iter().all(|line| line.len() <= 40));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.to_unstyled() == "  long description remains readable")
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.to_unstyled().contains("short description"))
+        );
     }
 
     #[test]
