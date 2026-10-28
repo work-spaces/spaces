@@ -9,7 +9,7 @@
 //! `utils::metrics_log` (`spaces metrics`).
 //!
 //! Collection is controlled by `Feature::CollectMetrics`. Errors never fail a command.
-//! `Feature::EnableRunMetrics` uses the same in-memory samples to show the longest running
+//! `Feature::ShowRunMetrics` uses the same in-memory samples to show the longest running
 //! tasks at the end of `run`, checkout, and `sync` commands (see `show_run_summary`).
 
 use anyhow::Context;
@@ -179,12 +179,12 @@ fn is_feature_disabled_by_env(feature: features::Feature) -> bool {
 
 fn is_disabled_by_env() -> bool {
     is_feature_disabled_by_env(features::Feature::CollectMetrics)
-        && is_feature_disabled_by_env(features::Feature::EnableRunMetrics)
+        && is_feature_disabled_by_env(features::Feature::ShowRunMetrics)
 }
 
 /// Installs the global metrics recorder. Only env vars are known at this point, so the
 /// recorder is skipped (macros become no-ops) only if both `SPACES_ENV_COLLECT_METRICS`
-/// and `SPACES_ENV_ENABLE_RUN_METRICS` disable it.
+/// and `SPACES_ENV_SHOW_RUN_METRICS` disable it.
 pub fn init() {
     if TELEMETRY_STATE.get().is_some() || is_disabled_by_env() {
         return;
@@ -213,11 +213,11 @@ pub fn bind_workspace(
         workspace_path,
         store_path,
         is_enabled: features.is_enabled(features::Feature::CollectMetrics),
-        is_run_metrics_enabled: features.is_enabled(features::Feature::EnableRunMetrics),
+        is_run_metrics_enabled: features.is_enabled(features::Feature::ShowRunMetrics),
     });
 }
 
-/// Shows the longest running tasks recorded so far if `enable-run-metrics` is enabled for
+/// Shows the longest running tasks recorded so far if `show-run-metrics` is enabled for
 /// the bound workspace. Doesn't consume the samples, so call it before `finish()`.
 pub fn show_run_summary(console: &console::Console, elapsed: std::time::Duration) {
     let Some(state) = TELEMETRY_STATE.get() else {

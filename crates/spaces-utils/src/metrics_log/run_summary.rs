@@ -1,5 +1,5 @@
 //! The run summary shown at the end of a successful `spaces run`, checkout, or `sync`
-//! when the `enable-run-metrics` feature is enabled: a bar chart of the longest running
+//! when the `show-run-metrics` feature is enabled: a bar chart of the longest running
 //! operations recorded during the command (rules, starlark module evaluation, and
 //! internal steps).
 
@@ -10,7 +10,6 @@ use console::plot::BarChart;
 
 const RUN_SUMMARY_LIMIT: usize = 20;
 const CACHE_LABEL: &str = "cache";
-const OVERLAP_NOTE: &str = "Times are inclusive: enclosing tasks (for example `evaluate` and `step graph.execute`) include the rules and modules they ran.";
 
 #[derive(Debug, Clone, PartialEq)]
 struct Entry {
@@ -101,7 +100,6 @@ pub fn show_run_summary(
         .collect();
     let chart = BarChart::new(bars)
         .title(title)
-        .footer(OVERLAP_NOTE)
         .value_formatter(move |value| format_seconds(value, ascii))
         .width(default_plot_width(is_tty))
         .options(options);
