@@ -1010,11 +1010,14 @@ pub fn run_starlark_modules_in_workspace(
             sync::SnapshotStage::Checkout,
         )
         .and_then(|snapshots| {
-            let store_path = workspace_arc.read().get_store_path();
-            let store_maintenance_status =
+            let store_maintenance_status = if singleton::get_is_ci() {
+                None
+            } else {
+                let store_path = workspace_arc.read().get_store_path();
                 store::Store::new_from_store_path(std::path::Path::new(store_path.as_ref()))
                     .ok()
-                    .map(|store| store.get_maintenance_status(utils::age::get_now()));
+                    .map(|store| store.get_maintenance_status(utils::age::get_now()))
+            };
             sync::emit_checkout_complete_report(
                 console.clone(),
                 snapshots.as_slice(),

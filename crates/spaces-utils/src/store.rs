@@ -15,7 +15,7 @@ pub const SPACES_STORE_RCACHE: &str = "rcache";
 pub const SPACES_STORE_METRICS: &str = "metrics";
 pub const USAGE_METRICS_FILE_NAME: &str = "spaces.usage.jsonl";
 pub const SPACES_STORE_BARE: &str = "bare";
-const DEFAULT_MAINTENANCE_INTERVAL_DAYS: u128 = 7;
+const DEFAULT_MAINTENANCE_INTERVAL_DAYS: u128 = 30;
 const GIT_ACTION_FSCK: &str = "git fsck (checking integrity)";
 const GIT_ACTION_GC: &str = "git gc (optimizing)";
 const GIT_ACTION_FETCH: &str = "git fetch (repairing)";
@@ -167,6 +167,9 @@ pub struct Maintenance {
     /// Milliseconds since the UNIX epoch when `spaces store fix --git-fsck` last completed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     last_git_fsck: Option<u128>,
+    /// Milliseconds since the UNIX epoch when maintenance tracking started for this store.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    created_at: Option<u128>,
 }
 
 impl Default for Maintenance {
@@ -174,6 +177,7 @@ impl Default for Maintenance {
         Self {
             interval_days: DEFAULT_MAINTENANCE_INTERVAL_DAYS,
             last_git_fsck: None,
+            created_at: Some(age::get_now()),
         }
     }
 }
@@ -182,6 +186,7 @@ impl Default for Maintenance {
 pub enum MaintenanceStatus {
     UpToDate,
     NeverRun {
+        days_since_created: u128,
         interval_days: u128,
     },
     Overdue {
@@ -221,8 +226,25 @@ impl Store {
     /// when it was last run against this store.
     pub fn get_maintenance_status(&self, reference: u128) -> MaintenanceStatus {
         let interval_days = self.maintenance.interval_days;
+        if interval_days == 0 {
+            return MaintenanceStatus::UpToDate;
+        }
+
         match self.maintenance.last_git_fsck {
-            None => MaintenanceStatus::NeverRun { interval_days },
+            None => {
+                let Some(created_at) = self.maintenance.created_at else {
+                    return MaintenanceStatus::UpToDate;
+                };
+                let days_since_created = age::LastUsed::new(created_at).get_age(reference);
+                if days_since_created >= interval_days {
+                    MaintenanceStatus::NeverRun {
+                        days_since_created,
+                        interval_days,
+                    }
+                } else {
+                    MaintenanceStatus::UpToDate
+                }
+            }
             Some(last_run) => {
                 let days_since_last_run = age::LastUsed::new(last_run).get_age(reference);
                 if days_since_last_run >= interval_days {
@@ -269,6 +291,9 @@ impl Store {
         };
 
         store.path_to_store = path_to_store.into();
+        if store.maintenance.created_at.is_none() {
+            store.maintenance.created_at = Some(age::get_now());
+        }
         Ok(store)
     }
 
@@ -2282,10 +2307,19 @@ mod tests {
         let store_root = tempfile::tempdir().unwrap();
         let mut store = Store::new(store_root.path());
         let now = age::get_now();
+        store.maintenance.created_at = Some(now);
 
         assert_eq!(
             store.get_maintenance_status(now),
+            MaintenanceStatus::UpToDate,
+            "fresh store should start the maintenance clock instead of prompting immediately"
+        );
+
+        store.maintenance.created_at = Some(now - DEFAULT_MAINTENANCE_INTERVAL_DAYS * DAY_MS);
+        assert_eq!(
+            store.get_maintenance_status(now),
             MaintenanceStatus::NeverRun {
+                days_since_created: DEFAULT_MAINTENANCE_INTERVAL_DAYS,
                 interval_days: DEFAULT_MAINTENANCE_INTERVAL_DAYS
             }
         );
@@ -2306,7 +2340,14 @@ mod tests {
         );
 
         // A custom interval from the manifest is respected.
-        store.maintenance.interval_days = 30;
+        store.maintenance.interval_days = 60;
+        assert_eq!(
+            store.get_maintenance_status(now),
+            MaintenanceStatus::UpToDate
+        );
+
+        // Setting interval_days = 0 disables the maintenance recommendation.
+        store.maintenance.interval_days = 0;
         assert_eq!(
             store.get_maintenance_status(now),
             MaintenanceStatus::UpToDate
@@ -2351,22 +2392,27 @@ mod tests {
     fn test_manifest_without_maintenance_deserializes() {
         let store: Store = serde_json::from_str(r#"{"entries":{}}"#).unwrap();
         assert!(store.maintenance.last_git_fsck.is_none());
+        assert!(store.maintenance.created_at.is_some());
         assert_eq!(
             store.maintenance.interval_days,
             DEFAULT_MAINTENANCE_INTERVAL_DAYS
         );
 
-        // `maintenance` present but without `interval_days` still defaults.
+        // `maintenance` present but without `interval_days` or `created_at` still defaults.
         let store: Store =
             serde_json::from_str(r#"{"entries":{},"maintenance":{"last_git_fsck":1}}"#).unwrap();
         assert_eq!(store.maintenance.last_git_fsck, Some(1));
+        assert!(store.maintenance.created_at.is_none());
         assert_eq!(
             store.maintenance.interval_days,
             DEFAULT_MAINTENANCE_INTERVAL_DAYS
         );
 
-        let store: Store =
-            serde_json::from_str(r#"{"entries":{},"maintenance":{"interval_days":14}}"#).unwrap();
+        let store: Store = serde_json::from_str(
+            r#"{"entries":{},"maintenance":{"interval_days":14,"created_at":42}}"#,
+        )
+        .unwrap();
         assert_eq!(store.maintenance.interval_days, 14);
+        assert_eq!(store.maintenance.created_at, Some(42));
     }
 }
