@@ -128,7 +128,6 @@ checkout_add_repo(
     co_logger(console.clone()).debug(format!("Adding branches {:?}", args.new_branch).as_str());
     handle_new_branch(args.new_branch);
 
-    let _timer = telemetry::time_step("co.checkout_workspace");
     runner::checkout(
         console.clone(),
         name,
@@ -231,7 +230,6 @@ pub fn checkout_workflow(
             .context(format_context!("while installing tools"))?;
     }
 
-    let _timer = telemetry::time_step("co.checkout_workspace");
     runner::checkout(
         console.clone(),
         name,
