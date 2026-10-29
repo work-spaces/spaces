@@ -8,7 +8,7 @@ use super::{HistogramRecord, PERF_COMMAND_DURATION, PERF_PREFIX, get_metric_info
 use console::bootstrap;
 use console::plot::BarChart;
 
-const RUN_SUMMARY_LIMIT: usize = 20;
+const RUN_SUMMARY_LIMIT: usize = 5;
 const CACHE_LABEL: &str = "cache";
 
 #[derive(Debug, Clone, PartialEq)]
@@ -89,7 +89,7 @@ pub fn show_run_summary(
     let ascii = options.ascii;
     let shown = entries.len().min(RUN_SUMMARY_LIMIT);
     let title = format!(
-        "Longest running tasks (top {shown} of {}, run took {})",
+        "Ttop {shown} of {}, run took {})",
         entries.len(),
         format_seconds(elapsed.as_secs_f64(), ascii)
     );
@@ -107,6 +107,11 @@ pub fn show_run_summary(
     let mut container = bootstrap::Container::new();
     container.add(bootstrap::VerticalSpacer::new(1));
     container.add(chart);
+    container.add(bootstrap::VerticalSpacer::new(1));
+    container.add(
+        bootstrap::Paragraph::new("See all: spaces metrics summary perf.rule --last=1")
+            .variant(bootstrap::Variant::Secondary),
+    );
     console.emit_container(&container);
 }
 
