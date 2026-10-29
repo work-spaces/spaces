@@ -108,10 +108,6 @@ pub fn show_run_summary(
     container.add(bootstrap::VerticalSpacer::new(1));
     container.add(chart);
     container.add(bootstrap::VerticalSpacer::new(1));
-    container.add(
-        bootstrap::Paragraph::new("See all: spaces metrics summary perf.rule --last=1")
-            .variant(bootstrap::Variant::Secondary),
-    );
     console.emit_container(&container);
 }
 
