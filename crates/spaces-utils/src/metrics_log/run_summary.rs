@@ -89,7 +89,7 @@ pub fn show_run_summary(
     let ascii = options.ascii;
     let shown = entries.len().min(RUN_SUMMARY_LIMIT);
     let title = format!(
-        "Ttop {shown} of {}, run took {})",
+        "Top {shown} of {}. Total {}",
         entries.len(),
         format_seconds(elapsed.as_secs_f64(), ascii)
     );
