@@ -139,6 +139,9 @@ pub fn execute_rule(
     progress.set_message(format!("Waiting for dependencies ({:?})", task.phase).as_str());
 
     std::thread::spawn(move || -> anyhow::Result<executor::TaskResult> {
+        // Dependency-only target rules have no execution performance to report.
+        let should_record_performance = !matches!(&task.executor, executor::Task::Target);
+
         // check inputs/outputs to see if we need to run
         let name = task.rule.name.clone();
         let logger = task_logger(console.clone(), name.clone());
@@ -227,10 +230,12 @@ pub fn execute_rule(
         };
 
         let updated_digest = if !dep_globs.is_empty() && skip_execute_message.is_empty() {
-            let _hash_inputs_timer = telemetry::Timer::new(metrics::histogram!(
-                telemetry::PERF_RULE_HASH_INPUTS_DURATION,
-                "rule" => rule_name.clone()
-            ));
+            let _hash_inputs_timer = should_record_performance.then(|| {
+                telemetry::Timer::new(metrics::histogram!(
+                    telemetry::PERF_RULE_HASH_INPUTS_DURATION,
+                    "rule" => rule_name.clone()
+                ))
+            });
             logger
                 .debug(format!("update workspace changes with deps globs {dep_globs:?}").as_str());
 
@@ -411,12 +416,14 @@ pub fn execute_rule(
 
         let elapsed_time = start_time.elapsed();
         let cache_label = telemetry::cache_status_label(&cache_status);
-        metrics::histogram!(
-            telemetry::PERF_RULE_DURATION,
-            "rule" => rule_name.clone(),
-            "cache" => cache_label
-        )
-        .record(elapsed_time);
+        if should_record_performance {
+            metrics::histogram!(
+                telemetry::PERF_RULE_DURATION,
+                "rule" => rule_name.clone(),
+                "cache" => cache_label
+            )
+            .record(elapsed_time);
+        }
         metrics::counter!(
             telemetry::USAGE_RULE,
             "rule" => rule_name.clone(),
