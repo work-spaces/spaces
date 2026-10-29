@@ -1185,6 +1185,7 @@ impl State {
         workspace: workspace::WorkspaceArc,
         phase: task::Phase,
     ) -> anyhow::Result<executor::TaskResult> {
+        let mut execute_timer = telemetry::time_step("graph.execute");
         let mut task_result = executor::TaskResult::new();
         let mut handle_list = Vec::new();
         let console = progress.console.clone();
@@ -1268,8 +1269,10 @@ impl State {
 
                     // this could be configured with a another global starlark function
                     if number_running < max_queue_count {
+                        execute_timer.resume();
                         break;
                     } else {
+                        execute_timer.pause();
                         std::thread::sleep(std::time::Duration::from_millis(1));
                     }
                 }
@@ -1289,7 +1292,9 @@ impl State {
 
         let mut first_error = None;
         for (name, handle) in handle_list {
+            execute_timer.pause();
             let handle_join_result = handle.join();
+            execute_timer.resume();
             if task_pending_set.remove(name.as_ref()) {
                 progress.increment(1);
             }
