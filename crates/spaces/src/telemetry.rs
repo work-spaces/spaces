@@ -77,34 +77,67 @@ pub fn cache_status_label(cache_status: &rcache::CacheStatus) -> &'static str {
 }
 
 /// Records the time from creation until drop, so early returns and errors are included.
+/// Supports [`Timer::pause`] and [`Timer::resume`] to aggregate only active intervals.
 #[must_use = "the elapsed time is recorded when the timer is dropped"]
 pub struct Timer {
     histogram: Histogram,
+    accumulated: Option<std::time::Duration>,
     start_time: Option<std::time::Instant>,
 }
 
 impl Timer {
     pub fn new(histogram: Histogram) -> Self {
+        let now = is_recording().then(std::time::Instant::now);
         Self {
             histogram,
-            start_time: is_recording().then(std::time::Instant::now),
+            accumulated: now.map(|_| std::time::Duration::ZERO),
+            start_time: now,
         }
     }
 
-    fn noop() -> Self {
+    pub fn noop() -> Self {
         Self {
             histogram: Histogram::noop(),
+            accumulated: None,
             start_time: None,
+        }
+    }
+
+    pub fn pause(&mut self) {
+        if let (Some(accumulated), Some(start_time)) =
+            (self.accumulated.as_mut(), self.start_time.take())
+        {
+            *accumulated += start_time.elapsed();
+        }
+    }
+
+    pub fn resume(&mut self) {
+        if self.accumulated.is_some() && self.start_time.is_none() {
+            self.start_time = Some(std::time::Instant::now());
         }
     }
 }
 
 impl Drop for Timer {
     fn drop(&mut self) {
-        if let Some(start_time) = self.start_time {
-            self.histogram.record(start_time.elapsed());
+        if let Some(mut accumulated) = self.accumulated {
+            if let Some(start_time) = self.start_time {
+                accumulated += start_time.elapsed();
+            }
+            self.histogram.record(accumulated);
         }
     }
+}
+
+/// Times the starlark evaluation phase (`checkout`, `run`, or `inspect`).
+pub fn time_evaluate(phase: &str) -> Timer {
+    if !is_recording() {
+        return Timer::noop();
+    }
+    Timer::new(metrics::histogram!(
+        PERF_EVALUATE_DURATION,
+        "phase" => phase.to_lowercase()
+    ))
 }
 
 /// Times a workspace-level step (e.g. `sync.build_plan`).
@@ -937,5 +970,28 @@ mod tests {
             record_sample_metrics(&recorder);
             assert!(!take_snapshot(&recorder.registry).is_empty());
         }
+    }
+
+    #[test]
+    fn test_timer_pause_and_resume_excludes_paused_intervals() {
+        let recorder = SpacesRecorder::new();
+        metrics::with_local_recorder(&recorder, || {
+            let mut timer = time_evaluate("Run");
+            timer.pause();
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            timer.resume();
+        });
+
+        let snapshot = take_snapshot(&recorder.registry);
+        assert_eq!(snapshot.histograms.len(), 1);
+        let histogram = &snapshot.histograms[0];
+        assert_eq!(histogram.name, PERF_EVALUATE_DURATION);
+        assert_eq!(histogram.labels["phase"], "run");
+        assert_eq!(histogram.samples.len(), 1);
+        assert!(
+            histogram.samples[0] < 0.04,
+            "expected paused sleep to be excluded, got {}s",
+            histogram.samples[0]
+        );
     }
 }

@@ -684,7 +684,6 @@ fn run_starlark_modules_with_workspace(
     is_create_lock_file: IsCreateLockFile,
     is_execute_tasks: IsExecuteTasks,
 ) -> anyhow::Result<()> {
-    let evaluate_start_time = std::time::Instant::now();
     match run_workspace {
         RunWorkspace::Target(target, trailing_args) => {
             workspace.write().trailing_args = trailing_args;
@@ -733,12 +732,6 @@ fn run_starlark_modules_with_workspace(
                 .context(format_context!("Failed to save workspace lock file"))?;
         }
     }
-
-    metrics::histogram!(
-        telemetry::PERF_EVALUATE_DURATION,
-        "phase" => phase.to_string().to_lowercase()
-    )
-    .record(evaluate_start_time.elapsed());
 
     Ok(())
 }

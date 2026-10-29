@@ -998,6 +998,17 @@ pub fn evaluate_starlark_modules(
     modules: &[(Arc<str>, Arc<str>)],
     phase: task::Phase,
 ) -> anyhow::Result<()> {
+    let mut noop_timer = telemetry::Timer::noop();
+    evaluate_starlark_modules_with_timer(console, workspace, modules, phase, &mut noop_timer)
+}
+
+fn evaluate_starlark_modules_with_timer(
+    console: console::Console,
+    workspace: workspace::WorkspaceArc,
+    modules: &[(Arc<str>, Arc<str>)],
+    phase: task::Phase,
+    evaluate_timer: &mut telemetry::Timer,
+) -> anyhow::Result<()> {
     let load_result_cache = Arc::new(mtarget::LoadResultCache::new());
     let logger = star_logger(console.clone());
     logger.message("--Run Starlark Modules--");
@@ -1217,6 +1228,8 @@ pub fn evaluate_starlark_modules(
                         .with_context(|| format_context!("Failed to show eval progress"))?;
                 }
 
+                evaluate_timer.pause();
+
                 logger.debug("--Checkout Phase--");
 
                 {
@@ -1241,14 +1254,13 @@ pub fn evaluate_starlark_modules(
 
                 progress.set_message(format!("Executing {phase} rules").as_str());
 
-                let task_result = {
-                    let _timer = telemetry::time_step("graph.execute");
-                    rules::execute(progress, workspace.clone(), phase)
-                        .with_context(|| format_context!("Failed to execute tasks"))?
-                };
+                let task_result = rules::execute(progress, workspace.clone(), phase)
+                    .with_context(|| format_context!("Failed to execute tasks"))?;
 
                 update_secrets(console.clone(), workspace.clone())
                     .with_context(|| format_context!("while running checkout tasks"))?;
+
+                evaluate_timer.resume();
 
                 // In checkout mode, the workspace env mutates after executing rules.
                 // Repopulate inherited vars to ensure the env is up-to-date for
@@ -1450,10 +1462,7 @@ fn execute_tasks(
             let mut progress =
                 console::Progress::new(console.clone(), "Executing tasks", Some(0), None);
 
-            let execute_result = {
-                let _timer = telemetry::time_step("graph.execute");
-                rules::execute(&mut progress, workspace.clone(), phase)
-            };
+            let execute_result = rules::execute(&mut progress, workspace.clone(), phase);
 
             rules::export_log_status(workspace.clone())
                 .context(format_context!("Failed to export log status"))?;
@@ -1955,6 +1964,8 @@ pub fn run_starlark_modules(
     let logger = star_logger(console.clone());
     let is_dirty = workspace.read().is_dirty;
     let is_always_evaluate = workspace.read().settings.bin.is_always_evaluate;
+    let phase_name = phase.to_string();
+    let mut evaluate_timer = telemetry::time_evaluate(phase_name.as_str());
 
     let (run_target, is_save_bin) =
         if is_dirty || is_always_evaluate || phase == task::Phase::Checkout {
@@ -1965,7 +1976,13 @@ pub fn run_starlark_modules(
             } else {
                 logger.message("always evaluate during checkout/sync");
             }
-            evaluate_starlark_modules(console.clone(), workspace.clone(), &modules, phase)?;
+            evaluate_starlark_modules_with_timer(
+                console.clone(),
+                workspace.clone(),
+                &modules,
+                phase,
+                &mut evaluate_timer,
+            )?;
 
             logger.message("Inserting //:setup, //:all, //:test, //:clean rules");
             let run_target = {
@@ -1973,6 +1990,8 @@ pub fn run_starlark_modules(
                 insert_setup_and_all_rules(workspace.clone(), target.clone())
                     .context(format_context!("failed to insert run all"))?
             };
+
+            evaluate_timer.pause();
 
             // after checkout, the dependencies need to be inserted for run rules
             {
@@ -2004,6 +2023,7 @@ pub fn run_starlark_modules(
                 )
                 .context(format_context!("importing tasks"))?;
             }
+            evaluate_timer.pause();
             logger.trace(format!("tasks {}", rules::get_pretty_tasks()).as_str());
             (
                 target.clone().unwrap_or(rule::ALL_RULE_NAME.into()),
@@ -2012,10 +2032,12 @@ pub fn run_starlark_modules(
         };
 
     let is_save_bin = if is_execute_tasks == IsExecuteTasks::Yes {
+        evaluate_timer.resume();
         workspace
             .write()
             .evaluate_env_vars()
             .context(format_context!("evaluating env vars"))?;
+        drop(evaluate_timer);
 
         execute_tasks(
             console.clone(),
@@ -2027,6 +2049,7 @@ pub fn run_starlark_modules(
         )
         .context(format_context!("executing tasks"))?
     } else {
+        drop(evaluate_timer);
         is_save_bin
     };
 
