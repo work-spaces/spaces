@@ -1093,6 +1093,8 @@ pub fn checkout(
     create_lock_file: IsCreateLockFile,
     keep_workspace_on_failure: bool,
 ) -> anyhow::Result<()> {
+    let mut checkout_timer = telemetry::time_step("co.checkout_workspace");
+
     #[derive(Debug, Clone, PartialEq)]
     enum CheckoutCleanup {
         Workspace,
@@ -1169,6 +1171,7 @@ pub fn checkout(
     let target_workspace_directory = current_working_directory.join(name.as_ref());
     let absolute_path_to_workspace: Arc<str> = target_workspace_directory.to_string_lossy().into();
 
+    checkout_timer.pause();
     let checkout_result = run_starlark_modules_in_workspace(
         console.clone(),
         task::Phase::Checkout,
@@ -1181,6 +1184,7 @@ pub fn checkout(
     .context(format_context!(
         "while evaluating starlark modules for checkout"
     ));
+    checkout_timer.resume();
 
     if !keep_workspace_on_failure && checkout_result.is_err() {
         {
