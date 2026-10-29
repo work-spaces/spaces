@@ -13,7 +13,7 @@ pub const NONE_KEY: &str = "(none)";
 
 const MINUTE_MS: u64 = 60_000;
 const HOUR_MS: u64 = 60 * MINUTE_MS;
-pub(crate) const DAY_MS: u64 = 24 * HOUR_MS;
+pub const DAY_MS: u64 = 24 * HOUR_MS;
 const WEEK_MS: u64 = 7 * DAY_MS;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

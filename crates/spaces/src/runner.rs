@@ -459,9 +459,14 @@ pub fn run_store_command_in_workspace(
             dry_run,
             rcache_only,
         } => {
+            let dry_run_value = if dry_run {
+                store::IsDryRun::Yes
+            } else {
+                store::IsDryRun::No
+            };
             if !rcache_only {
                 store
-                    .prune(console.clone(), age, dry_run, is_ci)
+                    .prune(console.clone(), age, dry_run_value, is_ci)
                     .context(format_context!("While pruning store"))?;
 
                 store

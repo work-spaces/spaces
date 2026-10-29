@@ -16,6 +16,8 @@ pub struct PruneReport {
     /// Lines that could not be parsed. They are always kept.
     pub unparseable: usize,
     pub dry_run: bool,
+    #[serde(skip)]
+    pub removed_bytes: u64,
 }
 
 /// Removes records with `timestamp_ms <= cutoff_ms`, preserving the order of the
@@ -38,6 +40,7 @@ pub fn prune_file(path: &Path, cutoff_ms: u64, dry_run: bool) -> anyhow::Result<
             removed: 0,
             unparseable: 0,
             dry_run,
+            removed_bytes: 0,
         };
         let mut kept: Vec<&[u8]> = Vec::new();
         for line in contents.split(|byte| *byte == b'\n') {
@@ -55,6 +58,11 @@ pub fn prune_file(path: &Path, cutoff_ms: u64, dry_run: bool) -> anyhow::Result<
                     kept.push(line);
                 }
             }
+        }
+
+        if report.removed > 0 {
+            let kept_bytes: u64 = kept.iter().map(|line| line.len() as u64 + 1).sum();
+            report.removed_bytes = (contents.len() as u64).saturating_sub(kept_bytes);
         }
 
         if dry_run || report.removed == 0 {

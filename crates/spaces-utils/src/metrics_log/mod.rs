@@ -20,7 +20,7 @@ pub use command::{
 };
 pub use prune::{PruneReport, prune_file};
 pub use query::{
-    Filter, LabelFilter, PSEUDO_KEYS, Sample, Selection, Selector, When, group_key, select,
+    DAY_MS, Filter, LabelFilter, PSEUDO_KEYS, Sample, Selection, Selector, When, group_key, select,
 };
 pub use run_summary::show_run_summary;
 pub use stats::{BinCount, Bucket, Scale, Stat, Stats, make_bins, percentile, trend};

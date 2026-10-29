@@ -24,6 +24,12 @@ pub fn logger(console: console::Console) -> logger::Logger {
     logger::Logger::new(console, "store".into())
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum IsDryRun {
+    No,
+    Yes,
+}
+
 #[derive(Debug, Clone, PartialEq, clap::ValueEnum)]
 pub enum SortBy {
     /// Sort by name
@@ -269,7 +275,9 @@ impl Store {
     ) -> anyhow::Result<Self> {
         let path = path_to_store.join(MANIFEST_FILE_NAME);
         if !path.exists() {
-            return Ok(Store::new(path_to_store));
+            let mut store = Store::new(path_to_store);
+            store.sync_metrics_entry();
+            return Ok(store);
         }
 
         let contents = match std::fs::read_to_string(path.clone()) {
@@ -294,6 +302,7 @@ impl Store {
         if store.maintenance.created_at.is_none() {
             store.maintenance.created_at = Some(age::get_now());
         }
+        store.sync_metrics_entry();
         Ok(store)
     }
 
@@ -365,9 +374,7 @@ impl Store {
                 continue;
             };
 
-            if top_level == std::ffi::OsStr::new(SPACES_STORE_RCACHE)
-                || top_level == std::ffi::OsStr::new(SPACES_STORE_METRICS)
-            {
+            if top_level == std::ffi::OsStr::new(SPACES_STORE_RCACHE) {
                 iter.skip_current_dir();
                 continue;
             }
@@ -384,6 +391,8 @@ impl Store {
             let is_bare_repo = top_level == std::ffi::OsStr::new(SPACES_STORE_BARE)
                 && Self::is_probable_bare_repo(candidate_path);
 
+            let is_metrics = relative_path == std::path::Path::new(SPACES_STORE_METRICS);
+
             // Archive entries are rooted at <scheme>/<host>/<...>, so the manifest key
             // depth is at least 3 components. This avoids false positives on host
             // container directories such as "https/example.com".
@@ -392,12 +401,22 @@ impl Store {
                 && !is_bare_repo
                 && http_archive::check_downloaded_archive(candidate_path).is_ok();
 
-            if !is_bare_repo && !is_archive {
+            if !is_bare_repo && !is_archive && !is_metrics {
                 continue;
             }
 
             let size = get_size_of_path(candidate_path).unwrap_or(0);
-            let last_used = std::fs::metadata(candidate_path)
+            let time_source = if is_metrics {
+                let usage_path = candidate_path.join(USAGE_METRICS_FILE_NAME);
+                if usage_path.exists() {
+                    usage_path
+                } else {
+                    candidate_path.to_path_buf()
+                }
+            } else {
+                candidate_path.to_path_buf()
+            };
+            let last_used = std::fs::metadata(&time_source)
                 .and_then(|m| m.modified())
                 .ok()
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
@@ -503,6 +522,33 @@ impl Store {
 
     fn get_path_in_store(&self, path: &std::path::Path) -> std::path::PathBuf {
         self.path_to_store.join(path)
+    }
+
+    fn sync_metrics_entry(&mut self) {
+        self.unmanaged.remove(SPACES_STORE_METRICS);
+        let metrics_path = self.path_to_store.join(SPACES_STORE_METRICS);
+        if metrics_path.is_dir() {
+            let size = get_size_of_path(&metrics_path).unwrap_or(0);
+            let usage_path = metrics_path.join(USAGE_METRICS_FILE_NAME);
+            let time_source = if usage_path.exists() {
+                usage_path.as_path()
+            } else {
+                metrics_path.as_path()
+            };
+            let last_used = std::fs::metadata(time_source)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis())
+                .unwrap_or(0);
+            let entry = self.entries.entry(SPACES_STORE_METRICS.into()).or_default();
+            entry.size = size;
+            if last_used > 0 {
+                entry.last_used = last_used;
+            }
+        } else {
+            self.entries.remove(SPACES_STORE_METRICS);
+        }
     }
 
     fn get_managed_top_level_dirs(&self) -> std::collections::HashSet<String> {
@@ -635,6 +681,8 @@ impl Store {
         rcache_path: &std::path::Path,
     ) -> anyhow::Result<()> {
         ci::in_github_group(console.clone(), is_ci, "Spaces Store Info", || {
+            self.sync_metrics_entry();
+
             // Collect unmanaged directory sizes before printing anything, with progress indicator.
             let managed_top_level_dirs = self.get_managed_top_level_dirs();
 
@@ -697,7 +745,8 @@ impl Store {
             for (key, value) in entries.iter() {
                 let path = self.get_path_in_store(std::path::Path::new(key.as_ref()));
                 let path_missing = !path.exists();
-                if path_missing || value.size == 0 {
+                let is_metrics = key.as_ref() == SPACES_STORE_METRICS;
+                if path_missing || (!is_metrics && value.size == 0) {
                     is_fix_needed = true;
                 }
                 let workspace_count = value.workspace_links.len();
@@ -938,6 +987,7 @@ impl Store {
         run_git_fsck: bool,
     ) -> anyhow::Result<()> {
         ci::in_github_group(console.clone(), is_ci, "Spaces Store Fix", || {
+            self.sync_metrics_entry();
             let log = logger(console.clone());
 
             // Counters accumulated across all fix phases for the finalize summary.
@@ -1076,8 +1126,9 @@ impl Store {
                     .extension()
                     .map(|e| e.to_string_lossy().starts_with("git"))
                     .unwrap_or(false);
+                let is_metrics = key.as_ref() == SPACES_STORE_METRICS;
 
-                if !is_git_suffix {
+                if !is_git_suffix && !is_metrics {
                     let result = http_archive::check_downloaded_archive(&path);
                     if let Err(err) = result {
                         log.warning(format!("{key} is corrupted. {err}").as_str());
@@ -1382,23 +1433,27 @@ impl Store {
         &mut self,
         console: console::Console,
         age: u16,
-        is_dry_run: bool,
+        is_dry_run: IsDryRun,
         is_ci: ci::IsCi,
     ) -> anyhow::Result<()> {
         ci::in_github_group(console.clone(), is_ci, "Spaces Store Prune", || {
+            self.sync_metrics_entry();
             let mut remove_entries = Vec::new();
 
             let mut progress =
                 console::Progress::new(console.clone(), "pruning the store", None, None);
 
             let path_to_store = self.path_to_store.clone();
-            if !is_dry_run {
+            if is_dry_run == IsDryRun::No {
                 make_path_dirs_user_writable(path_to_store.as_path());
             }
 
             progress.set_message("gathering entries to prune");
             let mut total_size_removed = ByteSize(0);
             for (key, entry) in self.entries.iter() {
+                if key.as_ref() == SPACES_STORE_METRICS {
+                    continue;
+                }
                 let path = path_to_store.join(key.as_ref());
                 let entry_age = entry.get_age(age::get_now());
                 if entry_age >= age as u128 {
@@ -1432,7 +1487,7 @@ impl Store {
                     console::Progress::new(console.clone(), key.as_ref(), None, None);
                 item_progress.set_message(&format!("{size}, age {age} days"));
                 progress.set_message(&format!("pruning {key} with {size}"));
-                if !is_dry_run {
+                if is_dry_run == IsDryRun::No {
                     self.entries.remove(&key);
                     let remove_result = if path.is_file() {
                         std::fs::remove_file(&path)
@@ -1464,7 +1519,64 @@ impl Store {
                 progress.increment(1);
             }
 
-            let finalize_message = if is_dry_run {
+            let usage_path = crate::metrics_log::get_usage_path(&path_to_store);
+            if usage_path.exists() {
+                let cutoff_ms = if age == 0 {
+                    u64::MAX
+                } else {
+                    (age::get_now() as u64).saturating_sub(age as u64 * crate::metrics_log::DAY_MS)
+                };
+                progress.set_message(&format!("pruning {SPACES_STORE_METRICS}"));
+                match crate::metrics_log::prune_file(
+                    &usage_path,
+                    cutoff_ms,
+                    is_dry_run == IsDryRun::Yes,
+                ) {
+                    Ok(report) => {
+                        let removed_size = ByteSize(report.removed_bytes);
+                        total_size_removed += removed_size.as_u64();
+                        if is_dry_run == IsDryRun::No {
+                            self.sync_metrics_entry();
+                        }
+                        if report.removed > 0 {
+                            let mut item_progress = console::Progress::new(
+                                console.clone(),
+                                SPACES_STORE_METRICS,
+                                None,
+                                None,
+                            );
+                            if is_dry_run == IsDryRun::Yes {
+                                item_progress.set_finalize_lines(logger::make_finalize_line(
+                                    logger::FinalType::Cancelled,
+                                    item_progress.elapsed(),
+                                    format!(
+                                        "dry run: {SPACES_STORE_METRICS} ({} record(s), {removed_size})",
+                                        report.removed
+                                    )
+                                    .as_str(),
+                                ));
+                            } else {
+                                item_progress.set_finalize_lines(logger::make_finalize_line(
+                                    logger::FinalType::Completed,
+                                    item_progress.elapsed(),
+                                    format!(
+                                        "{SPACES_STORE_METRICS}: pruned {} record(s) ({removed_size})",
+                                        report.removed
+                                    )
+                                    .as_str(),
+                                ));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        logger(console.clone()).error(
+                            format!("Failed to prune {SPACES_STORE_METRICS}, error: {e}").as_str(),
+                        );
+                    }
+                }
+            }
+
+            let finalize_message = if is_dry_run == IsDryRun::Yes {
                 format!("dry run: would prune {total_size_removed} from store")
             } else {
                 format!("pruned {total_size_removed} from store")
@@ -1835,11 +1947,7 @@ fn emit_top_entries_group(console: &console::Console, heading: &str, entries: &[
 
     for entry in top {
         let size_str = ByteSize(entry.size_bytes).display().to_string();
-        let warning = if entry.path_missing || entry.size_bytes == 0 {
-            "  !!"
-        } else {
-            ""
-        };
+        let warning = if is_entry_issue(entry) { "  !!" } else { "" };
         list = list.item(&entry.path, format!("{size_str}{warning}"));
     }
 
@@ -1853,11 +1961,12 @@ fn emit_pretty_top_entries(console: &console::Console, entries: &[StoreInfoEntry
     emit_top_entries_group(console, "Top 5 unmanaged by size", &unmanaged);
 }
 
+fn is_entry_issue(entry: &StoreInfoEntry) -> bool {
+    entry.path_missing || (entry.path != SPACES_STORE_METRICS && entry.size_bytes == 0)
+}
+
 fn emit_pretty_issues(console: &console::Console, entries: &[StoreInfoEntry]) {
-    let issues: Vec<_> = entries
-        .iter()
-        .filter(|e| e.path_missing || e.size_bytes == 0)
-        .collect();
+    let issues: Vec<_> = entries.iter().filter(|e| is_entry_issue(e)).collect();
 
     if issues.is_empty() {
         return;
@@ -1920,6 +2029,7 @@ fn get_unmanaged_dir_entries(
                     name != MANIFEST_FILE_NAME
                         && name != SPACES_STORE_RCACHE
                         && name != SPACES_STORE_BARE
+                        && name != SPACES_STORE_METRICS
                         && !managed_top_level_dirs.contains(&name)
                 })
                 .collect()
@@ -2414,5 +2524,111 @@ mod tests {
         .unwrap();
         assert_eq!(store.maintenance.interval_days, 14);
         assert_eq!(store.maintenance.created_at, Some(42));
+    }
+
+    #[test]
+    fn test_metrics_directory_is_managed_not_unmanaged() {
+        let store_root = tempfile::tempdir().unwrap();
+        let metrics_dir = store_root.path().join(SPACES_STORE_METRICS);
+        std::fs::create_dir_all(&metrics_dir).unwrap();
+        let usage_path = metrics_dir.join(USAGE_METRICS_FILE_NAME);
+        std::fs::write(
+            &usage_path,
+            b"{\"timestamp_ms\":1000,\"spaces_version\":\"0.1\",\"command\":\"run\",\"status\":\"ok\"}\n",
+        )
+        .unwrap();
+
+        // Also create a genuinely unmanaged directory to verify detection still works.
+        std::fs::create_dir_all(store_root.path().join("stray")).unwrap();
+
+        let managed_top_level_dirs = std::collections::HashSet::new();
+        let unmanaged = get_unmanaged_dir_entries(store_root.path(), &managed_top_level_dirs);
+        let unmanaged_names: Vec<String> = unmanaged
+            .iter()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(unmanaged_names, vec!["stray".to_string()]);
+
+        let mut store = Store::new_from_store_path(store_root.path()).unwrap();
+        assert!(
+            store.entries.contains_key(SPACES_STORE_METRICS),
+            "metrics directory should be tracked as a managed entry"
+        );
+        assert!(!store.unmanaged.contains_key(SPACES_STORE_METRICS));
+
+        store
+            .fix(console::Console::new_null(), false, ci::IsCi::No, false)
+            .unwrap();
+        assert!(
+            usage_path.exists(),
+            "store fix must not delete the managed metrics directory"
+        );
+        assert!(store.entries.contains_key(SPACES_STORE_METRICS));
+    }
+
+    #[test]
+    fn test_prune_removes_metrics_entries_older_than_age_and_zero_removes_all() {
+        let store_root = tempfile::tempdir().unwrap();
+        let metrics_dir = store_root.path().join(SPACES_STORE_METRICS);
+        std::fs::create_dir_all(&metrics_dir).unwrap();
+        let usage_path = metrics_dir.join(USAGE_METRICS_FILE_NAME);
+
+        let now_ms = age::get_now() as u64;
+        let old_ts = now_ms - 10 * crate::metrics_log::DAY_MS;
+        let recent_ts = now_ms - crate::metrics_log::DAY_MS;
+
+        let make_line = |ts: u64, cmd: &str| {
+            serde_json::to_string(&crate::metrics_log::Record {
+                timestamp_ms: ts,
+                spaces_version: "0.1".to_string(),
+                command: cmd.to_string(),
+                status: "ok".to_string(),
+                workspace: None,
+                counters: Vec::new(),
+                histograms: Vec::new(),
+            })
+            .unwrap()
+        };
+        let initial_contents = format!(
+            "{}\n{}\n",
+            make_line(old_ts, "old"),
+            make_line(recent_ts, "recent")
+        );
+        std::fs::write(&usage_path, &initial_contents).unwrap();
+
+        let mut store = Store::new_from_store_path(store_root.path()).unwrap();
+
+        // Dry run with age = 5 keeps all records intact on disk.
+        store
+            .prune(console::Console::new_null(), 5, IsDryRun::Yes, ci::IsCi::No)
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&usage_path).unwrap(),
+            initial_contents
+        );
+
+        // Live prune with age = 5 removes the 10-day-old record and keeps the 1-day-old record.
+        store
+            .prune(console::Console::new_null(), 5, IsDryRun::Yes, ci::IsCi::No)
+            .unwrap();
+        let after_partial = std::fs::read_to_string(&usage_path).unwrap();
+        assert!(!after_partial.contains(r#""command":"old""#));
+        assert!(after_partial.contains(r#""command":"recent""#));
+        assert!(store.entries.contains_key(SPACES_STORE_METRICS));
+
+        // Live prune with age = 0 removes everything.
+        store
+            .prune(console::Console::new_null(), 0, IsDryRun::No, ci::IsCi::No)
+            .unwrap();
+        let after_zero = std::fs::read_to_string(&usage_path).unwrap();
+        assert!(
+            after_zero.is_empty(),
+            "age == 0 should remove all metrics entries"
+        );
+        assert!(
+            store.entries.contains_key(SPACES_STORE_METRICS),
+            "metrics directory remains a managed entry after pruning all records"
+        );
+        assert_eq!(store.entries[SPACES_STORE_METRICS].size, 0);
     }
 }
