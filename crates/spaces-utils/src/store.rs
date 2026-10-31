@@ -793,13 +793,13 @@ impl Store {
                     emit_pretty_info(&console, &info_entries, total_size, is_fix_needed);
                 }
                 console::Format::Yaml => {
-                    console.write(
+                    console.write_stdout(
                         &serialise_store_info_yaml(&info_entries, total_size)
                             .context(format_context!("Failed to serialize store info as YAML"))?,
                     )?;
                 }
                 console::Format::Json => {
-                    console.write(
+                    console.write_stdout(
                         &serialise_store_info_json(&info_entries, total_size)
                             .context(format_context!("Failed to serialize store info as JSON"))?,
                     )?;
@@ -2241,7 +2241,7 @@ fn show_bare_info(
             );
         }
         console::Format::Yaml => {
-            progress.console.write(
+            progress.console.write_stdout(
                 &serialise_bare_info_yaml(
                     bare_size,
                     workspace_count,
@@ -2252,7 +2252,7 @@ fn show_bare_info(
             )?;
         }
         console::Format::Json => {
-            progress.console.write(
+            progress.console.write_stdout(
                 &serialise_bare_info_json(
                     bare_size,
                     workspace_count,

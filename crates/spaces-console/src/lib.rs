@@ -293,6 +293,19 @@ impl Console {
         self.writer.lock().unwrap().write_str(&redacted.as_ref())
     }
 
+    pub fn write_stdout(&self, message: &str) -> anyhow::Result<()> {
+        use std::io::Write;
+
+        let redacted = self.state.read().unwrap().secrets.redact(message.into());
+        let mut stdout = std::io::stdout().lock();
+        stdout.write_all(redacted.as_bytes())?;
+        if !redacted.ends_with('\n') {
+            stdout.write_all(b"\n")?;
+        }
+        stdout.flush()?;
+        Ok(())
+    }
+
     pub fn emit_line(&self, line: superconsole::Line) {
         self.writer.lock().unwrap().emit_line(line);
     }
