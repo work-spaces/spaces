@@ -603,6 +603,13 @@ fn evaluate_module_with_cycle_state(
         rules::register_module(params.name.clone());
     }
 
+    let is_module_caching_feature_enabled = workspace.as_ref().is_some_and(|workspace| {
+        workspace
+            .read()
+            .features
+            .is_enabled(features::Feature::ModuleCache)
+    });
+
     // Build a per-evaluation context that builtins access via `eval.extra_mut`
     // instead of through the global singleton.
     let eval_context = workspace.as_ref().map(|w| {
@@ -641,6 +648,7 @@ fn evaluate_module_with_cycle_state(
     let (module, module_deps, module_target) = evaluate_ast_result?;
 
     if workspace::is_rules_module(params.name.as_ref())
+        && is_module_caching_feature_enabled
         && matches!(
             singleton::get_execution_phase(),
             task::Phase::Run | task::Phase::Inspect
