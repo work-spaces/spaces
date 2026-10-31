@@ -294,9 +294,25 @@ impl Console {
     }
 
     pub fn write_stdout(&self, message: &str) -> anyhow::Result<()> {
+        self.write_stdout_with_redaction(message, false)
+    }
+
+    /// Writes stdout with all secret occurrences redacted, without truncating the message.
+    pub fn write_stdout_untruncated(&self, message: &str) -> anyhow::Result<()> {
+        self.write_stdout_with_redaction(message, true)
+    }
+
+    fn write_stdout_with_redaction(&self, message: &str, redact_all: bool) -> anyhow::Result<()> {
         use std::io::Write;
 
-        let redacted = self.state.read().unwrap().secrets.redact(message.into());
+        let redacted = {
+            let state = self.state.read().unwrap();
+            if redact_all {
+                state.secrets.redact_all(message.into())
+            } else {
+                state.secrets.redact(message.into())
+            }
+        };
         let mut stdout = std::io::stdout().lock();
         stdout.write_all(redacted.as_bytes())?;
         if !redacted.ends_with('\n') {

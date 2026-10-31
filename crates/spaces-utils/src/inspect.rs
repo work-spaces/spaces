@@ -239,9 +239,7 @@ impl Options {
 
         let command = build_checkout_command(&locks, assign_from_arg_env, command_line_store)?;
 
-        console.raw("\n")?;
-        console.raw(&command)?;
-        console.raw("\n")?;
+        console.write_stdout(&format!("\n{command}\n"))?;
         Ok(())
     }
 }
