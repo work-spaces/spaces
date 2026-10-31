@@ -44,6 +44,20 @@ impl Secrets {
             result.into()
         }
     }
+
+    pub(crate) fn redact_all(&self, text: Arc<str>) -> Arc<str> {
+        if self.secrets.is_empty() {
+            text
+        } else {
+            let mut result = text.to_string();
+            for secret in &self.secrets {
+                if !secret.is_empty() && secret.len() >= self.min_secret_length {
+                    result = result.replace(secret.as_ref(), self.redacted.as_ref());
+                }
+            }
+            result.into()
+        }
+    }
 }
 
 #[cfg(test)]
@@ -137,6 +151,28 @@ mod tests {
             "REDACTED REDACTED ...",
             "Only the first max_redactions occurrences should be replaced, remainder truncated"
         );
+    }
+
+    #[test]
+    fn redact_all_replaces_occurrences_without_truncating() {
+        let secrets = Secrets {
+            secrets: vec!["secret".into()],
+            redacted: "REDACTED".into(),
+            max_redactions: DEFAULT_MAX_REDACTIONS,
+            min_secret_length: 0,
+        };
+        let values = (0..=DEFAULT_MAX_REDACTIONS)
+            .map(|_| r#""secret""#)
+            .collect::<Vec<_>>()
+            .join(",");
+        let input: Arc<str> = format!(r#"{{"values":[{values}],"complete":true}}"#).into();
+        let result = secrets.redact_all(input);
+
+        assert_eq!(
+            result.matches("REDACTED").count(),
+            DEFAULT_MAX_REDACTIONS + 1
+        );
+        assert!(result.ends_with(r#"],"complete":true}"#));
     }
 
     #[test]
