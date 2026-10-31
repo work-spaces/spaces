@@ -180,8 +180,8 @@ fn build_module_target(
             rule_name,
             module_name
         ))?;
-        let task_json = serde_json::to_value(&task).context(format_context!(
-            "Failed to serialize task '{}' while building module result for '{}'",
+        let task_bin = postcard::to_stdvec(&task).context(format_context!(
+            "Failed to serialize task '{}' to binary while building module result for '{}'",
             rule_name,
             module_name
         ))?;
@@ -189,7 +189,7 @@ fn build_module_target(
             rule_name.clone(),
             task.phase.to_string().into(),
             eval_context.default_module_visibility.clone(),
-            task_json,
+            task_bin,
         );
         rules.insert(rule_name.clone(), module_rule);
     }
@@ -648,14 +648,14 @@ fn evaluate_module_with_cycle_state(
     {
         // Save module result for rules modules in Run/Inspect phases
         if let Some(ref result) = module_deps {
-            result.save_to_json().context(format_context!(
+            result.save_to_binary().context(format_context!(
                 "Internal Error: Failed to save module deps for {}",
                 params.name.as_ref()
             ))?;
         }
 
         if let Some(ref target) = module_target {
-            target.save_to_json().context(format_context!(
+            target.save_to_binary().context(format_context!(
                 "Internal Error: Failed to save module target for {}",
                 params.name.as_ref()
             ))?;
@@ -710,7 +710,7 @@ fn try_evaluate_with_cache(
     let module_start = Instant::now();
 
     // Try to load existing module result from build folder
-    let module_deps_option = mtarget::ModuleDeps::new_from_json(params.name.as_ref())
+    let module_deps_option = mtarget::ModuleDeps::new_from_binary(params.name.as_ref())
         .with_context(|| format_context!("Failed to load module deps for {:?}", params.name))?;
 
     let (is_always_evaluate, is_module_caching_feature_enabled) = {
@@ -784,12 +784,12 @@ fn try_evaluate_with_cache(
         ws::get_rcache_path(std::path::Path::new(store_path.as_ref()))
     };
 
-    // rcache targets = the JSON file
-    let json_target: Arc<str> = mtarget::ModuleTarget::get_json_path(params.name.as_ref())
+    // rcache target is the binary module result file
+    let binary_target: Arc<str> = mtarget::ModuleTarget::get_path(params.name.as_ref())
         .to_string_lossy()
         .into();
 
-    let cache_targets = vec![targets::Target::File(json_target.clone())];
+    let cache_targets = vec![targets::Target::File(binary_target.clone())];
 
     // Execute with rcache
     let result = rcache::execute(
@@ -814,7 +814,7 @@ fn try_evaluate_with_cache(
             .map(|_| ());
             result.map_err(|err| format_error!("{err:?}"))
         },
-        || vec![Arc::from(std::path::Path::new(json_target.as_ref()))],
+        || vec![Arc::from(std::path::Path::new(binary_target.as_ref()))],
     );
 
     match result {
@@ -837,11 +837,11 @@ fn try_evaluate_with_cache(
                 queue_wait,
                 module_start.elapsed(),
             );
-            let Some(mtarget) = mtarget::ModuleTarget::new_from_json(params.name.as_ref())
+            let Some(mtarget) = mtarget::ModuleTarget::new_from_binary(params.name.as_ref())
                 .with_context(|| format_context!("Failed to load mtarget for cache hit"))?
             else {
                 return Err(format_error!(
-                    "Internal error: mtarget not found for cache hit {} - {json_target}",
+                    "Internal error: mtarget not found for cache hit {} - {binary_target}",
                     params.name
                 ));
             };
