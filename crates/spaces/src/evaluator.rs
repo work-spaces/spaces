@@ -216,6 +216,7 @@ fn build_module_deps(
     Ok(result)
 }
 
+const MODULE_CACHE_KEY_FORMAT_VERSION: &str = "binary-v1";
 const EMBEDDED_PRELUDE_PREFIX: &str = "//@star/prelude/";
 
 fn embedded_prelude_relative_path(module_id: &str) -> Option<&str> {
@@ -777,14 +778,15 @@ fn try_evaluate_with_cache(
         return Err(format_error!("Internal Error: module_deps is None"));
     };
 
-    // Compute digest from mtarget
-    let module_digest = {
+    // Include the binary target format in the cache key so legacy JSON-target entries cannot hit.
+    let module_digest: Arc<str> = {
         let workspace = workspace.read();
-        module_deps
+        let digest = module_deps
             .compute_digest(&workspace.settings.bin.star_files)
             .with_context(|| {
                 format_context!("Failed to compute digest for module {:?}", params.name,)
-            })?
+            })?;
+        format!("{MODULE_CACHE_KEY_FORMAT_VERSION}-{digest}").into()
     };
 
     // Get rcache path
