@@ -124,21 +124,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn postcard_roundtrip_preserves_task() {
+    fn json_roundtrip_supports_untagged_rule_deps() {
         let task = Task::new(
             rule::Rule {
                 name: "//test:target".into(),
+                deps: Some(rule::Deps::Any(vec![rule::AnyDep::Rule(
+                    "//test:dependency".into(),
+                )])),
                 ..Default::default()
             },
             Phase::Run,
             executor::Task::Target,
         );
 
-        let bytes = postcard::to_stdvec(&task).unwrap();
-        let decoded: Task = postcard::from_bytes(&bytes).unwrap();
+        let bytes = serde_json::to_vec(&task).unwrap();
+        let decoded: Task = serde_json::from_slice(&bytes).unwrap();
 
         assert_eq!(decoded.phase, task.phase);
         assert_eq!(decoded.rule.name, task.rule.name);
+        assert!(!decoded.rule.deps.as_ref().unwrap().is_empty());
         assert!(matches!(decoded.executor, executor::Task::Target));
     }
 }

@@ -608,23 +608,33 @@ impl State {
     /// This is the reverse of `build_module_target()` in evaluator.rs - it takes
     /// a cached module result and inserts all its tasks into the rules state,
     /// allowing module evaluation to be skipped when the cache is valid.
+    ///
+    /// Returns `Ok(false)` when a cached task cannot be deserialized, before inserting any tasks.
     fn restore_tasks_from_cache(
         &self,
         mtarget: &mtarget::ModuleTarget,
         module_name: &Arc<str>,
-    ) -> anyhow::Result<()> {
-        for task_summary in mtarget.rules.values() {
-            let task: task::Task = postcard::from_bytes(&task_summary.task_bin).context(
-                format_context!("Failed to deserialize cached task {}", task_summary.name),
-            )?;
+    ) -> anyhow::Result<bool> {
+        let cached_tasks = mtarget
+            .rules
+            .values()
+            .map(|task_summary| {
+                serde_json::from_slice::<task::Task>(&task_summary.task_bin)
+                    .with_context(|| {
+                        format_context!("Failed to deserialize cached task {}", task_summary.name)
+                    })
+                    .map(|task| (task, task_summary.default_visibility.clone()))
+            })
+            .collect::<anyhow::Result<Vec<_>>>();
 
-            self.insert_task_with_context(
-                task,
-                module_name,
-                task_summary.default_visibility.clone(),
-            )?;
+        let Ok(cached_tasks) = cached_tasks else {
+            return Ok(false);
+        };
+
+        for (task, default_visibility) in cached_tasks {
+            self.insert_task_with_context(task, module_name, default_visibility)?;
         }
-        Ok(())
+        Ok(true)
     }
 
     fn check_task_deps_visibility(&self, task: &task::Task) -> anyhow::Result<()> {
@@ -1442,6 +1452,7 @@ pub fn register_module(name: Arc<str>) {
 /// This is the reverse of `build_module_result()` in evaluator.rs - it takes
 /// a cached module result and inserts all its tasks into the rules state,
 /// allowing module evaluation to be skipped when the cache is valid.
+/// Returns `Ok(false)` when a cached task cannot be deserialized, before inserting any tasks.
 ///
 /// # Arguments
 /// * `mtarget` - The cached module evaluation result containing serialized tasks
@@ -1449,10 +1460,13 @@ pub fn register_module(name: Arc<str>) {
 pub fn restore_tasks_from_cache(
     mtarget: &mtarget::ModuleTarget,
     module_name: &Arc<str>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
     let mut state = get_state().write();
-    state.all_modules.insert(module_name.clone());
-    state.restore_tasks_from_cache(mtarget, module_name)
+    let restored = state.restore_tasks_from_cache(mtarget, module_name)?;
+    if restored {
+        state.all_modules.insert(module_name.clone());
+    }
+    Ok(restored)
 }
 
 pub fn show_tasks(
