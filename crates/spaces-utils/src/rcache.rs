@@ -503,13 +503,13 @@ pub fn show_info(
                 emit_pretty_rcache_info(&console, artifacts_size, rule_digests_size, total_size);
             }
             console::Format::Yaml => {
-                console.write(
+                console.write_stdout(
                     &serialise_rcache_info_yaml(artifacts_size, rule_digests_size, total_size)
                         .context(format_context!("while serializing rcache info as YAML"))?,
                 )?;
             }
             console::Format::Json => {
-                console.write(
+                console.write_stdout(
                     &serialise_rcache_info_json(artifacts_size, rule_digests_size, total_size)
                         .context(format_context!("while serializing rcache info as JSON"))?,
                 )?;

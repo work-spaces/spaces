@@ -791,7 +791,8 @@ impl QueryCoCommand {
                     console::Format::Yaml => {
                         let rendered =
                             build_query_co_output_map(results.iter().map(|scored| &scored.entry));
-                        console.write(&serialise_query_co_entries_yaml(&rendered).context(
+                        console
+                            .write_stdout(&serialise_query_co_entries_yaml(&rendered).context(
                             format_context!(
                                 "Internal Error: while serializing query-co search results for YAML"
                             ),
@@ -800,7 +801,8 @@ impl QueryCoCommand {
                     console::Format::Json => {
                         let rendered =
                             build_query_co_output_map(results.iter().map(|scored| &scored.entry));
-                        console.write(&serialise_query_co_entries_json(&rendered).context(
+                        console
+                            .write_stdout(&serialise_query_co_entries_json(&rendered).context(
                             format_context!(
                                 "Internal Error: while serializing query-co search results for JSON"
                             ),
@@ -838,7 +840,8 @@ impl QueryCoCommand {
                     }
                     console::Format::Yaml => {
                         let rendered = build_query_co_output_map(filtered.iter());
-                        console.write(&serialise_query_co_entries_yaml(&rendered).context(
+                        console
+                            .write_stdout(&serialise_query_co_entries_yaml(&rendered).context(
                             format_context!(
                                 "Internal Error: while serializing query-co list results for YAML"
                             ),
@@ -846,7 +849,8 @@ impl QueryCoCommand {
                     }
                     console::Format::Json => {
                         let rendered = build_query_co_output_map(filtered.iter());
-                        console.write(&serialise_query_co_entries_json(&rendered).context(
+                        console
+                            .write_stdout(&serialise_query_co_entries_json(&rendered).context(
                             format_context!(
                                 "Internal Error: while serializing query-co list results for JSON"
                             ),

@@ -349,7 +349,7 @@ fn emit_serialized<T: Serialize>(
             "Internal Error: failed to serialize metrics as JSON"
         ))?,
     };
-    console.write(&text)
+    console.write_stdout(&text)
 }
 
 /// Chart options derived from the terminal: ASCII when not a TTY (or in ASCII typography
