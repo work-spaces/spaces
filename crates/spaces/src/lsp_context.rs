@@ -41,7 +41,7 @@ use starlark::syntax::Dialect;
 use starlark_lsp::error::eval_message_to_lsp_diagnostic;
 use starlark_lsp::server::LspContext;
 use starlark_lsp::server::LspEvalResult;
-use starlark_lsp::server::LspUrl;
+use starlark_lsp::server::LspUri;
 use starlark_lsp::server::StringLiteralResult;
 
 #[derive(Debug)]
@@ -55,10 +55,10 @@ pub(crate) enum ContextMode {
 enum ContextError {
     /// The provided Url was not absolute and it needs to be.
     #[error("Path for URL `{}` was not absolute", .0)]
-    NotAbsolute(LspUrl),
+    NotAbsolute(LspUri),
     /// The scheme provided was not correct or supported.
     #[error("Url `{}` was expected to be of type `{}`", .1, .0)]
-    WrongScheme(String, LspUrl),
+    WrongScheme(String, LspUri),
 }
 
 #[derive(Debug)]
@@ -66,8 +66,8 @@ pub(crate) struct SpacesContext {
     pub(crate) mode: ContextMode,
     pub(crate) dialect: Dialect,
     pub(crate) globals: Globals,
-    pub(crate) builtin_docs: HashMap<LspUrl, String>,
-    pub(crate) builtin_symbols: HashMap<String, LspUrl>,
+    pub(crate) builtin_docs: HashMap<LspUri, String>,
+    pub(crate) builtin_symbols: HashMap<String, LspUri>,
     pub(crate) workspace: workspace::WorkspaceArc,
 }
 
@@ -90,7 +90,7 @@ pub(crate) struct EvalResult {
 enum ResolveLoadError {
     /// The scheme provided was not correct or supported.
     #[error("Url `{}` was expected to be of type `{}`", .1, .0)]
-    WrongScheme(String, LspUrl),
+    WrongScheme(String, LspUri),
 }
 
 impl SpacesContext {
@@ -98,15 +98,15 @@ impl SpacesContext {
         workspace: workspace::WorkspaceArc,
         mode: ContextMode,
     ) -> anyhow::Result<Self> {
-        let mut builtin_docs: HashMap<LspUrl, String> = HashMap::new();
-        let mut builtin_symbols: HashMap<String, LspUrl> = HashMap::new();
+        let mut builtin_docs: HashMap<LspUri, String> = HashMap::new();
+        let mut builtin_symbols: HashMap<String, LspUri> = HashMap::new();
         let globals = evaluator::get_globals(evaluator::GlobalsConfig::All).build();
         let workspace_path = workspace.read().get_absolute_path();
 
         for (name, item) in globals.documentation().members {
             let path = format!("{workspace_path}/.spaces/builtins/globals_{name}.bzl");
             let as_code = item.render_as_code(&name);
-            let uri = LspUrl::Starlark(path.into());
+            let uri = LspUri::Starlark(path.into());
             builtin_docs.insert(uri.clone(), as_code);
             builtin_symbols.insert(name, uri);
         }
@@ -400,10 +400,10 @@ impl SpacesContext {
 }
 
 impl LspContext for SpacesContext {
-    fn parse_file_with_contents(&self, uri: &LspUrl, content: String) -> LspEvalResult {
+    fn parse_file_with_contents(&self, uri: &LspUri, content: String) -> LspEvalResult {
         eprintln!("parse file with contents {uri:?}");
         match uri {
-            LspUrl::File(uri) => {
+            LspUri::File(uri) => {
                 let EvalResult {
                     lsp_eval_result,
                     #[allow(unused)]
@@ -411,7 +411,7 @@ impl LspContext for SpacesContext {
                 } = self.file_with_contents(&uri.to_string_lossy(), content);
                 lsp_eval_result
             }
-            LspUrl::Starlark(name) => {
+            LspUri::Starlark(name) => {
                 let EvalResult {
                     lsp_eval_result,
                     #[allow(unused)]
@@ -429,12 +429,12 @@ impl LspContext for SpacesContext {
     fn resolve_load(
         &self,
         path: &str,
-        current_file: &LspUrl,
+        current_file: &LspUri,
         _workspace_root: Option<&Path>,
-    ) -> anyhow::Result<LspUrl, String> {
+    ) -> anyhow::Result<LspUri, String> {
         eprintln!("resolve load for {path}");
         match current_file {
-            LspUrl::File(current_file_path) => {
+            LspUri::File(current_file_path) => {
                 let workspace_path_str = self.workspace.read().get_absolute_path();
                 let workspace_path = std::path::Path::new(workspace_path_str.as_ref());
                 let resolved_path = if let Some(path_in_workspace) = path.strip_prefix("//") {
@@ -448,7 +448,7 @@ impl LspContext for SpacesContext {
 
                 eprintln!("Current file path is {}", current_file_path.display());
                 eprintln!("Resolved file path is {}", resolved_path.display());
-                Ok(LspUrl::File(resolved_path))
+                Ok(LspUri::File(resolved_path))
             }
             _ => Err(
                 ResolveLoadError::WrongScheme("file://".to_owned(), current_file.clone())
@@ -460,7 +460,7 @@ impl LspContext for SpacesContext {
     fn resolve_string_literal(
         &self,
         literal: &str,
-        current_file: &LspUrl,
+        current_file: &LspUri,
         _workspace_root: Option<&Path>,
     ) -> anyhow::Result<Option<StringLiteralResult>, String> {
         eprintln!("resolve_string_literal {literal} from {current_file}");
@@ -475,7 +475,7 @@ impl LspContext for SpacesContext {
                 if literal.starts_with(':') {
                     eprintln!("Match leading : -> {current_file:?}");
                     match current_file {
-                        LspUrl::File(path) => Some(path.to_string_lossy().to_string()),
+                        LspUri::File(path) => Some(path.to_string_lossy().to_string()),
                         _ => None,
                     }
                 } else {
@@ -491,7 +491,7 @@ impl LspContext for SpacesContext {
                 eprintln!("This is a rule label: {source_file}");
                 let name = label::get_rule_name_from_label(literal).to_owned();
                 return Ok(Some(StringLiteralResult {
-                    url: LspUrl::File(source_file_path.as_ref().into()),
+                    uri: LspUri::File(source_file_path.as_ref().into()),
                     location_finder: Some(Box::new(|ast| Ok(Self::find_target(ast, name)))),
                 }));
             }
@@ -500,10 +500,10 @@ impl LspContext for SpacesContext {
         Ok(None)
     }
 
-    fn get_load_contents(&self, uri: &LspUrl) -> anyhow::Result<Option<String>, String> {
+    fn get_load_contents(&self, uri: &LspUri) -> anyhow::Result<Option<String>, String> {
         eprintln!("get_load_contents: {uri:?}");
         match uri {
-            LspUrl::File(path) => match path.is_absolute() {
+            LspUri::File(path) => match path.is_absolute() {
                 true => match fs::read_to_string(path) {
                     Ok(contents) => Ok(Some(contents)),
                     Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
@@ -511,7 +511,7 @@ impl LspContext for SpacesContext {
                 },
                 false => Err(ContextError::NotAbsolute(uri.clone()).to_string()),
             },
-            LspUrl::Starlark(starlark) => {
+            LspUri::Starlark(starlark) => {
                 eprintln!("get starlark: {}", starlark.display());
                 if let Some(docs) = self.builtin_docs.get(uri).cloned() {
                     eprintln!("got some docs: {docs}");
@@ -524,12 +524,12 @@ impl LspContext for SpacesContext {
         }
     }
 
-    fn get_url_for_global_symbol(
+    fn get_uri_for_global_symbol(
         &self,
-        current_file: &LspUrl,
+        current_file: &LspUri,
         symbol: &str,
-    ) -> anyhow::Result<Option<LspUrl>, String> {
-        eprintln!("get_url_for_global_symbol: Symbol: {symbol:?} Current: {current_file:?}");
+    ) -> anyhow::Result<Option<LspUri>, String> {
+        eprintln!("get_uri_for_global_symbol: Symbol: {symbol:?} Current: {current_file:?}");
         let url = self.builtin_symbols.get(symbol).cloned();
         if let Some(url) = url {
             eprintln!("url for {symbol} is {url}");
@@ -549,15 +549,15 @@ impl LspContext for SpacesContext {
 
     fn render_as_load(
         &self,
-        target: &LspUrl,
-        current_file: &LspUrl,
+        target: &LspUri,
+        current_file: &LspUri,
         _workspace_root: Option<&Path>,
     ) -> anyhow::Result<String, String> {
         eprintln!("render_as_load: Target: {target:?} Current: {current_file:?}");
         Err("Not yet implemented, render_as_load".to_string())
     }
 
-    fn get_environment(&self, _uri: &LspUrl) -> DocModule {
+    fn get_environment(&self, _uri: &LspUri) -> DocModule {
         DocModule::default()
     }
 }
