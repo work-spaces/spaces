@@ -41,7 +41,7 @@ impl ConsoleWriter for Writer {
                     .collect();
                 console.emit(superconsole::Lines(lines));
             } else {
-                println!("{}", message);
+                eprintln!("{}", message);
             }
         }
         Ok(())
@@ -51,7 +51,7 @@ impl ConsoleWriter for Writer {
         if let Some(console) = self.console.as_mut() {
             console.emit(superconsole::Lines(vec![line]));
         } else {
-            println!("{}", line.to_unstyled());
+            eprintln!("{}", line.to_unstyled());
         }
     }
 

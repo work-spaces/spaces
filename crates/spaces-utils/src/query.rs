@@ -1475,7 +1475,7 @@ impl QueryCommand {
                             return Ok(());
                         }
                         if let Some(yaml) = &qr.serialized_yaml {
-                            console.write(&format!("# {raw_name}\n{yaml}"))?;
+                            console.write_stdout(&format!("# {raw_name}\n{yaml}"))?;
                         }
                         Ok(())
                     };
@@ -1529,14 +1529,14 @@ impl QueryCommand {
                             }
                         }
                         console::Format::Yaml => {
-                            console.write(&serialise_rule_map_yaml(&map).context(
+                            console.write_stdout(&serialise_rule_map_yaml(&map).context(
                                 format_context!(
                                     "Internal Error: while serialising rule map for YAML"
                                 ),
                             )?)?;
                         }
                         console::Format::Json => {
-                            console.write(&serialise_rule_map_json(&map).context(
+                            console.write_stdout(&serialise_rule_map_json(&map).context(
                                 format_context!(
                                     "Internal Error: while serialising rule map for JSON"
                                 ),
@@ -1624,7 +1624,7 @@ impl QueryCommand {
                         console::Format::Json => serialized_json.clone(),
                     }
                 };
-                console.raw(&output)?;
+                console.write_stdout(&output)?;
                 Ok(())
             }
 
@@ -1951,12 +1951,12 @@ impl QueryCommand {
                     console::Format::Json => {
                         let json = serde_json::to_string_pretty(&tree)
                             .context(format_context!("Failed to serialize to JSON"))?;
-                        console.write(&format!("{}\n", json))?;
+                        console.write_stdout(&format!("{}\n", json))?;
                     }
                     console::Format::Yaml => {
                         let yaml = serde_yaml::to_string(&tree)
                             .context(format_context!("Failed to serialize to YAML"))?;
-                        console.write(&format!("{}\n", yaml))?;
+                        console.write_stdout(&format!("{}\n", yaml))?;
                     }
                     console::Format::Pretty => {
                         // Count total dependencies
