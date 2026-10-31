@@ -2609,7 +2609,7 @@ mod tests {
 
         // Live prune with age = 5 removes the 10-day-old record and keeps the 1-day-old record.
         store
-            .prune(console::Console::new_null(), 5, IsDryRun::Yes, ci::IsCi::No)
+            .prune(console::Console::new_null(), 5, IsDryRun::No, ci::IsCi::No)
             .unwrap();
         let after_partial = std::fs::read_to_string(&usage_path).unwrap();
         assert!(!after_partial.contains(r#""command":"old""#));
