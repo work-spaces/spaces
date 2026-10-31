@@ -11,7 +11,7 @@ members = [
 [workspace.dependencies]
 anyhow-source-location = "0.2.1"
 anyhow = "1"
-starlark = { git = "https://github.com/facebook/starlark-rust", rev = "100f29bc1a57d344171a405e4e06bccc6b8b8e23"}
+starlark = { version = "0.14" }
 serde = { version = "1", features = ["derive"] }
 postcard = { version = "1", features = ["use-std"] }
 serde_json = { version = "1", features = ["preserve_order"] }
