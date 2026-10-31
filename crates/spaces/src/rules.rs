@@ -614,7 +614,7 @@ impl State {
         module_name: &Arc<str>,
     ) -> anyhow::Result<()> {
         for task_summary in mtarget.rules.values() {
-            let task: task::Task = serde_json::from_value(task_summary.task_json.clone()).context(
+            let task: task::Task = postcard::from_bytes(&task_summary.task_bin).context(
                 format_context!("Failed to deserialize cached task {}", task_summary.name),
             )?;
 

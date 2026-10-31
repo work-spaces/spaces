@@ -118,3 +118,27 @@ impl Task {
         digest.finalize()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn postcard_roundtrip_preserves_task() {
+        let task = Task::new(
+            rule::Rule {
+                name: "//test:target".into(),
+                ..Default::default()
+            },
+            Phase::Run,
+            executor::Task::Target,
+        );
+
+        let bytes = postcard::to_stdvec(&task).unwrap();
+        let decoded: Task = postcard::from_bytes(&bytes).unwrap();
+
+        assert_eq!(decoded.phase, task.phase);
+        assert_eq!(decoded.rule.name, task.rule.name);
+        assert!(matches!(decoded.executor, executor::Task::Target));
+    }
+}

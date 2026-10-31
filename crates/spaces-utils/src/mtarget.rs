@@ -1,9 +1,9 @@
-//! Module Target creation (spaces modules to JSON compilation).
+//! Module Target creation (spaces modules to binary compilation).
 //!
 //! This module provides data structures for capturing and persisting
-//! the results of evaluating Starlark modules. This enables compiling
-//! spaces modules to JSON to avoid re-evaluation when the
-//! module and its dependencies haven't changed.
+//! the results of evaluating Starlark modules. This enables caching
+//! spaces module evaluations to avoid re-evaluation when the module and
+//! its dependencies haven't changed.
 
 use crate::{bin_detail, platform, rule};
 use anyhow::Context;
@@ -18,19 +18,19 @@ pub const MODULE_TARGETS_DIR: &str = "build/spaces-module-targets";
 pub const MODULE_DEPS_DIR: &str = "build/spaces-module-deps";
 
 /// File extension for module result files.
-pub const MODULE_RESULTS_SUFFIX: &str = ".json";
+pub const MODULE_RESULTS_SUFFIX: &str = ".spaces";
 
-fn get_json_path(dir: &str, module_name: &str) -> Arc<std::path::Path> {
+fn get_module_result_path(dir: &str, module_name: &str) -> Arc<std::path::Path> {
     let build_module_target_dir = std::path::Path::new(dir);
-    let module_name_json = format!("{module_name}.json");
-    let module_path = std::path::Path::new(module_name_json.as_str());
+    let module_result_name = format!("{module_name}{MODULE_RESULTS_SUFFIX}");
+    let module_path = std::path::Path::new(module_result_name.as_str());
 
     let file_path = build_module_target_dir.join(module_path);
     file_path.into()
 }
 
-fn get_existing_json_path(dir: &str, module_name: &str) -> Option<Arc<std::path::Path>> {
-    let path = get_json_path(dir, module_name);
+fn get_existing_module_result_path(dir: &str, module_name: &str) -> Option<Arc<std::path::Path>> {
+    let path = get_module_result_path(dir, module_name);
     if !path.exists() {
         return None;
     }
@@ -109,8 +109,8 @@ pub struct Rule {
     /// Used when restoring from cache if the rule's visibility is None.
     pub default_visibility: rule::Visibility,
 
-    /// Serialized task data for replay/inspection
-    pub task_json: serde_json::Value,
+    /// Binary-serialized task data for replay/inspection.
+    pub task_bin: Vec<u8>,
 }
 
 /// Represents the dependencies of a Starlark module.
@@ -128,32 +128,32 @@ pub struct ModuleDeps {
 }
 
 impl ModuleDeps {
-    pub fn get_json_path(module_name: &str) -> Arc<std::path::Path> {
-        get_json_path(MODULE_DEPS_DIR, module_name)
+    pub fn get_path(module_name: &str) -> Arc<std::path::Path> {
+        get_module_result_path(MODULE_DEPS_DIR, module_name)
     }
 
-    /// Loads a cached ModuleEvaluationResult from the build directory.
+    /// Loads cached module dependencies from the build directory.
     ///
     /// Returns `Ok(None)` if the cache file doesn't exist (indicating rcache should be skipped).
     /// Returns `Ok(Some(result))` if the file exists and was successfully loaded.
-    /// Returns `Err` if the file exists but couldn't be read or parsed.
+    /// Returns `Err` if the file exists but couldn't be read or decoded.
     ///
     /// This function assumes it is called from the workspace root directory.
     ///
     /// # Arguments
     /// * `module_name` - The module path (e.g., "spaces/spaces.star")
-    pub fn new_from_json(module_name: &str) -> anyhow::Result<Option<Self>> {
-        let Some(file_path) = get_existing_json_path(MODULE_DEPS_DIR, module_name) else {
+    pub fn new_from_binary(module_name: &str) -> anyhow::Result<Option<Self>> {
+        let Some(file_path) = get_existing_module_result_path(MODULE_DEPS_DIR, module_name) else {
             return Ok(None);
         };
 
-        let content = std::fs::read_to_string(file_path.as_ref()).context(format_context!(
+        let content = std::fs::read(file_path.as_ref()).context(format_context!(
             "Failed to read module deps from {}",
             file_path.display()
         ))?;
 
-        let result: Self = serde_json::from_str(&content).context(format_context!(
-            "Failed to parse module deps from {}",
+        let result: Self = postcard::from_bytes(&content).context(format_context!(
+            "Failed to decode module deps from {}",
             file_path.display()
         ))?;
 
@@ -250,17 +250,16 @@ impl ModuleDeps {
         self.loads = loads;
     }
 
-    /// Saves this module evaluation result to the build directory.
+    /// Saves this module evaluation result to the build directory as a binary file.
     ///
-    /// The file is saved to `<workspace_path>/build/spaces-modules-deps/<module_path>.json`
-    /// mirroring the workspace directory structure (e.g., `spaces/spaces.star` becomes
-    /// `build/spaces-modules-deps/spaces/spaces.star.json`).
-    pub fn save_to_json(&self) -> anyhow::Result<()> {
+    /// The file mirrors the workspace directory structure (e.g., `spaces/spaces.star`
+    /// becomes `build/spaces-module-deps/spaces/spaces.star.spaces`).
+    pub fn save_to_binary(&self) -> anyhow::Result<()> {
         // Serialize before acquiring the lock to minimise the time spent holding it.
-        let content = serde_json::to_string_pretty(&self)
-            .context(format_context!("Failed to serialize module result"))?;
+        let content = postcard::to_stdvec(self)
+            .context(format_context!("Failed to serialize module deps"))?;
 
-        let file_path = get_json_path(MODULE_DEPS_DIR, self.module_name.as_ref());
+        let file_path = get_module_result_path(MODULE_DEPS_DIR, self.module_name.as_ref());
         let mut mutex = crate::fs_mutex::FsMutex::new(file_path);
         mutex.with_lock(|path| {
             // Create parent directories to mirror workspace structure.
@@ -276,7 +275,7 @@ impl ModuleDeps {
             // cannot manage the file removal.
             let _ = std::fs::remove_file(path);
 
-            std::fs::write(path, content.as_bytes()).context(format_context!(
+            std::fs::write(path, &content).context(format_context!(
                 "Failed to write module result to {}",
                 path.display()
             ))
@@ -337,32 +336,33 @@ impl ModuleTarget {
         self.loads.push(load);
     }
 
-    pub fn get_json_path(module_name: &str) -> Arc<std::path::Path> {
-        get_json_path(MODULE_TARGETS_DIR, module_name)
+    pub fn get_path(module_name: &str) -> Arc<std::path::Path> {
+        get_module_result_path(MODULE_TARGETS_DIR, module_name)
     }
 
-    /// Loads a cached ModuleEvaluationResult from the build directory.
+    /// Loads a cached module target from the build directory.
     ///
     /// Returns `Ok(None)` if the cache file doesn't exist (indicating rcache should be skipped).
     /// Returns `Ok(Some(result))` if the file exists and was successfully loaded.
-    /// Returns `Err` if the file exists but couldn't be read or parsed.
+    /// Returns `Err` if the file exists but couldn't be read or decoded.
     ///
     /// This function assumes it is called from the workspace root directory.
     ///
     /// # Arguments
     /// * `module_name` - The module path (e.g., "spaces/spaces.star")
-    pub fn new_from_json(module_name: &str) -> anyhow::Result<Option<Self>> {
-        let Some(file_path) = get_existing_json_path(MODULE_TARGETS_DIR, module_name) else {
+    pub fn new_from_binary(module_name: &str) -> anyhow::Result<Option<Self>> {
+        let Some(file_path) = get_existing_module_result_path(MODULE_TARGETS_DIR, module_name)
+        else {
             return Ok(None);
         };
 
-        let content = std::fs::read_to_string(file_path.as_ref()).context(format_context!(
+        let content = std::fs::read(file_path.as_ref()).context(format_context!(
             "Failed to read module result from {}",
             file_path.display()
         ))?;
 
-        let result: Self = serde_json::from_str(&content).context(format_context!(
-            "Failed to parse module result from {}",
+        let result: Self = postcard::from_bytes(&content).context(format_context!(
+            "Failed to decode module result from {}",
             file_path.display()
         ))?;
 
@@ -374,17 +374,16 @@ impl ModuleTarget {
         self.rules.insert(rule.name.clone(), rule);
     }
 
-    /// Saves this module evaluation result to the build directory.
+    /// Saves this module evaluation result to the build directory as a binary file.
     ///
-    /// The file is saved to `<workspace_path>/build/spaces-modules/<module_path>.json`
-    /// mirroring the workspace directory structure (e.g., `spaces/spaces.star` becomes
-    /// `build/spaces-modules/spaces/spaces.star.json`).
-    pub fn save_to_json(&self) -> anyhow::Result<()> {
+    /// The file mirrors the workspace directory structure (e.g., `spaces/spaces.star`
+    /// becomes `build/spaces-module-targets/spaces/spaces.star.spaces`).
+    pub fn save_to_binary(&self) -> anyhow::Result<()> {
         // Serialize before acquiring the lock to minimise the time spent holding it.
-        let content = serde_json::to_string_pretty(&self)
-            .context(format_context!("Failed to serialize module result"))?;
+        let content = postcard::to_stdvec(self)
+            .context(format_context!("Failed to serialize module target"))?;
 
-        let file_path = get_json_path(MODULE_TARGETS_DIR, self.module_name.as_ref());
+        let file_path = get_module_result_path(MODULE_TARGETS_DIR, self.module_name.as_ref());
         let mut mutex = crate::fs_mutex::FsMutex::new(file_path);
         mutex.with_lock(|path| {
             // Create parent directories to mirror workspace structure.
@@ -400,7 +399,7 @@ impl ModuleTarget {
             // cannot manage the file removal.
             let _ = std::fs::remove_file(path);
 
-            std::fs::write(path, content.as_bytes()).context(format_context!(
+            std::fs::write(path, &content).context(format_context!(
                 "Failed to write module result to {}",
                 path.display()
             ))
@@ -423,13 +422,13 @@ impl Rule {
         name: Arc<str>,
         phase: Arc<str>,
         default_visibility: rule::Visibility,
-        task_json: serde_json::Value,
+        task_bin: Vec<u8>,
     ) -> Self {
         Self {
             name,
             phase,
             default_visibility,
-            task_json,
+            task_bin,
         }
     }
 }
@@ -462,7 +461,7 @@ mod tests {
             "//test:build".into(),
             "Run".into(),
             rule::Visibility::Public,
-            serde_json::json!({"name": "//test:build"}),
+            vec![1, 2, 3],
         );
         assert_eq!(rule.name.as_ref(), "//test:build");
         assert_eq!(rule.phase.as_ref(), "Run");
@@ -475,7 +474,7 @@ mod tests {
             "//test:internal".into(),
             "Test".into(),
             rule::Visibility::Private,
-            serde_json::json!({"type": "test"}),
+            vec![4, 5, 6],
         );
         assert_eq!(rule.default_visibility, rule::Visibility::Private);
     }
@@ -486,7 +485,7 @@ mod tests {
             "//test:build".into(),
             "Run".into(),
             rule::Visibility::Public,
-            serde_json::json!({"executor": "Target"}),
+            vec![7, 8, 9],
         );
         let json = serde_json::to_string(&rule).unwrap();
         let deserialized: Rule = serde_json::from_str(&json).unwrap();
@@ -532,7 +531,7 @@ mod tests {
             "//test:build".into(),
             "Run".into(),
             rule::Visibility::Public,
-            serde_json::json!({"name": "//test:build"}),
+            vec![1, 2, 3],
         ));
         assert_eq!(result.rules.len(), 1);
         assert!(result.rules.contains_key(&Arc::from("//test:build")));
@@ -545,13 +544,13 @@ mod tests {
             "//test:build".into(),
             "Run".into(),
             rule::Visibility::Public,
-            serde_json::json!({"name": "//test:build"}),
+            vec![1, 2, 3],
         ));
         result.insert_rule(Rule::new(
             "//test:test".into(),
             "Test".into(),
             rule::Visibility::Public,
-            serde_json::json!({"name": "//test:test"}),
+            vec![4, 5, 6],
         ));
         assert_eq!(result.rules.len(), 2);
         assert!(result.rules.contains_key(&Arc::from("//test:build")));
@@ -565,18 +564,18 @@ mod tests {
             "//test:build".into(),
             "Run".into(),
             rule::Visibility::Public,
-            serde_json::json!({"version": 1}),
+            vec![1],
         ));
         result.insert_rule(Rule::new(
             "//test:build".into(),
             "Run".into(),
             rule::Visibility::Private,
-            serde_json::json!({"version": 2}),
+            vec![2],
         ));
         assert_eq!(result.rules.len(), 1);
         let rule = result.rules.get(&Arc::from("//test:build")).unwrap();
         assert_eq!(rule.default_visibility, rule::Visibility::Private);
-        assert_eq!(rule.task_json["version"], 2);
+        assert_eq!(rule.task_bin, vec![2]);
     }
 
     #[test]
@@ -587,7 +586,7 @@ mod tests {
             "//test:build".into(),
             "Run".into(),
             rule::Visibility::Private,
-            serde_json::json!({"executor": "Target", "phase": "Run"}),
+            vec![1, 2, 3],
         ));
 
         let json = serde_json::to_string_pretty(&result).unwrap();
@@ -599,16 +598,36 @@ mod tests {
     }
 
     #[test]
-    fn test_module_target_get_json_path() {
-        let path = ModuleTarget::get_json_path("test/module.star");
-        let path_str = path.to_string_lossy();
-        assert!(path_str.contains("build/spaces-module-targets"));
-        assert!(path_str.ends_with("test/module.star.json"));
+    fn test_postcard_roundtrip_preserves_task_bin() {
+        let mut target = ModuleTarget::new("test/module.star".into());
+        target.insert_rule(Rule::new(
+            "//test:build".into(),
+            "Run".into(),
+            rule::Visibility::Private,
+            vec![0, 1, 2, 255],
+        ));
+
+        let bytes = postcard::to_stdvec(&target).unwrap();
+        let decoded: ModuleTarget = postcard::from_bytes(&bytes).unwrap();
+
+        assert_eq!(decoded.module_name, target.module_name);
+        assert_eq!(
+            decoded.rules["//test:build"].task_bin,
+            target.rules["//test:build"].task_bin
+        );
     }
 
     #[test]
-    fn test_module_target_new_from_json_nonexistent() {
-        let result = ModuleTarget::new_from_json("nonexistent/module.star").unwrap();
+    fn test_module_target_get_path() {
+        let path = ModuleTarget::get_path("test/module.star");
+        let path_str = path.to_string_lossy();
+        assert!(path_str.contains("build/spaces-module-targets"));
+        assert!(path_str.ends_with("test/module.star.spaces"));
+    }
+
+    #[test]
+    fn test_module_target_new_from_binary_nonexistent() {
+        let result = ModuleTarget::new_from_binary("nonexistent/module.star").unwrap();
         assert!(result.is_none());
     }
 
@@ -648,16 +667,16 @@ mod tests {
     }
 
     #[test]
-    fn test_module_deps_get_json_path() {
-        let path = ModuleDeps::get_json_path("test/module.star");
+    fn test_module_deps_get_path() {
+        let path = ModuleDeps::get_path("test/module.star");
         let path_str = path.to_string_lossy();
         assert!(path_str.contains("build/spaces-module-deps"));
-        assert!(path_str.ends_with("test/module.star.json"));
+        assert!(path_str.ends_with("test/module.star.spaces"));
     }
 
     #[test]
-    fn test_module_deps_new_from_json_nonexistent() {
-        let result = ModuleDeps::new_from_json("nonexistent/module.star").unwrap();
+    fn test_module_deps_new_from_binary_nonexistent() {
+        let result = ModuleDeps::new_from_binary("nonexistent/module.star").unwrap();
         assert!(result.is_none());
     }
 
@@ -911,23 +930,23 @@ mod tests {
     // ===== Helper Function Tests =====
 
     #[test]
-    fn test_get_json_path() {
-        let path = get_json_path("some/dir", "module/path.star");
+    fn test_get_module_result_path() {
+        let path = get_module_result_path("some/dir", "module/path.star");
         let path_str = path.to_string_lossy();
         assert!(path_str.contains("some/dir"));
-        assert!(path_str.ends_with("module/path.star.json"));
+        assert!(path_str.ends_with("module/path.star.spaces"));
     }
 
     #[test]
-    fn test_get_json_path_different_dirs() {
-        let path1 = get_json_path("dir1", "module.star");
-        let path2 = get_json_path("dir2", "module.star");
+    fn test_get_module_result_path_different_dirs() {
+        let path1 = get_module_result_path("dir1", "module.star");
+        let path2 = get_module_result_path("dir2", "module.star");
         assert_ne!(path1, path2);
     }
 
     #[test]
-    fn test_get_existing_json_path_nonexistent() {
-        let path = get_existing_json_path("nonexistent/dir", "nonexistent.star");
+    fn test_get_existing_module_result_path_nonexistent() {
+        let path = get_existing_module_result_path("nonexistent/dir", "nonexistent.star");
         assert!(path.is_none());
     }
 
@@ -937,6 +956,6 @@ mod tests {
     fn test_constants() {
         assert_eq!(MODULE_TARGETS_DIR, "build/spaces-module-targets");
         assert_eq!(MODULE_DEPS_DIR, "build/spaces-module-deps");
-        assert_eq!(MODULE_RESULTS_SUFFIX, ".json");
+        assert_eq!(MODULE_RESULTS_SUFFIX, ".spaces");
     }
 }

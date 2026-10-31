@@ -28,6 +28,7 @@ glob-match.workspace = true
 petgraph.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
+postcard.workspace = true
 serde.workspace = true
 starlark.workspace = true
 starstd.workspace = true
