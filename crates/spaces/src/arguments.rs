@@ -168,12 +168,6 @@ pub fn execute() -> anyhow::Result<()> {
         commands,
     } = args;
 
-    let hide_progress_bars = if matches!(commands, Commands::Foreach { .. }) {
-        true
-    } else {
-        hide_progress_bars
-    };
-
     let stdout_console = console::Console::new_stdout(console::Verbosity {
         level: verbosity.into(),
         ..Default::default()

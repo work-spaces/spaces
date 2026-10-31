@@ -101,6 +101,33 @@ fn evaluate_environment(
     Ok(())
 }
 
+struct ProgressBarVisibilityGuard {
+    console: console::Console,
+    show_progress_bars: bool,
+}
+
+impl ProgressBarVisibilityGuard {
+    fn hide(console: console::Console) -> Self {
+        let show_progress_bars = console.is_show_progress_bars();
+        console.set_is_show_progress_bars(false);
+        Self {
+            console,
+            show_progress_bars,
+        }
+    }
+
+    fn restore(&self) {
+        self.console
+            .set_is_show_progress_bars(self.show_progress_bars);
+    }
+}
+
+impl Drop for ProgressBarVisibilityGuard {
+    fn drop(&mut self) {
+        self.restore();
+    }
+}
+
 fn emit_foreach_separator(console: &console::Console) {
     console.emit_line(console::Line::default());
 }
@@ -151,6 +178,8 @@ pub fn foreach_repo(
     for_each_repo: ForEachRepo,
     command_arguments: &[Arc<str>],
 ) -> anyhow::Result<()> {
+    let progress_bar_visibility = ProgressBarVisibilityGuard::hide(console.clone());
+
     let workspace = get_workspace(
         console.clone(),
         run_workspace,
@@ -176,6 +205,7 @@ pub fn foreach_repo(
     );
     let is_run_on_dirty_branches = matches!(for_each_repo, ForEachRepo::DirtyBranch);
 
+    progress_bar_visibility.restore();
     for (url, member_list) in workspace_members.iter() {
         for member in member_list.iter() {
             if is_run_on_branches_only {
@@ -183,8 +213,9 @@ pub fn foreach_repo(
                     console.clone(),
                     format!("//{}", member.path),
                     Some(100),
-                    Some("Queueing for execution".to_string()),
+                    None,
                 );
+                repo_progress.set_message("Checking repository");
                 // use git to check if member is on a branch
                 let repo = git::Repository::new(url.clone(), member.path.clone());
                 if repo.is_branch(&mut repo_progress, &member.rev) {
@@ -234,6 +265,13 @@ pub fn foreach_repo(
     let command_string = command_arguments.join(" ");
     let command_label = command_arguments.join("_");
     let total_repos = repos.len();
+
+    if total_repos == 0 {
+        return Ok(());
+    }
+
+    let mut foreach_progress =
+        console::Progress::new(console.clone(), "foreach", Some(total_repos as u64), None);
     for (index, member) in repos.iter().enumerate() {
         let mut args = command_arguments.to_owned().split_off(1);
         let command = command_arguments[0].clone();
@@ -243,24 +281,20 @@ pub fn foreach_repo(
         }
         let working_directory: Arc<str> = format!("//{}", member.path).into();
 
-        let mut exec_progress = console::Progress::new(
-            console.clone(),
-            command.as_ref(),
-            Some(100),
-            Some("Complete".to_string()),
-        );
+        foreach_progress.set_prefix(working_directory.as_ref());
+        foreach_progress.set_message("Analyzing repository");
 
         if index > 0 {
-            exec_progress.console.emit_line(console::Line::default());
+            console.emit_line(console::Line::default());
         }
         emit_foreach_header(
-            &exec_progress.console,
+            &console,
             index + 1,
             total_repos,
             working_directory.as_ref(),
             command_string.as_ref(),
         );
-        emit_foreach_separator(&exec_progress.console);
+        emit_foreach_separator(&console);
 
         let name = format!("__foreach_{working_directory}_{command_label}");
 
@@ -275,16 +309,19 @@ pub fn foreach_repo(
             timeout: None,
         };
 
-        exec.execute(
-            &mut exec_progress,
+        if let Err(err) = exec.execute(
+            &mut foreach_progress,
             workspace_arc.clone(),
             name.as_str(),
             executor::exec::UseWorkspaceEnv::Yes,
-        )
-        .context(format_context!(
-            "while executing command {} in workspace",
-            command
-        ))?;
+        ) {
+            foreach_progress.set_finalize("Failed");
+            return Err(err).context(format_context!(
+                "while executing command {} in workspace",
+                command
+            ));
+        }
+        foreach_progress.increment(1);
     }
 
     Ok(())
