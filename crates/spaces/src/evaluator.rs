@@ -180,8 +180,9 @@ fn build_module_target(
             rule_name,
             module_name
         ))?;
-        let task_bin = postcard::to_stdvec(&task).context(format_context!(
-            "Failed to serialize task '{}' to binary while building module result for '{}'",
+        // Rule deps include an untagged enum, which Postcard cannot deserialize.
+        let task_bin = serde_json::to_vec(&task).context(format_context!(
+            "Failed to serialize task '{}' while building module result for '{}'",
             rule_name,
             module_name
         ))?;
@@ -838,24 +839,59 @@ fn try_evaluate_with_cache(
         }
         Some(Err(e)) => Err(e),
         None => {
-            eval_logger.debug(format!("Cache hit for module {:?}", params.name).as_str());
-            evaluation_profile::record_cache_hit_module(
-                params.name.as_ref(),
-                phase,
+            let module_target = mtarget::ModuleTarget::new_from_binary(params.name.as_ref())
+                .with_context(|| format_context!("Failed to load mtarget for cache hit"))?;
+            let restored_from_cache = if let Some(mtarget) = module_target.as_ref() {
+                rules::restore_tasks_from_cache(mtarget, &params.name)?
+            } else {
+                false
+            };
+
+            if restored_from_cache {
+                eval_logger.debug(format!("Cache hit for module {:?}", params.name).as_str());
+                evaluation_profile::record_cache_hit_module(
+                    params.name.as_ref(),
+                    phase,
+                    queue_wait,
+                    module_start.elapsed(),
+                );
+                telemetry::record_module(
+                    &workspace_path,
+                    &params.name,
+                    "hit",
+                    module_start.elapsed(),
+                );
+                return Ok(());
+            }
+
+            eval_logger.debug(
+                format!(
+                    "No usable module target for cache hit {:?}; reevaluating",
+                    params.name
+                )
+                .as_str(),
+            );
+            evaluation_profile::set_next_module_metadata(
+                evaluation_profile::ModuleCacheStatus::Miss,
+                None,
                 queue_wait,
+            );
+            evaluate_module(
+                Some(workspace),
+                workspace_path.clone(),
+                params.clone(),
+                workspace_env,
+                Some(console.clone()),
+                load_result_cache,
+            )
+            .map(|_| ())
+            .map_err(|err| format_error!("{err:?}"))?;
+            telemetry::record_module(
+                &workspace_path,
+                &params.name,
+                "miss",
                 module_start.elapsed(),
             );
-            let Some(mtarget) = mtarget::ModuleTarget::new_from_binary(params.name.as_ref())
-                .with_context(|| format_context!("Failed to load mtarget for cache hit"))?
-            else {
-                return Err(format_error!(
-                    "Internal error: mtarget not found for cache hit {} - {binary_target}",
-                    params.name
-                ));
-            };
-            // Cache hit - restore tasks from mtarget
-            rules::restore_tasks_from_cache(&mtarget, &params.name)?;
-            telemetry::record_module(&workspace_path, &params.name, "hit", module_start.elapsed());
             Ok(())
         }
     }

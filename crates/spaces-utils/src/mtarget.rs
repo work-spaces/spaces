@@ -38,6 +38,11 @@ fn get_existing_module_result_path(dir: &str, module_name: &str) -> Option<Arc<s
     Some(path)
 }
 
+fn read_module_result<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> Option<T> {
+    let content = std::fs::read(path).ok()?;
+    postcard::from_bytes(&content).ok()
+}
+
 /// Represents a load statement in a module.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -134,9 +139,9 @@ impl ModuleDeps {
 
     /// Loads cached module dependencies from the build directory.
     ///
-    /// Returns `Ok(None)` if the cache file doesn't exist (indicating rcache should be skipped).
+    /// Returns `Ok(None)` if the cache file doesn't exist or can't be read or decoded
+    /// (indicating rcache should be skipped).
     /// Returns `Ok(Some(result))` if the file exists and was successfully loaded.
-    /// Returns `Err` if the file exists but couldn't be read or decoded.
     ///
     /// This function assumes it is called from the workspace root directory.
     ///
@@ -147,17 +152,7 @@ impl ModuleDeps {
             return Ok(None);
         };
 
-        let content = std::fs::read(file_path.as_ref()).context(format_context!(
-            "Failed to read module deps from {}",
-            file_path.display()
-        ))?;
-
-        let result: Self = postcard::from_bytes(&content).context(format_context!(
-            "Failed to decode module deps from {}",
-            file_path.display()
-        ))?;
-
-        Ok(Some(result))
+        Ok(read_module_result(file_path.as_ref()))
     }
 
     /// Computes a unique digest for this module evaluation result.
@@ -342,9 +337,9 @@ impl ModuleTarget {
 
     /// Loads a cached module target from the build directory.
     ///
-    /// Returns `Ok(None)` if the cache file doesn't exist (indicating rcache should be skipped).
+    /// Returns `Ok(None)` if the cache file doesn't exist or can't be read or decoded
+    /// (indicating rcache should be skipped).
     /// Returns `Ok(Some(result))` if the file exists and was successfully loaded.
-    /// Returns `Err` if the file exists but couldn't be read or decoded.
     ///
     /// This function assumes it is called from the workspace root directory.
     ///
@@ -356,17 +351,7 @@ impl ModuleTarget {
             return Ok(None);
         };
 
-        let content = std::fs::read(file_path.as_ref()).context(format_context!(
-            "Failed to read module result from {}",
-            file_path.display()
-        ))?;
-
-        let result: Self = postcard::from_bytes(&content).context(format_context!(
-            "Failed to decode module result from {}",
-            file_path.display()
-        ))?;
-
-        Ok(Some(result))
+        Ok(read_module_result(file_path.as_ref()))
     }
 
     /// Adds a task summary to the result.
@@ -629,6 +614,23 @@ mod tests {
     fn test_module_target_new_from_binary_nonexistent() {
         let result = ModuleTarget::new_from_binary("nonexistent/module.star").unwrap();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_read_module_result_ignores_invalid_cache_files() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), b"invalid cache data").unwrap();
+
+        assert!(read_module_result::<ModuleDeps>(file.path()).is_none());
+        assert!(read_module_result::<ModuleTarget>(file.path()).is_none());
+    }
+
+    #[test]
+    fn test_read_module_result_ignores_read_errors() {
+        let directory = tempfile::tempdir().unwrap();
+
+        assert!(read_module_result::<ModuleDeps>(directory.path()).is_none());
+        assert!(read_module_result::<ModuleTarget>(directory.path()).is_none());
     }
 
     // ===== ModuleDeps Tests =====
