@@ -1,6 +1,5 @@
 use crossterm::style::{self, Attribute, Attributes, Color, ContentStyle};
-use superconsole::Span;
-use termwiz::cell::Hyperlink;
+use superconsole::{Hyperlink, Span};
 
 // ---------------------------------------------------------------------------
 // Helper functions for creating styled spans

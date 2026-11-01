@@ -32,7 +32,7 @@ load(
 
 GLOB_DEPS = globs_new(includes = [
     "//Cargo.toml",
-    "//spaces/Cargo.toml",
+    "//spaces/**/Cargo.toml",
     "//spaces/Cargo.workspace.toml",
     "//spaces/**/*.rs",
     "//spaces/crates/spaces/src/assets/**/*.star",
