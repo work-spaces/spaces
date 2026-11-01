@@ -541,7 +541,7 @@ impl LspContext for SpacesContext {
                     let _ = std::fs::write(url.path(), content);
                 }
             }
-            Ok(Some(url))
+            Ok(Some(LspUri::File(url.path().into())))
         } else {
             Ok(None)
         }
