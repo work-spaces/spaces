@@ -25,6 +25,18 @@ fn logger(console: console::Console, name: &str) -> logger::Logger {
     logger::Logger::new(console, name.into())
 }
 
+fn apply_passthrough_verbosity(
+    log_level: Option<console::Level>,
+    verbosity: console::Level,
+    is_target_rule: bool,
+) -> Option<console::Level> {
+    if verbosity == console::Level::Passthrough && is_target_rule {
+        Some(console::Level::Passthrough)
+    } else {
+        log_level
+    }
+}
+
 fn get_state() -> &'static lock::StateLock<State> {
     if let Some(state) = STATE.try_get() {
         return state;
@@ -277,24 +289,22 @@ impl Exec {
 
         let mut log_level = self.log_level;
         if let Some(target) = command_line_target {
-            let trailing_args = {
+            let (trailing_args, is_target_rule) = {
                 let workspace_read = workspace.read();
-                if let Some(mapped_rule) = workspace_read
+                let mapped_rule = workspace_read
                     .settings
                     .bin
                     .trailing_args_rule_map
-                    .get(target.as_ref())
-                {
-                    if mapped_rule.as_ref() == name {
-                        workspace_read.trailing_args.clone()
-                    } else {
-                        Vec::new()
-                    }
-                } else if target.as_ref() == name {
+                    .get(target.as_ref());
+                let is_target_rule = mapped_rule
+                    .map(|mapped_rule| mapped_rule.as_ref() == name)
+                    .unwrap_or_else(|| target.as_ref() == name);
+                let trailing_args = if is_target_rule {
                     workspace_read.trailing_args.clone()
                 } else {
                     Vec::new()
-                }
+                };
+                (trailing_args, is_target_rule)
             };
 
             let is_trailing_args_empty = trailing_args.is_empty();
@@ -302,6 +312,11 @@ impl Exec {
             if log_level.is_none() && !is_trailing_args_empty {
                 log_level = Some(console::Level::Passthrough);
             }
+            log_level = apply_passthrough_verbosity(
+                log_level,
+                progress.console.get_level(),
+                is_target_rule,
+            );
         }
 
         let environment = exec_env_vars.into_iter().collect::<Vec<_>>();
@@ -572,5 +587,24 @@ impl Kill {
         items.push(format!("Expect: `{}`", self.expect.unwrap_or_default()).into());
         result.push_str(&markdown::list(items));
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::apply_passthrough_verbosity;
+    use console::Level;
+
+    #[test]
+    fn passthrough_verbosity_only_enables_output_for_the_selected_rule() {
+        assert_eq!(
+            apply_passthrough_verbosity(Some(Level::App), Level::Passthrough, true),
+            Some(Level::Passthrough)
+        );
+        assert_eq!(
+            apply_passthrough_verbosity(Some(Level::App), Level::Passthrough, false),
+            Some(Level::App)
+        );
+        assert_eq!(apply_passthrough_verbosity(None, Level::Info, true), None);
     }
 }
