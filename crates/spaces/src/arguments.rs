@@ -1003,6 +1003,7 @@ fn execute_command(command: Commands, effective_console: console::Console) -> an
             output,
             all_targets,
         } => {
+            singleton::set_execution_phase(task::Phase::Inspect);
             let has_help = if all_targets {
                 rules::HasHelp::No
             } else {

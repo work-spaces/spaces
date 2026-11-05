@@ -723,18 +723,28 @@ fn try_evaluate_with_cache(
     let module_deps_option = mtarget::ModuleDeps::new_from_binary(params.name.as_ref())
         .with_context(|| format_context!("Failed to load module deps for {:?}", params.name))?;
 
-    let (is_always_evaluate, is_module_caching_feature_enabled) = {
+    let (is_always_evaluate, is_module_caching_feature_enabled, module_digest_option) = {
         let read_workspace = workspace.read();
+        let digest = module_deps_option
+            .as_ref()
+            .and_then(|deps| {
+                deps.compute_digest(&read_workspace.settings.bin.star_files)
+                    .ok()
+            })
+            .map(|digest| -> Arc<str> {
+                format!("{MODULE_CACHE_KEY_FORMAT_VERSION}-{digest}").into()
+            });
 
         (
             read_workspace.settings.bin.is_always_evaluate,
             read_workspace
                 .features
                 .is_enabled(features::Feature::ModuleCache),
+            digest,
         )
     };
 
-    let bypass_reason = if module_deps_option.is_none() {
+    let bypass_reason = if module_deps_option.is_none() || module_digest_option.is_none() {
         Some("no-module-deps")
     } else if is_always_evaluate {
         Some("always-evaluate")
@@ -774,19 +784,8 @@ fn try_evaluate_with_cache(
     }
 
     // If no cached result exists, evaluate without rcache
-    let Some(module_deps) = module_deps_option else {
-        return Err(format_error!("Internal Error: module_deps is None"));
-    };
-
-    // Include the binary target format in the cache key so legacy JSON-target entries cannot hit.
-    let module_digest: Arc<str> = {
-        let workspace = workspace.read();
-        let digest = module_deps
-            .compute_digest(&workspace.settings.bin.star_files)
-            .with_context(|| {
-                format_context!("Failed to compute digest for module {:?}", params.name,)
-            })?;
-        format!("{MODULE_CACHE_KEY_FORMAT_VERSION}-{digest}").into()
+    let Some(module_digest) = module_digest_option else {
+        return Err(format_error!("Internal Error: module_digest is None"));
     };
 
     // Get rcache path
