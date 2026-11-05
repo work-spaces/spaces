@@ -631,39 +631,50 @@ where
         .with_context(|| format_context!("while checking for cache entry for {rule_digest}"));
 
     match new_from_cache_result {
-        Err(e) => Some(Err(e)),
         Ok(Some(entry)) => {
             // cache entry exists
             let result = entry
                 .restore_to_workspace(cache_path)
                 .with_context(|| format_context!("while restoring cached output to workspace"));
-            if let Err(e) = result {
+            if result.is_ok() {
+                // no result and no error, item restored from cache
+                return None;
+            }
+            if let Err(err) = result {
+                logger(console.clone()).debug(
+                    format!("Failed to restore cache entry for {rule_digest}: {err:?}").as_str(),
+                );
+            }
+            let remove_result =
+                remove_targets(targets).with_context(|| format_context!("while removing targets"));
+            if let Err(e) = remove_result {
                 return Some(Err(e));
             }
-
-            // no result and no error, item restored from cache
-            None
         }
-        Ok(None) => {
-            let exec_result = exec();
-
-            if exec_result.is_ok() {
-                let result = RuleDigestCacheEntry::create_cache_entry(
-                    console,
-                    cache_path,
-                    &rule_digest,
-                    get_target_paths().as_slice(),
-                )
-                .with_context(|| format_context!("while creating cache entry for {rule_digest}"));
-
-                if let Err(e) = result {
-                    return Some(Err(e));
-                }
-            }
-
-            Some(exec_result)
+        Ok(None) => {}
+        Err(err) => {
+            logger(console.clone())
+                .debug(format!("Failed to load cache entry for {rule_digest}: {err:?}").as_str());
         }
     }
+
+    let exec_result = exec();
+
+    if exec_result.is_ok() {
+        let result = RuleDigestCacheEntry::create_cache_entry(
+            console,
+            cache_path,
+            &rule_digest,
+            get_target_paths().as_slice(),
+        )
+        .with_context(|| format_context!("while creating cache entry for {rule_digest}"));
+
+        if let Err(e) = result {
+            return Some(Err(e));
+        }
+    }
+
+    Some(exec_result)
 }
 
 #[cfg(test)]
@@ -1283,6 +1294,75 @@ mod tests {
         assert!(
             !artifacts_dir.join("art_old").exists(),
             "old artifact should be GC'd"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_execute_recreates_artifact_when_cached_artifact_missing() {
+        let root = make_test_dir("execute_missing_artifact");
+        let cache_path = root.join("cache");
+        let target_file = root.join("workspace_out").join("module.spaces");
+        let target_str: Arc<str> = target_file.to_string_lossy().into();
+        let targets = vec![targets::Target::File(target_str)];
+        let digest: Arc<str> = "test_module_digest".into();
+
+        // Populate initial cache entry and artifact via execute
+        let exec_result = execute(
+            null_console(),
+            &cache_path,
+            digest.clone(),
+            &targets,
+            || {
+                write_test_file(&target_file, b"cached module target v1");
+                Ok(())
+            },
+            || vec![Arc::from(target_file.as_path())],
+        );
+        assert!(matches!(exec_result, Some(Ok(()))));
+
+        // Remove all artifacts from the cache while leaving the rule digest entry intact
+        let artifacts_dir = cache_path.join(ARTIFACT_CACHE_DIR);
+        std::fs::remove_dir_all(&artifacts_dir).unwrap();
+        std::fs::remove_file(&target_file).unwrap();
+
+        // Next execute should re-create the artifact via exec rather than returning an error
+        let mut recreated = false;
+        let exec_result = execute(
+            null_console(),
+            &cache_path,
+            digest.clone(),
+            &targets,
+            || {
+                recreated = true;
+                write_test_file(&target_file, b"cached module target v1");
+                Ok(())
+            },
+            || vec![Arc::from(target_file.as_path())],
+        );
+        assert!(matches!(exec_result, Some(Ok(()))));
+        assert!(recreated);
+        assert_eq!(
+            std::fs::read(&target_file).unwrap(),
+            b"cached module target v1"
+        );
+
+        // Subsequent execute should now hit the restored cache entry
+        let hit_result = execute(
+            null_console(),
+            &cache_path,
+            digest,
+            &targets,
+            || -> anyhow::Result<()> {
+                panic!("exec should not be called on cache hit");
+            },
+            || vec![Arc::from(target_file.as_path())],
+        );
+        assert!(hit_result.is_none());
+        assert_eq!(
+            std::fs::read(&target_file).unwrap(),
+            b"cached module target v1"
         );
 
         let _ = std::fs::remove_dir_all(&root);
