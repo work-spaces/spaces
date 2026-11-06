@@ -188,13 +188,63 @@ pub struct CheckoutStoreEntry {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CheckoutStore {
     pub entries: HashMap<Arc<str>, CheckoutStoreEntry>,
+    #[serde(skip)]
+    pub modified: Option<std::time::SystemTime>,
 }
 
 impl CheckoutStore {
     pub fn load() -> Self {
-        match std::fs::read_to_string(CHECKOUT_STORE_FILE_NAME) {
-            Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
-            Err(_) => Self::default(),
+        Self::load_from_path(std::path::Path::new(CHECKOUT_STORE_FILE_NAME))
+    }
+
+    pub fn load_from_path(path: &std::path::Path) -> Self {
+        let modified = changes::get_modified_time(std::fs::metadata(path));
+        match std::fs::read_to_string(path) {
+            Ok(content) => {
+                let mut store: Self = serde_json::from_str(&content).unwrap_or_default();
+                store.modified = modified;
+                store
+            }
+            Err(_) => Self {
+                entries: HashMap::new(),
+                modified,
+            },
+        }
+    }
+
+    pub fn is_modified(&self) -> bool {
+        self.is_modified_at_path(std::path::Path::new(CHECKOUT_STORE_FILE_NAME))
+    }
+
+    pub fn is_modified_at_path(&self, path: &std::path::Path) -> bool {
+        changes::get_modified_time(std::fs::metadata(path)) != self.modified
+    }
+
+    pub fn reload_if_modified(&mut self) -> bool {
+        self.reload_if_modified_at_path(std::path::Path::new(CHECKOUT_STORE_FILE_NAME))
+    }
+
+    pub fn reload_if_modified_at_path(&mut self, path: &std::path::Path) -> bool {
+        let current_modified = changes::get_modified_time(std::fs::metadata(path));
+        if current_modified == self.modified {
+            return false;
+        }
+
+        match std::fs::read_to_string(path) {
+            Ok(content) => match serde_json::from_str::<Self>(&content) {
+                Ok(store) => {
+                    self.entries = store.entries;
+                    self.modified = current_modified;
+                    true
+                }
+                Err(_) => false,
+            },
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                self.entries.clear();
+                self.modified = None;
+                true
+            }
+            Err(_) => false,
         }
     }
 
@@ -658,5 +708,93 @@ impl Settings {
         }
 
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unique_temp_store_path(test_name: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "spaces_checkout_store_{test_name}_{}_{nanos}.json",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn checkout_store_reload_if_modified_handles_lifecycle() {
+        let path = unique_temp_store_path("lifecycle");
+        let _ = std::fs::remove_file(&path);
+
+        // Missing file initially
+        let mut store = CheckoutStore::load_from_path(&path);
+        assert!(store.entries.is_empty());
+        assert_eq!(store.modified, None);
+        assert!(!store.is_modified_at_path(&path));
+        assert!(!store.reload_if_modified_at_path(&path));
+
+        // Create file
+        std::fs::write(
+            &path,
+            r#"{"entries":{"//":{"url":"<command line>","values":{"KEY":"v1"}}}}"#,
+        )
+        .unwrap();
+        assert!(store.is_modified_at_path(&path));
+        assert!(store.reload_if_modified_at_path(&path));
+        assert_eq!(
+            store
+                .entries
+                .get("//")
+                .and_then(|e| e.values.get("KEY"))
+                .and_then(|v| v.as_str()),
+            Some("v1")
+        );
+        assert!(!store.is_modified_at_path(&path));
+        assert!(!store.reload_if_modified_at_path(&path));
+
+        // Ensure mtime advances on update
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(
+            &path,
+            r#"{"entries":{"//":{"url":"<command line>","values":{"KEY":"v2"}}}}"#,
+        )
+        .unwrap();
+        assert!(store.is_modified_at_path(&path));
+        assert!(store.reload_if_modified_at_path(&path));
+        assert_eq!(
+            store
+                .entries
+                .get("//")
+                .and_then(|e| e.values.get("KEY"))
+                .and_then(|v| v.as_str()),
+            Some("v2")
+        );
+
+        // Invalid JSON keeps existing entries and does not advance modified
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(&path, "{ invalid json").unwrap();
+        assert!(store.is_modified_at_path(&path));
+        assert!(!store.reload_if_modified_at_path(&path));
+        assert_eq!(
+            store
+                .entries
+                .get("//")
+                .and_then(|e| e.values.get("KEY"))
+                .and_then(|v| v.as_str()),
+            Some("v2")
+        );
+        assert!(store.is_modified_at_path(&path));
+
+        // Removing the file clears entries and resets modified
+        std::fs::remove_file(&path).unwrap();
+        assert!(store.is_modified_at_path(&path));
+        assert!(store.reload_if_modified_at_path(&path));
+        assert!(store.entries.is_empty());
+        assert_eq!(store.modified, None);
     }
 }

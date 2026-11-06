@@ -98,6 +98,7 @@ impl SpacesContext {
         workspace: workspace::WorkspaceArc,
         mode: ContextMode,
     ) -> anyhow::Result<Self> {
+        #[allow(clippy::mutable_key_type)]
         let mut builtin_docs: HashMap<LspUri, String> = HashMap::new();
         let mut builtin_symbols: HashMap<String, LspUri> = HashMap::new();
         let globals = evaluator::get_globals(evaluator::GlobalsConfig::All).build();
@@ -133,8 +134,31 @@ impl SpacesContext {
         Ok(ctx)
     }
 
+    fn reload_store_if_needed(&self) {
+        let store_path = {
+            let ws = self.workspace.read();
+            let workspace_path = ws.get_absolute_path();
+            let path = Path::new(workspace_path.as_ref()).join(utils::ws::CHECKOUT_STORE_FILE_NAME);
+            if !ws.settings.checkout_store.is_modified_at_path(&path) {
+                return;
+            }
+            path
+        };
+
+        if self
+            .workspace
+            .write()
+            .settings
+            .checkout_store
+            .reload_if_modified_at_path(&store_path)
+        {
+            eprintln!("Reloaded {}", utils::ws::CHECKOUT_STORE_FILE_NAME);
+        }
+    }
+
     fn load_path(&self, path: &Path) -> starlark::Result<FrozenModule> {
         eprintln!("Load path {path:?}");
+        self.reload_store_if_needed();
         let workspace_path = self.workspace.read().get_absolute_path();
 
         let content =
@@ -263,6 +287,7 @@ impl SpacesContext {
     }
 
     fn run(&self, file: &str, ast: AstModule) -> EvalResult {
+        self.reload_store_if_needed();
         let workspace_path = self.workspace.read().get_absolute_path();
         let name = file
             .strip_prefix(format!("{workspace_path}").as_str())
