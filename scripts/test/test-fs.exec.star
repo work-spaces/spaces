@@ -527,6 +527,29 @@ shared_lock_result = fs_with_file_lock(
 results["locks"]["shared_create_true_readonly_existing"] = shared_lock_result == "shared-lock-ok"
 results["locks"]["shared_create_true_readonly_ran"] = fs_read_text(p("shared_lock_target.txt")) == "shared lock callback\n"
 
+# multiple shared locks can be held at once
+def _inner_shared_lock_callback():
+    return "inner-shared-ok"
+
+def _outer_shared_lock_callback():
+    return fs_with_file_lock(
+        p("shared_resource.lock"),
+        _inner_shared_lock_callback,
+        exclusive = False,
+        blocking = False,
+    )
+
+nested_shared_result = fs_with_file_lock(
+    p("shared_resource.lock"),
+    _outer_shared_lock_callback,
+    exclusive = False,
+)
+results["locks"]["nested_shared_non_blocking"] = nested_shared_result == "inner-shared-ok"
+
+# an exclusive lock is released after the callback, so it can be re-acquired without blocking
+reacquire_result = fs_with_file_lock(p("resource.lock"), _lock_callback, blocking = False)
+results["locks"]["exclusive_released_after_callback"] = reacquire_result == "lock-ok"
+
 # ============================================================================
 # Touch
 # ============================================================================

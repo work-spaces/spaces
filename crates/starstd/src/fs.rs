@@ -1606,7 +1606,7 @@ pub fn globals(builder: &mut GlobalsBuilder) {
     /// The callback is invoked while the lock is held, and the lock is always
     /// released before this function returns (even if the callback errors).
     ///
-    /// This is implemented using the `fd-lock` crate and is advisory: other
+    /// This is implemented using `std::fs::File` locking and is advisory: other
     /// processes must also use advisory locking to participate.
     ///
     /// Example:
@@ -1682,59 +1682,42 @@ pub fn globals(builder: &mut GlobalsBuilder) {
                 .open(lock_path)
                 .map_err(|err| format_error!("while opening lock file {} because {err:?}", path))?
         };
-        let mut lock = fd_lock::RwLock::new(file);
-
-        if exclusive {
-            if blocking {
-                let _guard = lock.write().map_err(|err| {
-                    format_error!("while acquiring exclusive lock on {} because {err:?}", path)
-                })?;
-                return eval.eval_function(callback, &[], &[]).map_err(|err| {
-                    format_error!("while executing lock callback for {} because {err:?}", path)
-                });
-            }
-
-            let _guard = match lock.try_write() {
-                Ok(guard) => guard,
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    anyhow::bail!("Lock is currently held and blocking=False: {}", path)
+        let lock_kind = if exclusive { "exclusive" } else { "shared" };
+        if blocking {
+            let lock_result = if exclusive {
+                file.lock()
+            } else {
+                file.lock_shared()
+            };
+            lock_result.map_err(|err| {
+                format_error!("while acquiring {lock_kind} lock on {path} because {err:?}")
+            })?;
+        } else {
+            let lock_result = if exclusive {
+                file.try_lock()
+            } else {
+                file.try_lock_shared()
+            };
+            match lock_result {
+                Ok(()) => {}
+                Err(std::fs::TryLockError::WouldBlock) => {
+                    anyhow::bail!("Lock is currently held and blocking=False: {path}")
                 }
-                Err(err) => {
+                Err(std::fs::TryLockError::Error(err)) => {
                     return Err(format_error!(
-                        "while acquiring exclusive lock on {} because {err:?}",
-                        path
+                        "while acquiring {lock_kind} lock on {path} because {err:?}"
                     ));
                 }
-            };
-            return eval.eval_function(callback, &[], &[]).map_err(|err| {
-                format_error!("while executing lock callback for {} because {err:?}", path)
-            });
+            }
         }
 
-        if blocking {
-            let _guard = lock.read().map_err(|err| {
-                format_error!("while acquiring shared lock on {path} because {err:?}")
-            })?;
-            return eval.eval_function(callback, &[], &[]).map_err(|err| {
-                format_error!("while executing lock callback for {path} because {err:?}")
-            });
-        }
-
-        let _guard = match lock.try_read() {
-            Ok(guard) => guard,
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                anyhow::bail!("Lock is currently held and blocking=False: {path}")
-            }
-            Err(err) => {
-                return Err(format_error!(
-                    "while acquiring shared lock on {path} because {err:?}"
-                ));
-            }
-        };
-
-        eval.eval_function(callback, &[], &[]).map_err(|err| {
+        let result = eval.eval_function(callback, &[], &[]).map_err(|err| {
             format_error!("while executing lock callback for {path} because {err:?}")
-        })
+        });
+
+        // Closing the file releases the lock before returning, even if the callback failed.
+        drop(file);
+        result
     }
 }
 
