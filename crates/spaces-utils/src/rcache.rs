@@ -380,7 +380,9 @@ pub fn prune(
             }
 
             // Pre-collect unreferenced artifacts so we know the total count up front
+            let lock_file_extension = format!(".{}", lock::LOCK_FILE_SUFFIX);
             let mut stale_artifacts: Vec<(String, u64, std::path::PathBuf)> = Vec::new();
+            let mut lock_files: Vec<std::path::PathBuf> = Vec::new();
             if let Ok(artifact_entries) = std::fs::read_dir(&artifacts_path) {
                 for dir_entry in artifact_entries.filter_map(|e| e.ok()) {
                     let path = dir_entry.path();
@@ -391,6 +393,10 @@ pub fn prune(
                         .file_name()
                         .map(|n| n.to_string_lossy().into_owned())
                         .unwrap_or_default();
+                    if hash.ends_with(&lock_file_extension) {
+                        lock_files.push(path);
+                        continue;
+                    }
                     if !live_hashes.contains(&hash) {
                         let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
                         stale_artifacts.push((hash, size, path));
@@ -411,6 +417,18 @@ pub fn prune(
                         Ok(()) => total_size_removed += *size,
                         Err(e) => logger(console.clone())
                             .error(format!("while removing artifact {short_hash}: {e}").as_str()),
+                    }
+                }
+            }
+
+            // Lock files persist after use; remove those not currently held.
+            if !is_dry_run && !lock_files.is_empty() {
+                progress.set_message("removing unused artifact lock files");
+                for path in &lock_files {
+                    if let Err(e) = lock::remove_if_unlocked(path) {
+                        logger(console.clone()).error(
+                            format!("while removing lock file {}: {e:?}", path.display()).as_str(),
+                        );
                     }
                 }
             }
@@ -1005,6 +1023,45 @@ mod tests {
             "shared artifact should remain because a live digest still references it"
         );
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_prune_removes_unheld_lock_files() {
+        let root = make_test_dir("prune_lock_files");
+        let cache_path = root.join("cache");
+        let artifacts_dir = cache_path.join(ARTIFACT_CACHE_DIR);
+
+        write_digest_entry(&cache_path, "d1", &["a1"], last_used_days_ago(0));
+        write_artifact(&cache_path, "a1", b"live");
+        write_artifact(&cache_path, &format!("a1.{}", lock::LOCK_FILE_SUFFIX), b"");
+        let held_path: Arc<std::path::Path> = artifacts_dir
+            .join(format!("a2.{}", lock::LOCK_FILE_SUFFIX))
+            .into();
+        let mut held = lock::FileLock::new(held_path.clone());
+        assert_eq!(held.try_lock().unwrap(), lock::LockStatus::Locked);
+
+        // dry run leaves lock files alone
+        prune(&cache_path, 30, true, null_console(), ci::IsCi::No).unwrap();
+        assert!(
+            artifacts_dir
+                .join(format!("a1.{}", lock::LOCK_FILE_SUFFIX))
+                .exists()
+        );
+
+        prune(&cache_path, 30, false, null_console(), ci::IsCi::No).unwrap();
+
+        assert!(artifacts_dir.join("a1").exists(), "live artifact kept");
+        assert!(
+            !artifacts_dir
+                .join(format!("a1.{}", lock::LOCK_FILE_SUFFIX))
+                .exists(),
+            "unheld lock file should be removed"
+        );
+        assert!(held_path.exists(), "held lock file should be kept");
+
+        drop(held);
         let _ = std::fs::remove_dir_all(&root);
     }
 
