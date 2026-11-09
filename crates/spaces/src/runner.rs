@@ -491,6 +491,11 @@ pub fn run_store_command_in_workspace(
                 .save(store_path)
                 .context(format_context!("Failed to save store at {store_path_str}",))?;
         }
+        store::StoreCommand::Fetch => {
+            store
+                .fetch(console.clone(), is_ci)
+                .context(format_context!("While fetching store bare repos"))?;
+        }
         store::StoreCommand::Prune {
             age,
             dry_run,
