@@ -555,18 +555,21 @@ pub fn evaluate_ast(
             let doc_items: Vec<(Arc<str>, _)> = module
                 .names()
                 .filter_map(|function_name| {
-                    let value = module.get(&function_name).unwrap();
-                    // The signature is the full path to the function with the file path
-                    // filter out values where the signature doesn't start with the module
-                    // that is being processed. These are loaded from another module
-                    // and don't belong in the docs for this module
-                    let signature_starts_with_name = value
-                        .parameters_spec()
-                        .map(|spec| spec.signature())
-                        .map(|signature| signature.starts_with(params.name.as_ref()))
-                        .unwrap_or(false);
-                    if signature_starts_with_name {
-                        Some((function_name.as_str().into(), value.documentation()))
+                    if let Some(value) = module.get(&function_name) {
+                        // The signature is the full path to the function with the file path
+                        // filter out values where the signature doesn't start with the module
+                        // that is being processed. These are loaded from another module
+                        // and don't belong in the docs for this module
+                        let signature_starts_with_name = value
+                            .parameters_spec()
+                            .map(|spec| spec.signature())
+                            .map(|signature| signature.starts_with(params.name.as_ref()))
+                            .unwrap_or(false);
+                        if signature_starts_with_name {
+                            Some((function_name.as_str().into(), value.documentation()))
+                        } else {
+                            None
+                        }
                     } else {
                         None
                     }

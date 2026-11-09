@@ -652,10 +652,27 @@ pub fn new_bare_repo_lock(bare_repo_path: &str) -> lock::FileLock {
     lock::FileLock::new(std::path::Path::new(&lock_file_path).into())
 }
 
+/// Refspec used when fetching bare repositories in the store. Remote branches
+/// are fetched into remote-tracking refs rather than `refs/heads/*`, so local
+/// branches (which may be checked out by worktrees) are never overwritten.
+///
+/// Pass it explicitly: bare repos created with `git clone --bare` have no
+/// `remote.origin.fetch` configured, so a plain `git fetch` only fetches the
+/// remote HEAD into `FETCH_HEAD`.
+pub const BARE_REPO_FETCH_REFSPEC: &str = "+refs/heads/*:refs/remotes/origin/*";
+
+/// Fetches all remote branches of a bare repository into
+/// `refs/remotes/origin/*` (see [`BARE_REPO_FETCH_REFSPEC`]), pruning
+/// remote-tracking refs that no longer exist.
 pub fn fetch_bare_repo(progress_bar: &mut console::Progress, path: &str) -> anyhow::Result<()> {
     let options = console::ExecuteOptions {
         working_directory: Some(path.into()),
-        arguments: vec!["fetch".into(), "--prune".into()],
+        arguments: vec![
+            "fetch".into(),
+            "--prune".into(),
+            "origin".into(),
+            BARE_REPO_FETCH_REFSPEC.into(),
+        ],
         ..Default::default()
     };
     execute_git_command(progress_bar, path, options).map(|_| ())
@@ -1611,5 +1628,106 @@ impl Repository {
             .context(format_context!("while checking out {}", self.full_path))?;
 
         Ok(revision)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run_git(directory: &std::path::Path, args: &[&str]) -> String {
+        let output = std::process::Command::new("git")
+            .current_dir(directory)
+            .args([
+                "-c",
+                "user.name=Spaces Test",
+                "-c",
+                "user.email=spaces@example.com",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    fn commit(directory: &std::path::Path, message: &str) -> String {
+        run_git(directory, &["commit", "--allow-empty", "-m", message]);
+        run_git(directory, &["rev-parse", "HEAD"])
+    }
+
+    #[test]
+    fn fetch_bare_repo_fetches_all_branches_without_touching_worktree_branches() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let source = temp_dir.path().join("source");
+        let bare = temp_dir.path().join("cache.git");
+        let worktree = temp_dir.path().join("worktree");
+
+        std::fs::create_dir_all(&source).unwrap();
+        run_git(&source, &["init", "--initial-branch=main"]);
+        let main_initial = commit(&source, "main initial");
+        run_git(&source, &["branch", "feature"]);
+
+        // Mirrors ensure_bare_repository: no remote.origin.fetch configured.
+        run_git(
+            temp_dir.path(),
+            &[
+                "clone",
+                "--bare",
+                source.to_str().unwrap(),
+                bare.to_str().unwrap(),
+            ],
+        );
+        run_git(
+            &bare,
+            &["worktree", "add", worktree.to_str().unwrap(), "main"],
+        );
+
+        let main_updated = commit(&source, "main update");
+        run_git(&source, &["checkout", "feature"]);
+        let feature_updated = commit(&source, "feature update");
+
+        let mut progress = console::Progress::new(console::Console::new_null(), "test", None, None);
+        fetch_bare_repo(&mut progress, bare.to_str().unwrap()).unwrap();
+
+        assert_eq!(
+            run_git(&bare, &["rev-parse", "refs/remotes/origin/main"]),
+            main_updated
+        );
+        assert_eq!(
+            run_git(&bare, &["rev-parse", "refs/remotes/origin/feature"]),
+            feature_updated
+        );
+        assert_eq!(
+            run_git(&bare, &["rev-parse", "refs/heads/main"]),
+            main_initial,
+            "branch checked out by a worktree must not be overwritten"
+        );
+
+        run_git(&source, &["branch", "-D", "main"]);
+        fetch_bare_repo(&mut progress, bare.to_str().unwrap()).unwrap();
+        assert!(
+            run_git(
+                &bare,
+                &[
+                    "for-each-ref",
+                    "--format=%(refname)",
+                    "refs/remotes/origin/main"
+                ]
+            )
+            .is_empty(),
+            "remote-tracking refs for deleted branches should be pruned"
+        );
+        assert_eq!(
+            run_git(&bare, &["rev-parse", "refs/heads/main"]),
+            main_initial,
+            "pruning must not delete local branches"
+        );
     }
 }

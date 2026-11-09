@@ -153,7 +153,10 @@ impl Git {
             } else {
                 local_logger.debug("Fetching updates in bare repository");
 
-                // Fetch updates in bare repo (safe - no working tree to corrupt)
+                // Fetch updates in bare repo (safe - no working tree to corrupt).
+                // `--all` can't be combined with a refspec, and the explicit
+                // refspec is needed because `clone --bare` leaves
+                // remote.origin.fetch unset.
                 git::execute_git_command(
                     progress,
                     &self.url,
@@ -162,10 +165,11 @@ impl Git {
                             "--git-dir".into(),
                             bare_repo_path.clone(),
                             "fetch".into(),
-                            "--all".into(),
                             "--tags".into(),
                             "--force".into(),
                             "--prune".into(),
+                            "origin".into(),
+                            git::BARE_REPO_FETCH_REFSPEC.into(),
                         ],
                         ..Default::default()
                     },
