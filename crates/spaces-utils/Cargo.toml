@@ -39,6 +39,7 @@ nono = { version = "0.71"}
 
 
 indexmap.workspace = true
+rayon.workspace = true
 
 anyhow.workspace = true
 archiver.workspace = true

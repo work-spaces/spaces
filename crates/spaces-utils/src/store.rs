@@ -4,6 +4,7 @@ use anyhow_source_location::{format_context, format_error};
 use bytesize::ByteSize;
 use console::bootstrap::IntoLine;
 use console::components::{self, Variant};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_with::{TimestampSeconds, serde_as};
 use std::collections::HashMap;
@@ -18,8 +19,9 @@ pub const SPACES_STORE_BARE: &str = "bare";
 const DEFAULT_MAINTENANCE_INTERVAL_DAYS: u128 = 30;
 const GIT_ACTION_FSCK: &str = "git fsck (checking integrity)";
 const GIT_ACTION_GC: &str = "git gc (optimizing)";
-const GIT_ACTION_FETCH: &str = "git fetch (repairing)";
+const GIT_ACTION_FETCH: &str = "git fetch";
 const GIT_ACTION_VALIDATE: &str = "validating";
+const MAX_BARE_REPO_FETCH_PARALLEL_JOBS: usize = 8;
 pub fn logger(console: console::Console) -> logger::Logger {
     logger::Logger::new(console, "store".into())
 }
@@ -56,10 +58,13 @@ pub enum StoreCommand {
         /// Show which entries have errors and will be deleted without deleting the data
         #[clap(long)]
         dry_run: bool,
-        /// Run git fsck on bare repositories to detect and repair issues
+        /// Run git fsck on bare repositories to detect issues, then fetch all bare repositories
+        /// to repair and update them
         #[clap(long)]
         git_fsck: bool,
     },
+    /// Run git fetch on each bare repository in the store.
+    Fetch,
     /// Prune the store by deleting entries that are this age or older (inclusive).
     Prune {
         /// Delete entries this age or older in days (inclusive). Use --age=0 to prune all entries.
@@ -995,6 +1000,7 @@ impl Store {
 
             let mut bare_repos_repair_attempted: usize = 0;
             let mut bare_repos_repaired: usize = 0;
+            let mut bare_repos_fetched: usize = 0;
 
             {
                 let bad_keys: Vec<Arc<str>> = self
@@ -1077,26 +1083,19 @@ impl Store {
             // Compute bare-repo paths before creating the progress bar so that
             // their ticks can be included in the initial total, keeping a single
             // progress bar for the entire fix run.
-            let bare_prefix = format!("{}/", SPACES_STORE_BARE);
-            let bare_repo_paths: Vec<std::path::PathBuf> = self
-                .entries
-                .keys()
-                .filter(|key| key.starts_with(&bare_prefix))
-                .map(|key| path_to_store.join(key.as_ref()))
-                .collect();
+            let bare_repo_paths = self.get_bare_repo_paths();
 
             // dry-run: 1 pass over bare_repo_paths (health check if --git-fsck)
-            // live:    2 passes over bare_repo_paths (gc + fsck if --git-fsck), plus a repair
-            //          pass whose size is unknown until after phase 2 – it is
-            //          added via set_total once repos_needing_repair is known.
+            // live:    3 passes over bare_repo_paths with --git-fsck (gc + fsck + fetch),
+            //          otherwise 1 pass (gc)
             let bare_passes = if is_dry_run {
                 if run_git_fsck { 1u64 } else { 0u64 }
             } else if run_git_fsck {
-                2u64
+                3u64
             } else {
                 1u64
             };
-            let mut total = (unmanaged_candidates.len() + self.entries.len()) as u64
+            let total = (unmanaged_candidates.len() + self.entries.len()) as u64
                 + bare_repo_paths.len() as u64 * bare_passes;
             let mut progress =
                 console::Progress::new(console.clone(), "scanning", Some(total), None);
@@ -1253,6 +1252,9 @@ impl Store {
                     log.message(
                         format!("Would run gc on {} bare repos", bare_repo_paths.len()).as_str(),
                     );
+                    log.message(
+                        format!("Would run fetch on {} bare repos", bare_repo_paths.len()).as_str(),
+                    );
                     bare_repos_repair_attempted = repos_needing_repair.len();
                     if !repos_needing_repair.is_empty() {
                         log.message(
@@ -1290,28 +1292,37 @@ impl Store {
                         progress.increment(1);
                     }
 
-                    // Phase 3: repair (fetch) – extend the declared total now
-                    // that we know how many repos need repair.
+                    // Phase 3: fetch all bare repos in parallel. This updates every
+                    // repo and repairs the ones flagged by fsck.
                     bare_repos_repair_attempted = repos_needing_repair.len();
-                    if !repos_needing_repair.is_empty() {
-                        total += repos_needing_repair.len() as u64;
-                        progress.update_progress(0, total);
-                        for repo_path in &repos_needing_repair {
-                            let path_str = repo_path.to_string_lossy();
-                            let mut git_progress =
-                                start_git_progress(&progress, repo_path, GIT_ACTION_FETCH);
-                            if git::fetch_bare_repo(&mut git_progress, path_str.as_ref()) {
-                                bare_repos_repaired += 1;
-                                log.info(format!("Fetched bare repo: {path_str}").as_str());
-                            } else {
-                                log.warning(
+                    let failed_fetches = fetch_bare_repos_in_parallel(
+                        &progress,
+                        &path_to_store.join(SPACES_STORE_BARE),
+                        &bare_repo_paths,
+                    )
+                    .context(format_context!("While fetching bare repos"))?;
+                    bare_repos_fetched = bare_repo_paths.len() - failed_fetches.len();
+
+                    for repo_path in &failed_fetches {
+                        let path_str = repo_path.to_string_lossy();
+                        if repos_needing_repair.contains(repo_path) {
+                            log.warning(
                                 format!(
                                     "Failed to fetch bare repo: {path_str} - consider re-cloning"
                                 )
                                 .as_str(),
                             );
-                            }
-                            progress.increment(1);
+                        } else {
+                            log.warning(format!("Failed to fetch bare repo: {path_str}").as_str());
+                        }
+                    }
+
+                    for repo_path in &repos_needing_repair {
+                        if !failed_fetches.contains(repo_path) {
+                            bare_repos_repaired += 1;
+                            log.info(
+                                format!("Repaired bare repo: {}", repo_path.display()).as_str(),
+                            );
                         }
                     }
                 }
@@ -1407,6 +1418,7 @@ impl Store {
                 stale_links_cleaned,
                 staging_areas_removed,
                 bare_repos_discovered: bare_repo_paths.len(),
+                bare_repos_fetched,
                 bare_repos_repair_attempted,
                 bare_repos_repaired,
             };
@@ -1424,6 +1436,101 @@ impl Store {
             emit_pretty_fix_report(&console, &fix_report);
 
             bare_separator(&console, console::bootstrap::Width::default());
+
+            Ok(())
+        })
+    }
+
+    fn get_bare_repo_paths(&self) -> Vec<std::path::PathBuf> {
+        let bare_prefix = format!("{}/", SPACES_STORE_BARE);
+        let mut paths: Vec<std::path::PathBuf> = self
+            .entries
+            .keys()
+            .filter(|key| key.starts_with(&bare_prefix))
+            .map(|key| self.path_to_store.join(key.as_ref()))
+            .collect();
+        paths.sort();
+        paths
+    }
+
+    /// Runs `git fetch` on every bare repository in the store in parallel.
+    pub fn fetch(&self, console: console::Console, is_ci: ci::IsCi) -> anyhow::Result<()> {
+        ci::in_github_group(console.clone(), is_ci, "Spaces Store Fetch", || {
+            let log = logger(console.clone());
+            let bare_repo_paths: Vec<std::path::PathBuf> = self
+                .get_bare_repo_paths()
+                .into_iter()
+                .filter(|path| {
+                    let exists = path.exists();
+                    if !exists {
+                        log.warning(
+                            format!(
+                                "Skipping missing bare repo: {} (run `spaces store fix`)",
+                                path.display()
+                            )
+                            .as_str(),
+                        );
+                    }
+                    exists
+                })
+                .collect();
+
+            let mut progress = console::Progress::new(
+                console.clone(),
+                "fetching bare repos",
+                Some(bare_repo_paths.len() as u64),
+                None,
+            );
+
+            let failed_fetches = fetch_bare_repos_in_parallel(
+                &progress,
+                &self.path_to_store.join(SPACES_STORE_BARE),
+                &bare_repo_paths,
+            )
+            .context(format_context!("While fetching bare repos"))?;
+
+            for repo_path in &failed_fetches {
+                log.warning(format!("Failed to fetch bare repo: {}", repo_path.display()).as_str());
+            }
+
+            let fetched = bare_repo_paths.len() - failed_fetches.len();
+            let (final_type, finalize_message) = if bare_repo_paths.is_empty() {
+                (
+                    logger::FinalType::Finished,
+                    "no bare repos found".to_string(),
+                )
+            } else if failed_fetches.is_empty() {
+                (
+                    logger::FinalType::Finished,
+                    format!("fetched {fetched} bare repo(s)"),
+                )
+            } else {
+                (
+                    logger::FinalType::Failed,
+                    format!(
+                        "fetched {fetched} of {} bare repo(s), {} failed",
+                        bare_repo_paths.len(),
+                        failed_fetches.len()
+                    ),
+                )
+            };
+            progress.set_finalize_lines(logger::make_finalize_line(
+                final_type,
+                progress.elapsed(),
+                finalize_message.as_str(),
+            ));
+
+            if !failed_fetches.is_empty() {
+                return Err(format_error!(
+                    "Failed to fetch {} bare repo(s):\n{}",
+                    failed_fetches.len(),
+                    failed_fetches
+                        .iter()
+                        .map(|path| format!("- {}", path.display()))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                ));
+            }
 
             Ok(())
         })
@@ -1609,6 +1716,7 @@ struct FixActionReport {
     stale_links_cleaned: usize,
     staging_areas_removed: usize,
     bare_repos_discovered: usize,
+    bare_repos_fetched: usize,
     bare_repos_repair_attempted: usize,
     bare_repos_repaired: usize,
 }
@@ -1716,6 +1824,22 @@ fn emit_pretty_fix_report(console: &console::Console, report: &FixActionReport) 
         format!("checked {} bare repo(s)", report.bare_repos_discovered)
     };
     rows.push(vec!["Bare repo fsck".to_string(), bare_fsck_outcome]);
+
+    let bare_fetch_outcome = if !report.run_git_fsck {
+        "skipped (--git-fsck not set)".to_string()
+    } else if report.bare_repos_discovered == 0 {
+        "no bare repos found".to_string()
+    } else if report.is_dry_run {
+        format!("would fetch {} bare repo(s)", report.bare_repos_discovered)
+    } else if report.bare_repos_fetched == report.bare_repos_discovered {
+        format!("fetched {} bare repo(s)", report.bare_repos_fetched)
+    } else {
+        format!(
+            "fetched {} of {} bare repo(s)",
+            report.bare_repos_fetched, report.bare_repos_discovered
+        )
+    };
+    rows.push(vec!["Bare repo fetch".to_string(), bare_fetch_outcome]);
 
     let bare_repair_outcome = if !report.run_git_fsck {
         "skipped (--git-fsck not set)".to_string()
@@ -2198,6 +2322,56 @@ fn start_git_progress(
         console::Progress::new(progress.console.clone(), display_name.as_str(), None, None);
     git_progress.set_message(action);
     git_progress
+}
+
+/// Runs `git fetch` on each bare repo using a bounded worker pool and
+/// increments `progress` once per repo. Returns the repos whose fetch failed,
+/// in the same order as `repo_paths`.
+fn fetch_bare_repos_in_parallel(
+    progress: &console::Progress,
+    bare_root: &std::path::Path,
+    repo_paths: &[std::path::PathBuf],
+) -> anyhow::Result<Vec<std::path::PathBuf>> {
+    if repo_paths.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    progress.set_message(
+        format!(
+            "{GIT_ACTION_FETCH}: {} bare repo(s) in parallel",
+            repo_paths.len()
+        )
+        .as_str(),
+    );
+
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(MAX_BARE_REPO_FETCH_PARALLEL_JOBS)
+        .build()
+        .map_err(|error| format_error!("failed to create bare repo fetch worker pool: {error}"))?;
+
+    let failed = pool.install(|| {
+        repo_paths
+            .par_iter()
+            .filter_map(|repo_path| {
+                // Progress entries are keyed by label, so concurrent fetches need
+                // unique labels (repo file names alone can collide across hosts/orgs).
+                let label = repo_path
+                    .strip_prefix(bare_root)
+                    .unwrap_or(repo_path)
+                    .to_string_lossy()
+                    .to_string();
+                let mut git_progress =
+                    console::Progress::new(progress.console.clone(), label.as_str(), None, None);
+                git_progress.set_message(GIT_ACTION_FETCH);
+                let path_str = repo_path.to_string_lossy();
+                let is_ok = git::fetch_bare_repo(&mut git_progress, path_str.as_ref());
+                progress.increment(1);
+                (!is_ok).then(|| repo_path.clone())
+            })
+            .collect::<Vec<_>>()
+    });
+
+    Ok(failed)
 }
 
 fn show_bare_info(
