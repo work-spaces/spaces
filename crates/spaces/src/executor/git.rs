@@ -111,8 +111,7 @@ impl Git {
             ))?;
         }
 
-        let lock_file_path = format!("{bare_repo_path}.{}", lock::LOCK_FILE_SUFFIX);
-        let mut lock_file = lock::FileLock::new(std::path::Path::new(&lock_file_path).into());
+        let mut lock_file = git::new_bare_repo_lock(&bare_repo_path);
 
         lock_file
             .lock(progress.console.clone())

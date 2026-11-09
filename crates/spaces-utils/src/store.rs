@@ -1303,22 +1303,29 @@ impl Store {
                     .context(format_context!("While fetching bare repos"))?;
                     bare_repos_fetched = bare_repo_paths.len() - failed_fetches.len();
 
-                    for repo_path in &failed_fetches {
-                        let path_str = repo_path.to_string_lossy();
-                        if repos_needing_repair.contains(repo_path) {
+                    for failed_fetch in &failed_fetches {
+                        let path_str = failed_fetch.path.to_string_lossy();
+                        let error = &failed_fetch.error;
+                        if repos_needing_repair.contains(&failed_fetch.path) {
                             log.warning(
                                 format!(
-                                    "Failed to fetch bare repo: {path_str} - consider re-cloning"
+                                    "Failed to fetch bare repo: {path_str} - consider re-cloning\n{error:#}"
                                 )
                                 .as_str(),
                             );
                         } else {
-                            log.warning(format!("Failed to fetch bare repo: {path_str}").as_str());
+                            log.warning(
+                                format!("Failed to fetch bare repo: {path_str}\n{error:#}")
+                                    .as_str(),
+                            );
                         }
                     }
 
                     for repo_path in &repos_needing_repair {
-                        if !failed_fetches.contains(repo_path) {
+                        if !failed_fetches
+                            .iter()
+                            .any(|failed_fetch| &failed_fetch.path == repo_path)
+                        {
                             bare_repos_repaired += 1;
                             log.info(
                                 format!("Repaired bare repo: {}", repo_path.display()).as_str(),
@@ -1489,8 +1496,10 @@ impl Store {
             )
             .context(format_context!("While fetching bare repos"))?;
 
-            for repo_path in &failed_fetches {
-                log.warning(format!("Failed to fetch bare repo: {}", repo_path.display()).as_str());
+            for failed_fetch in &failed_fetches {
+                log.warning(
+                    format!("Failed to fetch bare repo: {}", failed_fetch.path.display()).as_str(),
+                );
             }
 
             let fetched = bare_repo_paths.len() - failed_fetches.len();
@@ -1526,7 +1535,7 @@ impl Store {
                     failed_fetches.len(),
                     failed_fetches
                         .iter()
-                        .map(|path| format!("- {}", path.display()))
+                        .map(FailedBareRepoFetch::to_summary_item)
                         .collect::<Vec<_>>()
                         .join("\n")
                 ));
@@ -2324,14 +2333,49 @@ fn start_git_progress(
     git_progress
 }
 
+/// A bare repo whose `git fetch` failed, along with the Git error.
+struct FailedBareRepoFetch {
+    path: std::path::PathBuf,
+    error: anyhow::Error,
+}
+
+impl FailedBareRepoFetch {
+    /// Formats the failure as a list item with the Git error indented below
+    /// the repo path.
+    fn to_summary_item(&self) -> String {
+        let error = format!("{:#}", self.error);
+        let indented_error = error
+            .lines()
+            .map(|line| format!("    {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!("- {}\n{indented_error}", self.path.display())
+    }
+}
+
+/// Fetches a bare repo while holding its `<repo>.spaces.lock`, the same lock
+/// checkouts hold, so store fetches don't race checkouts in other processes.
+fn fetch_bare_repo_with_lock(
+    progress: &mut console::Progress,
+    bare_repo_path: &str,
+) -> anyhow::Result<()> {
+    let mut lock_file = git::new_bare_repo_lock(bare_repo_path);
+    lock_file
+        .lock(progress.console.clone())
+        .context(format_context!(
+            "Failed to lock bare repository {bare_repo_path}"
+        ))?;
+    git::fetch_bare_repo(progress, bare_repo_path)
+}
+
 /// Runs `git fetch` on each bare repo using a bounded worker pool and
-/// increments `progress` once per repo. Returns the repos whose fetch failed,
-/// in the same order as `repo_paths`.
+/// increments `progress` once per repo. Returns the repos whose fetch failed
+/// (with the Git error), in the same order as `repo_paths`.
 fn fetch_bare_repos_in_parallel(
     progress: &console::Progress,
     bare_root: &std::path::Path,
     repo_paths: &[std::path::PathBuf],
-) -> anyhow::Result<Vec<std::path::PathBuf>> {
+) -> anyhow::Result<Vec<FailedBareRepoFetch>> {
     if repo_paths.is_empty() {
         return Ok(Vec::new());
     }
@@ -2364,9 +2408,12 @@ fn fetch_bare_repos_in_parallel(
                     console::Progress::new(progress.console.clone(), label.as_str(), None, None);
                 git_progress.set_message(GIT_ACTION_FETCH);
                 let path_str = repo_path.to_string_lossy();
-                let is_ok = git::fetch_bare_repo(&mut git_progress, path_str.as_ref());
+                let result = fetch_bare_repo_with_lock(&mut git_progress, path_str.as_ref());
                 progress.increment(1);
-                (!is_ok).then(|| repo_path.clone())
+                result.err().map(|error| FailedBareRepoFetch {
+                    path: repo_path.clone(),
+                    error,
+                })
             })
             .collect::<Vec<_>>()
     });
@@ -2804,5 +2851,20 @@ mod tests {
             "metrics directory remains a managed entry after pruning all records"
         );
         assert_eq!(store.entries[SPACES_STORE_METRICS].size, 0);
+    }
+
+    #[test]
+    fn failed_bare_repo_fetch_summary_includes_git_error() {
+        let failed_fetch = FailedBareRepoFetch {
+            path: std::path::PathBuf::from("/store/bare/github.com/org/repo.git"),
+            error: anyhow::anyhow!(
+                "url: /store/bare/github.com/org/repo.git\ncmd: git fetch --prune\nfatal: Authentication failed"
+            ),
+        };
+
+        assert_eq!(
+            failed_fetch.to_summary_item(),
+            "- /store/bare/github.com/org/repo.git\n    url: /store/bare/github.com/org/repo.git\n    cmd: git fetch --prune\n    fatal: Authentication failed"
+        );
     }
 }

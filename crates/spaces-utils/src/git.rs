@@ -1,4 +1,5 @@
 use crate::features::{Feature, Features};
+use crate::lock;
 use crate::logger;
 use anyhow::Context;
 use anyhow_source_location::{format_context, format_error};
@@ -642,13 +643,22 @@ pub fn run_bare_repo_maintenance(progress_bar: &mut console::Progress, path: &st
     execute_git_command(progress_bar, path, options).is_ok()
 }
 
-pub fn fetch_bare_repo(progress_bar: &mut console::Progress, path: &str) -> bool {
+/// Returns the cross-process lock that serializes clone/fetch operations on the
+/// bare repository at `bare_repo_path` (the lock file is `<repo>.spaces.lock`).
+/// Checkouts and store operations must use this so they don't run Git
+/// concurrently on the same bare repository.
+pub fn new_bare_repo_lock(bare_repo_path: &str) -> lock::FileLock {
+    let lock_file_path = format!("{bare_repo_path}.{}", lock::LOCK_FILE_SUFFIX);
+    lock::FileLock::new(std::path::Path::new(&lock_file_path).into())
+}
+
+pub fn fetch_bare_repo(progress_bar: &mut console::Progress, path: &str) -> anyhow::Result<()> {
     let options = console::ExecuteOptions {
         working_directory: Some(path.into()),
         arguments: vec!["fetch".into(), "--prune".into()],
         ..Default::default()
     };
-    execute_git_command(progress_bar, path, options).is_ok()
+    execute_git_command(progress_bar, path, options).map(|_| ())
 }
 
 /// Get the current branch name for a repository
