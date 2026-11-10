@@ -1,14 +1,20 @@
 use crate::{builtins, singleton, workspace};
 use anyhow::Context;
 use anyhow_source_location::format_context;
-use utils::{ci, features, http_archive, logger, platform, store, ws};
+use utils::{ci, copy, features, http_archive, logger, platform, store, ws};
 
 #[derive(Debug, clap::Subcommand, Clone, strum::Display)]
 pub enum Command {
     /// Lists the available internal tools.
     List {},
     /// Install internal tools if they are not already installed.
-    Install {},
+    Install {
+        /// Also hard link the tool executables into the directory containing
+        /// the running `spaces` binary, so they are found on `PATH` alongside
+        /// `spaces`.
+        #[arg(long)]
+        use_spaces_path: bool,
+    },
     /// Cleans up old workspaces in the current directory.
     CleanupCheckouts {
         /// Minimum age of workspaces to clean up.
@@ -24,15 +30,40 @@ const CARGO_BINSTALL_JSON: &str = include_str!("tools/cargo-binstall.json");
 const ORAS_JSON: &str = include_str!("tools/oras.json");
 const GH_JSON: &str = include_str!("tools/gh.json");
 const GIT_LFS_JSON: &str = include_str!("tools/git-lfs.json");
-const TOOLS: &[(&str, &str, features::Feature)] = &[
-    ("gh", GH_JSON, features::Feature::SkipGhTool),
-    (
-        "cargo_binstall",
-        CARGO_BINSTALL_JSON,
-        features::Feature::SkipCargoBinstallTool,
-    ),
-    ("oras", ORAS_JSON, features::Feature::SkipOrasTool),
-    ("git_lfs", GIT_LFS_JSON, features::Feature::SkipGitLfsTool),
+struct Tool {
+    name: &'static str,
+    /// File name in the spaces tools `sysroot/bin`, without the platform
+    /// executable suffix.
+    executable: &'static str,
+    json: &'static str,
+    skip_feature: features::Feature,
+}
+
+const TOOLS: &[Tool] = &[
+    Tool {
+        name: "gh",
+        executable: "gh",
+        json: GH_JSON,
+        skip_feature: features::Feature::SkipGhTool,
+    },
+    Tool {
+        name: "cargo_binstall",
+        executable: "cargo-binstall",
+        json: CARGO_BINSTALL_JSON,
+        skip_feature: features::Feature::SkipCargoBinstallTool,
+    },
+    Tool {
+        name: "oras",
+        executable: "oras",
+        json: ORAS_JSON,
+        skip_feature: features::Feature::SkipOrasTool,
+    },
+    Tool {
+        name: "git_lfs",
+        executable: "git-lfs",
+        json: GIT_LFS_JSON,
+        skip_feature: features::Feature::SkipGitLfsTool,
+    },
 ];
 
 fn load_features(store_path: &std::path::Path) -> anyhow::Result<features::Features> {
@@ -109,7 +140,13 @@ pub fn handle_command(console: console::Console, command: Command) -> anyhow::Re
         group_name.as_str(),
         move || match command {
             Command::List {} => list_tools(console.clone()),
-            Command::Install {} => install_tools(console.clone(), true),
+            Command::Install { use_spaces_path } => {
+                install_tools(console.clone(), true)?;
+                if use_spaces_path {
+                    link_tools_to_spaces_path(console.clone())?;
+                }
+                Ok(())
+            }
             Command::CleanupCheckouts { age, dry_run } => {
                 cleanup_checkouts(console.clone(), age, dry_run)
             }
@@ -131,7 +168,10 @@ pub fn list_tools(console: console::Console) -> anyhow::Result<()> {
     logger.info("Tools:");
 
     let features = load_features(&store_path)?;
-    for (name, _json, skip_feature) in TOOLS {
+    for Tool {
+        name, skip_feature, ..
+    } in TOOLS
+    {
         if features.is_enabled(*skip_feature) {
             logger.info(
                 format!(
@@ -207,7 +247,13 @@ pub fn install_tools(console: console::Console, _is_force_link: bool) -> anyhow:
 
     let features = load_features(std::path::Path::new(store_path.as_ref()))?;
 
-    for (name, json, skip_feature) in TOOLS {
+    for Tool {
+        name,
+        json,
+        skip_feature,
+        ..
+    } in TOOLS
+    {
         if features.is_enabled(*skip_feature) {
             logger.info(
                 format!(
@@ -236,6 +282,85 @@ pub fn install_tools(console: console::Console, _is_force_link: bool) -> anyhow:
     manifest_store
         .save(std::path::Path::new(store_path.as_ref()))
         .context(format_context!("Failed to save store manifest"))?;
+
+    Ok(())
+}
+
+/// Hard links (or copies, e.g. across filesystems) the installed tool
+/// executables from the store into the directory of the running `spaces`
+/// binary. `PATH` is left to the user: anything on `PATH` next to `spaces`
+/// is then found by name, including `git-lfs` for git filters and hooks.
+fn link_tools_to_spaces_path(console: console::Console) -> anyhow::Result<()> {
+    let logger = tools_logger(console.clone());
+    let store_path = ws::get_checkout_store_path_as_path();
+    let tools_bin = ws::get_spaces_tools_path_to_sysroot_bin(&store_path);
+
+    let spaces_exe = std::env::current_exe()
+        .and_then(std::fs::canonicalize)
+        .context(format_context!("Failed to get current executable path"))?;
+    let spaces_bin = spaces_exe.parent().context(format_context!(
+        "Failed to get directory of {}",
+        spaces_exe.display()
+    ))?;
+
+    let features = load_features(&store_path)?;
+
+    for Tool {
+        name,
+        executable,
+        skip_feature,
+        ..
+    } in TOOLS
+    {
+        if features.is_enabled(*skip_feature) {
+            continue;
+        }
+
+        let executable = format!("{executable}{}", std::env::consts::EXE_SUFFIX);
+        let source = tools_bin.join(&executable);
+        let target = spaces_bin.join(&executable);
+
+        if !source.is_file() {
+            logger.debug(format!("{name} is not installed in {}", tools_bin.display()).as_str());
+            continue;
+        }
+
+        // Don't replace links managed elsewhere (e.g. by a package manager).
+        if target.is_symlink() {
+            logger.warning(
+                format!("skip linking {name}: {} is a symlink", target.display()).as_str(),
+            );
+            continue;
+        }
+
+        // Replacing the target removes it first, which must not remove the
+        // source when `spaces` runs from the tools directory.
+        if std::fs::canonicalize(&target).ok() == std::fs::canonicalize(&source).ok() {
+            logger.debug(format!("{name} is already at {}", target.display()).as_str());
+            continue;
+        }
+
+        let target_path = target.to_string_lossy().to_string();
+        let source_path = source.to_string_lossy().to_string();
+        let link = |link_type| {
+            copy::create_link(
+                target_path.clone(),
+                source_path.clone(),
+                copy::MakeReadOnly::No,
+                None,
+                link_type,
+            )
+        };
+
+        if let Err(hard_link_error) = link(copy::LinkType::Hard) {
+            logger.debug(format!("hard link failed, copying {name}: {hard_link_error:?}").as_str());
+            link(copy::LinkType::Copy).context(format_context!(
+                "Failed to link or copy {source_path} to {target_path}"
+            ))?;
+        }
+
+        logger.info(format!("{name}: {target_path} -> {source_path}").as_str());
+    }
 
     Ok(())
 }

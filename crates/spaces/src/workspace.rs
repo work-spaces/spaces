@@ -5,8 +5,8 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use utils::{
-    age, changes, environment, features, git, inputs, lock, logger, logs, mtarget, platform,
-    rcache, rule, store, ws,
+    age, changes, environment, features, inputs, lock, logger, logs, mtarget, platform, rcache,
+    rule, store, ws,
 };
 
 pub use rcache::CacheStatus;
@@ -256,38 +256,6 @@ fn get_unique() -> anyhow::Result<String> {
 
 pub fn build_directory() -> &'static str {
     "build"
-}
-
-/// Returns the spaces tools `sysroot/bin` that provides `git-lfs`, or `None`
-/// when the `SkipGitLfsTool` feature is enabled.
-fn get_git_lfs_tools_directory(
-    features: &features::Features,
-    store_path: &str,
-) -> Option<Arc<str>> {
-    if features.is_enabled(features::Feature::SkipGitLfsTool) {
-        return None;
-    }
-    Some(
-        ws::get_spaces_tools_path_to_sysroot_bin(std::path::Path::new(store_path))
-            .to_string_lossy()
-            .into(),
-    )
-}
-
-/// Appends `directory` to an existing `PATH` entry unless it is already
-/// present. Uses the same `:` separator as workspace `paths`/`system_paths`.
-fn append_to_path_var(env_vars: &mut HashMap<Arc<str>, Arc<str>>, directory: &str) {
-    let Some(path) = env_vars.get_mut("PATH") else {
-        return;
-    };
-    if path.split(':').any(|entry| entry == directory) {
-        return;
-    }
-    *path = if path.is_empty() {
-        directory.into()
-    } else {
-        format!("{path}:{directory}").into()
-    };
 }
 
 pub fn save_env_file_at(dir_path: &std::path::Path, env_md: &str, env: &str) -> anyhow::Result<()> {
@@ -1000,11 +968,6 @@ impl Workspace {
             &features,
         );
 
-        git::set_git_lfs_tools_directory(get_git_lfs_tools_directory(
-            &features,
-            settings.json.store_path.as_ref(),
-        ));
-
         if logger::is_tracing_enabled() {
             // Creating a run log folder just for tracing would move the `latest` symlink to a
             // folder without a log status file, so commands without one write a standalone
@@ -1190,15 +1153,6 @@ impl Workspace {
                 new_value = new_value.replace(&automatic_token, with_value.as_ref());
             }
             *replace_value = new_value.into();
-        }
-
-        // git-lfs hooks installed in checked out repositories call `git-lfs`
-        // through PATH. Append (not prepend) so tools provided by the
-        // workspace or system take precedence.
-        if let Some(tools_directory) =
-            get_git_lfs_tools_directory(&self.features, self.get_store_path().as_ref())
-        {
-            append_to_path_var(&mut env_vars, &tools_directory);
         }
 
         Ok(env_vars)
@@ -1500,41 +1454,6 @@ mod tests {
 
     fn arcs(items: &[&str]) -> Vec<Arc<str>> {
         items.iter().map(|item| Arc::<str>::from(*item)).collect()
-    }
-
-    #[test]
-    fn append_to_path_var_appends_once_and_skips_missing_path() {
-        let mut env_vars: HashMap<Arc<str>, Arc<str>> = HashMap::new();
-        append_to_path_var(&mut env_vars, "/tools/bin");
-        assert!(env_vars.is_empty());
-
-        env_vars.insert("PATH".into(), "/ws/sysroot/bin:/usr/bin".into());
-        append_to_path_var(&mut env_vars, "/tools/bin");
-        append_to_path_var(&mut env_vars, "/tools/bin");
-        assert_eq!(
-            env_vars["PATH"].as_ref(),
-            "/ws/sysroot/bin:/usr/bin:/tools/bin"
-        );
-
-        env_vars.insert("PATH".into(), "".into());
-        append_to_path_var(&mut env_vars, "/tools/bin");
-        assert_eq!(env_vars["PATH"].as_ref(), "/tools/bin");
-    }
-
-    #[test]
-    fn git_lfs_tools_directory_respects_skip_feature() {
-        let mut features = features::Features::new();
-        assert_eq!(
-            get_git_lfs_tools_directory(&features, "/store").as_deref(),
-            Some(
-                ws::get_spaces_tools_path_to_sysroot_bin(std::path::Path::new("/store"))
-                    .to_string_lossy()
-                    .as_ref()
-            )
-        );
-
-        features.enable(features::Feature::SkipGitLfsTool);
-        assert!(get_git_lfs_tools_directory(&features, "/store").is_none());
     }
 
     #[test]

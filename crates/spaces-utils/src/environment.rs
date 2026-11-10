@@ -7,6 +7,10 @@ use std::sync::Arc;
 
 pub const SPACES_ENV_RUNNING_AS_A_RULE: &str = "SPACES_ENV_RUNNING_AS_A_RULE";
 
+/// Separator for list-style variables such as `PATH` (`;` on Windows, `:`
+/// elsewhere). Matches what `std::env::split_paths` expects on the host.
+pub const PATH_LIST_SEPARATOR: &str = if cfg!(windows) { ";" } else { ":" };
+
 const ASSIGN_VARIABLES_DESCRIPTION: &str = r#"Values set in checkout rules. Part of the rule digest unless filtered. Overridden by `--env=NAME=VALUE`."#;
 
 const AUTOMATIC_VARIABLES_DESCRIPTION: &str = r#"Workspace-specific values assigned by spaces during checkout (e.g. workspace path, digest). Other variables referencing these values use placeholders that are resolved at run time. This keeps rule digests stable across workspaces and enables cross-workspace rule caching."#;
@@ -426,7 +430,7 @@ impl Any {
             name: "PATH".into(),
             value: Value::Prepend(AppendPrependValue {
                 value: path,
-                separator: ":".into(),
+                separator: PATH_LIST_SEPARATOR.into(),
             }),
             ..Default::default()
         }
@@ -437,7 +441,7 @@ impl Any {
             name: "PATH".into(),
             value: Value::Append(AppendPrependValue {
                 value: system_path,
-                separator: ":".into(),
+                separator: PATH_LIST_SEPARATOR.into(),
             }),
             ..Default::default()
         }
@@ -889,5 +893,36 @@ impl From<&Environment> for AnyEnvironment {
             }
         }
         any_env
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn paths_and_system_paths_use_platform_path_separator() {
+        let env = Environment {
+            paths: Some(vec!["/ws/sysroot/bin".into(), "/ws/tools/bin".into()]),
+            system_paths: Some(vec!["/usr/bin".into(), "/bin".into()]),
+            ..Default::default()
+        };
+        let any_env = AnyEnvironment::from(&env);
+        let vars = any_env.get_vars().unwrap();
+
+        let entries: Vec<_> = std::env::split_paths(&*vars["PATH"]).collect();
+        let expected: Vec<std::path::PathBuf> =
+            ["/ws/tools/bin", "/ws/sysroot/bin", "/usr/bin", "/bin"]
+                .iter()
+                .map(std::path::PathBuf::from)
+                .collect();
+        assert_eq!(entries, expected);
+
+        let expected_path = if cfg!(windows) {
+            "/ws/tools/bin;/ws/sysroot/bin;/usr/bin;/bin"
+        } else {
+            "/ws/tools/bin:/ws/sysroot/bin:/usr/bin:/bin"
+        };
+        assert_eq!(vars["PATH"].as_ref(), expected_path);
     }
 }

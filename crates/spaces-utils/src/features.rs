@@ -107,10 +107,7 @@ impl Feature {
             }
             Feature::CollectMetrics => r"Record command usage and rule/operation timings.",
             Feature::ShowRunMetrics => r"Show a chart of the longest running tasks.",
-            Feature::SkipGitLfsTool => {
-                r"Skip installing the built-in `git-lfs` tool.
-                Git checkout rules will no longer prepend the spaces tools path to `PATH`."
-            }
+            Feature::SkipGitLfsTool => r"Skip installing the built-in `git-lfs` tool.",
             Feature::SkipOrasTool => r"Skip installing the built-in `oras` tool.",
             Feature::SkipGhTool => {
                 r"Skip installing the built-in `gh` tool.

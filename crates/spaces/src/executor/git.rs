@@ -203,7 +203,8 @@ impl Git {
 
         // Worktrees share the bare repository's config and `worktree add`
         // checks out immediately, so configure LFS on the bare repository.
-        git::Repository::new(self.url.clone(), bare_repo.full_path.clone())
+        // The bare repository has no working tree to materialize.
+        let _ = git::Repository::new(self.url.clone(), bare_repo.full_path.clone())
             .ensure_lfs_filter_config(progress)
             .context(format_context!(
                 "while configuring git-lfs in bare repository"
@@ -338,12 +339,14 @@ impl Git {
             let existing_repo = git::Repository::new(self.url.clone(), self.spaces_key.clone());
 
             // Clones made before git-lfs was configured need it before any
-            // checkout below.
-            existing_repo
-                .ensure_lfs_filter_config(progress)
-                .context(format_context!(
-                    "while configuring git-lfs in existing workspace"
-                ))?;
+            // checkout below. Files already checked out remain LFS pointers
+            // until they are materialized.
+            let is_lfs_newly_enabled =
+                existing_repo
+                    .ensure_lfs_filter_config(progress)
+                    .context(format_context!(
+                        "while configuring git-lfs in existing workspace"
+                    ))?;
 
             if existing_repo.is_dirty(progress, git::IgnoreSubmodules::Yes) {
                 logger(progress.console.clone(), self.url.clone()).warning(
@@ -353,6 +356,15 @@ impl Git {
                     )
                     .as_str(),
                 );
+                // Materializing leaves files with local changes untouched.
+                // This is the only chance, as the filter is now enabled.
+                if is_lfs_newly_enabled == git::IsLfsFilterNewlyEnabled::Yes {
+                    existing_repo
+                        .materialize_lfs_files(progress)
+                        .context(format_context!(
+                            "while materializing LFS files in existing workspace"
+                        ))?;
+                }
                 return Ok(());
             }
 
@@ -388,6 +400,14 @@ impl Git {
                     .pull(progress, git::IsRecurseSubmodules::No)
                     .context(format_context!(
                         "while pulling latest changes in existing workspace"
+                    ))?;
+            }
+
+            if is_lfs_newly_enabled == git::IsLfsFilterNewlyEnabled::Yes {
+                existing_repo
+                    .materialize_lfs_files(progress)
+                    .context(format_context!(
+                        "while materializing LFS files in existing workspace"
                     ))?;
             }
 
@@ -442,7 +462,11 @@ impl Git {
             ]);
         }
 
-        clone_arguments.extend(git::get_lfs_clone_arguments(progress));
+        clone_arguments.extend(git::get_lfs_clone_arguments(
+            progress,
+            &self.url,
+            &workspace_directory,
+        ));
 
         clone_arguments.extend(vec![
             "--reference".into(),
@@ -480,15 +504,24 @@ impl Git {
         ))?;
 
         // Step 4: Setup sparse checkout if needed
+        let workspace_repo = git::Repository::new(self.url.clone(), self.spaces_key.clone());
+
+        // Conditional user LFS config (e.g. `includeIf "gitdir:..."`) can only
+        // be evaluated now that the repository exists.
+        let is_lfs_newly_enabled =
+            workspace_repo
+                .ensure_lfs_filter_config(progress)
+                .context(format_context!(
+                    "while configuring git-lfs in cloned repository"
+                ))?;
+
         if let Some(sparse_checkout) = self.sparse_checkout.as_ref() {
-            let workspace_repo = git::Repository::new(self.url.clone(), self.spaces_key.clone());
             workspace_repo
                 .setup_sparse_checkout(progress, sparse_checkout)
                 .context(format_context!("while setting up sparse checkout"))?;
         }
 
         // Step 5: Checkout the desired revision
-        let workspace_repo = git::Repository::new(self.url.clone(), self.spaces_key.clone());
         workspace_repo
             .checkout(progress, &self.checkout)
             .context(format_context!(
@@ -504,6 +537,16 @@ impl Git {
             workspace_repo
                 .reset_hard_origin_branch(progress, rev)
                 .context(format_context!("while resetting to origin/{rev}"))?;
+        }
+
+        // The clone may have checked out pointers if the LFS filter was only
+        // enabled above.
+        if is_lfs_newly_enabled == git::IsLfsFilterNewlyEnabled::Yes {
+            workspace_repo
+                .materialize_lfs_files(progress)
+                .context(format_context!(
+                    "while materializing LFS files in cloned repository"
+                ))?;
         }
 
         logger(progress.console.clone(), self.url.clone())
@@ -565,7 +608,11 @@ impl Git {
         let workspace_directory = self.get_clone_working_directory(workspace.clone());
 
         let mut clone_arguments: Vec<Arc<str>> = vec!["clone".into()];
-        clone_arguments.extend(git::get_lfs_clone_arguments(progress));
+        clone_arguments.extend(git::get_lfs_clone_arguments(
+            progress,
+            &self.url,
+            &workspace_directory,
+        ));
         clone_arguments.extend([
             "--depth".into(),
             "1".into(),
@@ -581,13 +628,11 @@ impl Git {
             clone_arguments.push("--no-checkout".into());
         }
 
-        let mut clone_options = console::ExecuteOptions {
+        let clone_options = console::ExecuteOptions {
             arguments: clone_arguments,
             working_directory: Some(workspace_directory.clone()),
             ..Default::default()
         };
-        git::apply_path_prefix(&mut clone_options)
-            .context(format_context!("while preparing shallow clone environment"))?;
 
         let clone_path: Arc<str> = std::path::Path::new(workspace_directory.as_ref())
             .join(self.spaces_key.as_ref())
@@ -617,18 +662,21 @@ impl Git {
             progress
                 .execute_process("git", clone_options)
                 .context(format_context!("while executing shallow clone"))?;
-        } else {
-            git::Repository::new(self.url.clone(), clone_path.clone())
+        }
+
+        // For a new clone, conditional user LFS config (e.g.
+        // `includeIf "gitdir:..."`) can only be evaluated now that the
+        // repository exists.
+        let workspace_repo = git::Repository::new(self.url.clone(), clone_path.clone());
+        let is_lfs_newly_enabled =
+            workspace_repo
                 .ensure_lfs_filter_config(progress)
                 .context(format_context!(
-                    "while configuring git-lfs in existing shallow clone"
+                    "while configuring git-lfs in shallow clone"
                 ))?;
-        }
 
         // Setup sparse checkout if needed
         if let Some(sparse_checkout) = self.sparse_checkout.as_ref() {
-            let workspace_repo = git::Repository::new(self.url.clone(), clone_path.clone());
-
             url_logger.debug("Setting up sparse checkout for shallow clone");
 
             workspace_repo
@@ -644,6 +692,16 @@ impl Git {
                 .checkout(progress, &self.checkout)
                 .context(format_context!(
                     "while checking out sparse files for shallow clone"
+                ))?;
+        }
+
+        // An existing clone, or a new one cloned without the LFS filter, may
+        // contain pointers.
+        if is_lfs_newly_enabled == git::IsLfsFilterNewlyEnabled::Yes {
+            workspace_repo
+                .materialize_lfs_files(progress)
+                .context(format_context!(
+                    "while materializing LFS files in shallow clone"
                 ))?;
         }
 
