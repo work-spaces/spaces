@@ -201,6 +201,14 @@ impl Git {
         let (bare_repo, _lock_file) =
             self.ensure_bare_repository(progress, workspace.clone(), None)?;
 
+        // Worktrees share the bare repository's config and `worktree add`
+        // checks out immediately, so configure LFS on the bare repository.
+        git::Repository::new(self.url.clone(), bare_repo.full_path.clone())
+            .ensure_lfs_filter_config(progress)
+            .context(format_context!(
+                "while configuring git-lfs in bare repository"
+            ))?;
+
         match &self.checkout {
             git::Checkout::NewBranch(branch_name) => {
                 let worktree = bare_repo
@@ -329,6 +337,14 @@ impl Git {
 
             let existing_repo = git::Repository::new(self.url.clone(), self.spaces_key.clone());
 
+            // Clones made before git-lfs was configured need it before any
+            // checkout below.
+            existing_repo
+                .ensure_lfs_filter_config(progress)
+                .context(format_context!(
+                    "while configuring git-lfs in existing workspace"
+                ))?;
+
             if existing_repo.is_dirty(progress, git::IgnoreSubmodules::Yes) {
                 logger(progress.console.clone(), self.url.clone()).warning(
                     format!(
@@ -425,6 +441,8 @@ impl Git {
                 "gc.writeCommitGraph=false".into(),
             ]);
         }
+
+        clone_arguments.extend(git::get_lfs_clone_arguments(progress));
 
         clone_arguments.extend(vec![
             "--reference".into(),
@@ -546,8 +564,9 @@ impl Git {
 
         let workspace_directory = self.get_clone_working_directory(workspace.clone());
 
-        let mut clone_arguments: Vec<Arc<str>> = vec![
-            "clone".into(),
+        let mut clone_arguments: Vec<Arc<str>> = vec!["clone".into()];
+        clone_arguments.extend(git::get_lfs_clone_arguments(progress));
+        clone_arguments.extend([
             "--depth".into(),
             "1".into(),
             self.url.clone(),
@@ -555,18 +574,20 @@ impl Git {
             "--branch".into(),
             branch.clone(),
             "--single-branch".into(),
-        ];
+        ]);
 
         // Add --no-checkout if sparse checkout is specified
         if self.sparse_checkout.is_some() {
             clone_arguments.push("--no-checkout".into());
         }
 
-        let clone_options = console::ExecuteOptions {
+        let mut clone_options = console::ExecuteOptions {
             arguments: clone_arguments,
             working_directory: Some(workspace_directory.clone()),
             ..Default::default()
         };
+        git::apply_path_prefix(&mut clone_options)
+            .context(format_context!("while preparing shallow clone environment"))?;
 
         let clone_path =
             std::path::Path::new(workspace_directory.as_ref()).join(self.spaces_key.as_ref());
@@ -601,6 +622,12 @@ impl Git {
             progress
                 .execute_process("git", clone_options)
                 .context(format_context!("while executing shallow clone"))?;
+        } else {
+            git::Repository::new(self.url.clone(), self.spaces_key.clone())
+                .ensure_lfs_filter_config(progress)
+                .context(format_context!(
+                    "while configuring git-lfs in existing shallow clone"
+                ))?;
         }
 
         // Setup sparse checkout if needed

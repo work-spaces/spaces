@@ -41,6 +41,10 @@ pub enum Feature {
     TracingTrace,
     CollectMetrics,
     ShowRunMetrics,
+    SkipGitLfsTool,
+    SkipOrasTool,
+    SkipGhTool,
+    SkipCargoBinstallTool,
 }
 
 impl Feature {
@@ -103,6 +107,19 @@ impl Feature {
             }
             Feature::CollectMetrics => r"Record command usage and rule/operation timings.",
             Feature::ShowRunMetrics => r"Show a chart of the longest running tasks.",
+            Feature::SkipGitLfsTool => {
+                r"Skip installing the built-in `git-lfs` tool.
+                Git checkout rules will no longer prepend the spaces tools path to `PATH`."
+            }
+            Feature::SkipOrasTool => r"Skip installing the built-in `oras` tool.",
+            Feature::SkipGhTool => {
+                r"Skip installing the built-in `gh` tool.
+                `spaces version` uses it to fetch releases unless a custom version manifest is configured."
+            }
+            Feature::SkipCargoBinstallTool => {
+                r"Skip installing the built-in `cargo-binstall` tool.
+                `checkout.add_cargo_bin()` requires it."
+            }
         }
     }
 }
@@ -414,6 +431,30 @@ mod tests {
         assert_eq!(
             Feature::ShowRunMetrics.into_kebab_case().as_ref(),
             "show-run-metrics"
+        );
+        assert_eq!(
+            Feature::SkipGitLfsTool.env_var_name(),
+            "SPACES_ENV_SKIP_GIT_LFS_TOOL"
+        );
+        assert_eq!(
+            Feature::SkipGitLfsTool.into_kebab_case().as_ref(),
+            "skip-git-lfs-tool"
+        );
+        assert_eq!(
+            Feature::SkipOrasTool.env_var_name(),
+            "SPACES_ENV_SKIP_ORAS_TOOL"
+        );
+        assert_eq!(
+            Feature::SkipGhTool.env_var_name(),
+            "SPACES_ENV_SKIP_GH_TOOL"
+        );
+        assert_eq!(
+            Feature::SkipCargoBinstallTool.env_var_name(),
+            "SPACES_ENV_SKIP_CARGO_BINSTALL_TOOL"
+        );
+        assert_eq!(
+            Feature::SkipCargoBinstallTool.into_kebab_case().as_ref(),
+            "skip-cargo-binstall-tool"
         );
     }
 

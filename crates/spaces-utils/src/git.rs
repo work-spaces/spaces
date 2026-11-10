@@ -237,6 +237,158 @@ fn url_logger(console: console::Console, url: &str) -> logger::Logger {
     logger::Logger::new(console, url.into())
 }
 
+/// Directory containing the Spaces-managed `git-lfs` (the spaces tools
+/// `sysroot/bin`). `None` when the `SkipGitLfsTool` feature is enabled.
+static GIT_LFS_TOOLS_DIRECTORY: RwLock<Option<Arc<str>>> = RwLock::new(None);
+
+/// Cached result of checking whether the user's system/global git config
+/// already defines the LFS filter (e.g. via `git lfs install`).
+static IS_LFS_FILTER_USER_CONFIGURED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+const GIT_LFS_FILTER_CONFIG_REGEX: &str = r"^filter\.lfs\.";
+const GIT_LFS_CONFIG_LOCK_KEY: &str = "git-lfs-config";
+
+/// Sets the directory containing the Spaces-managed `git-lfs`.
+///
+/// When set, the directory is prepended to `PATH` for every git command Spaces
+/// runs (git-lfs hooks call `git-lfs` through `PATH`), and repositories cloned
+/// or updated by checkout rules get a local LFS filter config that points at
+/// the absolute path of the managed `git-lfs`.
+pub fn set_git_lfs_tools_directory(directory: Option<Arc<str>>) {
+    *GIT_LFS_TOOLS_DIRECTORY.write().unwrap() = directory;
+}
+
+fn get_git_lfs_tools_directory() -> Option<Arc<str>> {
+    GIT_LFS_TOOLS_DIRECTORY.read().unwrap().clone()
+}
+
+fn get_git_lfs_executable_name() -> &'static str {
+    if cfg!(windows) {
+        "git-lfs.exe"
+    } else {
+        "git-lfs"
+    }
+}
+
+/// Quotes `value` for the POSIX shell that git uses to run filter commands.
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', r"'\''"))
+}
+
+/// Mirrors the config written by `git lfs install`, but with an absolute path
+/// so the filter works without `git-lfs` on `PATH`.
+fn get_lfs_filter_config_for_directory(directory: &str) -> Vec<(Arc<str>, Arc<str>)> {
+    let git_lfs = std::path::Path::new(directory).join(get_git_lfs_executable_name());
+    let git_lfs = shell_quote(git_lfs.to_string_lossy().as_ref());
+    vec![
+        (
+            "filter.lfs.process".into(),
+            format!("{git_lfs} filter-process").into(),
+        ),
+        (
+            "filter.lfs.smudge".into(),
+            format!("{git_lfs} smudge -- %f").into(),
+        ),
+        (
+            "filter.lfs.clean".into(),
+            format!("{git_lfs} clean -- %f").into(),
+        ),
+        ("filter.lfs.required".into(), "true".into()),
+    ]
+}
+
+fn is_lfs_filter_user_configured(progress: &mut console::Progress) -> bool {
+    *IS_LFS_FILTER_USER_CONFIGURED.get_or_init(|| {
+        let options = console::ExecuteOptions {
+            arguments: vec![
+                "config".into(),
+                "--show-scope".into(),
+                "--get-regexp".into(),
+                GIT_LFS_FILTER_CONFIG_REGEX.into(),
+            ],
+            is_return_stdout: true,
+            ..Default::default()
+        };
+
+        // `git config --get-regexp` exits with 1 when nothing matches.
+        let Ok(Some(stdout)) = execute_git_command(progress, GIT_LFS_CONFIG_LOCK_KEY, options)
+        else {
+            return false;
+        };
+
+        // Ignore entries from a repository that happens to contain the cwd.
+        stdout.lines().any(|line| {
+            let scope = line.split_whitespace().next().unwrap_or_default();
+            !matches!(scope, "local" | "worktree")
+        })
+    })
+}
+
+/// Returns the LFS filter config that Spaces applies to the repositories it
+/// manages.
+///
+/// Returns `None` when the managed `git-lfs` is disabled or not installed, or
+/// when the user already configures the LFS filter in their system/global git
+/// config (which is then respected).
+pub fn get_lfs_filter_config(
+    progress: &mut console::Progress,
+) -> Option<Vec<(Arc<str>, Arc<str>)>> {
+    let directory = get_git_lfs_tools_directory()?;
+    let git_lfs = std::path::Path::new(directory.as_ref()).join(get_git_lfs_executable_name());
+    if !git_lfs.exists() || is_lfs_filter_user_configured(progress) {
+        return None;
+    }
+    Some(get_lfs_filter_config_for_directory(&directory))
+}
+
+/// Returns `-c key=value` arguments to pass after `git clone`.
+///
+/// `git clone -c` applies the config before the initial checkout (so LFS
+/// files are smudged) and persists it to the new repository's local config.
+pub fn get_lfs_clone_arguments(progress: &mut console::Progress) -> Vec<Arc<str>> {
+    get_lfs_filter_config(progress)
+        .into_iter()
+        .flatten()
+        .flat_map(|(key, value)| ["-c".into(), format!("{key}={value}").into()])
+        .collect()
+}
+
+/// Prepends the Spaces tools directory (if set) to `PATH` in `options`.
+pub fn apply_path_prefix(options: &mut console::ExecuteOptions) -> anyhow::Result<()> {
+    let Some(prefix) = get_git_lfs_tools_directory() else {
+        return Ok(());
+    };
+    prepend_to_path(options, &prefix)
+}
+
+fn prepend_to_path(options: &mut console::ExecuteOptions, prefix: &str) -> anyhow::Result<()> {
+    let existing_index = options
+        .environment
+        .iter()
+        .rposition(|(key, _)| key.as_ref() == "PATH");
+
+    let current_path: std::ffi::OsString = match existing_index {
+        Some(index) => options.environment[index].1.as_ref().into(),
+        None => std::env::var_os("PATH").unwrap_or_default(),
+    };
+
+    let paths = std::iter::once(std::path::PathBuf::from(prefix))
+        .chain(std::env::split_paths(&current_path).filter(|path| !path.as_os_str().is_empty()));
+    let joined: Arc<str> = std::env::join_paths(paths)
+        .context(format_context!(
+            "Failed to prepend {prefix} to PATH for git"
+        ))?
+        .to_string_lossy()
+        .into();
+
+    match existing_index {
+        Some(index) => options.environment[index].1 = joined,
+        None => options.environment.push(("PATH".into(), joined)),
+    }
+
+    Ok(())
+}
+
 pub fn execute_git_command(
     progress: &mut console::Progress,
     url: &str,
@@ -244,6 +396,8 @@ pub fn execute_git_command(
 ) -> anyhow::Result<Option<String>> {
     use std::ops::DerefMut;
     let full_command = format!("git {}", options.arguments.join(" "));
+    let mut options = options;
+    apply_path_prefix(&mut options)?;
     let mut last_error = None;
     for attempt in 0..=GIT_MAX_RETRIES {
         if attempt > 0 {
@@ -1265,11 +1419,12 @@ impl Repository {
         url_logger(progress.console.clone(), url.as_ref())
             .message(format!("git {}", arguments.join(" ")).as_str());
 
-        let clone_options = console::ExecuteOptions {
+        let mut clone_options = console::ExecuteOptions {
             arguments,
             working_directory: Some(working_directory.clone()),
             ..Default::default()
         };
+        apply_path_prefix(&mut clone_options)?;
 
         progress
             .execute_process("git", clone_options)
@@ -1368,6 +1523,51 @@ impl Repository {
 
         execute_git_command(progress, &self.url, options)
             .context(format_context!("while executing git command"))?;
+        Ok(())
+    }
+
+    /// Writes the Spaces LFS filter config (see [`get_lfs_filter_config`]) to
+    /// the repository's local config if it is missing or out of date. Use
+    /// this for repositories that were not cloned with
+    /// [`get_lfs_clone_arguments`] (e.g. existing clones or bare repositories
+    /// that worktrees are added to).
+    pub fn ensure_lfs_filter_config(&self, progress: &mut console::Progress) -> anyhow::Result<()> {
+        let Some(config) = get_lfs_filter_config(progress) else {
+            return Ok(());
+        };
+
+        let options = console::ExecuteOptions {
+            working_directory: Some(self.full_path.clone()),
+            arguments: vec![
+                "config".into(),
+                "--local".into(),
+                "--get-regexp".into(),
+                GIT_LFS_FILTER_CONFIG_REGEX.into(),
+            ],
+            is_return_stdout: true,
+            ..Default::default()
+        };
+        // `git config --get-regexp` exits with 1 when nothing matches.
+        let existing = execute_git_command(progress, &self.url, options)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let existing: std::collections::HashMap<&str, &str> = existing
+            .lines()
+            .filter_map(|line| line.split_once(' '))
+            .collect();
+
+        for (key, value) in config {
+            if existing.get(key.as_ref()) == Some(&value.as_ref()) {
+                continue;
+            }
+            self.execute(
+                progress,
+                vec!["config".into(), "--local".into(), key.clone(), value],
+            )
+            .context(format_context!("while setting {key} in {}", self.full_path))?;
+        }
+
         Ok(())
     }
 
@@ -1634,6 +1834,87 @@ impl Repository {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn get_path_entry(options: &console::ExecuteOptions) -> Vec<std::path::PathBuf> {
+        let paths: Vec<_> = options
+            .environment
+            .iter()
+            .filter(|(key, _)| key.as_ref() == "PATH")
+            .collect();
+        assert_eq!(paths.len(), 1, "expected exactly one PATH entry");
+        std::env::split_paths(paths[0].1.as_ref()).collect()
+    }
+
+    #[test]
+    fn prepend_to_path_prefixes_process_or_explicit_path() {
+        let mut options = console::ExecuteOptions::default();
+        prepend_to_path(&mut options, "/tools/sysroot/bin").unwrap();
+        let paths = get_path_entry(&options);
+        assert_eq!(paths[0], std::path::PathBuf::from("/tools/sysroot/bin"));
+
+        let process_path = std::env::var_os("PATH").unwrap_or_default();
+        let process_paths: Vec<_> = std::env::split_paths(&process_path)
+            .filter(|path| !path.as_os_str().is_empty())
+            .collect();
+        assert_eq!(&paths[1..], process_paths.as_slice());
+
+        // An explicit PATH in the options is prefixed rather than duplicated.
+        let explicit_path: Arc<str> = std::env::join_paths(["/usr/bin", "/bin"])
+            .unwrap()
+            .to_string_lossy()
+            .into();
+        let mut options = console::ExecuteOptions {
+            environment: vec![("PATH".into(), explicit_path)],
+            ..Default::default()
+        };
+        prepend_to_path(&mut options, "/tools/sysroot/bin").unwrap();
+        assert_eq!(
+            get_path_entry(&options),
+            ["/tools/sysroot/bin", "/usr/bin", "/bin"]
+                .map(std::path::PathBuf::from)
+                .to_vec()
+        );
+    }
+
+    #[test]
+    fn shell_quote_escapes_single_quotes() {
+        assert_eq!(shell_quote("/a b/git-lfs"), "'/a b/git-lfs'");
+        assert_eq!(shell_quote("/it's/git-lfs"), r"'/it'\''s/git-lfs'");
+    }
+
+    #[test]
+    fn lfs_filter_config_uses_absolute_quoted_path() {
+        let directory = "/store/spaces tools/sysroot/bin";
+        let git_lfs = shell_quote(
+            std::path::Path::new(directory)
+                .join(get_git_lfs_executable_name())
+                .to_string_lossy()
+                .as_ref(),
+        );
+        let config = get_lfs_filter_config_for_directory(directory);
+        let config: Vec<(&str, &str)> = config
+            .iter()
+            .map(|(key, value)| (key.as_ref(), value.as_ref()))
+            .collect();
+        assert_eq!(
+            config,
+            vec![
+                (
+                    "filter.lfs.process",
+                    format!("{git_lfs} filter-process").as_str()
+                ),
+                (
+                    "filter.lfs.smudge",
+                    format!("{git_lfs} smudge -- %f").as_str()
+                ),
+                (
+                    "filter.lfs.clean",
+                    format!("{git_lfs} clean -- %f").as_str()
+                ),
+                ("filter.lfs.required", "true"),
+            ]
+        );
+    }
 
     fn run_git(directory: &std::path::Path, args: &[&str]) -> String {
         let output = std::process::Command::new("git")
