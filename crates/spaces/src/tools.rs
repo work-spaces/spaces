@@ -1,7 +1,7 @@
 use crate::{builtins, singleton, workspace};
 use anyhow::Context;
 use anyhow_source_location::format_context;
-use utils::{ci, http_archive, logger, platform, store, ws};
+use utils::{ci, features, http_archive, logger, platform, store, ws};
 
 #[derive(Debug, clap::Subcommand, Clone, strum::Display)]
 pub enum Command {
@@ -23,11 +23,24 @@ pub enum Command {
 const CARGO_BINSTALL_JSON: &str = include_str!("tools/cargo-binstall.json");
 const ORAS_JSON: &str = include_str!("tools/oras.json");
 const GH_JSON: &str = include_str!("tools/gh.json");
-const TOOLS: &[(&str, &str)] = &[
-    ("gh", GH_JSON),
-    ("cargo_binstall", CARGO_BINSTALL_JSON),
-    ("oras", ORAS_JSON),
+const GIT_LFS_JSON: &str = include_str!("tools/git-lfs.json");
+const TOOLS: &[(&str, &str, features::Feature)] = &[
+    ("gh", GH_JSON, features::Feature::SkipGhTool),
+    (
+        "cargo_binstall",
+        CARGO_BINSTALL_JSON,
+        features::Feature::SkipCargoBinstallTool,
+    ),
+    ("oras", ORAS_JSON, features::Feature::SkipOrasTool),
+    ("git_lfs", GIT_LFS_JSON, features::Feature::SkipGitLfsTool),
 ];
+
+fn load_features(store_path: &std::path::Path) -> anyhow::Result<features::Features> {
+    features::Features::new_from_json(store_path).context(format_context!(
+        "Failed to load features from {}",
+        store_path.display()
+    ))
+}
 
 fn tools_logger(console: console::Console) -> logger::Logger {
     logger::Logger::new(console, "tools".into())
@@ -117,8 +130,19 @@ pub fn list_tools(console: console::Console) -> anyhow::Result<()> {
     logger.info("- builtin: info.get_path_to_spaces_tools()");
     logger.info("Tools:");
 
-    for (name, _json) in TOOLS {
-        logger.info(format!("- {name}").as_str());
+    let features = load_features(&store_path)?;
+    for (name, _json, skip_feature) in TOOLS {
+        if features.is_enabled(*skip_feature) {
+            logger.info(
+                format!(
+                    "- {name} (skipped: `{}` is enabled)",
+                    skip_feature.into_kebab_case()
+                )
+                .as_str(),
+            );
+        } else {
+            logger.info(format!("- {name}").as_str());
+        }
     }
 
     Ok(())
@@ -181,7 +205,20 @@ pub fn install_tools(console: console::Console, _is_force_link: bool) -> anyhow:
         store_path
     ))?;
 
-    for (name, json) in TOOLS {
+    let features = load_features(std::path::Path::new(store_path.as_ref()))?;
+
+    for (name, json, skip_feature) in TOOLS {
+        if features.is_enabled(*skip_feature) {
+            logger.info(
+                format!(
+                    "skip {name}: `{}` is enabled",
+                    skip_feature.into_kebab_case()
+                )
+                .as_str(),
+            );
+            continue;
+        }
+
         logger.info(format!("download and install {name}").as_str());
         let tool: builtins::checkout::PlatformArchive =
             serde_json::from_str(json).context(format_context!("Failed to parse {name} json"))?;
