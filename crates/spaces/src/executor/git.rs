@@ -589,27 +589,22 @@ impl Git {
         git::apply_path_prefix(&mut clone_options)
             .context(format_context!("while preparing shallow clone environment"))?;
 
-        let clone_path =
-            std::path::Path::new(workspace_directory.as_ref()).join(self.spaces_key.as_ref());
-        let should_run_clone = if clone_path.exists() {
-            let entries = std::fs::read_dir(&clone_path).context(format_context!(
-                "while reading existing shallow clone directory {}",
-                clone_path.display()
+        let clone_path: Arc<str> = std::path::Path::new(workspace_directory.as_ref())
+            .join(self.spaces_key.as_ref())
+            .to_string_lossy()
+            .into();
+        let should_run_clone = if std::path::Path::new(clone_path.as_ref()).exists() {
+            let entries = std::fs::read_dir(clone_path.as_ref()).context(format_context!(
+                "while reading existing shallow clone directory {clone_path}"
             ))?;
 
             if entries.count() > 0 {
-                url_logger.warning(
-                    format!("{} already exists and is populated", clone_path.display()).as_str(),
-                );
+                url_logger
+                    .warning(format!("{clone_path} already exists and is populated").as_str());
                 false
             } else {
-                url_logger.debug(
-                    format!(
-                        "{} already exists but is empty - cloning",
-                        clone_path.display()
-                    )
-                    .as_str(),
-                );
+                url_logger
+                    .debug(format!("{clone_path} already exists but is empty - cloning").as_str());
                 true
             }
         } else {
@@ -623,7 +618,7 @@ impl Git {
                 .execute_process("git", clone_options)
                 .context(format_context!("while executing shallow clone"))?;
         } else {
-            git::Repository::new(self.url.clone(), self.spaces_key.clone())
+            git::Repository::new(self.url.clone(), clone_path.clone())
                 .ensure_lfs_filter_config(progress)
                 .context(format_context!(
                     "while configuring git-lfs in existing shallow clone"
@@ -632,7 +627,7 @@ impl Git {
 
         // Setup sparse checkout if needed
         if let Some(sparse_checkout) = self.sparse_checkout.as_ref() {
-            let workspace_repo = git::Repository::new(self.url.clone(), self.spaces_key.clone());
+            let workspace_repo = git::Repository::new(self.url.clone(), clone_path.clone());
 
             url_logger.debug("Setting up sparse checkout for shallow clone");
 
