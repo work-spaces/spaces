@@ -359,7 +359,7 @@ fn link_tools_to_spaces_path(console: console::Console) -> anyhow::Result<()> {
             ))?;
         }
 
-        logger.info(format!("{name}: {target_path} -> {source_path}").as_str());
+        logger.info(format!("{name} -> {target_path}").as_str());
     }
 
     Ok(())
