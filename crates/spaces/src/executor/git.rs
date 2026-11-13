@@ -300,7 +300,7 @@ impl Git {
     ) -> anyhow::Result<()> {
         logger(progress.console.clone(), self.url.clone()).message(
             format!(
-                "execute dissociated reference clone with filter {:?}",
+                "execute local clone from bare repository with filter {:?}",
                 filter.clone().unwrap_or("None".to_string())
             )
             .as_str(),
@@ -428,19 +428,17 @@ impl Git {
             );
         }
 
-        // Step 3: Clone from bare repo using --reference --dissociate
-        // This creates a new repo with:
-        // - Original URL as remote (not the local bare repo path)
-        // - Objects copied from bare repo (fast, no network needed)
-        // - No alternates file left behind — fully self-contained
+        // Step 3: Local clone from the bare repo.
+        // Git hardlinks the object files when the store and the workspace are
+        // on the same filesystem and copies them otherwise. Object files are
+        // never modified in place, so the clone shares disk space with the
+        // store while staying fully self-contained (no alternates file):
+        // deleting or repacking the bare repo never affects it.
+        // `--local` is NOT passed because it makes a failed hardlink (e.g. a
+        // cross-device link) fatal instead of falling back to copying.
 
-        logger(progress.console.clone(), self.url.clone()).debug(
-            format!(
-                "Cloning {} from bare repo with --reference --dissociate",
-                self.spaces_key
-            )
-            .as_str(),
-        );
+        logger(progress.console.clone(), self.url.clone())
+            .debug(format!("Cloning {} locally from bare repo", self.spaces_key).as_str());
 
         let workspace_directory = self.get_clone_working_directory(workspace.clone());
 
@@ -468,27 +466,18 @@ impl Git {
             &workspace_directory,
         ));
 
+        // `--filter` is not passed: git ignores it for local clones. A filter
+        // only applies to the bare repo (currently unused - Default and
+        // Blobless both use full clones).
+        //
+        // `--no-checkout` because `origin` is the bare repo until it is
+        // redirected below, and the bare repo's branches are stale. Checking
+        // out now would populate (and LFS-smudge) a stale revision.
         clone_arguments.extend(vec![
-            "--reference".into(),
+            "--no-checkout".into(),
             bare_repo.full_path.clone(),
-            "--dissociate".into(),
+            self.spaces_key.clone(),
         ]);
-
-        // Add filter if specified (currently unused - Default and Blobless both use full clones)
-        if let Some(ref filter_str) = filter {
-            clone_arguments.push(format!("--filter={filter_str}").into());
-        }
-
-        // Handle sparse checkout
-        if self.sparse_checkout.is_some() {
-            clone_arguments.push("--no-checkout".into());
-        }
-
-        // Add the original URL (this becomes the remote)
-        clone_arguments.push(self.url.clone());
-
-        // Add the destination
-        clone_arguments.push(self.spaces_key.clone());
 
         git::execute_git_command(
             progress,
@@ -500,12 +489,54 @@ impl Git {
             },
         )
         .context(format_context!(
-            "while cloning repository with reference clone"
+            "while cloning repository locally from bare repository"
         ))?;
 
-        // Step 4: Setup sparse checkout if needed
         let workspace_repo = git::Repository::new(self.url.clone(), self.spaces_key.clone());
 
+        // Step 3b: Point `origin` at the real remote and refresh from it.
+        // The bare repo fetches into `refs/remotes/origin/*`
+        // (`BARE_REPO_FETCH_REFSPEC`), so its `refs/heads/*` (which the local
+        // clone turned into this repo's `origin/*`) are frozen at the time the
+        // bare repo was created. This fetch is required to replace them, and
+        // it keeps contacting the real remote during sync when the bare repo
+        // fetch is skipped. It is cheap because the objects are already local.
+        workspace_repo
+            .execute(
+                progress,
+                vec![
+                    "remote".into(),
+                    "set-url".into(),
+                    "origin".into(),
+                    self.url.clone(),
+                ],
+            )
+            .context(format_context!("while setting origin to {}", self.url))?;
+
+        workspace_repo
+            .execute(
+                progress,
+                vec![
+                    // Refresh `origin/HEAD` in the same fetch (git >= 2.48;
+                    // older versions ignore unknown config).
+                    "-c".into(),
+                    "remote.origin.followRemoteHEAD=always".into(),
+                    "fetch".into(),
+                    "--tags".into(),
+                    "--force".into(),
+                    "--prune".into(),
+                    // `--prune` alone keeps tags copied from the bare repo
+                    // that were deleted on the remote.
+                    "--prune-tags".into(),
+                    "--recurse-submodules=no".into(),
+                    "origin".into(),
+                ],
+            )
+            .context(format_context!(
+                "while fetching from origin after cloning from bare repository"
+            ))?;
+
+        // Step 4: Setup sparse checkout if needed
         // Conditional user LFS config (e.g. `includeIf "gitdir:..."`) can only
         // be evaluated now that the repository exists.
         let is_lfs_newly_enabled =
@@ -520,6 +551,13 @@ impl Git {
                 .setup_sparse_checkout(progress, sparse_checkout)
                 .context(format_context!("while setting up sparse checkout"))?;
         }
+
+        // Step 4b: Populate the working tree from origin's default branch,
+        // as a regular clone would. `Checkout::NewBranch` branches off HEAD.
+        self.checkout_default_branch_from_origin(progress, &workspace_repo)
+            .context(format_context!(
+                "while checking out the default branch from origin"
+            ))?;
 
         // Step 5: Checkout the desired revision
         workspace_repo
@@ -550,7 +588,7 @@ impl Git {
         }
 
         logger(progress.console.clone(), self.url.clone())
-            .debug("Reference clone completed successfully");
+            .debug("Local clone from bare repository completed successfully");
 
         // Track workspace link to bare repository
         let (relative_bare_store_path, name_dot_git) =
@@ -581,6 +619,106 @@ impl Git {
                 utils::store::CloneType::Reference,
             )
             .context(format_context!("while adding reference store link"))?;
+
+        Ok(())
+    }
+
+    /// After a `--no-checkout` local clone from the bare repo, the local
+    /// default branch is at the bare repo's stale `refs/heads/<default>` and
+    /// the working tree is empty. Resets the branch to its refreshed
+    /// `origin/<default>` and checks it out (honoring sparse checkout and
+    /// LFS). If the default branch no longer exists on origin (e.g. it was
+    /// renamed), asks origin for its current default branch and replaces the
+    /// stale local branch with it.
+    fn checkout_default_branch_from_origin(
+        &self,
+        progress: &mut console::Progress,
+        repo: &git::Repository,
+    ) -> anyhow::Result<()> {
+        // Empty repository: nothing to check out.
+        if repo.resolve_ref_to_commit(progress, "HEAD")?.is_none() {
+            return Ok(());
+        }
+
+        let stale_branch = repo.get_current_branch(progress)?;
+
+        let default_branch: Arc<str> = match stale_branch.as_ref() {
+            Some(branch)
+                if repo
+                    .resolve_ref_to_commit(progress, &format!("refs/remotes/origin/{branch}"))?
+                    .is_some() =>
+            {
+                branch.clone()
+            }
+            _ => {
+                logger(progress.console.clone(), self.url.clone()).debug(
+                    format!(
+                        "Bare repository default branch {stale_branch:?} not on origin - querying origin"
+                    )
+                    .as_str(),
+                );
+                repo.execute(
+                    progress,
+                    vec![
+                        "remote".into(),
+                        "set-head".into(),
+                        "origin".into(),
+                        "--auto".into(),
+                    ],
+                )
+                .context(format_context!(
+                    "while querying the default branch of origin"
+                ))?;
+
+                let origin_head = git::execute_git_command(
+                    progress,
+                    &self.url,
+                    console::ExecuteOptions {
+                        working_directory: Some(repo.full_path.clone()),
+                        arguments: vec![
+                            "symbolic-ref".into(),
+                            "--short".into(),
+                            "refs/remotes/origin/HEAD".into(),
+                        ],
+                        is_return_stdout: true,
+                        ..Default::default()
+                    },
+                )
+                .context(format_context!("while reading origin/HEAD"))?
+                .unwrap_or_default();
+
+                let origin_head = origin_head.trim();
+                origin_head
+                    .strip_prefix("origin/")
+                    .ok_or(format_error!("Unexpected origin/HEAD target {origin_head}"))?
+                    .into()
+            }
+        };
+
+        repo.execute(
+            progress,
+            vec![
+                "checkout".into(),
+                "-B".into(),
+                default_branch.clone(),
+                format!("origin/{default_branch}").into(),
+            ],
+        )
+        .context(format_context!(
+            "while checking out origin/{default_branch}"
+        ))?;
+
+        if let Some(stale_branch) = stale_branch
+            && stale_branch != default_branch
+        {
+            repo.execute(
+                progress,
+                vec!["branch".into(), "-D".into(), stale_branch.clone()],
+            )
+            .context(format_context!(
+                "while deleting stale branch {stale_branch} from the bare repository"
+            ))?;
+        }
 
         Ok(())
     }
@@ -715,10 +853,10 @@ impl Git {
         name: &str,
     ) -> anyhow::Result<()> {
         // The logic in Repo::uses_bare_repository() needs to stay in sync
-        // with the logic here. Default and Blobless use bare repository
-        // with reference clone (--reference --dissociate): objects are copied
-        // locally from the bare repo cache (fast, no network), and the alternates
-        // file is removed so the workspace clone is fully self-contained.
+        // with the logic here. Default and Blobless use a local clone from the
+        // bare repo cache: objects are hardlinked when possible (copied
+        // otherwise), so no network transfer of existing objects is needed and
+        // the workspace clone is fully self-contained (no alternates file).
         // Note: Default and Blobless are now equivalent - both create full clones
         // without filters to avoid "unable to read sha1 file" errors.
         //

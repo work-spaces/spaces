@@ -82,7 +82,7 @@ pub enum StoreCommand {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub enum CloneType {
     #[default]
-    Reference, // --reference clone (Default/Blobless)
+    Reference, // local clone from the store's bare repo (Default/Blobless)
     Worktree, // worktree (deprecated)
     Shallow,  // shallow clone
 }
