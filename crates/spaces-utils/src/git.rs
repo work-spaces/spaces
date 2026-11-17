@@ -756,12 +756,15 @@ pub const BARE_REPO_FETCH_REFSPEC: &str = "+refs/heads/*:refs/remotes/origin/*";
 
 /// Fetches all remote branches of a bare repository into
 /// `refs/remotes/origin/*` (see [`BARE_REPO_FETCH_REFSPEC`]), pruning
-/// remote-tracking refs that no longer exist.
+/// remote-tracking refs that no longer exist. Also fetches all tags, forcing
+/// updates to tags that have moved on the remote.
 pub fn fetch_bare_repo(progress_bar: &mut console::Progress, path: &str) -> anyhow::Result<()> {
     let options = console::ExecuteOptions {
         working_directory: Some(path.into()),
         arguments: vec![
             "fetch".into(),
+            "--tags".into(),
+            "--force".into(),
             "--prune".into(),
             "origin".into(),
             BARE_REPO_FETCH_REFSPEC.into(),
@@ -2001,6 +2004,45 @@ mod tests {
     fn commit(directory: &std::path::Path, message: &str) -> String {
         run_git(directory, &["commit", "--allow-empty", "-m", message]);
         run_git(directory, &["rev-parse", "HEAD"])
+    }
+
+    #[test]
+    fn fetch_bare_repo_force_fetches_all_tags() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let source = temp_dir.path().join("source");
+        let bare = temp_dir.path().join("cache.git");
+
+        std::fs::create_dir_all(&source).unwrap();
+        run_git(&source, &["init", "--initial-branch=main"]);
+        let initial = commit(&source, "initial");
+        run_git(&source, &["tag", "release"]);
+        run_git(
+            temp_dir.path(),
+            &[
+                "clone",
+                "--bare",
+                source.to_str().unwrap(),
+                bare.to_str().unwrap(),
+            ],
+        );
+
+        let updated = commit(&source, "update");
+        run_git(&source, &["tag", "--force", "release"]);
+
+        // This tag is not reachable from any branch, so auto-follow is insufficient.
+        run_git(&source, &["checkout", "--detach", &initial]);
+        let tag_only = commit(&source, "tag only");
+        run_git(&source, &["tag", "tag-only"]);
+        run_git(&source, &["checkout", "main"]);
+
+        let mut progress = console::Progress::new(console::Console::new_null(), "test", None, None);
+        fetch_bare_repo(&mut progress, bare.to_str().unwrap()).unwrap();
+
+        assert_eq!(run_git(&bare, &["rev-parse", "refs/tags/release"]), updated);
+        assert_eq!(
+            run_git(&bare, &["rev-parse", "refs/tags/tag-only"]),
+            tag_only
+        );
     }
 
     #[test]
