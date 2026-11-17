@@ -667,8 +667,26 @@ impl Git {
         };
 
         let workspace_repo = git::Repository::new(self.url.clone(), clone_path.clone());
-        if should_run_clone {
-            if is_commit {
+        if is_commit {
+            if !should_run_clone
+                && (workspace_repo.is_dirty(progress, git::IgnoreSubmodules::Yes)
+                    || workspace_repo.is_head_branch(progress)
+                    || (workspace_repo.get_commit_hash(progress)?.as_deref()
+                        != Some(revision.as_ref())
+                        && workspace_repo
+                            .has_local_commits_not_on_remotes(progress)
+                            .context(format_context!(
+                                "while checking for local commits in existing shallow clone"
+                            ))?))
+            {
+                url_logger.warning(
+                    format!("{clone_path} has local changes, a checked out branch, or unpublished commits - not updating")
+                        .as_str(),
+                );
+                return Ok(());
+            }
+
+            if should_run_clone {
                 // Mark the directory before init so an interrupted fetch or checkout
                 // is not mistaken for a completed clone on the next run.
                 std::fs::create_dir_all(incomplete_clone.parent().unwrap()).context(
@@ -735,43 +753,31 @@ impl Git {
                         vec!["config".into(), "remote.origin.url".into(), origin_url],
                     )
                     .context(format_context!("while configuring shallow clone origin"))?;
-                // Track the downloaded commit so lock collection and sync cleanup
-                // do not mistake it for local work, even after fetch --prune.
-                let fetch_refspec: Arc<str> =
-                    format!("+{revision}:refs/remotes/origin/spaces-commit").into();
-                workspace_repo
-                    .execute(
-                        progress,
-                        vec![
-                            "config".into(),
-                            "remote.origin.fetch".into(),
-                            fetch_refspec.clone(),
-                        ],
-                    )
-                    .context(format_context!(
-                        "while configuring shallow commit fetch refspec"
-                    ))?;
-                workspace_repo
-                    .execute(
-                        progress,
-                        vec![
-                            "fetch".into(),
-                            "--depth=1".into(),
-                            "--no-tags".into(),
-                            "origin".into(),
-                            fetch_refspec,
-                        ],
-                    )
-                    .context(format_context!(
-                        "while fetching shallow commit {revision}; the remote must allow fetching this full commit ID"
-                    ))?;
-            } else {
-                url_logger.trace(format!("git clone {clone_options:?}").as_str());
-
-                progress
-                    .execute_process("git", clone_options)
-                    .context(format_context!("while executing shallow clone"))?;
             }
+
+            workspace_repo
+                .execute(
+                    progress,
+                    vec![
+                        "fetch".into(),
+                        "--depth=1".into(),
+                        "--no-tags".into(),
+                        // Keep the previous tracking ref until checkout succeeds,
+                        // so a failed update is not mistaken for unpublished work.
+                        "--refmap=".into(),
+                        "origin".into(),
+                        revision.clone(),
+                    ],
+                )
+                .context(format_context!(
+                    "while fetching shallow commit {revision}; the remote must allow fetching this full commit ID"
+                ))?;
+        } else if should_run_clone {
+            url_logger.trace(format!("git clone {clone_options:?}").as_str());
+
+            progress
+                .execute_process("git", clone_options)
+                .context(format_context!("while executing shallow clone"))?;
         }
 
         let is_resuming_checkout = is_resuming_clone
@@ -802,13 +808,38 @@ impl Git {
                 ))?;
         }
 
-        if is_commit && should_run_clone {
+        if is_commit {
             workspace_repo
                 .execute(
                     progress,
-                    vec!["checkout".into(), "--detach".into(), revision],
+                    vec!["checkout".into(), "--detach".into(), revision.clone()],
                 )
                 .context(format_context!("while checking out shallow commit"))?;
+            workspace_repo
+                .execute(
+                    progress,
+                    vec![
+                        "update-ref".into(),
+                        "refs/remotes/origin/spaces-commit".into(),
+                        revision.clone(),
+                    ],
+                )
+                .context(format_context!("while tracking checked out shallow commit"))?;
+            // Preserve the pinned tracking ref across ordinary fetches and pruning.
+            // Only change the refspec after checkout succeeds, so failed updates
+            // leave the previous commit tracked and can be retried safely.
+            workspace_repo
+                .execute(
+                    progress,
+                    vec![
+                        "config".into(),
+                        "remote.origin.fetch".into(),
+                        format!("+{revision}:refs/remotes/origin/spaces-commit").into(),
+                    ],
+                )
+                .context(format_context!(
+                    "while configuring shallow commit fetch refspec"
+                ))?;
         } else if self.sparse_checkout.is_some() {
             url_logger.debug("Checking out files for sparse checkout");
             workspace_repo
@@ -1053,6 +1084,221 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
         String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    fn commit_shallow_clone_files(directory: &std::path::Path, contents: &str) -> String {
+        for name in ["selected", "excluded"] {
+            std::fs::create_dir_all(directory.join(name)).unwrap();
+            std::fs::write(directory.join(name).join("file.txt"), contents).unwrap();
+        }
+        run_git(directory, &["add", "."]);
+        run_git(directory, &["commit", "-m", contents]);
+        run_git(directory, &["rev-parse", "HEAD"])
+    }
+
+    fn shallow_commit_clone_fixture(
+        is_sparse: bool,
+    ) -> (tempfile::TempDir, Git, console::Progress) {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let source = temp_dir.path().join("source");
+        std::fs::create_dir(&source).unwrap();
+        run_git(
+            &source,
+            &["init", "--initial-branch=main", "--object-format=sha1"],
+        );
+        let revision = commit_shallow_clone_files(&source, "initial");
+        let executor = Git {
+            url: source.to_str().unwrap().into(),
+            spaces_key: "checkout".into(),
+            worktree_path: "checkout".into(),
+            checkout: git::Checkout::Revision(revision.into()),
+            clone: git::Clone::Shallow,
+            is_evaluate_spaces_modules: false,
+            sparse_checkout: is_sparse.then(|| git::SparseCheckout {
+                list: vec!["selected".into()],
+                ..Default::default()
+            }),
+            working_directory: None,
+        };
+        let mut progress = console::Progress::new(console::Console::new_null(), "test", None, None);
+        executor
+            .execute_shallow_clone(&mut progress, temp_dir.path().to_str().unwrap().into())
+            .unwrap();
+        (temp_dir, executor, progress)
+    }
+
+    #[test]
+    fn shallow_commit_clone_updates_existing_checkout() {
+        for is_sparse in [false, true] {
+            let (temp_dir, mut executor, mut progress) = shallow_commit_clone_fixture(is_sparse);
+            let checkout = temp_dir.path().join("checkout");
+            let revision = commit_shallow_clone_files(&temp_dir.path().join("source"), "updated");
+            executor.checkout = git::Checkout::Revision(revision.clone().into());
+
+            // Updating and rerunning the same rule must both keep the requested commit.
+            for _ in 0..2 {
+                executor
+                    .execute_shallow_clone(&mut progress, temp_dir.path().to_str().unwrap().into())
+                    .unwrap();
+                assert_eq!(run_git(&checkout, &["rev-parse", "HEAD"]), revision);
+                assert_eq!(
+                    std::fs::read_to_string(checkout.join("selected/file.txt")).unwrap(),
+                    "updated"
+                );
+                assert_eq!(checkout.join("excluded/file.txt").exists(), !is_sparse);
+                assert_eq!(run_git(&checkout, &["status", "--porcelain"]), "");
+                assert_eq!(run_git(&checkout, &["rev-list", "--count", "HEAD"]), "1");
+                assert_eq!(
+                    run_git(
+                        &checkout,
+                        &["rev-parse", "refs/remotes/origin/spaces-commit"]
+                    ),
+                    revision
+                );
+                assert_eq!(
+                    run_git(&checkout, &["config", "--get", "remote.origin.fetch"]),
+                    format!("+{revision}:refs/remotes/origin/spaces-commit")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn shallow_commit_clone_retries_failed_updates() {
+        for is_sparse in [false, true] {
+            for lock_file in ["index.lock", "refs/remotes/origin/spaces-commit.lock"] {
+                let (temp_dir, mut executor, mut progress) =
+                    shallow_commit_clone_fixture(is_sparse);
+                let checkout = temp_dir.path().join("checkout");
+                let original_revision = run_git(&checkout, &["rev-parse", "HEAD"]);
+                let revision =
+                    commit_shallow_clone_files(&temp_dir.path().join("source"), "updated");
+                executor.checkout = git::Checkout::Revision(revision.clone().into());
+                let lock_path = checkout.join(".git").join(lock_file);
+                std::fs::write(&lock_path, "").unwrap();
+                let result = executor
+                    .execute_shallow_clone(&mut progress, temp_dir.path().to_str().unwrap().into());
+                assert!(
+                    result.is_err(),
+                    "{lock_file} must prevent completing the update"
+                );
+                std::fs::remove_file(lock_path).unwrap();
+                let expected_head = if lock_file == "index.lock" {
+                    &original_revision
+                } else {
+                    &revision
+                };
+                assert_eq!(run_git(&checkout, &["rev-parse", "HEAD"]), *expected_head);
+                assert_eq!(
+                    run_git(&checkout, &["config", "--get", "remote.origin.fetch"]),
+                    format!("+{original_revision}:refs/remotes/origin/spaces-commit")
+                );
+                let repository =
+                    git::Repository::new(executor.url.clone(), checkout.to_str().unwrap().into());
+                repository
+                    .fetch_with_prune(&mut progress, git::IgnoreSubmodules::Yes)
+                    .unwrap();
+                assert_eq!(
+                    run_git(
+                        &checkout,
+                        &["rev-parse", "refs/remotes/origin/spaces-commit"]
+                    ),
+                    original_revision
+                );
+
+                executor
+                    .execute_shallow_clone(&mut progress, temp_dir.path().to_str().unwrap().into())
+                    .unwrap();
+                assert_eq!(run_git(&checkout, &["rev-parse", "HEAD"]), revision);
+                assert_eq!(
+                    run_git(
+                        &checkout,
+                        &["rev-parse", "refs/remotes/origin/spaces-commit"]
+                    ),
+                    revision
+                );
+                assert_eq!(
+                    std::fs::read_to_string(checkout.join("selected/file.txt")).unwrap(),
+                    "updated"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn shallow_commit_clone_preserves_local_work() {
+        for is_sparse in [false, true] {
+            for local_work in ["modified", "staged", "untracked", "branch", "commit"] {
+                let (temp_dir, mut executor, mut progress) =
+                    shallow_commit_clone_fixture(is_sparse);
+                let checkout = temp_dir.path().join("checkout");
+                let original_revision = run_git(&checkout, &["rev-parse", "HEAD"]);
+                let revision =
+                    commit_shallow_clone_files(&temp_dir.path().join("source"), "updated");
+                match local_work {
+                    "modified" | "staged" => {
+                        std::fs::write(checkout.join("selected/file.txt"), "local changes")
+                            .unwrap();
+                        if local_work == "staged" {
+                            run_git(&checkout, &["add", "selected/file.txt"]);
+                        }
+                    }
+                    "untracked" => {
+                        std::fs::write(checkout.join("selected/local.txt"), "local changes")
+                            .unwrap();
+                    }
+                    "branch" => {
+                        run_git(&checkout, &["switch", "-c", "development"]);
+                    }
+                    "commit" => {
+                        std::fs::write(checkout.join("selected/file.txt"), "local commit").unwrap();
+                        run_git(&checkout, &["add", "selected/file.txt"]);
+                        run_git(&checkout, &["commit", "-m", "local commit"]);
+                    }
+                    _ => unreachable!(),
+                }
+                let head = run_git(&checkout, &["rev-parse", "HEAD"]);
+                let status = run_git(&checkout, &["status", "--porcelain"]);
+                let contents = std::fs::read_to_string(checkout.join("selected/file.txt")).unwrap();
+                executor.checkout = git::Checkout::Revision(revision.into());
+                if let Some(sparse_checkout) = executor.sparse_checkout.as_mut() {
+                    sparse_checkout.list = vec!["excluded".into()];
+                }
+                executor
+                    .execute_shallow_clone(&mut progress, temp_dir.path().to_str().unwrap().into())
+                    .unwrap();
+                assert_eq!(
+                    run_git(&checkout, &["rev-parse", "HEAD"]),
+                    head,
+                    "{local_work}"
+                );
+                assert_eq!(run_git(&checkout, &["status", "--porcelain"]), status);
+                assert_eq!(
+                    std::fs::read_to_string(checkout.join("selected/file.txt")).unwrap(),
+                    contents
+                );
+                assert_eq!(checkout.join("excluded/file.txt").exists(), !is_sparse);
+                assert_eq!(
+                    run_git(
+                        &checkout,
+                        &["rev-parse", "refs/remotes/origin/spaces-commit"]
+                    ),
+                    original_revision
+                );
+                if local_work == "branch" {
+                    assert_eq!(
+                        run_git(&checkout, &["branch", "--show-current"]),
+                        "development"
+                    );
+                }
+                if local_work == "untracked" {
+                    assert_eq!(
+                        std::fs::read_to_string(checkout.join("selected/local.txt")).unwrap(),
+                        "local changes"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
