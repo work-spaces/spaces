@@ -588,12 +588,12 @@ impl Git {
     fn execute_shallow_clone(
         &self,
         progress: &mut console::Progress,
-        workspace: workspace::WorkspaceArc,
+        workspace_directory: Arc<str>,
     ) -> anyhow::Result<()> {
         let url_logger = logger(progress.console.clone(), self.url.clone());
         url_logger.message("execute shallow clone");
 
-        let branch = match &self.checkout {
+        let revision = match &self.checkout {
             git::Checkout::NewBranch(branch_name) => {
                 return Err(anyhow::anyhow!(
                     "Cannot create a new branch {branch_name} with a shallow clone"
@@ -602,10 +602,10 @@ impl Git {
                     "while validating shallow clone checkout mode"
                 ));
             }
-            git::Checkout::Revision(branch_name) => branch_name.clone(),
+            git::Checkout::Revision(revision) => revision.clone(),
         };
-
-        let workspace_directory = self.get_clone_working_directory(workspace.clone());
+        let is_commit = matches!(revision.len(), 40 | 64)
+            && revision.bytes().all(|byte| byte.is_ascii_hexdigit());
 
         let mut clone_arguments: Vec<Arc<str>> = vec!["clone".into()];
         clone_arguments.extend(git::get_lfs_clone_arguments(
@@ -619,7 +619,7 @@ impl Git {
             self.url.clone(),
             self.spaces_key.clone(),
             "--branch".into(),
-            branch.clone(),
+            revision.clone(),
             "--single-branch".into(),
         ]);
 
@@ -638,7 +638,17 @@ impl Git {
             .join(self.spaces_key.as_ref())
             .to_string_lossy()
             .into();
-        let should_run_clone = if std::path::Path::new(clone_path.as_ref()).exists() {
+        let incomplete_clone =
+            std::path::Path::new(clone_path.as_ref()).join(".git/spaces-shallow-clone-incomplete");
+        let is_resuming_clone = incomplete_clone.is_file();
+        let should_run_clone = if is_resuming_clone {
+            anyhow::ensure!(
+                is_commit,
+                "Incomplete shallow clone at {clone_path}; retry with a full commit hash or remove the incomplete clone directory"
+            );
+            url_logger.debug(format!("Resuming incomplete shallow clone at {clone_path}").as_str());
+            true
+        } else if std::path::Path::new(clone_path.as_ref()).exists() {
             let entries = std::fs::read_dir(clone_path.as_ref()).context(format_context!(
                 "while reading existing shallow clone directory {clone_path}"
             ))?;
@@ -656,18 +666,108 @@ impl Git {
             true
         };
 
+        let workspace_repo = git::Repository::new(self.url.clone(), clone_path.clone());
         if should_run_clone {
-            url_logger.trace(format!("git clone {clone_options:?}").as_str());
+            if is_commit {
+                // Mark the directory before init so an interrupted fetch or checkout
+                // is not mistaken for a completed clone on the next run.
+                std::fs::create_dir_all(incomplete_clone.parent().unwrap()).context(
+                    format_context!("while creating shallow clone directory {clone_path}"),
+                )?;
+                std::fs::write(&incomplete_clone, "").context(format_context!(
+                    "while marking shallow clone incomplete at {clone_path}"
+                ))?;
 
-            progress
-                .execute_process("git", clone_options)
-                .context(format_context!("while executing shallow clone"))?;
+                // Older Git versions only support SHA-1 and ignore this variable.
+                // On newer versions it overrides the user's default object format.
+                git::execute_git_command(
+                    progress,
+                    &self.url,
+                    console::ExecuteOptions {
+                        arguments: vec!["init".into()],
+                        working_directory: Some(clone_path.clone()),
+                        environment: vec![(
+                            "GIT_DEFAULT_HASH".into(),
+                            if revision.len() == 64 {
+                                "sha256"
+                            } else {
+                                "sha1"
+                            }
+                            .into(),
+                        )],
+                        ..Default::default()
+                    },
+                )
+                .context(format_context!("while initializing shallow clone"))?;
+
+                // Resolve insteadOf aliases before distinguishing local paths from
+                // remote URLs. --get-url does not contact the remote.
+                let resolved_url = git::execute_git_command(
+                    progress,
+                    &self.url,
+                    console::ExecuteOptions {
+                        arguments: vec!["ls-remote".into(), "--get-url".into(), self.url.clone()],
+                        working_directory: Some(clone_path.clone()),
+                        is_return_stdout: true,
+                        ..Default::default()
+                    },
+                )
+                .context(format_context!("while resolving shallow clone source"))?
+                .ok_or_else(|| format_error!("Git did not return a URL for {}", self.url))?;
+                let resolved_url = resolved_url.trim_end_matches(['\r', '\n']);
+                // Unlike clone, fetch resolves local paths from inside the new repo.
+                // A colon before the first slash denotes a URL or scp-style remote.
+                let origin_url = if std::path::Path::new(resolved_url).is_relative()
+                    && !resolved_url.split('/').next().unwrap_or("").contains(':')
+                {
+                    std::path::absolute(workspace_directory.as_ref())
+                        .context(format_context!("while resolving shallow clone source"))?
+                        .join(resolved_url)
+                        .to_string_lossy()
+                        .into()
+                } else {
+                    self.url.clone()
+                };
+                // Setting the URL is idempotent when resuming an incomplete clone.
+                workspace_repo
+                    .execute(
+                        progress,
+                        vec!["config".into(), "remote.origin.url".into(), origin_url],
+                    )
+                    .context(format_context!("while configuring shallow clone origin"))?;
+                workspace_repo
+                    .execute(
+                        progress,
+                        vec![
+                            "fetch".into(),
+                            "--depth=1".into(),
+                            "--no-tags".into(),
+                            "origin".into(),
+                            revision.clone(),
+                        ],
+                    )
+                    .context(format_context!(
+                        "while fetching shallow commit {revision}; the remote must allow fetching this full commit ID"
+                    ))?;
+            } else {
+                url_logger.trace(format!("git clone {clone_options:?}").as_str());
+
+                progress
+                    .execute_process("git", clone_options)
+                    .context(format_context!("while executing shallow clone"))?;
+            }
         }
+
+        let is_resuming_checkout = is_resuming_clone
+            && workspace_repo
+                .get_commit_hash(progress)
+                .ok()
+                .flatten()
+                .is_some();
 
         // For a new clone, conditional user LFS config (e.g.
         // `includeIf "gitdir:..."`) can only be evaluated now that the
         // repository exists.
-        let workspace_repo = git::Repository::new(self.url.clone(), clone_path.clone());
         let is_lfs_newly_enabled =
             workspace_repo
                 .ensure_lfs_filter_config(progress)
@@ -684,10 +784,17 @@ impl Git {
                 .context(format_context!(
                     "while setting up sparse checkout for shallow clone"
                 ))?;
+        }
 
-            // Checkout the files according to sparse checkout configuration
+        if is_commit && should_run_clone {
+            workspace_repo
+                .execute(
+                    progress,
+                    vec!["checkout".into(), "--detach".into(), revision],
+                )
+                .context(format_context!("while checking out shallow commit"))?;
+        } else if self.sparse_checkout.is_some() {
             url_logger.debug("Checking out files for sparse checkout");
-
             workspace_repo
                 .checkout(progress, &self.checkout)
                 .context(format_context!(
@@ -695,14 +802,23 @@ impl Git {
                 ))?;
         }
 
-        // An existing clone, or a new one cloned without the LFS filter, may
-        // contain pointers.
-        if is_lfs_newly_enabled == git::IsLfsFilterNewlyEnabled::Yes {
+        // A fresh commit checkout already smudges selected files. Avoid an LFS
+        // pull that would also fetch excluded sparse files. Existing checkouts,
+        // including interrupted ones, may still contain pointers.
+        if (!is_commit || !should_run_clone || is_resuming_checkout)
+            && is_lfs_newly_enabled == git::IsLfsFilterNewlyEnabled::Yes
+        {
             workspace_repo
                 .materialize_lfs_files(progress)
                 .context(format_context!(
                     "while materializing LFS files in shallow clone"
                 ))?;
+        }
+
+        if is_commit && should_run_clone {
+            std::fs::remove_file(&incomplete_clone).context(format_context!(
+                "while marking shallow clone complete at {clone_path}"
+            ))?;
         }
 
         Ok(())
@@ -737,7 +853,10 @@ impl Git {
             git::Clone::Default | git::Clone::Blobless => {
                 self.execute_default_clone(progress, workspace.clone(), None, is_new_branch)
             }
-            git::Clone::Shallow => self.execute_shallow_clone(progress, workspace.clone()),
+            git::Clone::Shallow => self.execute_shallow_clone(
+                progress,
+                self.get_clone_working_directory(workspace.clone()),
+            ),
         }
         .map_err(|err| {
             format_error!("Failed to execute git clone workflow for rule {name}\n{err:?}")
