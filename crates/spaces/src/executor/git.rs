@@ -761,7 +761,7 @@ impl Git {
                     vec![
                         "fetch".into(),
                         "--depth=1".into(),
-                        "--no-tags".into(),
+                        "--tags".into(),
                         // Keep the previous tracking ref until checkout succeeds,
                         // so a failed update is not mistaken for unpublished work.
                         "--refmap=".into(),
@@ -1159,6 +1159,76 @@ mod tests {
                     run_git(&checkout, &["config", "--get", "remote.origin.fetch"]),
                     format!("+{revision}:refs/remotes/origin/spaces-commit")
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn shallow_commit_clone_fetches_tags_for_locks_and_versions() {
+        for is_sparse in [false, true] {
+            for is_annotated in [false, true] {
+                let (temp_dir, mut executor, mut progress) =
+                    shallow_commit_clone_fixture(is_sparse);
+                let source = temp_dir.path().join("source");
+                let original_revision = run_git(&source, &["rev-parse", "HEAD"]);
+                commit_shallow_clone_files(&source, "untagged intermediate commit");
+                let revision = commit_shallow_clone_files(&source, "release");
+                for (tag, commit) in [
+                    ("v1.0.0", original_revision.as_str()),
+                    ("v1.2.3", revision.as_str()),
+                ] {
+                    if is_annotated {
+                        run_git(
+                            &source,
+                            &[
+                                "-c",
+                                "tag.gpgsign=false",
+                                "tag",
+                                "-a",
+                                tag,
+                                "-m",
+                                tag,
+                                commit,
+                            ],
+                        );
+                    } else {
+                        run_git(&source, &["tag", tag, commit]);
+                    }
+                }
+                executor.checkout = git::Checkout::Revision(revision.clone().into());
+
+                for spaces_key in ["checkout", "fresh-checkout"] {
+                    executor.spaces_key = spaces_key.into();
+                    executor
+                        .execute_shallow_clone(
+                            &mut progress,
+                            temp_dir.path().to_str().unwrap().into(),
+                        )
+                        .unwrap();
+                    let checkout = temp_dir.path().join(spaces_key);
+                    let directory = checkout.to_str().unwrap();
+                    assert_eq!(run_git(&checkout, &["rev-parse", "HEAD"]), revision);
+                    assert_eq!(run_git(&checkout, &["rev-list", "--count", "HEAD"]), "1");
+                    assert_eq!(run_git(&checkout, &["rev-list", "--all", "--count"]), "2");
+
+                    let tag = git::get_latest_tag(&mut progress, &executor.url, directory).unwrap();
+                    assert_eq!(tag.as_deref(), Some("v1.2.3"));
+                    assert_eq!(Git::rev_to_version(tag).as_deref(), Some("1.2.3"));
+
+                    // Locks can name either the fetched commit's tag or an older release.
+                    for (tag, commit) in [
+                        ("v1.2.3", revision.as_str()),
+                        ("v1.0.0", original_revision.as_str()),
+                    ] {
+                        run_git(&checkout, &["checkout", "--detach", tag]);
+                        assert_eq!(run_git(&checkout, &["rev-parse", "HEAD"]), commit);
+                        assert_eq!(run_git(&checkout, &["rev-list", "--count", "HEAD"]), "1");
+                        assert_eq!(
+                            git::get_commit_tag(&mut progress, &executor.url, directory).as_deref(),
+                            Some(tag)
+                        );
+                    }
+                }
             }
         }
     }
