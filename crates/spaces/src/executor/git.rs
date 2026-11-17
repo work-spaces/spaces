@@ -735,6 +735,22 @@ impl Git {
                         vec!["config".into(), "remote.origin.url".into(), origin_url],
                     )
                     .context(format_context!("while configuring shallow clone origin"))?;
+                // Track the downloaded commit so lock collection and sync cleanup
+                // do not mistake it for local work, even after fetch --prune.
+                let fetch_refspec: Arc<str> =
+                    format!("+{revision}:refs/remotes/origin/spaces-commit").into();
+                workspace_repo
+                    .execute(
+                        progress,
+                        vec![
+                            "config".into(),
+                            "remote.origin.fetch".into(),
+                            fetch_refspec.clone(),
+                        ],
+                    )
+                    .context(format_context!(
+                        "while configuring shallow commit fetch refspec"
+                    ))?;
                 workspace_repo
                     .execute(
                         progress,
@@ -743,7 +759,7 @@ impl Git {
                             "--depth=1".into(),
                             "--no-tags".into(),
                             "origin".into(),
-                            revision.clone(),
+                            fetch_refspec,
                         ],
                     )
                     .context(format_context!(
@@ -1010,5 +1026,106 @@ impl Git {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run_git(directory: &std::path::Path, args: &[&str]) -> String {
+        let output = std::process::Command::new("git")
+            .current_dir(directory)
+            .args([
+                "-c",
+                "user.name=Spaces Test",
+                "-c",
+                "user.email=spaces@example.com",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    #[test]
+    fn shallow_commit_clone_tracks_remote_commit_across_fetches() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let source = temp_dir.path().join("source");
+        std::fs::create_dir(&source).unwrap();
+        run_git(
+            &source,
+            &["init", "--initial-branch=main", "--object-format=sha1"],
+        );
+        run_git(&source, &["commit", "--allow-empty", "-m", "initial"]);
+        let revision = run_git(&source, &["rev-parse", "HEAD"]);
+        run_git(&source, &["commit", "--allow-empty", "-m", "remote update"]);
+
+        let executor = Git {
+            url: source.to_str().unwrap().into(),
+            spaces_key: "checkout".into(),
+            worktree_path: "checkout".into(),
+            checkout: git::Checkout::Revision(revision.clone().into()),
+            clone: git::Clone::Shallow,
+            is_evaluate_spaces_modules: false,
+            sparse_checkout: None,
+            working_directory: None,
+        };
+        let mut progress = console::Progress::new(console::Console::new_null(), "test", None, None);
+        executor
+            .execute_shallow_clone(&mut progress, temp_dir.path().to_str().unwrap().into())
+            .unwrap();
+
+        let checkout = temp_dir.path().join("checkout");
+        let repository = git::Repository::new(executor.url, checkout.to_str().unwrap().into());
+        assert_eq!(run_git(&checkout, &["rev-parse", "HEAD"]), revision);
+        assert_eq!(run_git(&checkout, &["rev-list", "--count", "HEAD"]), "1");
+        assert_eq!(
+            run_git(&checkout, &["rev-parse", "--is-shallow-repository"]),
+            "true"
+        );
+        assert!(
+            !repository
+                .has_local_commits_not_on_remotes(&mut progress)
+                .unwrap(),
+            "the fetched commit must not be considered unpublished"
+        );
+
+        repository.fetch(&mut progress).unwrap();
+        repository
+            .fetch_with_prune(&mut progress, git::IgnoreSubmodules::Yes)
+            .unwrap();
+        assert_eq!(
+            run_git(
+                &checkout,
+                &["rev-parse", "refs/remotes/origin/spaces-commit"]
+            ),
+            revision
+        );
+        assert_eq!(run_git(&checkout, &["rev-list", "--count", "HEAD"]), "1");
+        assert!(
+            !repository
+                .has_local_commits_not_on_remotes(&mut progress)
+                .unwrap(),
+            "fetching and pruning must preserve the pinned remote-tracking ref"
+        );
+
+        run_git(
+            &checkout,
+            &["commit", "--allow-empty", "-m", "local update"],
+        );
+        assert!(
+            repository
+                .has_local_commits_not_on_remotes(&mut progress)
+                .unwrap(),
+            "genuinely local commits must still be detected"
+        );
     }
 }
