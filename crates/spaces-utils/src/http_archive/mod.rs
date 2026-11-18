@@ -1357,12 +1357,36 @@ pub(crate) fn get_archive_suffixes() -> &'static [&'static str] {
     SUFFIXES
 }
 
-pub fn check_downloaded_archive(path_to_archive: &std::path::Path) -> anyhow::Result<()> {
-    delete_ds_store(path_to_archive)?;
+fn get_archive_entries(path: &std::path::Path) -> anyhow::Result<Vec<std::fs::DirEntry>> {
+    delete_ds_store(path)?;
+    let entries =
+        std::fs::read_dir(path).context(format_context!("Failed to read directory {path:?}"))?;
+    let lock_suffix = format!(".{}", lock::LOCK_FILE_SUFFIX);
+    let mut collected_entries = Vec::new();
 
-    let entries = std::fs::read_dir(path_to_archive).context(format_context!(
-        "Failed to read directory {path_to_archive:?}"
-    ))?;
+    for entry in entries {
+        let entry = entry.context(format_context!("Failed to read entry in {path:?}"))?;
+        let file_type = entry.file_type().context(format_context!(
+            "Failed to get file type for {:?}",
+            entry.path()
+        ))?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+
+        // Lock files persist after unlocking, and staging areas are not published payloads.
+        if (file_type.is_file() && name.ends_with(&lock_suffix))
+            || (file_type.is_dir() && is_staging_dir_name(&name))
+        {
+            continue;
+        }
+        collected_entries.push(entry);
+    }
+
+    Ok(collected_entries)
+}
+
+pub fn check_downloaded_archive(path_to_archive: &std::path::Path) -> anyhow::Result<()> {
+    let mut collected_entries = get_archive_entries(path_to_archive)?;
 
     let suffixes: Vec<_> = get_archive_suffixes()
         .iter()
@@ -1373,7 +1397,6 @@ pub fn check_downloaded_archive(path_to_archive: &std::path::Path) -> anyhow::Re
         .extension()
         .is_some_and(|suffix| suffixes.contains(&suffix));
 
-    let mut collected_entries: Vec<_> = entries.collect();
     let mut count = collected_entries.len();
 
     if !is_compressed {
@@ -1386,20 +1409,9 @@ pub fn check_downloaded_archive(path_to_archive: &std::path::Path) -> anyhow::Re
         let first_entry = collected_entries
             .into_iter()
             .next()
-            .ok_or_else(|| format_error!("Expected 1 entries in archive, found {count}"))?
-            .context(format_context!(
-                "Failed to read first archive entry in {}",
-                path_to_archive.display()
-            ))?;
+            .ok_or_else(|| format_error!("Expected 1 entries in archive, found {count}"))?;
 
-        let path_to_dir = path_to_archive.join(first_entry.path());
-        delete_ds_store(path_to_dir.as_path())?;
-        let entries = std::fs::read_dir(path_to_dir.as_path()).context(format_context!(
-            "Failed to read directory contents {}",
-            path_to_dir.display()
-        ))?;
-
-        collected_entries = entries.collect();
+        collected_entries = get_archive_entries(&first_entry.path())?;
         count = collected_entries.len();
 
         // For plain (non-compressed) single-file downloads, we expect the
@@ -1424,7 +1436,7 @@ pub fn check_downloaded_archive(path_to_archive: &std::path::Path) -> anyhow::Re
     let mut files = None;
     let mut file_path = None;
 
-    for entry in collected_entries.into_iter().filter_map(|e| e.ok()) {
+    for entry in collected_entries {
         let entry_name = entry.file_name().display().to_string();
         if let Some((current_hash, _suffix)) = entry_name.split_once(".")
             && is_compressed
@@ -1525,6 +1537,123 @@ mod tests {
         entry_dir
     }
 
+    fn build_compressed_archive_layout(
+        root: &std::path::Path,
+        extension: &str,
+    ) -> std::path::PathBuf {
+        let entry_dir = root.join(format!("tool.{extension}"));
+        let archive_name = format!("{}.{extension}", "0".repeat(64));
+        let files_dir = entry_dir.join(format!("{archive_name}_files"));
+        std::fs::create_dir_all(&files_dir).unwrap();
+        std::fs::write(entry_dir.join(&archive_name), b"archive payload").unwrap();
+        std::fs::write(files_dir.join("tool"), b"binary payload").unwrap();
+        std::fs::write(
+            entry_dir.join(format!("{archive_name}_files.json")),
+            br#"{"files": ["tool"]}"#,
+        )
+        .unwrap();
+        entry_dir
+    }
+
+    #[test]
+    fn test_check_downloaded_archive_accepts_plain_files_with_locks() {
+        for name in ["mylib.bin", "rustup-init", "buildifier-darwin-arm64"] {
+            for include_original in [false, true] {
+                let tmp = tempfile::tempdir().unwrap();
+                let entry_dir = build_plain_file_layout(tmp.path(), name, include_original);
+                let sha_dir = entry_dir.join("0".repeat(64));
+                for dir in [&entry_dir, &sha_dir] {
+                    for rule in ["first", "second"] {
+                        std::fs::write(dir.join(format!("{rule}.{}", lock::LOCK_FILE_SUFFIX)), b"")
+                            .unwrap();
+                    }
+                }
+
+                check_downloaded_archive(&entry_dir)
+                    .expect("persistent lock files are not plain-download payload entries");
+            }
+        }
+    }
+
+    #[test]
+    fn test_check_downloaded_archive_accepts_compressed_archives_with_locks() {
+        for extension in ["zip", "tar.xz"] {
+            let tmp = tempfile::tempdir().unwrap();
+            let entry_dir = build_compressed_archive_layout(tmp.path(), extension);
+            let lock_path = entry_dir.join(format!("first.{}", lock::LOCK_FILE_SUFFIX));
+            let mut file_lock = lock::FileLock::new(lock_path.clone().into());
+            file_lock.lock(console::Console::new_null()).unwrap();
+            std::fs::write(
+                entry_dir.join(format!("second.{}", lock::LOCK_FILE_SUFFIX)),
+                b"",
+            )
+            .unwrap();
+
+            check_downloaded_archive(&entry_dir)
+                .expect("held lock files are not compressed-archive payload entries");
+            file_lock.unlock().unwrap();
+            assert!(lock_path.exists());
+            check_downloaded_archive(&entry_dir)
+                .expect("unlocked lock files are not compressed-archive payload entries");
+        }
+    }
+
+    #[test]
+    fn test_check_downloaded_archive_rejects_corruption_with_locks() {
+        for corruption in ["manifest", "payload", "hash", "extra"] {
+            let tmp = tempfile::tempdir().unwrap();
+            let entry_dir = build_compressed_archive_layout(tmp.path(), "zip");
+            let archive_name = format!("{}.zip", "0".repeat(64));
+            std::fs::write(
+                entry_dir.join(format!("rule.{}", lock::LOCK_FILE_SUFFIX)),
+                b"",
+            )
+            .unwrap();
+
+            match corruption {
+                "manifest" => {
+                    std::fs::remove_file(entry_dir.join(format!("{archive_name}_files.json")))
+                        .unwrap();
+                }
+                "payload" => {
+                    std::fs::remove_file(entry_dir.join(format!("{archive_name}_files/tool")))
+                        .unwrap();
+                }
+                "hash" => {
+                    std::fs::rename(
+                        entry_dir.join(&archive_name),
+                        entry_dir.join(format!("{}.zip", "1".repeat(64))),
+                    )
+                    .unwrap();
+                }
+                "extra" => std::fs::write(entry_dir.join("unexpected"), b"").unwrap(),
+                _ => unreachable!(),
+            }
+
+            assert!(
+                check_downloaded_archive(&entry_dir).is_err(),
+                "lock files must not hide {corruption} corruption"
+            );
+        }
+    }
+
+    #[test]
+    fn test_get_archive_entries_filters_only_lock_files_and_staging_directories() {
+        let tmp = tempfile::tempdir().unwrap();
+        let lock_file = tmp.path().join(format!("rule.{}", lock::LOCK_FILE_SUFFIX));
+        let staging_dir = tmp.path().join(".staging-download");
+        std::fs::write(&lock_file, b"").unwrap();
+        std::fs::create_dir(&staging_dir).unwrap();
+        assert!(get_archive_entries(tmp.path()).unwrap().is_empty());
+        assert!(lock_file.exists());
+        assert!(staging_dir.exists());
+
+        std::fs::create_dir(tmp.path().join("payload.spaces.lock")).unwrap();
+        std::fs::write(tmp.path().join(".staging-payload"), b"").unwrap();
+        std::fs::write(tmp.path().join("not-spaces.lock"), b"").unwrap();
+        assert_eq!(get_archive_entries(tmp.path()).unwrap().len(), 3);
+    }
+
     #[test]
     fn test_check_downloaded_archive_accepts_plain_bin_file_legacy_layout() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1550,7 +1679,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let entry_dir = build_plain_file_layout(tmp.path(), "mylib.bin", false);
 
-        // Remove the manifest so only the `_files` directory remains (1 entry).
+        // A persistent lock must not substitute for the missing manifest.
         let sha_dir = std::fs::read_dir(&entry_dir)
             .unwrap()
             .next()
@@ -1558,6 +1687,11 @@ mod tests {
             .unwrap()
             .path();
         std::fs::remove_file(sha_dir.join("mylib.bin_files.json")).unwrap();
+        std::fs::write(
+            sha_dir.join(format!("rule.{}", lock::LOCK_FILE_SUFFIX)),
+            b"",
+        )
+        .unwrap();
 
         let err = check_downloaded_archive(&entry_dir).unwrap_err();
         assert!(
