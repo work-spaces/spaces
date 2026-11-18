@@ -22,6 +22,7 @@ const GIT_ACTION_GC: &str = "git gc (optimizing)";
 const GIT_ACTION_FETCH: &str = "git fetch";
 const GIT_ACTION_VALIDATE: &str = "validating";
 const MAX_BARE_REPO_FETCH_PARALLEL_JOBS: usize = 8;
+const MAX_BARE_REPO_FSCK_PARALLEL_JOBS: usize = 4;
 pub fn logger(console: console::Console) -> logger::Logger {
     logger::Logger::new(console, "store".into())
 }
@@ -1232,22 +1233,20 @@ impl Store {
             // Bare repo maintenance and repair
             if !bare_repo_paths.is_empty() && run_git_fsck {
                 if is_dry_run {
-                    let mut repos_needing_repair = Vec::new();
-                    for repo_path in &bare_repo_paths {
-                        let path_str = repo_path.to_string_lossy();
-                        let mut git_progress =
-                            start_git_progress(&progress, repo_path, GIT_ACTION_FSCK);
-
-                        if !git::is_bare_repo_healthy(&mut git_progress, path_str.as_ref()) {
-                            log.warning(
-                                format!(
-                                    "Bare repo has problems (would attempt repair): {path_str}"
-                                )
-                                .as_str(),
-                            );
-                            repos_needing_repair.push(repo_path.clone());
-                        }
-                        progress.increment(1);
+                    let repos_needing_repair = check_bare_repos_in_parallel(
+                        &progress,
+                        &path_to_store.join(SPACES_STORE_BARE),
+                        &bare_repo_paths,
+                    )
+                    .context(format_context!("While checking bare repos"))?;
+                    for repo_path in &repos_needing_repair {
+                        log.warning(
+                            format!(
+                                "Bare repo has problems (would attempt repair): {}",
+                                repo_path.display()
+                            )
+                            .as_str(),
+                        );
                     }
                     log.message(
                         format!("Would run gc on {} bare repos", bare_repo_paths.len()).as_str(),
@@ -1279,18 +1278,13 @@ impl Store {
                         progress.increment(1);
                     }
 
-                    // Phase 2: detection (fsck)
-                    let mut repos_needing_repair = Vec::new();
-                    for repo_path in &bare_repo_paths {
-                        let path_str = repo_path.to_string_lossy();
-                        let mut git_progress =
-                            start_git_progress(&progress, repo_path, GIT_ACTION_FSCK);
-
-                        if !git::is_bare_repo_healthy(&mut git_progress, path_str.as_ref()) {
-                            repos_needing_repair.push(repo_path.clone());
-                        }
-                        progress.increment(1);
-                    }
+                    // Phase 2: detection (fsck) across independent repos in parallel
+                    let repos_needing_repair = check_bare_repos_in_parallel(
+                        &progress,
+                        &path_to_store.join(SPACES_STORE_BARE),
+                        &bare_repo_paths,
+                    )
+                    .context(format_context!("While checking bare repos"))?;
 
                     // Phase 3: fetch all bare repos in parallel. This updates every
                     // repo and repairs the ones flagged by fsck.
@@ -2333,6 +2327,65 @@ fn start_git_progress(
     git_progress
 }
 
+/// Checks bare repos with a bounded worker pool and increments `progress` once
+/// per repo. Returns unhealthy repos in the same order as `repo_paths`.
+fn check_bare_repos_in_parallel(
+    progress: &console::Progress,
+    bare_root: &std::path::Path,
+    repo_paths: &[std::path::PathBuf],
+) -> anyhow::Result<Vec<std::path::PathBuf>> {
+    if repo_paths.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Fsck is CPU- and I/O-intensive, unlike the network-bound fetch phase.
+    let jobs = std::thread::available_parallelism()
+        .map_or(1, |count| count.get())
+        .min(MAX_BARE_REPO_FSCK_PARALLEL_JOBS)
+        .min(repo_paths.len());
+    progress.set_message(
+        format!(
+            "{GIT_ACTION_FSCK}: {} bare repo(s), {jobs} worker(s)",
+            repo_paths.len()
+        )
+        .as_str(),
+    );
+
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(jobs)
+        .build()
+        .map_err(|error| format_error!("failed to create bare repo fsck worker pool: {error}"))?;
+
+    let results = pool.install(|| {
+        repo_paths
+            .par_iter()
+            .map(|repo_path| -> anyhow::Result<_> {
+                // Repo file names can collide across hosts/orgs.
+                let label = repo_path
+                    .strip_prefix(bare_root)
+                    .unwrap_or(repo_path)
+                    .to_string_lossy()
+                    .to_string();
+                let mut git_progress =
+                    console::Progress::new(progress.console.clone(), label.as_str(), None, None);
+                git_progress.set_message(GIT_ACTION_FSCK);
+                let path_str = repo_path.to_string_lossy();
+
+                // Don't inspect a repo while another Spaces process modifies it.
+                let mut lock_file = git::new_bare_repo_lock(path_str.as_ref());
+                lock_file
+                    .lock(progress.console.clone())
+                    .context(format_context!("Failed to lock bare repository {path_str}"))?;
+                let healthy = git::is_bare_repo_healthy(&mut git_progress, path_str.as_ref());
+                progress.increment(1);
+                Ok((!healthy).then(|| repo_path.clone()))
+            })
+            .collect::<anyhow::Result<Vec<_>>>()
+    });
+
+    Ok(results?.into_iter().flatten().collect())
+}
+
 /// A bare repo whose `git fetch` failed, along with the Git error.
 struct FailedBareRepoFetch {
     path: std::path::PathBuf,
@@ -2851,6 +2904,115 @@ mod tests {
             "metrics directory remains a managed entry after pruning all records"
         );
         assert_eq!(store.entries[SPACES_STORE_METRICS].size, 0);
+    }
+
+    fn init_bare_repo(path: &std::path::Path) {
+        let output = std::process::Command::new("git")
+            .args(["init", "--bare", "--initial-branch=main"])
+            .arg(path)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git init failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn test_check_bare_repos_in_parallel_empty() {
+        let store_root = tempfile::tempdir().unwrap();
+        let progress = console::Progress::new(console::Console::new_null(), "checking", None, None);
+        assert!(
+            check_bare_repos_in_parallel(&progress, store_root.path(), &[])
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn test_check_bare_repos_in_parallel_reports_unhealthy_in_input_order() {
+        let store_root = tempfile::tempdir().unwrap();
+        let mut repo_paths = Vec::new();
+        let mut expected_unhealthy = Vec::new();
+        // More repos than workers, with identical file names across organizations.
+        for index in 0..MAX_BARE_REPO_FSCK_PARALLEL_JOBS + 2 {
+            let repo_path = store_root.path().join(format!("org{index}/repo.git"));
+            init_bare_repo(&repo_path);
+            if index % 2 == 1 {
+                std::fs::write(
+                    repo_path.join("refs/heads/broken"),
+                    "1111111111111111111111111111111111111111\n",
+                )
+                .unwrap();
+                expected_unhealthy.push(repo_path.clone());
+            }
+            repo_paths.push(repo_path);
+        }
+        repo_paths.reverse();
+        expected_unhealthy.reverse();
+
+        let progress = console::Progress::new(console::Console::new_null(), "checking", None, None);
+        let unhealthy =
+            check_bare_repos_in_parallel(&progress, store_root.path(), &repo_paths).unwrap();
+        assert_eq!(unhealthy, expected_unhealthy);
+        for repo_path in &unhealthy {
+            assert!(repo_path.join("refs/heads/broken").exists());
+        }
+    }
+
+    #[test]
+    fn test_check_bare_repos_in_parallel_waits_for_repo_lock() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let store_root = tempfile::tempdir().unwrap();
+        let repo_path = store_root.path().join("repo.git");
+        init_bare_repo(&repo_path);
+        let mut lock_file = git::new_bare_repo_lock(repo_path.to_str().unwrap());
+        lock_file.lock(console::Console::new_null()).unwrap();
+
+        let (sender, receiver) = mpsc::channel();
+        let bare_root = store_root.path().to_path_buf();
+        let repo_paths = vec![repo_path.clone()];
+        let worker = std::thread::spawn(move || {
+            let progress =
+                console::Progress::new(console::Console::new_null(), "checking", None, None);
+            sender
+                .send(check_bare_repos_in_parallel(
+                    &progress,
+                    &bare_root,
+                    &repo_paths,
+                ))
+                .unwrap();
+        });
+        let blocked = receiver.recv_timeout(Duration::from_millis(200));
+        // A locked check must see the corruption introduced before releasing the lock.
+        std::fs::write(
+            repo_path.join("refs/heads/broken"),
+            "1111111111111111111111111111111111111111\n",
+        )
+        .unwrap();
+        drop(lock_file);
+        let result = receiver.recv_timeout(Duration::from_secs(10));
+        worker.join().unwrap();
+
+        assert!(matches!(blocked, Err(mpsc::RecvTimeoutError::Timeout)));
+        assert_eq!(result.unwrap().unwrap(), vec![repo_path]);
+    }
+
+    #[test]
+    fn test_check_bare_repos_in_parallel_propagates_lock_error() {
+        let store_root = tempfile::tempdir().unwrap();
+        let repo_path = store_root.path().join("repo.git");
+        init_bare_repo(&repo_path);
+        let lock_file = git::new_bare_repo_lock(repo_path.to_str().unwrap());
+        std::fs::create_dir(lock_file.path.as_ref()).unwrap();
+
+        let progress = console::Progress::new(console::Console::new_null(), "checking", None, None);
+        let error =
+            check_bare_repos_in_parallel(&progress, store_root.path(), &[repo_path]).unwrap_err();
+        assert!(format!("{error:#}").contains("Failed to lock bare repository"));
     }
 
     #[test]
