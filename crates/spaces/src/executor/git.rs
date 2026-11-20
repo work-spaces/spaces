@@ -29,6 +29,46 @@ pub struct Git {
 }
 
 impl Git {
+    fn is_commit_hash(revision: &str) -> bool {
+        matches!(revision.len(), 40 | 64) && revision.bytes().all(|byte| byte.is_ascii_hexdigit())
+    }
+
+    fn fetch_commit_if_missing(
+        progress: &mut console::Progress,
+        repository: &git::Repository,
+        revision: &str,
+    ) -> anyhow::Result<()> {
+        if !Self::is_commit_hash(revision) {
+            return Ok(());
+        }
+
+        let commit = format!("{revision}^{{commit}}");
+        if repository
+            .execute(
+                progress,
+                vec!["cat-file".into(), "-e".into(), commit.into()],
+            )
+            .is_ok()
+        {
+            return Ok(());
+        }
+
+        repository
+            .execute(
+                progress,
+                vec![
+                    "fetch".into(),
+                    "--recurse-submodules=no".into(),
+                    "origin".into(),
+                    revision.into(),
+                ],
+            )
+            .context(format_context!(
+                "while fetching commit {revision} from origin"
+            ))?;
+        Ok(())
+    }
+
     fn rev_to_version(rev: Option<Arc<str>>) -> Option<Arc<str>> {
         if let Some(rev) = rev {
             // many projects use name-v1.2.3 as the tag
@@ -382,6 +422,10 @@ impl Git {
                     "while fetching updates in existing workspace"
                 ))?;
 
+            if let git::Checkout::Revision(revision) = &self.checkout {
+                Self::fetch_commit_if_missing(progress, &existing_repo, revision)?;
+            }
+
             // Checkout the desired revision
             existing_repo
                 .checkout(progress, &self.checkout)
@@ -521,6 +565,12 @@ impl Git {
                 .context(format_context!("while setting up sparse checkout"))?;
         }
 
+        // A raw commit ID may not be reachable from any branch or tag, so the
+        // regular clone fetch will not include it. Fetch it explicitly if needed.
+        if let git::Checkout::Revision(revision) = &self.checkout {
+            Self::fetch_commit_if_missing(progress, &workspace_repo, revision)?;
+        }
+
         // Step 5: Checkout the desired revision
         workspace_repo
             .checkout(progress, &self.checkout)
@@ -604,8 +654,7 @@ impl Git {
             }
             git::Checkout::Revision(revision) => revision.clone(),
         };
-        let is_commit = matches!(revision.len(), 40 | 64)
-            && revision.bytes().all(|byte| byte.is_ascii_hexdigit());
+        let is_commit = Self::is_commit_hash(&revision);
 
         let mut clone_arguments: Vec<Arc<str>> = vec!["clone".into()];
         clone_arguments.extend(git::get_lfs_clone_arguments(
@@ -1125,6 +1174,41 @@ mod tests {
             .execute_shallow_clone(&mut progress, temp_dir.path().to_str().unwrap().into())
             .unwrap();
         (temp_dir, executor, progress)
+    }
+
+    #[test]
+    fn fetches_dangling_commit_by_hash() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let source = temp_dir.path().join("source");
+        let target = temp_dir.path().join("target");
+        std::fs::create_dir(&source).unwrap();
+        std::fs::create_dir(&target).unwrap();
+        run_git(
+            &source,
+            &["init", "--initial-branch=main", "--object-format=sha1"],
+        );
+        run_git(
+            &source,
+            &["commit", "--allow-empty", "-m", "dangling commit"],
+        );
+        let revision = run_git(&source, &["rev-parse", "HEAD"]);
+        run_git(&source, &["update-ref", "-d", "refs/heads/main"]);
+
+        run_git(&target, &["init", "--object-format=sha1"]);
+        run_git(
+            &target,
+            &["remote", "add", "origin", source.to_str().unwrap()],
+        );
+
+        let repository = git::Repository::new(
+            source.to_str().unwrap().into(),
+            target.to_str().unwrap().into(),
+        );
+        let mut progress = console::Progress::new(console::Console::new_null(), "test", None, None);
+        Git::fetch_commit_if_missing(&mut progress, &repository, &revision).unwrap();
+        assert_eq!(run_git(&target, &["rev-parse", "FETCH_HEAD"]), revision);
+
+        Git::fetch_commit_if_missing(&mut progress, &repository, &revision).unwrap();
     }
 
     #[test]
