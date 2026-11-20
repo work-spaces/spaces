@@ -56,7 +56,12 @@ impl Git {
         repository
             .execute(
                 progress,
-                vec!["fetch".into(), "origin".into(), revision.into()],
+                vec![
+                    "fetch".into(),
+                    "--recurse-submodules=no".into(),
+                    "origin".into(),
+                    revision.into(),
+                ],
             )
             .context(format_context!(
                 "while fetching commit {revision} from origin"
