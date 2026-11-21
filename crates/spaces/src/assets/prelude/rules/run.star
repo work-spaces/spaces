@@ -2,6 +2,8 @@
 User friendly wrapper functions for the spaces run built-in functions.
 """
 
+load("deps.star", "deps_new", "deps_run_once")
+load("globs.star", "globs_new")
 load(
     "ws.star",
     "workspace_get_build_archive_info",
@@ -87,7 +89,8 @@ def run_load_env(key: str) -> str:
 # Provide thin wrapper for constants so that they can have docstrings
 def run_inputs_once():
     """
-    Assign `inputs` to `[]` to run the command once.
+    Deprecated compatibility helper. Prefer declaring run-once dependencies with
+    `deps_run_once()` and file dependencies with `deps_new()`.
 
     Returns:
         list: []
@@ -96,7 +99,8 @@ def run_inputs_once():
 
 def run_inputs_always():
     """
-    Assign `inputs` to `None` to run the command every time.
+    Deprecated compatibility helper. Prefer declaring file dependencies with
+    `deps_new()`.
 
     Returns:
         None
@@ -271,6 +275,17 @@ def _run_get_effective_env(env: dict, workspace_vars: list[str]) -> dict:
 
     return effective_env
 
+def _run_get_deps(deps: list[str] | list[dict], inputs: list[str] | None) -> list[str] | list[dict]:
+    if inputs == None:
+        return deps
+
+    input_deps = deps_run_once() if not inputs else deps_new(globs = [globs_new(includes = inputs)])
+    if not deps:
+        return input_deps
+    if type(deps[0]) == "string":
+        return deps_new(rules = deps) + input_deps
+    return deps + input_deps
+
 def run_add_exec_setup(
         name: str,
         command: str,
@@ -301,7 +316,7 @@ def run_add_exec_setup(
         command: The command to execute.
         help: The help message for the rule.
         args: The arguments to pass to the command
-        deps: The rule dependencies
+        deps: Rule and file dependencies; use deps_new(files = [...], globs = [...]) for file inputs.
         env: key value pairs of environment variables
         workspace_vars: Workspace environment variable names to copy into env.
         apply_trailing_args_to: The name of the rule that will receive command line trailing args when this rule is run directly.
@@ -319,7 +334,7 @@ def run_add_exec_setup(
     run.add_exec(
         rule = {
             "name": name,
-            "deps": deps,
+            "deps": _run_get_deps(deps, RUN_INPUTS_ONCE),
             "platforms": platforms,
             "help": help,
             "type": RUN_TYPE_SETUP,
@@ -370,8 +385,8 @@ def run_add_exec_test(
         command: The command to execute.
         help: The help message for the rule.
         args: The arguments to pass to the command
-        deps: The rule dependencies
-        inputs: List of globs to specify the inputs. If the inputs are unchanged, the command will not run.
+        deps: Rule dependencies; use deps_new(files = [...], globs = [...]) for file inputs.
+        inputs: Deprecated list of input globs; retained for compatibility. Prefer deps_new(globs = [...]).
         env: key value pairs of environment variables
         workspace_vars: Workspace environment variable names to copy into env.
         apply_trailing_args_to: The name of the rule that will receive command line trailing args when this rule is run directly.
@@ -387,7 +402,7 @@ def run_add_exec_test(
     run.add_exec(
         rule = {
             "name": name,
-            "deps": deps,
+            "deps": _run_get_deps(deps, inputs),
             "platforms": platforms,
             "help": help,
             "type": "Test",
@@ -438,8 +453,8 @@ def run_add_exec_precommit(
         command: The command to execute.
         help: The help message for the rule.
         args: The arguments to pass to the command
-        deps: The rule dependencies
-        inputs: List of globs to specify the inputs. If the inputs are unchanged, the command will not run.
+        deps: Rule dependencies; use deps_new(files = [...], globs = [...]) for file inputs.
+        inputs: Deprecated list of input globs; retained for compatibility. Prefer deps_new(globs = [...]).
         env: key value pairs of environment variables
         workspace_vars: Workspace environment variable names to copy into env.
         apply_trailing_args_to: The name of the rule that will receive command line trailing args when this rule is run directly.
@@ -455,7 +470,7 @@ def run_add_exec_precommit(
     run.add_exec(
         rule = {
             "name": name,
-            "deps": deps,
+            "deps": _run_get_deps(deps, inputs),
             "platforms": platforms,
             "help": help,
             "type": RUN_TYPE_PRECOMMIT,
@@ -506,8 +521,8 @@ def run_add_exec_clean(
         command: The command to execute.
         help: The help message for the rule.
         args: The arguments to pass to the command
-        deps: The rule dependencies
-        inputs: List of globs to specify the inputs. If the inputs are unchanged, the command will not run.
+        deps: Rule dependencies; use deps_new(files = [...], globs = [...]) for file inputs.
+        inputs: Deprecated list of input globs; retained for compatibility. Prefer deps_new(globs = [...]).
         env: key value pairs of environment variables
         workspace_vars: Workspace environment variable names to copy into env.
         apply_trailing_args_to: The name of the rule that will receive command line trailing args when this rule is run directly.
@@ -523,7 +538,7 @@ def run_add_exec_clean(
     run.add_exec(
         rule = {
             "name": name,
-            "deps": deps,
+            "deps": _run_get_deps(deps, inputs),
             "platforms": platforms,
             "help": help,
             "type": RUN_TYPE_CLEAN,
@@ -572,8 +587,8 @@ def run_add_exec(
         help: The help message for the rule.
         args: The arguments to pass to the command.
         type: The exec type (Run|Setup|Optional (default)|PreCommit|Clean|Test)
-        deps: The rule dependencies that must be run before this command
-        inputs: List of globs to specify the inputs. If the inputs are unchanged, the command will not run.
+        deps: Rule dependencies; use deps_new(files = [...], globs = [...]) for file inputs.
+        inputs: Deprecated list of input globs; retained for compatibility. Prefer deps_new(globs = [...]).
         env: key value pairs of environment variables
         workspace_vars: Workspace environment variable names to copy into env.
         apply_trailing_args_to: The name of the rule that will receive command line trailing args when this rule is run directly.
