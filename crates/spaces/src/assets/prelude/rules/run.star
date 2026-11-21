@@ -365,7 +365,7 @@ def run_add_exec_setup(
         timeout: Number of seconds to run before sending a kill signal.
         expect: The expected result of the command Success|Failure|Any. (default is Success)
         rule_cache_policy: Controls whether this rule is cached. Use run_cache_policy_default(), run_cache_policy_once(), or run_cache_policy_always().
-        visibility: Rule visibility: `Public|Private|Rules[]`. See visibility.star for more info.
+        visibility: Prefer `Private`, or `Rules[]` to grant access to specific rules. Use `Public` only for rules intended to be accessible by any rule. See visibility.star for how to declare each visibility option.
     """
 
     EFFECTIVE_ENV = _run_get_effective_env(env, workspace_vars)
@@ -438,7 +438,7 @@ def run_add_exec_test(
         timeout: Number of seconds to run before sending a kill signal.
         expect: The expected result of the command Success|Failure|Any. (default is Success)
         rule_cache_policy: Controls whether this rule is cached. Use run_cache_policy_default(), run_cache_policy_once(), or run_cache_policy_always().
-        visibility: Rule visibility: `Public|Private|Rules[]`. See visibility.star for more info.
+        visibility: Prefer `Private`, or `Rules[]` to grant access to specific rules. Use `Public` only for rules intended to be accessible by any rule. See visibility.star for how to declare each visibility option.
     """
 
     run.add_exec(
@@ -509,7 +509,7 @@ def run_add_exec_precommit(
         timeout: Number of seconds to run before sending a kill signal.
         expect: The expected result of the command Success|Failure|Any. (default is Success)
         rule_cache_policy: Controls whether this rule is cached. Use run_cache_policy_default(), run_cache_policy_once(), or run_cache_policy_always().
-        visibility: Rule visibility: `Public|Private|Rules[]`. See visibility.star for more info.
+        visibility: Prefer `Private`, or `Rules[]` to grant access to specific rules. Use `Public` only for rules intended to be accessible by any rule. See visibility.star for how to declare each visibility option.
     """
 
     run.add_exec(
@@ -580,7 +580,7 @@ def run_add_exec_clean(
         timeout: Number of seconds to run before sending a kill signal.
         expect: The expected result of the command Success|Failure|Any. (default is Success)
         rule_cache_policy: Controls whether this rule is cached. Use run_cache_policy_default(), run_cache_policy_once(), or run_cache_policy_always().
-        visibility: Rule visibility: `Public|Private|Rules[]`. See visibility.star for more info.
+        visibility: Prefer `Private`, or `Rules[]` to grant access to specific rules. Use `Public` only for rules intended to be accessible by any rule. See visibility.star for how to declare each visibility option.
     """
 
     run.add_exec(
@@ -651,7 +651,7 @@ def run_add_exec(
         redirect_stdout: The file to redirect stdout to (prefer to parse the log file).
         timeout: Number of seconds to run before sending a kill signal.
         rule_cache_policy: Controls whether this rule is cached. Use run_cache_policy_default(), run_cache_policy_once(), or run_cache_policy_always().
-        visibility: Rule visibility: `Public|Private|Rules[]`. See visibility.star for more info.
+        visibility: Prefer `Private`, or `Rules[]` to grant access to specific rules. Use `Public` only for rules intended to be accessible by any rule. See visibility.star for how to declare each visibility option.
     """
 
     EFFECTIVE_TYPE = type if type != None else RUN_TYPE_DEFAULT
@@ -706,7 +706,7 @@ def run_add_kill_exec(
         deps: Run rule dependencies.
         type: See [run_add_exec()](#run_add_exec)
         platforms: Platforms to run on (default is all).
-        visibility: Rule visibility: `Public|Private|Rules[]`. See visibility.star for more info.
+        visibility: Prefer `Private`, or `Rules[]` to grant access to specific rules. Use `Public` only for rules intended to be accessible by any rule. See visibility.star for how to declare each visibility option.
     """
 
     EFFECTIVE_TYPE = type if type != None else RUN_TYPE_DEFAULT
@@ -748,7 +748,7 @@ def run_add(
         platforms: List of platforms to build the target for (default is all).
         type: See [run_add_exec()](#run_add_exec)
         help: The help message for the rule.
-        visibility: Rule visibility: `Public|Private|Rules[]`. See visibility.star for more info.
+        visibility: Prefer `Private`, or `Rules[]` to grant access to specific rules. Use `Public` only for rules intended to be accessible by any rule. See visibility.star for how to declare each visibility option.
     """
 
     run.add(
@@ -775,7 +775,7 @@ def run_add_to_all(
     Args:
         name: The name of the rule.
         deps: List of dependencies to run with `spaces run`
-        visibility: Rule visibility: `Public|Private|Rules[]`. See visibility.star for more info.
+        visibility: Prefer `Private`, or `Rules[]` to grant access to specific rules. Use `Public` only for rules intended to be accessible by any rule. See visibility.star for how to declare each visibility option.
     """
 
     run_add(name, deps, type = RUN_TYPE_ALL, visibility = visibility)
@@ -806,7 +806,7 @@ def run_add_archive(
         includes: List of globs to include in the archive.
         excludes: List of globs to exclude from the archive.
         platform: The platform to build the target for (default is all).
-        visibility: Rule visibility: `Public|Private|Rules[]`. See visibility.star for more info.
+        visibility: Prefer `Private`, or `Rules[]` to grant access to specific rules. Use `Public` only for rules intended to be accessible by any rule. See visibility.star for how to declare each visibility option.
 
     Returns:
         A tuple containing (<path to the archive>, <sha256 checksum of the archive>).
