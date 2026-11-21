@@ -223,13 +223,18 @@ pub fn execute_rule(
 
         let rule_name = name.clone();
 
-        let dep_globs = {
+        let dep_globs = if task.rule.rule_cache_policy == rule::RuleCachePolicy::RunOnce {
+            Vec::new()
+        } else {
             let state = get_state().read();
             let tasks = state.tasks.read();
             task.collects_glob_deps(&tasks)
         };
 
-        let updated_digest = if !dep_globs.is_empty() && skip_execute_message.is_empty() {
+        let should_check_inputs = task.rule.rule_cache_policy != rule::RuleCachePolicy::RunAlways
+            && (task.rule.rule_cache_policy == rule::RuleCachePolicy::RunOnce
+                || !dep_globs.is_empty());
+        let updated_digest = if should_check_inputs && skip_execute_message.is_empty() {
             let _hash_inputs_timer = should_record_performance.then(|| {
                 telemetry::Timer::new(metrics::histogram!(
                     telemetry::PERF_RULE_HASH_INPUTS_DURATION,

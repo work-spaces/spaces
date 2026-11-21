@@ -13,6 +13,9 @@ load(
 
 RUN_INPUTS_ONCE = []
 RUN_INPUTS_ALWAYS = None
+RUN_CACHE_POLICY_DEFAULT = "Default"
+RUN_CACHE_POLICY_ONCE = "RunOnce"
+RUN_CACHE_POLICY_ALWAYS = "RunAlways"
 RUN_TYPE_ALL = "Run"
 RUN_TYPE_DEFAULT = "Optional"
 RUN_TYPE_TEST = "Test"
@@ -106,6 +109,40 @@ def run_inputs_always():
         None
     """
     return RUN_INPUTS_ALWAYS
+
+def run_cache_policy_default():
+    """
+    Use the default rule cache policy, which preserves the existing behavior.
+
+    Assign this value to a rule's `rule_cache_policy` field.
+
+    Returns:
+        str: "Default"
+    """
+    return RUN_CACHE_POLICY_DEFAULT
+
+def run_cache_policy_once():
+    """
+    Run the rule once regardless of input changes. The rule runs again if its
+    definition changes or after the cache is cleaned.
+
+    Assign this value to a rule's `rule_cache_policy` field.
+
+    Returns:
+        str: "RunOnce"
+    """
+    return RUN_CACHE_POLICY_ONCE
+
+def run_cache_policy_always():
+    """
+    Always run the rule without using the rule cache.
+
+    Assign this value to a rule's `rule_cache_policy` field.
+
+    Returns:
+        str: "RunAlways"
+    """
+    return RUN_CACHE_POLICY_ALWAYS
 
 def run_type_all():
     """
@@ -301,7 +338,8 @@ def run_add_exec_setup(
         redirect_stdout: str | None = None,
         timeout: float | None = None,
         visibility: str | dict[str, list[str]] | None = None,
-        expect: str = RUN_EXPECT_SUCCESS):
+        expect: str = RUN_EXPECT_SUCCESS,
+        rule_cache_policy: str = RUN_CACHE_POLICY_DEFAULT):
     """
     Adds a command as a setup rule. It will run only once and all run rules will depend on it.
 
@@ -326,6 +364,7 @@ def run_add_exec_setup(
         redirect_stdout: The file to redirect stdout to (prefer to parse the log file).
         timeout: Number of seconds to run before sending a kill signal.
         expect: The expected result of the command Success|Failure|Any. (default is Success)
+        rule_cache_policy: Controls whether this rule is cached. Use run_cache_policy_default(), run_cache_policy_once(), or run_cache_policy_always().
         visibility: Rule visibility: `Public|Private|Rules[]`. See visibility.star for more info.
     """
 
@@ -341,6 +380,7 @@ def run_add_exec_setup(
             "inputs": RUN_INPUTS_ONCE,
             "visibility": visibility,
             "apply_trailing_args_to": apply_trailing_args_to,
+            "rule_cache_policy": rule_cache_policy,
         },
         exec = {
             "command": command,
@@ -370,7 +410,8 @@ def run_add_exec_test(
         redirect_stdout: str | None = None,
         timeout: float | None = None,
         visibility: str | dict[str, list[str]] | None = None,
-        expect: str = RUN_EXPECT_SUCCESS):
+        expect: str = RUN_EXPECT_SUCCESS,
+        rule_cache_policy: str = RUN_CACHE_POLICY_DEFAULT):
     """
     Adds a command as a test rule.
 
@@ -396,6 +437,7 @@ def run_add_exec_test(
         redirect_stdout: The file to redirect stdout to (prefer to parse the log file).
         timeout: Number of seconds to run before sending a kill signal.
         expect: The expected result of the command Success|Failure|Any. (default is Success)
+        rule_cache_policy: Controls whether this rule is cached. Use run_cache_policy_default(), run_cache_policy_once(), or run_cache_policy_always().
         visibility: Rule visibility: `Public|Private|Rules[]`. See visibility.star for more info.
     """
 
@@ -409,6 +451,7 @@ def run_add_exec_test(
             "inputs": inputs,
             "visibility": visibility,
             "apply_trailing_args_to": apply_trailing_args_to,
+            "rule_cache_policy": rule_cache_policy,
         },
         exec = {
             "command": command,
@@ -438,7 +481,8 @@ def run_add_exec_precommit(
         redirect_stdout: str | None = None,
         timeout: float | None = None,
         visibility: str | dict[str, list[str]] | None = None,
-        expect: str = RUN_EXPECT_SUCCESS):
+        expect: str = RUN_EXPECT_SUCCESS,
+        rule_cache_policy: str = RUN_CACHE_POLICY_DEFAULT):
     """
     Adds a command as a pre-commit rule.
 
@@ -464,6 +508,7 @@ def run_add_exec_precommit(
         redirect_stdout: The file to redirect stdout to (prefer to parse the log file).
         timeout: Number of seconds to run before sending a kill signal.
         expect: The expected result of the command Success|Failure|Any. (default is Success)
+        rule_cache_policy: Controls whether this rule is cached. Use run_cache_policy_default(), run_cache_policy_once(), or run_cache_policy_always().
         visibility: Rule visibility: `Public|Private|Rules[]`. See visibility.star for more info.
     """
 
@@ -477,6 +522,7 @@ def run_add_exec_precommit(
             "inputs": inputs,
             "visibility": visibility,
             "apply_trailing_args_to": apply_trailing_args_to,
+            "rule_cache_policy": rule_cache_policy,
         },
         exec = {
             "command": command,
@@ -506,7 +552,8 @@ def run_add_exec_clean(
         redirect_stdout: str | None = None,
         timeout: float | None = None,
         visibility: str | dict[str, list[str]] | None = None,
-        expect: str = RUN_EXPECT_SUCCESS):
+        expect: str = RUN_EXPECT_SUCCESS,
+        rule_cache_policy: str = RUN_CACHE_POLICY_DEFAULT):
     """
     Adds a command as a clean rule.
 
@@ -532,6 +579,7 @@ def run_add_exec_clean(
         redirect_stdout: The file to redirect stdout to (prefer to parse the log file).
         timeout: Number of seconds to run before sending a kill signal.
         expect: The expected result of the command Success|Failure|Any. (default is Success)
+        rule_cache_policy: Controls whether this rule is cached. Use run_cache_policy_default(), run_cache_policy_once(), or run_cache_policy_always().
         visibility: Rule visibility: `Public|Private|Rules[]`. See visibility.star for more info.
     """
 
@@ -545,6 +593,7 @@ def run_add_exec_clean(
             "inputs": inputs,
             "visibility": visibility,
             "apply_trailing_args_to": apply_trailing_args_to,
+            "rule_cache_policy": rule_cache_policy,
         },
         exec = {
             "command": command,
@@ -577,7 +626,8 @@ def run_add_exec(
         redirect_stdout: str | None = None,
         timeout: float | None = None,
         visibility: str | dict[str, list[str]] | None = None,
-        expect: str = RUN_EXPECT_SUCCESS):
+        expect: str = RUN_EXPECT_SUCCESS,
+        rule_cache_policy: str = RUN_CACHE_POLICY_DEFAULT):
     """
     Adds a command to the run dependency graph
 
@@ -600,6 +650,7 @@ def run_add_exec(
         expect: The expected result of the command Success|Failure|Any. (default is Success)
         redirect_stdout: The file to redirect stdout to (prefer to parse the log file).
         timeout: Number of seconds to run before sending a kill signal.
+        rule_cache_policy: Controls whether this rule is cached. Use run_cache_policy_default(), run_cache_policy_once(), or run_cache_policy_always().
         visibility: Rule visibility: `Public|Private|Rules[]`. See visibility.star for more info.
     """
 
@@ -619,6 +670,7 @@ def run_add_exec(
             "visibility": visibility,
             "apply_trailing_args_to": apply_trailing_args_to,
             "targets": TARGET_FILES + TARGET_DIRS,
+            "rule_cache_policy": rule_cache_policy,
         },
         exec = {
             "command": command,
