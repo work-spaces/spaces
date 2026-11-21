@@ -40,6 +40,17 @@ pub enum Visibility {
     Private,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum RuleCachePolicy {
+    /// Use the existing behavior: cache rules with targets.
+    #[default]
+    Default,
+    /// Ignore input changes and run only when the rule changes or the cache is cleaned.
+    RunOnce,
+    /// Always execute the rule without using the rule cache.
+    RunAlways,
+}
+
 /// A rule desribes what a task should do.
 /// It specifies named depedencies that must be executed
 /// before the task can run.
@@ -56,6 +67,9 @@ pub struct Rule {
     pub inputs: Option<Vec<Arc<str>>>,
     /// The targets can be files or directories - directory will use entire directory contents
     pub targets: Option<Vec<targets::Target>>,
+    /// Controls whether and how the rule is cached.
+    #[serde(default)]
+    pub rule_cache_policy: RuleCachePolicy,
     /// list of platforms that the rule will run on. default is to run on all platforms
     pub platforms: Option<Vec<platform::Platform>>,
     /// The type for the rule in the run phase
@@ -160,10 +174,11 @@ impl Rule {
     }
 
     pub fn uses_rule_cache(&self) -> bool {
-        // if the rule has targets, it uses the rule cache
-        self.targets
-            .as_ref()
-            .is_some_and(|targets| !targets.is_empty())
+        self.rule_cache_policy != RuleCachePolicy::RunAlways
+            && self
+                .targets
+                .as_ref()
+                .is_some_and(|targets| !targets.is_empty())
     }
 
     /// Returns all rule names from the rule's deps, including `Rules`, `Any(AnyDep::Rule)`, and `Any(AnyDep::Target)` variants.
@@ -343,4 +358,43 @@ pub enum Expect {
     #[default]
     Success,
     Any,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Rule, RuleCachePolicy, targets};
+
+    #[test]
+    fn omitted_rule_cache_policy_defaults_to_default() {
+        let rule: Rule = serde_json::from_str(r#"{"name":"//:test"}"#).unwrap();
+        assert_eq!(rule.rule_cache_policy, RuleCachePolicy::Default);
+    }
+
+    #[test]
+    fn run_always_disables_rule_cache() {
+        let mut rule = Rule {
+            name: "//:test".into(),
+            targets: Some(vec![targets::Target::File("out".into())]),
+            ..Default::default()
+        };
+
+        assert!(rule.uses_rule_cache());
+        rule.rule_cache_policy = RuleCachePolicy::RunOnce;
+        assert!(rule.uses_rule_cache());
+        rule.rule_cache_policy = RuleCachePolicy::RunAlways;
+        assert!(!rule.uses_rule_cache());
+    }
+
+    #[test]
+    fn rule_cache_policy_deserializes_each_variant() {
+        for (policy, expected) in [
+            ("Default", RuleCachePolicy::Default),
+            ("RunOnce", RuleCachePolicy::RunOnce),
+            ("RunAlways", RuleCachePolicy::RunAlways),
+        ] {
+            let json = format!(r#"{{"name":"//:test","rule_cache_policy":"{policy}"}}"#);
+            let rule: Rule = serde_json::from_str(&json).unwrap();
+            assert_eq!(rule.rule_cache_policy, expected);
+        }
+    }
 }
