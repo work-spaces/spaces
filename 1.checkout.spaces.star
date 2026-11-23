@@ -25,9 +25,10 @@ load(
     "checkout_add_repo",
     "checkout_clone_default",
     "checkout_set_sandbox",
+    "checkout_store_env_or",
     "checkout_store_value",
 )
-load("//@star/prelude/rules/env.star", "env_assign", "env_inherit")
+load("//@star/prelude/rules/env.star", "env_assign", "env_inherit", "env_script")
 
 # Sandbox needs support in CI before this will work
 load(
@@ -39,6 +40,7 @@ load(
     "//@star/prelude/rules/ws.star",
     "workspace_get_absolute_path",
     "workspace_get_path_to_checkout",
+    "workspace_load_value_or",
 )
 load(
     "//@star/sdk/star/checkout-config.star",
@@ -153,7 +155,7 @@ rust_add(
     deps = [":spaces0", ":cargo_workspace_assets"],
 )
 
-package_add("github.com", "cli", "cli", "v2.97.0")
+gh_checkout = package_add("github.com", "cli", "cli", "v2.97.0")
 
 cargo_vscode_task = {
     "type": "cargo",
@@ -171,16 +173,31 @@ task_options = {
     },
 }
 
+if info_is_ci():
+    gh_token_env = env_inherit(
+        "GH_TOKEN",
+        is_secret = True,
+        is_required = True,
+        help = "Allows access to gh in Spaces rules",
+    )
+else:
+    # env_script runs with a clean environment, so pass through the local
+    # HOME and PATH needed by gh auth token.
+    checkout_store_env_or("GH_TOKEN_HOME", other = "", env = "HOME")
+    gh_token_env = env_script(
+        "GH_TOKEN",
+        script = "gh auth token",
+        is_secret = True,
+        env = {
+            "HOME": workspace_load_value_or("GH_TOKEN_HOME", ""),
+        },
+        help = "Allows access to gh in Spaces rules",
+    )
+
 checkout_add_env_vars(
     "spaces_env",
-    vars = [
-        env_inherit(
-            "GH_TOKEN",
-            is_secret = True,
-            is_required = info_is_ci(),
-            help = "Allows access to gh in Spaces rules",
-        ),
-    ],
+    vars = [gh_token_env],
+    deps = [gh_checkout],
 )
 
 if info_is_platform_linux():
