@@ -2,8 +2,6 @@
 User friendly wrapper functions for the spaces run built-in functions.
 """
 
-load("deps.star", "deps_new", "deps_run_once")
-load("globs.star", "globs_new")
 load(
     "ws.star",
     "workspace_get_build_archive_info",
@@ -312,17 +310,6 @@ def _run_get_effective_env(env: dict, workspace_vars: list[str]) -> dict:
 
     return effective_env
 
-def _run_get_deps(deps: list[str] | list[dict], inputs: list[str] | None) -> list[str] | list[dict]:
-    if inputs == None:
-        return deps
-
-    input_deps = deps_run_once() if not inputs else deps_new(globs = [globs_new(includes = inputs)])
-    if not deps:
-        return input_deps
-    if type(deps[0]) == "string":
-        return deps_new(rules = deps) + input_deps
-    return deps + input_deps
-
 def run_add_exec_setup(
         name: str,
         command: str,
@@ -373,7 +360,7 @@ def run_add_exec_setup(
     run.add_exec(
         rule = {
             "name": name,
-            "deps": _run_get_deps(deps, RUN_INPUTS_ONCE),
+            "deps": deps,
             "platforms": platforms,
             "help": help,
             "type": RUN_TYPE_SETUP,
@@ -444,7 +431,7 @@ def run_add_exec_test(
     run.add_exec(
         rule = {
             "name": name,
-            "deps": _run_get_deps(deps, inputs),
+            "deps": deps,
             "platforms": platforms,
             "help": help,
             "type": "Test",
@@ -515,7 +502,7 @@ def run_add_exec_precommit(
     run.add_exec(
         rule = {
             "name": name,
-            "deps": _run_get_deps(deps, inputs),
+            "deps": deps,
             "platforms": platforms,
             "help": help,
             "type": RUN_TYPE_PRECOMMIT,
@@ -586,7 +573,7 @@ def run_add_exec_clean(
     run.add_exec(
         rule = {
             "name": name,
-            "deps": _run_get_deps(deps, inputs),
+            "deps": deps,
             "platforms": platforms,
             "help": help,
             "type": RUN_TYPE_CLEAN,
