@@ -6,8 +6,8 @@ load("//@star/prelude/rules/checkout.star", "checkout_add_env_vars", "checkout_a
 load("//@star/prelude/rules/env.star", "env_append")
 
 workspace.set_locks(locks = {
-    "@star/sdk": "030c97fe5e99638ea9390c4561380e263b1a5efb",
-    "@star/packages": "05d95f0428280a33d0f19865cefbdec34deeea01",
+    "@star/sdk": "71bb17030a88c69e4a8970d26c60c96cec62912c",
+    "@star/packages": "f1e59df56969189ce31619bf549b372dcdfcc7e2",
 })
 
 # Ensure tools checked out to sysroot/bin are available
