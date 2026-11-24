@@ -310,6 +310,12 @@ def _run_get_effective_env(env: dict, workspace_vars: list[str]) -> dict:
 
     return effective_env
 
+def _run_add_exec_rule_with_compatible_cache_policy(rule: dict, rule_cache_policy: str) -> dict:
+    if info.check_required_semver(">=0.23.4"):
+        rule["rule_cache_policy"] = rule_cache_policy
+
+    return rule
+
 def run_add_exec_setup(
         name: str,
         command: str,
@@ -358,17 +364,19 @@ def run_add_exec_setup(
     EFFECTIVE_ENV = _run_get_effective_env(env, workspace_vars)
 
     run.add_exec(
-        rule = {
-            "name": name,
-            "deps": deps,
-            "platforms": platforms,
-            "help": help,
-            "type": RUN_TYPE_SETUP,
-            "inputs": RUN_INPUTS_ONCE,
-            "visibility": visibility,
-            "apply_trailing_args_to": apply_trailing_args_to,
-            "rule_cache_policy": rule_cache_policy,
-        },
+        rule = _run_add_exec_rule_with_compatible_cache_policy(
+            {
+                "name": name,
+                "deps": deps,
+                "platforms": platforms,
+                "help": help,
+                "type": RUN_TYPE_SETUP,
+                "inputs": RUN_INPUTS_ONCE,
+                "visibility": visibility,
+                "apply_trailing_args_to": apply_trailing_args_to,
+            },
+            rule_cache_policy,
+        ),
         exec = {
             "command": command,
             "args": args,
@@ -429,17 +437,19 @@ def run_add_exec_test(
     """
 
     run.add_exec(
-        rule = {
-            "name": name,
-            "deps": deps,
-            "platforms": platforms,
-            "help": help,
-            "type": "Test",
-            "inputs": inputs,
-            "visibility": visibility,
-            "apply_trailing_args_to": apply_trailing_args_to,
-            "rule_cache_policy": rule_cache_policy,
-        },
+        rule = _run_add_exec_rule_with_compatible_cache_policy(
+            {
+                "name": name,
+                "deps": deps,
+                "platforms": platforms,
+                "help": help,
+                "type": "Test",
+                "inputs": inputs,
+                "visibility": visibility,
+                "apply_trailing_args_to": apply_trailing_args_to,
+            },
+            rule_cache_policy,
+        ),
         exec = {
             "command": command,
             "args": args,
@@ -500,17 +510,19 @@ def run_add_exec_precommit(
     """
 
     run.add_exec(
-        rule = {
-            "name": name,
-            "deps": deps,
-            "platforms": platforms,
-            "help": help,
-            "type": RUN_TYPE_PRECOMMIT,
-            "inputs": inputs,
-            "visibility": visibility,
-            "apply_trailing_args_to": apply_trailing_args_to,
-            "rule_cache_policy": rule_cache_policy,
-        },
+        rule = _run_add_exec_rule_with_compatible_cache_policy(
+            {
+                "name": name,
+                "deps": deps,
+                "platforms": platforms,
+                "help": help,
+                "type": RUN_TYPE_PRECOMMIT,
+                "inputs": inputs,
+                "visibility": visibility,
+                "apply_trailing_args_to": apply_trailing_args_to,
+            },
+            rule_cache_policy,
+        ),
         exec = {
             "command": command,
             "args": args,
@@ -571,17 +583,19 @@ def run_add_exec_clean(
     """
 
     run.add_exec(
-        rule = {
-            "name": name,
-            "deps": deps,
-            "platforms": platforms,
-            "help": help,
-            "type": RUN_TYPE_CLEAN,
-            "inputs": inputs,
-            "visibility": visibility,
-            "apply_trailing_args_to": apply_trailing_args_to,
-            "rule_cache_policy": rule_cache_policy,
-        },
+        rule = _run_add_exec_rule_with_compatible_cache_policy(
+            {
+                "name": name,
+                "deps": deps,
+                "platforms": platforms,
+                "help": help,
+                "type": RUN_TYPE_CLEAN,
+                "inputs": inputs,
+                "visibility": visibility,
+                "apply_trailing_args_to": apply_trailing_args_to,
+            },
+            rule_cache_policy,
+        ),
         exec = {
             "command": command,
             "args": args,
@@ -647,18 +661,20 @@ def run_add_exec(
     TARGET_DIRS = [{"Directory": dir} for dir in target_dirs] if target_dirs else []
 
     run.add_exec(
-        rule = {
-            "name": name,
-            "deps": deps,
-            "platforms": platforms,
-            "help": help,
-            "type": EFFECTIVE_TYPE,
-            "inputs": inputs,
-            "visibility": visibility,
-            "apply_trailing_args_to": apply_trailing_args_to,
-            "targets": TARGET_FILES + TARGET_DIRS,
-            "rule_cache_policy": rule_cache_policy,
-        },
+        rule = _run_add_exec_rule_with_compatible_cache_policy(
+            {
+                "name": name,
+                "deps": deps,
+                "platforms": platforms,
+                "help": help,
+                "type": EFFECTIVE_TYPE,
+                "inputs": inputs,
+                "visibility": visibility,
+                "apply_trailing_args_to": apply_trailing_args_to,
+                "targets": TARGET_FILES + TARGET_DIRS,
+            },
+            rule_cache_policy,
+        ),
         exec = {
             "command": command,
             "args": args,
