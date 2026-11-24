@@ -113,7 +113,11 @@ impl Decoder {
                 )?;
             }
             DecoderDriver::Zip(mut decoder) => {
-                let file_names: Vec<String> = decoder.file_names().map(|e| e.to_string()).collect();
+                let file_names: Vec<String> = decoder
+                    .file_names()
+                    .map(|name| name.map(|name| name.into_owned()))
+                    .collect::<Result<_, _>>()
+                    .context(format_context!("failed to read zip entry names"))?;
 
                 driver::update_status(
                     &mut progress_bar,
@@ -139,7 +143,13 @@ impl Decoder {
                     );
 
                     let mut buffer = Vec::new();
-                    let destination_path = format!("{}/{}", self.output_directory, zip_file.name());
+                    let destination_path = format!(
+                        "{}/{}",
+                        self.output_directory,
+                        zip_file
+                            .name()
+                            .context(format_context!("failed to read zip entry name"))?
+                    );
                     let dest_path = std::path::Path::new(destination_path.as_str());
                     if zip_file.is_dir() {
                         std::fs::create_dir_all(dest_path)
