@@ -8,7 +8,7 @@ repository = "https://github.com/work-spaces/spaces-archiver"
 
 [dependencies]
 flate2 = "1"
-zip = "8"
+zip = "9.0.5"
 tar = "0.4"
 sevenz-rust = "0.6"
 # zip requires bzip2 be on 0.4
